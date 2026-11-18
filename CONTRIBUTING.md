@@ -380,9 +380,16 @@ opened again.
 
 ## Releases
 
-There is no release workflow now: nothing in CI publishes to the npm registry or creates a GitHub
-Release, and no tag triggers anything. The version of `package.json` is set by hand in a pull
-request, with what is under `## Unreleased` in `docs/CHANGELOG.md` moved into a dated section.
+The version of `package.json` is set by hand in a pull request, with what is under
+`## Unreleased` in `docs/CHANGELOG.md` moved into a dated section. Once that pull request is
+merged and CI has passed on its commit on `main`, the owner pushes the tag `v<version>` on that
+commit, and `.github/workflows/release.yml` publishes the package to npm through npm's trusted
+publishing: no npm token exists, and npm adds the provenance. The job stops before building when
+the tag does not name the version, the version is a prerelease (not published by this workflow),
+the changelog has no `## [<version>] - <date>` section, the commit is not on `main`, or CI has not
+succeeded on it. The repository's rulesets let only the owner create a `v*` tag and nobody move or
+delete one; a run that failed for a cause outside the tagged commit is re-run, and one that failed
+for a defect in it abandons that version for the next patch. No GitHub Release is created.
 
 `npm run build:npm` still assembles the package in `build/npm/pardner`
 (`.github/scripts/npm-package.mjs`): the built `dist`, a `package.json` with what an install needs

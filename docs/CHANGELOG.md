@@ -5,6 +5,11 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- A release workflow (`.github/workflows/release.yml`): a `v*` tag the owner pushes publishes the package to npm
+  through npm's trusted publishing, once the tag names the version, its commit is on `main` and CI has passed there.
+
 ### Changed
 
 - Commands are typed as in the terminal. A pardner word starts with `/` (`/status`, `/bind <folder>`,

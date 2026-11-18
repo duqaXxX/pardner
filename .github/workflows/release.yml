@@ -1,0 +1,102 @@
+# Publishes the package to npm when the owner pushes a `v*` tag, through npm's trusted publishing:
+# the job proves its identity to npm with GitHub's OIDC token, so no npm token exists anywhere, and
+# npm adds the provenance. The tag is the release act. The `release tag creation` ruleset lets only
+# the owner create one and `release tags` lets nobody move or delete one; npm's trusted publisher
+# names this file and the `npm` environment, which admits `v*` tags alone. GitHub runs this file as
+# the tagged commit holds it, so the checks below live in the tagged commit: a failed run of a tag
+# is re-run once its cause is fixed outside that commit, or the version is abandoned and the next
+# patch is tagged.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+# Two tags never publish at once, a running publish is never cut, and a third tag does not cancel
+# a second one that waits.
+concurrency:
+  group: release
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    environment: npm
+    # A job's permissions replace the workflow's: each one it needs is listed.
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      # Full history, for the ancestry check below.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # No cache in the job that publishes: a restored cache is a way into the package.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          package-manager-cache: false
+
+      # The refs reach the script through the environment, never interpolated into it.
+      - name: Check the tag, the commit and npm
+        env:
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(node -p 'require("./package.json").version')"
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::the tag $TAG does not name package.json's version $version"
+            exit 1
+          fi
+          # npm publishes a prerelease only under a dist-tag this job does not give.
+          case "$version" in
+            *-*|*+*) echo "::error::$version is a prerelease, which this workflow does not publish"; exit 1 ;;
+          esac
+          if ! grep -qF "## [$version] - " docs/CHANGELOG.md; then
+            echo "::error::docs/CHANGELOG.md has no section for $version"
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::$SHA is not on main"
+            exit 1
+          fi
+          # CI's push run on this commit, on main: none, or one that has not succeeded, stops here.
+          # A run still going has no conclusion yet; a later merge can cancel it (re-run it, then this).
+          conclusions="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&branch=main" \
+            --jq '[.workflow_runs[] | (.conclusion // .status)] | join(" ")')"
+          if [ -z "$conclusions" ]; then
+            echo "::error::CI has no push run on $SHA"
+            exit 1
+          fi
+          for conclusion in $conclusions; do
+            if [ "$conclusion" != "success" ]; then
+              echo "::error::CI on $SHA: $conclusions"
+              exit 1
+            fi
+          done
+          # Trusted publishing needs npm 11.5.1 or later.
+          npm_version="$(npm --version)"
+          if [ "$(printf '%s\n' 11.5.1 "$npm_version" | sort -V | head -n 1)" != "11.5.1" ]; then
+            echo "::error::npm $npm_version is older than 11.5.1"
+            exit 1
+          fi
+
+      # No dependency's install script runs in the job that holds the OIDC token; the build is tsc.
+      - run: npm ci --ignore-scripts
+
+      # The package as `.github/scripts/npm-package.mjs` assembles it, with npm/README.md.
+      - run: npm run build:npm
+
+      - run: npm publish build/npm/pardner
