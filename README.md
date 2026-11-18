@@ -1,18 +1,28 @@
-# pardner
+# Pardner
 
-An agent daemon, a relay and the protocol between them, in development. macOS only.
+A self-hosted messenger for your Claude Code sessions, in development: the bot and the relay
+exist, the app you will chat from does not yet.
 
-This repository holds three things:
+When it is complete, you talk to your sessions in channels and threads, and the messages pass
+through a relay you run, encrypted so that the relay cannot read them. A session runs on your Mac
+with your Claude Code login; you follow it, answer its questions and approve its tools from a chat
+instead of a terminal.
 
-- the daemon `pardner`, which runs Claude Code sessions on your Mac through the
-  [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) and obeys one owner;
-- a relay (`src/relay/`) that carries the owner's messages and the daemon's replies, encrypted;
-- the protocol the two speak (`src/protocol/`).
+## How it works
+
+- The bot, the daemon `pardner` (this package), runs on your Mac and runs Claude Code sessions
+  through the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview). It obeys
+  only the person it was paired with, and listens on no port: it connects out to the relay. Each
+  channel it serves is bound to a project folder, and each thread holds a session.
+- The relay (`src/relay/`) stores and passes the messages, which it cannot read. It is meant for a
+  machine of yours; the package carries its code but no command that starts it yet.
+- The app is where you read and write: for macOS, not released yet.
+- The protocol the three speak is in `src/protocol/`.
 
 ## Status
 
-This is version 0.15.0, in development. The daemon's one chat is the relay chat, and no app reads its
-messages yet, so a session cannot be started from a message today.
+In development, macOS only. No app reads the bot's messages yet, so a session cannot be started
+from a message today, and the relay has no documented way to run.
 [docs/features.md](docs/features.md) lists what is tested and what is still checked by hand, and
 [docs/limits.md](docs/limits.md) what the terminal does and the chat does not.
 

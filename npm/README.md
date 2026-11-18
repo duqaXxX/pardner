@@ -1,6 +1,6 @@
 # pardner
 
-An agent daemon, a relay and the protocol between them, in development. macOS only.
+The bot of Pardner, a self-hosted messenger for your Claude Code sessions, in development. macOS only.
 
 The daemon runs Claude Code sessions on your Mac through the Claude Agent SDK and obeys one
 owner. Its one chat is the relay chat, and no app reads its messages yet.

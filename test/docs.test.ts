@@ -209,13 +209,14 @@ test("the readme lists every word of the daemon and no other", () => {
   assert.deepEqual(rows, words);
 });
 
-test("the readme states the version and the node the package declares", () => {
+test("the readme names the node the package declares and no version of its own", () => {
   const manifest = JSON.parse(read(join(ROOT, "package.json"))) as {
-    version: string;
     engines: { node: string };
   };
   const text = read(README);
-  assert.ok(text.includes(`version ${manifest.version}`));
+  // The version lives in package.json and on npm: a version in the README goes stale at the next release.
+  // Any dotted number but the Node's: `0.15.0`, `v0.15.0` and `pardner 1.0` all fail.
+  assert.doesNotMatch(text, /(?<![\w.])(?<!Node )v?\d+\.\d+(?:\.\d+)?(?!\.?\w)/);
   // `>=22.18.0` is written `Node 22.18 or later`: a patch of 0 is left out.
   const node = manifest.engines.node.replace(/^>=/, "");
   assert.ok(
