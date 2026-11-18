@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## [0.15.0] - 2026-11-18
+
+The first version published on npm as `pardner`.
+
 ### Added
 
 - The seam tells a chat when the core is done with an owner's message and which message a reply is for:
@@ -323,3 +327,5 @@ All notable changes to this project are documented here. The format follows
 
 Versions 0.1.0 to 0.14.0 were published on npm as `allaboard`, a daemon driven from Slack. Their changelog is not
 carried here.
+
+[0.15.0]: https://github.com/duqaXxX/pardner/tree/v0.15.0

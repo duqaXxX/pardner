@@ -1,6 +1,6 @@
 {
   "name": "pardner",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "A daemon that runs coding-agent sessions on your own Mac and is driven from a chat.",
   "keywords": [
     "coding-agent",

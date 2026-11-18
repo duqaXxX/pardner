@@ -11,7 +11,7 @@ This repository holds three things:
 
 ## Status
 
-This is version 0.14.0, in development. The daemon's one chat is the relay chat, and no app reads its
+This is version 0.15.0, in development. The daemon's one chat is the relay chat, and no app reads its
 messages yet, so a session cannot be started from a message today.
 [docs/features.md](docs/features.md) lists what is tested and what is still checked by hand, and
 [docs/limits.md](docs/limits.md) what the terminal does and the chat does not.
