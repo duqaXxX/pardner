@@ -1,0 +1,167 @@
+{"op":"prove","conn":"455230930f9d3b96ce6a","device":"455230930f9d3b96ce6a","enrol":"76721cd2564cdb94ee71","as":"5b1f9b8508f05715d0c7","expect":"served"}
+{"op":"submit","conn":"455230930f9d3b96ce6a","entry":"create","as":"create:5b1f9b8508f05715d0c7","expect":"result 0"}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":0,"head":"h1","expect":{"items":["5b1f9b8508f05715d0c7","create:5b1f9b8508f05715d0c7"],"n":2,"inc":"If0052acc368ffa219777","chained":true}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":0,"head":"h2","expect":{"items":["5b1f9b8508f05715d0c7","create:5b1f9b8508f05715d0c7"],"n":2,"inc":"If0052acc368ffa219777","chained":true}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":2,"expect":{"items":[],"n":2,"seals":0}}
+{"op":"submit","conn":"455230930f9d3b96ce6a","entry":"epoch","as":"8af28f5405d4824d7245","seq":0,"prevOf":null,"expect":"result 0","deviceLength":1}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":["8af28f5405d4824d7245"],"n":3}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":2,"head":"h3","expect":{"items":["8af28f5405d4824d7245"],"n":3,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":3,"expect":{"items":[],"n":3,"seals":0}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":3,"head":"h4","expect":{"items":[],"n":3,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":3,"expect":{"items":[],"n":3,"seals":0}}
+{"op":"submit","conn":"455230930f9d3b96ce6a","entry":"add","as":"7fdaa3ba85ab1a757774","expect":"result 0","seq":1,"prevOf":"5b1f9b8508f05715d0c7","device":"4f0a9750c182a6fdcaf0","bots":["4f0a9750c182a6fdcaf0"]}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":["7fdaa3ba85ab1a757774"],"n":4}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":3,"head":"h5","expect":{"items":["7fdaa3ba85ab1a757774"],"n":4,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":4,"expect":{"items":[],"n":4,"seals":0}}
+{"op":"prove","conn":"4f0a9750c182a6fdcaf0","device":"4f0a9750c182a6fdcaf0","expect":"served"}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":0,"head":"h6","expect":{"items":["5b1f9b8508f05715d0c7","create:5b1f9b8508f05715d0c7","8af28f5405d4824d7245","7fdaa3ba85ab1a757774"],"n":4,"inc":"If0052acc368ffa219777","chained":true}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":0,"head":"h7","expect":{"items":["5b1f9b8508f05715d0c7","create:5b1f9b8508f05715d0c7","8af28f5405d4824d7245","7fdaa3ba85ab1a757774"],"n":4,"inc":"If0052acc368ffa219777","chained":true}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":4,"expect":{"items":[],"n":4,"seals":0}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":4,"head":"h8","expect":{"items":[],"n":4,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":4,"expect":{"items":[],"n":4,"seals":0}}
+{"op":"submit","conn":"455230930f9d3b96ce6a","entry":"epoch","as":"43cbe4cfe3eb98ce0e31","seq":1,"prevOf":"8af28f5405d4824d7245","expect":"result 0","deviceLength":2}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":["43cbe4cfe3eb98ce0e31"],"n":5}}
+{"op":"follow","conn":"4f0a9750c182a6fdcaf0","wait":1000,"expect":{"items":["43cbe4cfe3eb98ce0e31"],"n":5}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":4,"head":"h9","expect":{"items":["43cbe4cfe3eb98ce0e31"],"n":5,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":5,"expect":{"items":[],"n":5,"seals":0}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":5,"head":"h10","expect":{"items":[],"n":5,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":5,"expect":{"items":[],"n":5,"seals":0}}
+{"op":"give-seal","conn":"455230930f9d3b96ce6a","epoch":"8af28f5405d4824d7245","recipient":"4f0a9750c182a6fdcaf0","expect":"result 0"}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"follow","conn":"4f0a9750c182a6fdcaf0","wait":1000,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":4,"head":"h11","expect":{"items":["43cbe4cfe3eb98ce0e31"],"n":5,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":5,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":5,"head":"h12","expect":{"items":[],"n":5,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":5,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":5,"head":"h13","expect":{"items":[],"n":5,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":5,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":5,"head":"h14","expect":{"items":[],"n":5,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":5,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":5,"head":"h15","expect":{"items":[],"n":5,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":5,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"relay","act":"copy","as":"cp1"}
+{"op":"prove","conn":"rc","device":"thr1","recovery":"76721cd2564cdb94ee71","wait":200,"expect":"silent"}
+{"op":"recovery-log","conn":"rc","expect":{"log":["5b1f9b8508f05715d0c7","7fdaa3ba85ab1a757774"]}}
+{"op":"close","conn":"rc"}
+{"op":"prove","conn":"b2f3983528739e5a79f3","device":"b2f3983528739e5a79f3","expect":"refused 1 or refused 2"}
+{"op":"prove","conn":"rc","device":"thr2","recovery":"76721cd2564cdb94ee71","wait":200,"expect":"silent"}
+{"op":"recovery-log","conn":"rc","expect":{"log":["5b1f9b8508f05715d0c7","7fdaa3ba85ab1a757774"]}}
+{"op":"close","conn":"rc"}
+{"op":"close","conn":"455230930f9d3b96ce6a"}
+{"op":"close","conn":"4f0a9750c182a6fdcaf0"}
+{"op":"prove","conn":"rc","device":"b2f3983528739e5a79f3","recovery":"76721cd2564cdb94ee71","wait":200,"expect":"silent"}
+{"op":"submit","conn":"rc","entry":"reset","as":"ad50121f989649152387","expect":"result 0","by":"76721cd2564cdb94ee71","seq":2,"prevOf":"7fdaa3ba85ab1a757774","set":["b2f3983528739e5a79f3"],"newDevice":"b2f3983528739e5a79f3"}
+{"op":"close","conn":"rc"}
+{"op":"prove","conn":"b2f3983528739e5a79f3","device":"b2f3983528739e5a79f3","expect":"served"}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":0,"head":"h16","expect":{"items":["5b1f9b8508f05715d0c7","create:5b1f9b8508f05715d0c7","8af28f5405d4824d7245","7fdaa3ba85ab1a757774","43cbe4cfe3eb98ce0e31","ad50121f989649152387"],"n":6,"inc":"If0052acc368ffa219777","chained":true}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":0,"head":"h17","expect":{"items":["5b1f9b8508f05715d0c7","create:5b1f9b8508f05715d0c7","8af28f5405d4824d7245","7fdaa3ba85ab1a757774","43cbe4cfe3eb98ce0e31","ad50121f989649152387"],"n":6,"inc":"If0052acc368ffa219777","chained":true}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":0,"head":"h18","expect":{"items":["5b1f9b8508f05715d0c7","create:5b1f9b8508f05715d0c7","8af28f5405d4824d7245","7fdaa3ba85ab1a757774","43cbe4cfe3eb98ce0e31","ad50121f989649152387"],"n":6,"inc":"If0052acc368ffa219777","chained":true}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":6,"expect":{"items":[],"n":6,"seals":1}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":6,"head":"h19","expect":{"items":[],"n":6,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":6,"expect":{"items":[],"n":6,"seals":1}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":6,"head":"h20","expect":{"items":[],"n":6,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":6,"expect":{"items":[],"n":6,"seals":1}}
+{"op":"submit","conn":"b2f3983528739e5a79f3","entry":"epoch","as":"2b8744d36dcf1c59dd1c","seq":2,"prevOf":"43cbe4cfe3eb98ce0e31","expect":"result 0","deviceLength":3}
+{"op":"follow","conn":"b2f3983528739e5a79f3","wait":1000,"expect":{"items":["2b8744d36dcf1c59dd1c"],"n":7}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":6,"head":"h21","expect":{"items":["2b8744d36dcf1c59dd1c"],"n":7,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":7,"expect":{"items":[],"n":7,"seals":1}}
+{"op":"give-seal","conn":"b2f3983528739e5a79f3","epoch":"8af28f5405d4824d7245","recipient":"76721cd2564cdb94ee71","expect":"result 0"}
+{"op":"follow","conn":"b2f3983528739e5a79f3","wait":1000,"expect":{"items":[],"n":7,"seals":1}}
+{"op":"give-seal","conn":"b2f3983528739e5a79f3","epoch":"43cbe4cfe3eb98ce0e31","recipient":"76721cd2564cdb94ee71","expect":"result 0"}
+{"op":"follow","conn":"b2f3983528739e5a79f3","wait":1000,"expect":{"items":[],"n":7,"seals":1}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":7,"head":"h22","expect":{"items":[],"n":7,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":7,"expect":{"items":[],"n":7,"seals":3}}
+{"op":"prove","conn":"4f0a9750c182a6fdcaf0","device":"4f0a9750c182a6fdcaf0","expect":"refused 1 or refused 2"}
+{"op":"prove","conn":"u1","device":"4f0a9750c182a6fdcaf0","head":"h15","wait":200,"expect":"silent"}
+{"op":"upload-done","conn":"u1","head":"h15","expect":"result 0"}
+{"op":"close","conn":"u1"}
+{"op":"prove","conn":"4f0a9750c182a6fdcaf0","device":"4f0a9750c182a6fdcaf0","expect":"refused 1 or refused 2"}
+{"op":"prove","conn":"4f0a9750c182a6fdcaf0","device":"4f0a9750c182a6fdcaf0","expect":"refused 1 or refused 2"}
+{"op":"prove","conn":"u1","device":"4f0a9750c182a6fdcaf0","head":"h15","wait":200,"expect":"silent"}
+{"op":"upload-done","conn":"u1","head":"h15","expect":"result 0"}
+{"op":"close","conn":"u1"}
+{"op":"prove","conn":"4f0a9750c182a6fdcaf0","device":"4f0a9750c182a6fdcaf0","expect":"refused 1 or refused 2"}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":7,"head":"h23","expect":{"items":[],"n":7,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":7,"expect":{"items":[],"n":7,"seals":3}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":7,"head":"h24","expect":{"items":[],"n":7,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":7,"expect":{"items":[],"n":7,"seals":3}}
+{"op":"relay","act":"put-back","copy":"cp1"}
+{"op":"prove","conn":"b2f3983528739e5a79f3","device":"b2f3983528739e5a79f3","expect":"refused 1 or refused 2"}
+{"op":"prove","conn":"u1","device":"b2f3983528739e5a79f3","head":"h24","wait":200,"expect":"silent"}
+{"op":"upload-done","conn":"u1","head":"h24","expect":"result 11"}
+{"op":"close","conn":"u1"}
+{"op":"prove","conn":"455230930f9d3b96ce6a","device":"455230930f9d3b96ce6a","expect":"refused 6"}
+{"op":"prove","conn":"455230930f9d3b96ce6a","device":"455230930f9d3b96ce6a","expect":"refused 6"}
+{"op":"relay","act":"recreate"}
+{"op":"prove","conn":"9cf651c0040e35b530ce","device":"9cf651c0040e35b530ce","enrol":"cdef19d02dc537bca406","as":"ead68a08a4f562c1c340","expect":"served"}
+{"op":"submit","conn":"9cf651c0040e35b530ce","entry":"create","as":"create:ead68a08a4f562c1c340","expect":"result 0"}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":0,"head":"h25","expect":{"items":["ead68a08a4f562c1c340","create:ead68a08a4f562c1c340"],"n":2,"inc":"I7d9841253fc173f27490","chained":true}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":0,"head":"h26","expect":{"items":["ead68a08a4f562c1c340","create:ead68a08a4f562c1c340"],"n":2,"inc":"I7d9841253fc173f27490","chained":true}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":2,"expect":{"items":[],"n":2,"seals":0}}
+{"op":"submit","conn":"9cf651c0040e35b530ce","entry":"epoch","as":"e3bb2d5fc8c41e6b3e12","seq":0,"prevOf":null,"expect":"result 0","deviceLength":1}
+{"op":"follow","conn":"9cf651c0040e35b530ce","wait":1000,"expect":{"items":["e3bb2d5fc8c41e6b3e12"],"n":3}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":2,"head":"h27","expect":{"items":["e3bb2d5fc8c41e6b3e12"],"n":3,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":3,"expect":{"items":[],"n":3,"seals":0}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":3,"head":"h28","expect":{"items":[],"n":3,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":3,"expect":{"items":[],"n":3,"seals":0}}
+{"op":"submit","conn":"9cf651c0040e35b530ce","entry":"add","as":"c5e1dc09e51d39eef6a2","expect":"result 0","seq":1,"prevOf":"ead68a08a4f562c1c340","device":"1042957b28e987384cd4","bots":["1042957b28e987384cd4"]}
+{"op":"follow","conn":"9cf651c0040e35b530ce","wait":1000,"expect":{"items":["c5e1dc09e51d39eef6a2"],"n":4}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":3,"head":"h29","expect":{"items":["c5e1dc09e51d39eef6a2"],"n":4,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":4,"expect":{"items":[],"n":4,"seals":0}}
+{"op":"prove","conn":"1042957b28e987384cd4","device":"1042957b28e987384cd4","expect":"served"}
+{"op":"read","conn":"1042957b28e987384cd4","from":0,"head":"h30","expect":{"items":["ead68a08a4f562c1c340","create:ead68a08a4f562c1c340","e3bb2d5fc8c41e6b3e12","c5e1dc09e51d39eef6a2"],"n":4,"inc":"I7d9841253fc173f27490","chained":true}}
+{"op":"read","conn":"1042957b28e987384cd4","from":0,"head":"h31","expect":{"items":["ead68a08a4f562c1c340","create:ead68a08a4f562c1c340","e3bb2d5fc8c41e6b3e12","c5e1dc09e51d39eef6a2"],"n":4,"inc":"I7d9841253fc173f27490","chained":true}}
+{"op":"read","conn":"1042957b28e987384cd4","from":4,"expect":{"items":[],"n":4,"seals":0}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":4,"head":"h32","expect":{"items":[],"n":4,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":4,"expect":{"items":[],"n":4,"seals":0}}
+{"op":"submit","conn":"9cf651c0040e35b530ce","entry":"epoch","as":"7e00eb6d7b918b04f94d","seq":1,"prevOf":"e3bb2d5fc8c41e6b3e12","expect":"result 0","deviceLength":2}
+{"op":"follow","conn":"9cf651c0040e35b530ce","wait":1000,"expect":{"items":["7e00eb6d7b918b04f94d"],"n":5}}
+{"op":"follow","conn":"1042957b28e987384cd4","wait":1000,"expect":{"items":["7e00eb6d7b918b04f94d"],"n":5}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":4,"head":"h33","expect":{"items":["7e00eb6d7b918b04f94d"],"n":5,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":5,"expect":{"items":[],"n":5,"seals":0}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":5,"head":"h34","expect":{"items":[],"n":5,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":5,"expect":{"items":[],"n":5,"seals":0}}
+{"op":"give-seal","conn":"9cf651c0040e35b530ce","epoch":"e3bb2d5fc8c41e6b3e12","recipient":"1042957b28e987384cd4","expect":"result 0"}
+{"op":"follow","conn":"9cf651c0040e35b530ce","wait":1000,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"follow","conn":"1042957b28e987384cd4","wait":1000,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":5,"head":"h35","expect":{"items":[],"n":5,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":5,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":5,"head":"h36","expect":{"items":[],"n":5,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":5,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"read","conn":"1042957b28e987384cd4","from":4,"head":"h37","expect":{"items":["7e00eb6d7b918b04f94d"],"n":5,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"1042957b28e987384cd4","from":5,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"read","conn":"1042957b28e987384cd4","from":5,"head":"h38","expect":{"items":[],"n":5,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"1042957b28e987384cd4","from":5,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":0,"expect":{"items":["ead68a08a4f562c1c340","create:ead68a08a4f562c1c340","e3bb2d5fc8c41e6b3e12","c5e1dc09e51d39eef6a2","7e00eb6d7b918b04f94d"],"n":5,"inc":"I7d9841253fc173f27490","seals":1,"chained":true}}
+{"op":"submit","conn":"9cf651c0040e35b530ce","entry":"message","as":"f3ea0d19430b94178c96","epoch":"7e00eb6d7b918b04f94d","counter":1,"run":"9bb2a4cf3b2c3fcf9858","kind":2,"name":"b1fbc696ad63159e4af8","expect":"result 0","to":"1042957b28e987384cd4","incarnation":"7d9841253fc173f27490"}
+{"op":"follow","conn":"9cf651c0040e35b530ce","wait":1000,"expect":{"items":["f3ea0d19430b94178c96"],"n":6}}
+{"op":"follow","conn":"1042957b28e987384cd4","wait":1000,"expect":{"items":["f3ea0d19430b94178c96"],"n":6}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":5,"head":"h39","expect":{"items":["f3ea0d19430b94178c96"],"n":6,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":6,"expect":{"items":[],"n":6,"seals":1}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":6,"head":"h40","expect":{"items":[],"n":6,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":6,"expect":{"items":[],"n":6,"seals":1}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":6,"head":"h41","expect":{"items":[],"n":6,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":6,"expect":{"items":[],"n":6,"seals":1}}
+{"op":"read","conn":"1042957b28e987384cd4","from":5,"head":"h42","expect":{"items":["f3ea0d19430b94178c96"],"n":6,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"1042957b28e987384cd4","from":6,"expect":{"items":[],"n":6,"seals":1}}
+{"op":"submit","conn":"1042957b28e987384cd4","entry":"message","as":"e3953d331aa6351cce3e","epoch":"7e00eb6d7b918b04f94d","counter":1,"run":"0835e7ff8fbf9380b301","kind":3,"name":"9e22d8b10b7a504be963","expect":"result 0","re":{"device":"9cf651c0040e35b530ce","name":"b1fbc696ad63159e4af8"},"incarnation":"7d9841253fc173f27490"}
+{"op":"follow","conn":"9cf651c0040e35b530ce","wait":1000,"expect":{"items":["e3953d331aa6351cce3e"],"n":7}}
+{"op":"follow","conn":"1042957b28e987384cd4","wait":1000,"expect":{"items":["e3953d331aa6351cce3e"],"n":7}}
+{"op":"read","conn":"1042957b28e987384cd4","from":6,"head":"h43","expect":{"items":["e3953d331aa6351cce3e"],"n":7,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"1042957b28e987384cd4","from":7,"expect":{"items":[],"n":7,"seals":1}}
+{"op":"submit","conn":"1042957b28e987384cd4","entry":"message","as":"18cbaab2265e46a15b2f","epoch":"7e00eb6d7b918b04f94d","counter":2,"run":"0835e7ff8fbf9380b301","kind":5,"name":"24b47f7428c4bb4d235e","expect":"result 0","re":{"device":"9cf651c0040e35b530ce","name":"b1fbc696ad63159e4af8"},"incarnation":"7d9841253fc173f27490"}
+{"op":"follow","conn":"9cf651c0040e35b530ce","wait":1000,"expect":{"items":["18cbaab2265e46a15b2f"],"n":8}}
+{"op":"follow","conn":"1042957b28e987384cd4","wait":1000,"expect":{"items":["18cbaab2265e46a15b2f"],"n":8}}
+{"op":"read","conn":"1042957b28e987384cd4","from":7,"head":"h44","expect":{"items":["18cbaab2265e46a15b2f"],"n":8,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"1042957b28e987384cd4","from":8,"expect":{"items":[],"n":8,"seals":1}}
+{"op":"read","conn":"1042957b28e987384cd4","from":8,"head":"h45","expect":{"items":[],"n":8,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"1042957b28e987384cd4","from":8,"expect":{"items":[],"n":8,"seals":1}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":6,"head":"h46","expect":{"items":["e3953d331aa6351cce3e","18cbaab2265e46a15b2f"],"n":8,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":8,"expect":{"items":[],"n":8,"seals":1}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":8,"head":"h47","expect":{"items":[],"n":8,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":8,"expect":{"items":[],"n":8,"seals":1}}
+{"op":"read","conn":"1042957b28e987384cd4","from":8,"head":"h48","expect":{"items":[],"n":8,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"1042957b28e987384cd4","from":8,"expect":{"items":[],"n":8,"seals":1}}
+{"op":"read","conn":"1042957b28e987384cd4","from":8,"head":"h49","expect":{"items":[],"n":8,"inc":"I7d9841253fc173f27490"}}
+{"op":"read","conn":"1042957b28e987384cd4","from":8,"expect":{"items":[],"n":8,"seals":1}}
+{"op":"read","conn":"9cf651c0040e35b530ce","from":0,"expect":{"items":["ead68a08a4f562c1c340","create:ead68a08a4f562c1c340","e3bb2d5fc8c41e6b3e12","c5e1dc09e51d39eef6a2","7e00eb6d7b918b04f94d","f3ea0d19430b94178c96","e3953d331aa6351cce3e","18cbaab2265e46a15b2f"],"n":8,"inc":"I7d9841253fc173f27490","seals":1,"chained":true}}

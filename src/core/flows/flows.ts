@@ -1,0 +1,76 @@
+/** Every flow of the core, built over one set of stores and wired to one another. */
+import type { ListPick } from "../../chat/seam.ts";
+import { asking } from "./asking.ts";
+import type { OtherFlows } from "./contract.ts";
+import { diffFlow } from "./diff.ts";
+import { rootGone } from "./gone.ts";
+import { InFlight } from "./in-flight.ts";
+import { Inbound } from "./inbound.ts";
+import { lists } from "./lists.ts";
+import { messages } from "./messages.ts";
+import { rewindFlow } from "./rewind.ts";
+import { type FlowDeps, Talk } from "./talk.ts";
+import { updating } from "./update.ts";
+import { inboundStop } from "./words.ts";
+
+export interface Built {
+  /** What the chat provider calls when the owner did something. */
+  readonly inbound: Inbound;
+}
+
+export function buildFlows(deps: FlowDeps): Built {
+  const talk = new Talk(deps);
+  const { setup, hold, terminal, answers } = asking(deps, talk);
+  const { resume, bind, picks } = lists(deps, talk);
+  const diff = diffFlow(deps, talk);
+  const rewind = rewindFlow(deps, talk);
+  const pardner = deps.updates === undefined ? undefined : updating(deps, deps.updates, talk);
+  const flows: OtherFlows = {
+    setup,
+    hold,
+    terminal,
+    resume,
+    bind,
+    diff,
+    rewind,
+    ...(pardner ? { pardner } : {}),
+  };
+  const inFlight = new InFlight();
+  const all = messages(deps, talk, flows, inFlight);
+  // A suggestion that arrives while a prompt of the thread is on its way belongs to the turn before.
+  deps.sessions.suggestions.promptOnItsWay = (ref) => inFlight.has(ref);
+  // A failure after the provider's checks reaches the owner in the channel of the offer; a click
+  // on the chat's own page has none, and that page shows the state.
+  const updatePicked = (pick: Extract<ListPick, { type: "update" }>): Promise<void> => {
+    const { channel } = pick;
+    if (pardner === undefined) return Promise.resolve();
+    return talk.replyOnFailure(
+      { channel: channel ?? "page", thread: pick.list ?? "page" },
+      () => pardner.picked(pick),
+      (told) => (channel === null ? Promise.resolve() : talk.inChannel(channel, told)),
+    );
+  };
+  return {
+    inbound: new Inbound({
+      // The notice decides before the message is handled and is not waited for: the message
+      // takes its place in its thread's line first (`messages.ts`), the line follows it.
+      message: async (message) => {
+        const told = pardner?.notice(message);
+        await Promise.all([told, all.message(message)]);
+      },
+      answer: (ref, requestId, answer, message) => answers.answer(ref, requestId, answer, message),
+      picked: (pick) => {
+        if (pick.type === "update") return updatePicked(pick);
+        if (pick.type === "diff-file" || pick.type === "diff-view") return diff.picked(pick);
+        if (pick.type === "suggestion") return all.suggestionPicked(pick);
+        if (pick.type === "rewind-point" || pick.type === "rewind-action") {
+          return rewind.picked(pick);
+        }
+        return picks.picked(pick);
+      },
+      unbound: (channel) => talk.unbound(channel),
+      rootGone: rootGone(deps, talk),
+      stop: inboundStop(deps, talk, inFlight),
+    }),
+  };
+}

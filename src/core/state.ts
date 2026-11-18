@@ -1,0 +1,1048 @@
+/**
+ * The daemon's only written file: per channel, its bound directory; per thread within it, the folder it was opened in, its session id, bypass switch and
+ * effort level; at its top, the version of the update the owner was last told of and the message
+ * a restart asked from the chat leaves to rewrite. A file names the agent and the chat it was
+ * written for (version 3), since a session id and a thread's name mean nothing to others.
+ */
+import { randomBytes } from "node:crypto";
+import fs from "node:fs";
+import { dirname, join } from "node:path";
+import type { ForkSource } from "../agent/seam.ts";
+import type { SessionStatus, ThreadRef } from "../chat/seam.ts";
+import { getLogger } from "../log.ts";
+import { errorName } from "../values.ts";
+
+export const logger = getLogger("pardner.core.state");
+
+// A thread with no session id that was opened longer ago than this never finished its first
+// turn: `prune` drops it. When it was opened is the chat's to say (`ChatProvider.openedAt`).
+export const ONE_DAY = 24 * 60 * 60;
+
+/** When a thread was opened, in epoch seconds; null when the chat cannot tell. */
+export type OpenedAt = (ref: ThreadRef) => number | null;
+
+/** A thread `StateStore.prune` removed, and why: none ever started. */
+export interface Pruned {
+  readonly ref: ThreadRef;
+  readonly reason: "never started";
+}
+
+/**
+ * The names of the agent and the chat a `state.json` was written for: a session id and a thread's
+ * name mean nothing to another agent or another chat.
+ */
+export interface StateModules {
+  readonly agent: string;
+  readonly chat: string;
+}
+
+/**
+ * What an observer is told after a write: the threads it touched, as a set (no order, no
+ * repeats).
+ */
+export type SessionsChange = (changed: readonly ThreadRef[]) => void;
+
+/**
+ * What a request message is, one word stored beside its id for the crash repair: a question or an
+ * approval of a turn, the session's setup form, the same-folder hold, the confirmation of a shell
+ * command.
+ */
+export type RequestKind = "question" | "approval" | "setup" | "hold" | "shell";
+
+/**
+ * Whether a request of `kind` is a turn's question or approval: the turn stops on it, and a crash
+ * that leaves it open stopped that turn. An entry with no kind (a file written before the kinds)
+ * is not.
+ */
+export function asksInTurn(kind: RequestKind | undefined): boolean {
+  return kind === "question" || kind === "approval";
+}
+
+/**
+ * Whether a request of `kind` waits for the owner's answer, the waits he is told of: a turn's
+ * question or approval (`asksInTurn`), or a message of his held back, by another session at work
+ * in the folder or by a terminal (`hold`), which he may have sent and left (#163). The setup form
+ * and a shell command's confirmation answer what he has just written.
+ */
+export function asksOwner(kind: RequestKind | undefined): boolean {
+  return asksInTurn(kind) || kind === "hold";
+}
+
+/**
+ * Whether a thread waiting on a request of `kind` can go no further until the owner answers it:
+ * a wait he is told of (`asksOwner`), or the setup form, before which no turn runs (#233). A shell
+ * command's confirmation comes while a session runs beside it.
+ */
+export function blocksOnOwner(kind: RequestKind | undefined): boolean {
+  return asksOwner(kind) || kind === "setup";
+}
+
+const REQUEST_KINDS: ReadonlySet<unknown> = new Set<RequestKind>([
+  "question",
+  "approval",
+  "setup",
+  "hold",
+  "shell",
+]);
+
+export interface ThreadState {
+  /** The folder the thread was opened in. */
+  readonly directory: string;
+  readonly sessionId: string | null;
+  // The owner's last word on bypass, kept across restarts (a restart is the daemon's doing, not
+  // the owner's): true after `!bypass on` or a ticked setup, false after `!bypass off` or an
+  // unticked one, null when never chosen, which leaves the agent's own mode alone. On disk,
+  // `bypass` holds `true` on or `false` not on, and an explicit off adds `bypass_off: true`,
+  // written for that alone: `bypass: false` alone is also what "never chosen" writes, so only the
+  // extra key tells an explicit off apart on the next start.
+  readonly bypass: boolean | null;
+  /** The level the owner set by command; null when unset or set back to the default. */
+  readonly effort: string | null;
+  // Crash repair, each an id only, never message content:
+  // the id of every open reply's last message (more than one can be open at once: a background
+  // task's own reply can outlive the turn that started it). Each `ReplySink` owns one entry:
+  // added on its first message, replaced on a continuation, removed once its final write is
+  // known to have landed. A sink that gave up on that write leaves its entry: the next start's
+  // crash repair (`repairCrash`) finishes the message and removes it.
+  readonly openReplies: readonly string[];
+  /** Id of every approval, question, setup form or same-folder hold request still carrying buttons. */
+  readonly requests: readonly string[];
+  // The kind of each request, by its message id. An entry written before the kinds existed has none; the
+  // repair treats it as a request to delete.
+  readonly requestKinds: Readonly<Record<string, RequestKind>>;
+  // The root's status while it is working or waiting; cleared once done or error is requested.
+  readonly status: SessionStatus | null;
+  // The root's status once done or error is requested, cleared when it turns working or waiting
+  // again: what the session index shows for a session with nothing running. Never read by crash
+  // repair. Error stands here next to a kept `status` when an answer never reached the chat: the
+  // root shows the error, and repair still owes the thread its notice.
+  readonly ended: SessionStatus | null;
+  // The root's text as the chat showed it before the daemon replaced the root with the session's
+  // title (`ChatProvider.titleThread`), kept so that `!status` can still show it: the one piece of
+  // message content `state.json` holds, since the daemon deleted it from the chat. Null until the
+  // root is titled; a file without it reads as none, as for `ended`.
+  readonly rootPrompt: string | null;
+  // For a thread `!fork` opened: the session its own is a copy of and when the copy was made,
+  // passed at every start of the copy, as the terminal passes it to every launch of its own: a
+  // start without it tells the copy that the original's background commands stopped. Ids and a
+  // time, never content; null for any other thread, and in a file without it.
+  readonly forkOf: ForkSource | null;
+  // For a bare `!fork` copy (`fork_of.ran`, `fork_of.named`; each written only while false, absent
+  // means true): whether any turn has started in it, and whether it has its name from the first
+  // prompt with text. Booleans, never content.
+  readonly forkRan: boolean;
+  readonly forkNamed: boolean;
+  // The cut of a rewind no prompt has followed yet: the agent keeps a cut only once something is
+  // written after it, so a restart would lose it. Ids, never content; null when no cut waits, and
+  // in a file without it.
+  readonly pendingCut: PendingCut | null;
+  // The terminal processes the owner answered `Send here` for, by the id the agent gives a
+  // process (`SessionHolder.id`, stable across restarts): he is asked once per terminal, across a
+  // restart and an idle close. Ids, never content; replaced at each answer, cleared when the
+  // thread's session id changes; empty in a file without it.
+  readonly terminalsAllowed: readonly string[];
+}
+
+/** A rewind's cut waiting for its prompt: the prompt it is at, and the agent's token for it. */
+export interface PendingCut {
+  readonly at: string;
+  readonly token: string | null;
+}
+
+export interface ChannelRecord {
+  readonly directory: string;
+  readonly threads: ReadonlyMap<string, ThreadState>;
+}
+
+/** A `ThreadState` with every field but the folder defaulted to "nothing set". */
+export function threadState(
+  directory: string,
+  fields: Partial<Omit<ThreadState, "directory">> = {},
+): ThreadState {
+  return {
+    directory,
+    sessionId: null,
+    bypass: null,
+    effort: null,
+    openReplies: [],
+    requests: [],
+    requestKinds: {},
+    status: null,
+    ended: null,
+    rootPrompt: null,
+    forkOf: null,
+    forkRan: true,
+    forkNamed: true,
+    pendingCut: null,
+    terminalsAllowed: [],
+    ...fields,
+  };
+}
+
+/** A `ChannelRecord` with no threads unless given. */
+export function channelRecord(
+  directory: string,
+  fields: Partial<Omit<ChannelRecord, "directory">> = {},
+): ChannelRecord {
+  return { directory, threads: new Map(), ...fields };
+}
+
+/** state.json exists but cannot be read; the daemon refuses to guess. */
+export class StateError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "StateError";
+  }
+}
+
+/** `openThread` was given a channel that has never been bound. */
+export class UnknownChannel extends Error {
+  constructor(channelId: string) {
+    super(`unknown channel: ${channelId}`);
+    this.name = "UnknownChannel";
+  }
+}
+
+/**
+ * The message to rewrite once the daemon is back from a restart it asked for: the
+ * channel and the message that said it was restarting, and the version an update asked for, null
+ * for a plain restart.
+ */
+export interface RestartNotice {
+  readonly channel: string;
+  readonly message: string;
+  readonly version: string | null;
+}
+
+/** A part of the file has the wrong shape; the message becomes the detail of a `StateError`. */
+class Malformed extends Error {
+  override name = "Malformed";
+}
+
+type Raw = Record<string, unknown>;
+
+function isRaw(value: unknown): value is Raw {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** `value` as an object, or `Malformed` naming `what`. */
+function asRaw(value: unknown, what: string): Raw {
+  if (!isRaw(value)) throw new Malformed(`${what} must be an object`);
+  return value;
+}
+
+/** The key's value; a missing key is `Malformed`, named by the key in quotes. */
+function required(raw: Raw, key: string): unknown {
+  if (!Object.hasOwn(raw, key)) throw new Malformed(`'${key}'`);
+  return raw[key];
+}
+
+function requiredString(raw: Raw, key: string): string {
+  const value = required(raw, key);
+  if (typeof value !== "string") throw new Malformed(`'${key}' must be a string`);
+  return value;
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+/** A thread's `fork_of`; one that is not whole is read as none. */
+function parseForkOf(value: unknown): ForkSource | null {
+  if (!isRaw(value)) return null;
+  const { session_id: session, at } = value;
+  return typeof session === "string" && typeof at === "string" ? { session, at } : null;
+}
+
+/** One of a bare fork's flags in `fork_of`: true unless written false. */
+function forkFlag(value: unknown, key: "ran" | "named"): boolean {
+  return !isRaw(value) || value[key] !== false;
+}
+
+/** A thread's `pending_cut`; one that is not whole is read as none. */
+function parsePendingCut(value: unknown): PendingCut | null {
+  if (!isRaw(value)) return null;
+  const { at, token } = value;
+  if (typeof at !== "string" || (token !== null && typeof token !== "string")) return null;
+  return { at, token };
+}
+
+/** The restart notice a file holds; one that is not whole is read as none, as `update_notice` is. */
+function parseRestartNotice(value: unknown): RestartNotice | null {
+  if (!isRaw(value)) return null;
+  const { channel, message, version } = value;
+  if (typeof channel !== "string" || typeof message !== "string") return null;
+  if (version !== null && typeof version !== "string") return null;
+  return { channel, message, version };
+}
+
+const STATUS_WORDS: ReadonlySet<unknown> = new Set<SessionStatus>([
+  "working",
+  "waiting",
+  "done",
+  "error",
+]);
+
+/** A stored status as a word; anything else reads as none. */
+function statusOrNull(value: unknown): SessionStatus | null {
+  return typeof value === "string" && STATUS_WORDS.has(value) ? (value as SessionStatus) : null;
+}
+
+function stringList(value: unknown): readonly string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+/** The kinds stored beside `requests`: only a known word for an id that is in the list. */
+function requestKinds(
+  value: unknown,
+  requests: readonly string[],
+): Readonly<Record<string, RequestKind>> {
+  const kinds: Record<string, RequestKind> = {};
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return kinds;
+  for (const id of requests) {
+    const kind: unknown = Object.hasOwn(value, id) ? (value as Raw)[id] : undefined;
+    if (REQUEST_KINDS.has(kind)) kinds[id] = kind as RequestKind;
+  }
+  return kinds;
+}
+
+function parseBypass(raw: Raw): boolean | null {
+  if (raw.bypass === true) return true;
+  return raw.bypass_off === true ? false : null;
+}
+
+/** `bypass` (`true` on, `false` not on), plus `bypass_off: true` for an explicit off only. */
+function dumpBypass(bypass: boolean | null): Record<string, boolean> {
+  if (bypass) return { bypass: true };
+  return bypass === false ? { bypass: false, bypass_off: true } : { bypass: false };
+}
+
+/**
+ * Tolerant of a file written without the repair fields (they default to "nothing open"), and of
+ * keys it does not know, which it ignores. A file without `bypass_off` reads its `bypass: false`
+ * as never chosen. A file written by 1304c5e's single `open_reply` field (never shipped) is read
+ * the same as one with none at all: that key is not looked at.
+ */
+export function parseThread(raw: Raw): ThreadState {
+  const requests = stringList(raw.requests);
+  const forkOf = parseForkOf(raw.fork_of);
+  return {
+    directory: requiredString(raw, "directory"),
+    sessionId: stringOrNull(raw.session_id),
+    bypass: parseBypass(raw),
+    effort: stringOrNull(raw.effort),
+    openReplies: stringList(raw.open_replies),
+    requests,
+    requestKinds: requestKinds(raw.request_kinds, requests),
+    status: statusOrNull(raw.status),
+    ended: statusOrNull(raw.ended),
+    rootPrompt: stringOrNull(raw.root_prompt),
+    forkOf,
+    forkRan: forkOf === null || forkFlag(raw.fork_of, "ran"),
+    forkNamed: forkOf === null || forkFlag(raw.fork_of, "named"),
+    pendingCut: parsePendingCut(raw.pending_cut),
+    terminalsAllowed: stringList(raw.terminals_allowed),
+  };
+}
+
+function parseChannels(raw: Raw): Map<string, ChannelRecord> {
+  const channels = new Map<string, ChannelRecord>();
+  for (const [channelId, rawEntry] of Object.entries(
+    asRaw(required(raw, "channels"), "'channels'"),
+  )) {
+    const entry = asRaw(rawEntry, `channel ${channelId}`);
+    const threads = new Map<string, ThreadState>();
+    const rawThreads = Object.hasOwn(entry, "threads") ? entry.threads : {};
+    for (const [threadId, rawThread] of Object.entries(
+      asRaw(rawThreads, `'threads' of ${channelId}`),
+    )) {
+      threads.set(threadId, parseThread(asRaw(rawThread, `thread ${threadId}`)));
+    }
+    channels.set(channelId, {
+      directory: requiredString(entry, "directory"),
+      threads,
+    });
+  }
+  return channels;
+}
+
+/**
+ * What the session index (the chat's sessions page) and the channels' line show of `threads`: a write that
+ * leaves this unchanged is not announced to `StateStore.onSessionsChange`.
+ */
+function shown(threads: ReadonlyMap<string, ThreadState>): Map<string, string> {
+  return new Map(
+    // Whether the thread blocks on the owner (`blocksOnOwner`) and whether it asks him
+    // (`asksOwner`) too, which the channel's line shows: a request can change either while the
+    // root's status stays waiting (the setup form answered, then the same-folder hold), and a
+    // turn's request is written after its status.
+    [...threads].map(([id, t]) => [
+      id,
+      JSON.stringify([
+        t.sessionId,
+        t.status,
+        t.ended,
+        Object.values(t.requestKinds).some(blocksOnOwner),
+        Object.values(t.requestKinds).some(asksOwner),
+      ]),
+    ]),
+  );
+}
+
+/** The text Python's `json.dump(data, f, indent=2)` writes: ASCII only, no trailing newline. */
+function dumpJson(data: unknown): string {
+  // `JSON.stringify` differs from `ensure_ascii=True` only in leaving DEL and everything from
+  // U+0080 up as they are; a UTF-16 code unit escaped on its own gives the same `🚀`
+  // pair for an astral character that Python writes.
+  return JSON.stringify(data, null, 2).replace(
+    /[\u007f-￿]/g,
+    (unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
+function threadKey(channelId: string, threadId: string): string {
+  return `${channelId}\0${threadId}`;
+}
+
+export interface StateStoreOptions {
+  /** Where a warning goes; ids and error names only, never message content. */
+  warn?: (message: string) => void;
+  /**
+   * The agent and the chat running now. A file written for others, or before the names were
+   * written (versions 1 and 2), is refused (`StateError`) and never touched.
+   */
+  modules: StateModules;
+  /**
+   * Flushes a written file, then its directory, to the disk: `fs.fsyncSync` when absent. The
+   * disk serves one flush at a time for the whole machine, so a store whose file no restart
+   * will read (a test's) passes one that does nothing.
+   */
+  sync?: (fd: number) => void;
+}
+
+/** In-memory copy of state.json, written atomically on every change. */
+export class StateStore {
+  private readonly path: string;
+  private readonly warn: (message: string) => void;
+  private readonly sync: (fd: number) => void;
+  private channelsById: Map<string, ChannelRecord>;
+  private readonly modules: StateModules;
+  // Called after a write that changed which channels are bound, which threads exist, the
+  // session one holds, or a root's status: what the session index is built from. It is
+  // given the (channelId, threadId) of each thread the write touched. Never while loading.
+  onSessionsChange: SessionsChange | null = null;
+  // The version of the update the owner was last told of: a top-level key beside
+  // `channels`, absent until one was told. Additive like `bypass_off`, so the file stays at its
+  // version and code that does not know the key ignores it.
+  private told: string | null = null;
+  // The message the next start rewrites, a second top-level key of the same kind:
+  // absent unless the daemon asked its own stop from the chat.
+  private restarted: RestartNotice | null = null;
+
+  constructor(path: string, options: StateStoreOptions) {
+    this.path = path;
+    this.warn = options.warn ?? ((message) => logger.warning(message));
+    this.modules = options.modules;
+    this.sync = options.sync ?? fs.fsyncSync;
+    this.channelsById = this.load();
+  }
+
+  /** The version of the update the owner was last told of; null when none was. */
+  get updateNotice(): string | null {
+    return this.told;
+  }
+
+  /** Remembers that the owner was told of `version`; no session changes, so the index is not told. */
+  setUpdateNotice(version: string): void {
+    if (this.told === version) return;
+    const before = this.told;
+    this.told = version;
+    try {
+      this.save();
+    } catch (error) {
+      this.told = before;
+      throw error;
+    }
+  }
+
+  /** The message to rewrite on the next start; null when the last stop was not asked from a chat. */
+  get restartNotice(): RestartNotice | null {
+    return this.restarted;
+  }
+
+  /** Remembers the message the next start rewrites; throws when the file cannot be written. */
+  setRestartNotice(notice: RestartNotice): void {
+    this.changeRestartNotice(notice);
+  }
+
+  /**
+   * Forgets `notice`, and only while it is still the one kept: a restart asked since has recorded
+   * its own, which stays. Throws when the file cannot be written.
+   */
+  clearRestartNotice(notice: RestartNotice): void {
+    const kept = this.restarted;
+    if (kept === null || kept.channel !== notice.channel || kept.message !== notice.message) return;
+    this.changeRestartNotice(null);
+  }
+
+  /** No session changes, so the index is not told. */
+  private changeRestartNotice(notice: RestartNotice | null): void {
+    if (this.restarted === null && notice === null) return;
+    const before = this.restarted;
+    this.restarted = notice;
+    try {
+      this.save();
+    } catch (error) {
+      this.restarted = before;
+      throw error;
+    }
+  }
+
+  channel(channelId: string): ChannelRecord | null {
+    return this.channelsById.get(channelId) ?? null;
+  }
+
+  /** The id of every bound channel, in the order they were bound. */
+  channels(): string[] {
+    return [...this.channelsById.keys()];
+  }
+
+  thread(channelId: string, threadId: string): ThreadState | null {
+    return this.channelsById.get(channelId)?.threads.get(threadId) ?? null;
+  }
+
+  /** Every (channelId, threadId, thread), across all channels. */
+  threads(): [string, string, ThreadState][] {
+    return [...this.channelsById].flatMap(([channelId, channel]) =>
+      [...channel.threads].map(([threadId, thread]): [string, string, ThreadState] => [
+        channelId,
+        threadId,
+        thread,
+      ]),
+    );
+  }
+
+  /**
+   * Bind a channel to a directory; its threads and their own folders stay untouched (each
+   * thread keeps the folder it was created in).
+   */
+  bind(channelId: string, directory: string): void {
+    const current = this.channelsById.get(channelId);
+    this.channelsById.set(channelId, {
+      directory,
+      threads: current?.threads ?? new Map(),
+    });
+    this.save();
+    if (current === undefined) this.announce(); // a new channel in the session index; a rebind changes no row
+  }
+
+  /** Forget a channel: its binding and every thread in it. A no-op for one that is not bound. */
+  removeChannel(channelId: string): void {
+    const channel = this.channelsById.get(channelId);
+    if (channel === undefined) return;
+    this.channelsById.delete(channelId);
+    this.save();
+    this.announce(
+      [...channel.threads.keys()].map(
+        (threadId): ThreadRef => ({ channel: channelId, thread: threadId }),
+      ),
+    );
+  }
+
+  /**
+   * Create a thread's entry with the channel's current folder, or return the existing one
+   * unchanged. Throws `UnknownChannel` for a channel that has never been bound.
+   */
+  openThread(channelId: string, threadId: string, sessionId: string | null = null): ThreadState {
+    const channel = this.channelsById.get(channelId);
+    if (channel === undefined) throw new UnknownChannel(channelId);
+    const existing = channel.threads.get(threadId);
+    if (existing !== undefined) return existing;
+    const created = threadState(channel.directory, { sessionId });
+    this.replaceThreads(channelId, new Map([...channel.threads, [threadId, created]]));
+    return created;
+  }
+
+  /** Record a thread's session id; a no-op for a thread that does not exist. */
+  setSession(channelId: string, threadId: string, sessionId: string | null): void {
+    const current = this.thread(channelId, threadId);
+    if (current !== null && current.sessionId !== sessionId) {
+      // The terminals allowed were holders of the old session.
+      // A copy's flags belong to the session it was made as: another session is no bare copy.
+      this.setThread(channelId, threadId, {
+        ...current,
+        sessionId,
+        terminalsAllowed: [],
+        forkRan: true,
+        forkNamed: true,
+      });
+    }
+  }
+
+  /**
+   * Record a thread's bypass choice (null: never chosen); a no-op for a thread that does not
+   * exist.
+   */
+  setBypass(channelId: string, threadId: string, on: boolean | null): void {
+    const current = this.thread(channelId, threadId);
+    if (current !== null && current.bypass !== on) {
+      this.setThread(channelId, threadId, { ...current, bypass: on });
+    }
+  }
+
+  /**
+   * Record the text the thread's root had before it was titled. Never replaces one already
+   * stored, empty or not: that text is what the root held before the daemon replaced it, and
+   * a later one would be the title. Returns whether it stored; a no-op, false, for an unknown thread.
+   */
+  setRootPrompt(channelId: string, threadId: string, prompt: string): boolean {
+    const current = this.thread(channelId, threadId);
+    if (current === null || current.rootPrompt !== null) return false;
+    this.setThread(channelId, threadId, { ...current, rootPrompt: prompt });
+    return true;
+  }
+
+  /**
+   * Forget the stored root text, for a root that kept its words after all (the daemon's edit was
+   * refused for good); a no-op for an unknown thread or none stored.
+   */
+  clearRootPrompt(channelId: string, threadId: string): void {
+    const current = this.thread(channelId, threadId);
+    if (current !== null && current.rootPrompt !== null) {
+      this.setThread(channelId, threadId, { ...current, rootPrompt: null });
+    }
+  }
+
+  /**
+   * Record that a thread's session is a copy of `source` (`!fork`); a no-op for an unknown thread.
+   * `bare`: no prompt came with the fork, so the copy has not run and is not named yet.
+   */
+  setForkOf(channelId: string, threadId: string, source: ForkSource, bare = false): void {
+    const current = this.thread(channelId, threadId);
+    if (current === null) return;
+    this.setThread(channelId, threadId, {
+      ...current,
+      forkOf: source,
+      forkRan: !bare,
+      forkNamed: !bare,
+    });
+  }
+
+  /** A turn started in a bare copy (`fork_of.ran`); a no-op when it already did. */
+  markForkRan(channelId: string, threadId: string): void {
+    const current = this.thread(channelId, threadId);
+    if (current !== null && !current.forkRan) {
+      this.setThread(channelId, threadId, { ...current, forkRan: true });
+    }
+  }
+
+  /** A bare copy got its name (`fork_of.named`); a no-op when it already has it. */
+  markForkNamed(channelId: string, threadId: string): void {
+    const current = this.thread(channelId, threadId);
+    if (current !== null && !current.forkNamed) {
+      this.setThread(channelId, threadId, { ...current, forkNamed: true });
+    }
+  }
+
+  /** Record the cut a rewind left waiting, or that none waits; a no-op for an unknown thread. */
+  setPendingCut(channelId: string, threadId: string, cut: PendingCut | null): void {
+    const current = this.thread(channelId, threadId);
+    if (current === null) return;
+    const stored = current.pendingCut;
+    if (stored?.at === cut?.at && stored?.token === cut?.token) return;
+    this.setThread(channelId, threadId, { ...current, pendingCut: cut });
+  }
+
+  /** Record the terminals the owner allowed; a no-op for an unknown thread or an unchanged list. */
+  setTerminalsAllowed(channelId: string, threadId: string, ids: readonly string[]): void {
+    const current = this.thread(channelId, threadId);
+    if (current === null) return;
+    const stored = current.terminalsAllowed;
+    if (stored.length === ids.length && stored.every((id, i) => id === ids[i])) return;
+    this.setThread(channelId, threadId, { ...current, terminalsAllowed: [...ids] });
+  }
+
+  /** Record the effort level a command set for a thread; a no-op for an unknown thread. */
+  setEffort(channelId: string, threadId: string, effort: string | null): void {
+    const current = this.thread(channelId, threadId);
+    if (current !== null && current.effort !== effort) {
+      this.setThread(channelId, threadId, { ...current, effort });
+    }
+  }
+
+  /**
+   * One `ReplySink`'s own entry in the open-replies list (crash repair): drop `oldId` (if it
+   * was there), add `newId` (if not already there), in one write. A no-op for a thread that
+   * does not exist, and for a call that changes nothing (both ends of a fresh sink's first
+   * message, `oldId=null, newId=null`, would otherwise still write).
+   */
+  replaceOpenReply(
+    channelId: string,
+    threadId: string,
+    oldId: string | null,
+    newId: string | null,
+  ): void {
+    const current = this.thread(channelId, threadId);
+    if (current === null) return;
+    let replies = current.openReplies;
+    if (oldId !== null && replies.includes(oldId)) replies = replies.filter((t) => t !== oldId);
+    if (newId !== null && !replies.includes(newId)) replies = [...replies, newId];
+    if (
+      replies.length !== current.openReplies.length ||
+      replies.some((t, i) => t !== current.openReplies[i])
+    ) {
+      this.setThread(channelId, threadId, { ...current, openReplies: replies });
+    }
+  }
+
+  /**
+   * Record a request message still carrying buttons, with its kind (crash repair); a no-op for a
+   * thread that does not exist or already has it.
+   */
+  addRequest(channelId: string, threadId: string, messageId: string, kind: RequestKind): void {
+    const current = this.thread(channelId, threadId);
+    if (current !== null && !current.requests.includes(messageId)) {
+      this.setThread(channelId, threadId, {
+        ...current,
+        requests: [...current.requests, messageId],
+        requestKinds: { ...current.requestKinds, [messageId]: kind },
+      });
+    }
+  }
+
+  /**
+   * Drop a decided or removed request from the list (crash repair); a no-op if it is not there,
+   * including for a thread that does not exist.
+   */
+  removeRequest(channelId: string, threadId: string, messageId: string): void {
+    const current = this.thread(channelId, threadId);
+    if (current?.requests.includes(messageId)) {
+      const remaining = current.requests.filter((t) => t !== messageId);
+      const { [messageId]: _gone, ...kinds } = current.requestKinds;
+      this.setThread(channelId, threadId, {
+        ...current,
+        requests: remaining,
+        requestKinds: kinds,
+      });
+    }
+  }
+
+  /**
+   * Record the root's status while it is working or waiting (`status`), or clear it once done or
+   * error is requested (crash repair) and keep that one as `ended`; both null for a root left
+   * bare, both set for an error shown while repair still owes the thread. A no-op for a thread
+   * that does not exist.
+   */
+  setStatusPending(
+    channelId: string,
+    threadId: string,
+    status: SessionStatus | null,
+    ended: SessionStatus | null = null,
+  ): void {
+    const current = this.thread(channelId, threadId);
+    if (current !== null && (current.status !== status || current.ended !== ended)) {
+      this.setThread(channelId, threadId, { ...current, status, ended });
+    }
+  }
+
+  /**
+   * Every (channelId, threadId, thread) whose crash-repair fields are not all empty: what a
+   * crashed daemon left open for startup repair to find.
+   */
+  repairsPending(): [string, string, ThreadState][] {
+    return this.threads().filter(
+      ([, , thread]) =>
+        thread.openReplies.length > 0 || thread.requests.length > 0 || thread.status !== null,
+    );
+  }
+
+  /**
+   * Clear a thread's crash-repair fields together, once it has been repaired (or repair failed
+   * for good and was logged); a no-op if already clear or the thread is gone. With `keepOpen`
+   * the open replies and the root's status stay: an answer never reached the chat, and the next
+   * start's repair still has to close it and say so.
+   */
+  clearRepair(
+    channelId: string,
+    threadId: string,
+    { keepOpen = false }: { keepOpen?: boolean } = {},
+  ): void {
+    const current = this.thread(channelId, threadId);
+    if (current === null) return;
+    const replies = keepOpen ? current.openReplies : [];
+    const status = keepOpen ? current.status : null;
+    if (
+      current.requests.length === 0 &&
+      replies.length === current.openReplies.length &&
+      current.status === status
+    ) {
+      return;
+    }
+    this.setThread(channelId, threadId, {
+      ...current,
+      openReplies: replies,
+      requests: [],
+      requestKinds: {},
+      status,
+    });
+  }
+
+  /** Drop a thread's entry; a no-op if it is not there. */
+  removeThread(channelId: string, threadId: string): void {
+    const channel = this.channelsById.get(channelId);
+    if (channel === undefined || !channel.threads.has(threadId)) return;
+    const remaining = new Map(channel.threads);
+    remaining.delete(threadId);
+    this.replaceThreads(channelId, remaining);
+  }
+
+  /** The (channelId, threadId) whose thread holds this session id, across all channels. */
+  holder(sessionId: string): ThreadRef | null {
+    for (const [channelId, channel] of this.channelsById) {
+      for (const [threadId, thread] of channel.threads) {
+        if (thread.sessionId === sessionId) return { channel: channelId, thread: threadId };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Remove a no-session thread that `openedAt` says was opened more than `ONE_DAY` before `now`
+   * (one it cannot date is kept). A thread with a session id is never removed here, whether or
+   * not the agent still lists the session: its messages remain in the chat, and the Home lists
+   * it from this file. `keep` names the (channelId, threadId) to leave alone whatever they look
+   * like: the threads with a live session. Returns the entries removed, each with why.
+   */
+  prune(openedAt: OpenedAt, now: number, keep: Iterable<ThreadRef> = []): Pruned[] {
+    const kept = new Set([...keep].map((ref) => threadKey(ref.channel, ref.thread)));
+    const updated = new Map<string, ChannelRecord>();
+    const removed: Pruned[] = [];
+    for (const [channelId, channel] of this.channelsById) {
+      const survivors = new Map<string, ThreadState>();
+      for (const [threadId, thread] of channel.threads) {
+        if (kept.has(threadKey(channelId, threadId))) {
+          survivors.set(threadId, thread);
+          continue;
+        }
+        if (thread.sessionId === null) {
+          const opened = openedAt({ channel: channelId, thread: threadId });
+          if (opened !== null && now - opened > ONE_DAY) {
+            removed.push({
+              ref: { channel: channelId, thread: threadId },
+              reason: "never started",
+            });
+            continue;
+          }
+        }
+        survivors.set(threadId, thread);
+      }
+      updated.set(
+        channelId,
+        survivors.size === channel.threads.size ? channel : { ...channel, threads: survivors },
+      );
+    }
+    if (removed.length > 0) {
+      const gone: ThreadRef[] = [];
+      for (const [channelId, channel] of this.channelsById) {
+        const after = updated.get(channelId)?.threads;
+        for (const threadId of channel.threads.keys()) {
+          if (!after?.has(threadId)) gone.push({ channel: channelId, thread: threadId });
+        }
+      }
+      this.channelsById = updated;
+      this.save();
+      this.announce(gone);
+    }
+    return removed;
+  }
+
+  private setThread(channelId: string, threadId: string, updated: ThreadState): void {
+    const channel = this.channelsById.get(channelId) as ChannelRecord;
+    this.replaceThreads(channelId, new Map([...channel.threads, [threadId, updated]]));
+  }
+
+  private replaceThreads(channelId: string, threads: Map<string, ThreadState>): void {
+    const channel = this.channelsById.get(channelId) as ChannelRecord;
+    this.channelsById.set(channelId, { ...channel, threads });
+    this.save();
+    const before = shown(channel.threads);
+    const after = shown(threads);
+    const changed: ThreadRef[] = [];
+    for (const threadId of new Set([...before.keys(), ...after.keys()])) {
+      if (before.get(threadId) !== after.get(threadId))
+        changed.push({ channel: channelId, thread: threadId });
+    }
+    if (changed.length > 0) this.announce(changed);
+  }
+
+  /** The write is already on disk: an observer that fails must not fail its caller. */
+  private announce(changed: readonly ThreadRef[] = []): void {
+    if (this.onSessionsChange === null) return;
+    try {
+      this.onSessionsChange(changed);
+    } catch (error) {
+      this.warn(`the session index was not told of a change: ${errorName(error)}`);
+    }
+  }
+
+  private load(): Map<string, ChannelRecord> {
+    let bytes: Buffer;
+    try {
+      bytes = fs.readFileSync(this.path);
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return new Map();
+      throw error;
+    }
+    let channels: Map<string, ChannelRecord>;
+    try {
+      // Bytes that are not UTF-8 stop the read and a BOM is kept, which the JSON parser then
+      // refuses; `TextDecoder` does both with these two options.
+      const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+      const raw = asRaw(JSON.parse(text), "the file");
+      const version = raw.version;
+      if (version === 3) {
+        this.checkModules(requiredString(raw, "agent"), requiredString(raw, "chat"));
+        channels = parseChannels(raw);
+        this.told = stringOrNull(raw.update_notice);
+        this.restarted = parseRestartNotice(raw.restart_notice);
+      } else if (version === undefined || version === 1 || version === 2) {
+        throw new StateError(
+          `${this.path} was written by an older version (${
+            version === undefined ? "no version" : `version ${version}`
+          }) and this one cannot read it; move the file aside`,
+        );
+      } else {
+        throw new StateError(`${this.path} has an unknown version; fix or delete it`);
+      }
+    } catch (error) {
+      const unreadable =
+        error instanceof SyntaxError ||
+        error instanceof Malformed ||
+        (error instanceof TypeError &&
+          "code" in error &&
+          error.code === "ERR_ENCODING_INVALID_ENCODED_DATA");
+      if (!unreadable) throw error;
+      throw new StateError(`${this.path} cannot be read (${error.message}); fix or delete it`, {
+        cause: error,
+      });
+    }
+    return channels;
+  }
+
+  /**
+   * A version 3 file names the agent and the chat that wrote it: those now running must be the
+   * same.
+   */
+  private checkModules(agent: string, chat: string): void {
+    if (this.modules.agent !== agent || this.modules.chat !== chat) {
+      const tail =
+        this.modules.chat !== chat
+          ? "the daemon's chat changed, so move the file aside"
+          : "move the file aside, or choose the agent it was written for";
+      throw new StateError(
+        `${this.path} was written for another chat or agent: it holds the agent "${agent}" and the ` +
+          `chat "${chat}", and this start runs the agent "${this.modules.agent}" and the chat ` +
+          `"${this.modules.chat}"; ${tail}`,
+      );
+    }
+  }
+
+  private save(): void {
+    this.write(this.channelsById);
+  }
+
+  /**
+   * Written synchronously, so two changes never interleave: the next line of the caller runs
+   * with the file already renamed into place.
+   */
+  private write(channels: ReadonlyMap<string, ChannelRecord>): void {
+    const data = {
+      version: 3,
+      agent: this.modules.agent,
+      chat: this.modules.chat,
+      ...(this.told === null ? {} : { update_notice: this.told }),
+      ...(this.restarted === null
+        ? {}
+        : {
+            restart_notice: {
+              channel: this.restarted.channel,
+              message: this.restarted.message,
+              version: this.restarted.version,
+            },
+          }),
+      channels: Object.fromEntries(
+        [...channels].map(([channelId, c]) => [
+          channelId,
+          {
+            directory: c.directory,
+            threads: Object.fromEntries(
+              [...c.threads].map(([threadId, t]) => [
+                threadId,
+                {
+                  directory: t.directory,
+                  session_id: t.sessionId,
+                  ...dumpBypass(t.bypass),
+                  effort: t.effort,
+                  open_replies: [...t.openReplies],
+                  requests: [...t.requests],
+                  request_kinds: { ...t.requestKinds },
+                  status: t.status,
+                  ended: t.ended,
+                  root_prompt: t.rootPrompt,
+                  ...(t.forkOf !== null && {
+                    fork_of: {
+                      session_id: t.forkOf.session,
+                      at: t.forkOf.at,
+                      ...(!t.forkRan && { ran: false }),
+                      ...(!t.forkNamed && { named: false }),
+                    },
+                  }),
+                  ...(t.pendingCut !== null && {
+                    pending_cut: { at: t.pendingCut.at, token: t.pendingCut.token },
+                  }),
+                  ...(t.terminalsAllowed.length > 0 && {
+                    terminals_allowed: [...t.terminalsAllowed],
+                  }),
+                },
+              ]),
+            ),
+          },
+        ]),
+      ),
+    };
+    // Write beside the target and rename: a crash leaves the old file or the new one.
+    const tmp = join(dirname(this.path), `.state-${randomBytes(4).toString("hex")}.tmp`);
+    const fd = fs.openSync(tmp, "wx", 0o600);
+    try {
+      try {
+        fs.writeFileSync(fd, dumpJson(data));
+        this.sync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      fs.renameSync(tmp, this.path);
+    } catch (error) {
+      try {
+        fs.unlinkSync(tmp);
+      } catch (unlinkError) {
+        if (
+          !(unlinkError instanceof Error && "code" in unlinkError && unlinkError.code === "ENOENT")
+        ) {
+          throw unlinkError;
+        }
+      }
+      throw error;
+    }
+    // The rename is a directory entry: only a sync of the directory makes it survive a power cut.
+    if (process.platform !== "win32") {
+      const dirFd = fs.openSync(dirname(this.path), "r");
+      try {
+        this.sync(dirFd);
+      } finally {
+        fs.closeSync(dirFd);
+      }
+    }
+  }
+}

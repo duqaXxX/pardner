@@ -1,0 +1,13 @@
+{"op":"prove","device":"app1","enrol":"sheet1","as":"g","expect":"served"}
+{"op":"prove","conn":"r1","device":"app9","recovery":"sheet1","wait":300,"expect":"silent"}
+{"op":"recovery-log","conn":"r1","expect":{"log":["g"]}}
+{"op":"close","conn":"r1"}
+{"op":"prove","conn":"r2","device":"app9","recovery":"sheet1","wait":300,"expect":"silent"}
+{"op":"recovery-log","conn":"r2","expect":{"log":["g"]}}
+{"op":"close","conn":"r2"}
+{"op":"prove","conn":"r3","device":"app9","recovery":"sheet1","wait":300,"expect":"silent"}
+{"op":"recovery-log","conn":"r3","expect":{"log":["g"]}}
+{"op":"close","conn":"r3"}
+{"op":"prove","conn":"r4","device":"app9","recovery":"sheet1","wait":300,"expect":"silent"}
+{"op":"recovery-log","conn":"r4","expect":{"log":["g"]}}
+{"op":"close","conn":"r4"}

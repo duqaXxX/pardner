@@ -1,0 +1,1437 @@
+import assert from "node:assert/strict";
+import fs, {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, test } from "node:test";
+import type { ThreadRef } from "../../src/chat/seam.ts";
+import {
+  channelRecord,
+  parseThread,
+  StateError,
+  StateStore,
+  threadState,
+  UnknownChannel,
+} from "../../src/core/state.ts";
+
+const POSIX_ONLY = {
+  skip: process.platform === "win32" && "file modes and a directory's sync are POSIX",
+};
+
+const CHANNEL = "chan-1";
+const OTHER_CHANNEL = "chan-2";
+const THREAD = "thread-1";
+const OTHER_THREAD = "thread-2";
+const SESSION = "4e8c1111-2222-3333-4444-555566667777";
+
+// When the chat says each thread was opened, in epoch seconds.
+const ROOT_TIME = 1_790_549_806;
+const OTHER_ROOT_TIME = 1_790_549_900;
+const OPENED_AT: Record<string, number> = { "thread-1": ROOT_TIME, "thread-2": OTHER_ROOT_TIME };
+const opened = (ref: ThreadRef): number | null => OPENED_AT[ref.thread] ?? null;
+
+// The agent and the chat every store of this file runs.
+const MODULES = { agent: "agent-a", chat: "chat-a" };
+
+const made: string[] = [];
+
+function scratch(): string {
+  const directory = mkdtempSync(join(tmpdir(), "awd-state-"));
+  made.push(directory);
+  return directory;
+}
+
+after(() => {
+  for (const directory of made) rmSync(directory, { recursive: true, force: true });
+});
+
+/** The file as a parsed object, and the one thread the helpers below look at. */
+interface StateFile {
+  version: number;
+  channels: Record<string, { threads: Record<string, Record<string, unknown>> }>;
+}
+
+function read(path: string): StateFile {
+  return JSON.parse(readFileSync(path, "utf8")) as StateFile;
+}
+
+function written(path: string): Record<string, unknown> {
+  const thread = read(path).channels[CHANNEL]?.threads[THREAD];
+  assert.ok(thread !== undefined);
+  return thread;
+}
+
+/** The thread, which the test has just created. */
+function mustThread(store: StateStore, channelId = CHANNEL, threadTs = THREAD) {
+  const thread = store.thread(channelId, threadTs);
+  assert.ok(thread !== null);
+  return thread;
+}
+
+/** A version 3 file holding one thread whose keys are `thread`, in the folder `directory`. */
+function writeThreadFile(path: string, directory: string, thread: Record<string, unknown>): void {
+  const channel = { directory, threads: { [THREAD]: thread } };
+  writeFileSync(path, JSON.stringify({ version: 3, ...MODULES, channels: { [CHANNEL]: channel } }));
+}
+
+test("a new store is empty", () => {
+  assert.equal(
+    new StateStore(join(scratch(), "state.json"), { modules: MODULES }).channel(CHANNEL),
+    null,
+  );
+});
+
+test("bind creates a channel with no threads", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  assert.deepEqual(store.channel(CHANNEL), channelRecord(join(dir, "project")));
+});
+
+test("open thread stores the channels current folder", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  const thread = store.openThread(CHANNEL, THREAD);
+  assert.deepEqual(thread, threadState(join(dir, "project")));
+  assert.deepEqual(store.thread(CHANNEL, THREAD), thread);
+});
+
+test("open thread on an unbound channel raises", () => {
+  const store = new StateStore(join(scratch(), "state.json"), { modules: MODULES });
+  assert.throws(() => store.openThread(CHANNEL, THREAD), UnknownChannel);
+});
+
+test("open thread is idempotent", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  const first = store.openThread(CHANNEL, THREAD, "ignored-on-repeat");
+  const second = store.openThread(CHANNEL, THREAD, "also-ignored");
+  assert.deepEqual(first, second);
+  assert.equal(first.sessionId, "ignored-on-repeat");
+});
+
+test("a thread keeps its folder across a rebind", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "a"));
+  store.openThread(CHANNEL, THREAD);
+  store.bind(CHANNEL, join(dir, "b"));
+  assert.deepEqual(
+    store.channel(CHANNEL),
+    channelRecord(join(dir, "b"), {
+      threads: new Map([[THREAD, threadState(join(dir, "a"))]]),
+    }),
+  );
+  assert.deepEqual(store.thread(CHANNEL, THREAD), threadState(join(dir, "a")));
+});
+
+test("set session bypass and effort round trip", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  store.setSession(CHANNEL, THREAD, SESSION);
+  store.setBypass(CHANNEL, THREAD, true);
+  store.setEffort(CHANNEL, THREAD, "high");
+
+  const reloaded = new StateStore(path, { modules: MODULES });
+  assert.deepEqual(
+    reloaded.thread(CHANNEL, THREAD),
+    threadState(join(dir, "project"), { sessionId: SESSION, bypass: true, effort: "high" }),
+  );
+});
+
+test("set session bypass and effort are a no op for an unknown thread", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, dir);
+  store.setSession(CHANNEL, THREAD, SESSION);
+  store.setBypass(CHANNEL, THREAD, true);
+  store.setEffort(CHANNEL, THREAD, "high");
+  assert.equal(store.thread(CHANNEL, THREAD), null);
+});
+
+test("set session does not rewrite when unchanged", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, dir);
+  store.openThread(CHANNEL, THREAD);
+  store.setSession(CHANNEL, THREAD, SESSION);
+  const before = statSync(path, { bigint: true });
+  store.setSession(CHANNEL, THREAD, SESSION);
+  const after = statSync(path, { bigint: true });
+  assert.equal(after.mtimeNs, before.mtimeNs);
+  // A rewrite renames a new file over the old one, so it would also change the inode.
+  assert.equal(after.ino, before.ino);
+});
+
+test("remove thread", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, dir);
+  store.openThread(CHANNEL, THREAD);
+  store.removeThread(CHANNEL, THREAD);
+  assert.equal(store.thread(CHANNEL, THREAD), null);
+  // Removing again, or removing from an unbound channel, is a no-op.
+  store.removeThread(CHANNEL, THREAD);
+  store.removeThread(OTHER_CHANNEL, THREAD);
+});
+
+test("holder finds a session across channels", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "a"));
+  store.bind(OTHER_CHANNEL, join(dir, "b"));
+  store.openThread(CHANNEL, THREAD);
+  store.openThread(OTHER_CHANNEL, OTHER_THREAD);
+  store.setSession(OTHER_CHANNEL, OTHER_THREAD, SESSION);
+  assert.deepEqual(store.holder(SESSION), { channel: OTHER_CHANNEL, thread: OTHER_THREAD });
+  assert.equal(store.holder("no-such-session"), null);
+});
+
+for (const [label, value] of [
+  ['"true"', "true"],
+  ['"false"', "false"],
+  ["1", 1],
+  ["null", null],
+  ["false", false],
+] as const) {
+  test(`only a literal true turns bypass on and the rest is unset [${label}]`, () => {
+    const dir = scratch();
+    const path = join(dir, "state.json");
+    writeThreadFile(path, dir, { directory: dir, session_id: null, bypass: value, effort: null });
+    assert.deepEqual(
+      new StateStore(path, { modules: MODULES }).thread(CHANNEL, THREAD),
+      threadState(dir, { bypass: null }),
+    );
+  });
+}
+
+test("every field round trips", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  store.setSession(CHANNEL, THREAD, SESSION);
+  store.setBypass(CHANNEL, THREAD, true);
+  store.setEffort(CHANNEL, THREAD, "low");
+
+  assert.deepEqual(read(path), {
+    version: 3,
+    agent: MODULES.agent,
+    chat: MODULES.chat,
+    channels: {
+      [CHANNEL]: {
+        directory: join(dir, "project"),
+        threads: {
+          [THREAD]: {
+            directory: join(dir, "project"),
+            session_id: SESSION,
+            bypass: true,
+            effort: "low",
+            open_replies: [],
+            requests: [],
+            request_kinds: {},
+            status: null,
+            ended: null,
+            root_prompt: null,
+          },
+        },
+      },
+    },
+  });
+});
+
+test("an unknown version is refused", () => {
+  const path = join(scratch(), "state.json");
+  writeFileSync(path, JSON.stringify({ version: 4, channels: {} }));
+  assert.throws(
+    () => new StateStore(path, { modules: MODULES }),
+    (error: unknown) => error instanceof StateError && /state\.json/.test(error.message),
+  );
+});
+
+// A version 3 file names the agent and the chat that wrote it.
+
+test("a v3 file written for other modules stops the start naming both pairs", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  new StateStore(path, { modules: MODULES }).bind(CHANNEL, dir);
+  const before = readFileSync(path, "utf8");
+
+  for (const other of [
+    { agent: "agent-b", chat: "chat-a" },
+    { agent: "agent-a", chat: "chat-b" },
+  ]) {
+    assert.throws(
+      () => new StateStore(path, { modules: other }),
+      (error: unknown) =>
+        error instanceof StateError &&
+        error.message.includes("written for another chat or agent") &&
+        error.message.includes(`agent "agent-a"`) &&
+        error.message.includes(`chat "chat-a"`) &&
+        error.message.includes(`agent "${other.agent}"`) &&
+        error.message.includes(`chat "${other.chat}"`),
+    );
+  }
+  assert.equal(readFileSync(path, "utf8"), before);
+});
+
+test("a v3 file whose names are missing or not text cannot be read", () => {
+  const path = join(scratch(), "state.json");
+  for (const names of [{}, { agent: "agent-a" }, { agent: 1, chat: "chat-a" }]) {
+    writeFileSync(path, JSON.stringify({ version: 3, ...names, channels: {} }));
+    assert.throws(
+      () => new StateStore(path, { modules: MODULES }),
+      (error: unknown) => error instanceof StateError && /cannot be read/.test(error.message),
+    );
+  }
+});
+
+// A file written before the relay chat is refused, never converted, deleted or rewritten.
+for (const [label, file] of [
+  ["version 1", { version: 1, channels: { [CHANNEL]: { directory: "/a" } } }],
+  ["version 2", { version: 2, channels: { [CHANNEL]: { directory: "/a" } } }],
+  ["no version", { channels: { [CHANNEL]: { directory: "/a" } } }],
+] as const) {
+  test(`a file with ${label} is refused, telling the owner to move it aside, and left as it is`, () => {
+    const path = join(scratch(), "state.json");
+    writeFileSync(path, JSON.stringify(file));
+    const before = readFileSync(path, "utf8");
+    assert.throws(
+      () => new StateStore(path, { modules: MODULES }),
+      (error: unknown) =>
+        error instanceof StateError &&
+        error.message.includes("written by an older version (") &&
+        error.message.includes("move the file aside"),
+    );
+    assert.equal(readFileSync(path, "utf8"), before);
+  });
+}
+
+test("a version 3 file of the slack chat is refused, telling the owner to move it aside", () => {
+  const path = join(scratch(), "state.json");
+  writeFileSync(path, JSON.stringify({ version: 3, agent: "claude", chat: "slack", channels: {} }));
+  const before = readFileSync(path, "utf8");
+  assert.throws(
+    () => new StateStore(path, { modules: { agent: "claude", chat: "relay" } }),
+    (error: unknown) =>
+      error instanceof StateError &&
+      error.message.includes(`chat "slack"`) &&
+      error.message.includes("the daemon's chat changed, so move the file aside"),
+  );
+  assert.equal(readFileSync(path, "utf8"), before);
+});
+
+test("a save writes no notice_pending, and an explicit bypass off survives a reload", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  store.setBypass(CHANNEL, THREAD, false);
+  assert.ok(!("notice_pending" in (read(path).channels[CHANNEL] ?? {})));
+  assert.equal(mustThread(new StateStore(path, { modules: MODULES })).bypass, false);
+});
+
+// A check for `tsc`: the function below is never called.
+test("a store needs its modules", () => {
+  const path = join(scratch(), "state.json");
+  // @ts-expect-error `modules` is required: a store with no names no longer exists
+  const build = (): StateStore => new StateStore(path);
+  assert.equal(typeof build, "function");
+});
+
+test("a corrupt file is refused not discarded", () => {
+  const path = join(scratch(), "state.json");
+  writeFileSync(path, "{not json");
+  assert.throws(
+    () => new StateStore(path, { modules: MODULES }),
+    (error: unknown) => error instanceof StateError && /state\.json/.test(error.message),
+  );
+  assert.equal(readFileSync(path, "utf8"), "{not json");
+});
+
+test("a missing file is empty", () => {
+  assert.equal(
+    new StateStore(join(scratch(), "state.json"), { modules: MODULES }).channel(CHANNEL),
+    null,
+  );
+});
+
+test("file is private and nothing else is left behind", POSIX_ONLY, () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, dir);
+  assert.deepEqual(readdirSync(dir).sort(), ["state.json"]);
+  assert.equal(statSync(join(dir, "state.json")).mode & 0o777, 0o600);
+});
+
+test("a failed write keeps the previous file", (t) => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "a"));
+  const before = readFileSync(path, "utf8");
+
+  // The rename (Python's `os.replace`) is the step that makes a write take effect: the test
+  // fails it.
+  t.mock.method(fs, "renameSync", () => {
+    throw new Error("disk full");
+  });
+  assert.throws(() => store.bind(CHANNEL, join(dir, "b")), /disk full/);
+  assert.equal(readFileSync(path, "utf8"), before);
+  assert.deepEqual(readdirSync(dir).sort(), ["state.json"]);
+});
+
+test("a write syncs the file before the rename and the directory after it", POSIX_ONLY, (t) => {
+  const dir = scratch();
+  const steps: string[] = [];
+  const rename = fs.renameSync;
+  t.mock.method(fs, "renameSync", (from: string, to: string) => {
+    steps.push("rename");
+    rename(from, to);
+  });
+  const store = new StateStore(join(dir, "state.json"), {
+    modules: MODULES,
+    sync: (fd) => {
+      steps.push(fs.fstatSync(fd).isDirectory() ? "directory" : "file");
+      fs.fsyncSync(fd);
+    },
+  });
+  store.bind(CHANNEL, join(dir, "a"));
+  assert.deepEqual(steps, ["file", "rename", "directory"]);
+});
+
+test("a store given no sync flushes with the system's own", POSIX_ONLY, (t) => {
+  const dir = scratch();
+  const flush = t.mock.method(fs, "fsyncSync");
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "a"));
+  assert.equal(flush.mock.callCount(), 2);
+});
+
+// TestPrune: `prune` reports the entries it removed, each with its reason.
+
+// #148: a thread's messages remain in the chat whether or not the agent lists its session.
+test("keeps a thread with a session however old", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  store.setSession(CHANNEL, THREAD, SESSION);
+
+  const removed = store.prune(opened, ROOT_TIME + 30 * 86_400);
+  assert.deepEqual(removed, []);
+  assert.equal(store.thread(CHANNEL, THREAD)?.sessionId, SESSION);
+});
+
+test("removes a no session thread older than a day", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+
+  const rootTime = ROOT_TIME;
+  const removed = store.prune(opened, rootTime + 86_401);
+  assert.deepEqual(removed, [
+    { ref: { channel: CHANNEL, thread: THREAD }, reason: "never started" },
+  ]);
+  assert.equal(store.thread(CHANNEL, THREAD), null);
+});
+
+test("keeps a young no session thread", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+
+  const rootTime = ROOT_TIME;
+  const removed = store.prune(opened, rootTime + 3_600);
+  assert.deepEqual(removed, []);
+  assert.notEqual(store.thread(CHANNEL, THREAD), null);
+});
+
+test("a file with no repair fields loads with them empty", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  writeThreadFile(path, join(dir, "project"), {
+    directory: join(dir, "project"),
+    session_id: SESSION,
+    bypass: false,
+    effort: null,
+  });
+  const thread = new StateStore(path, { modules: MODULES }).thread(CHANNEL, THREAD);
+  assert.deepEqual(thread, threadState(join(dir, "project"), { sessionId: SESSION }));
+  assert.ok(thread !== null);
+  assert.deepEqual(thread.openReplies, []);
+  assert.deepEqual(thread.requests, []);
+  assert.equal(thread.status, null);
+});
+
+test("a file with 1304c5e s single open reply field loads as nothing open", () => {
+  // That field never shipped past the fix round: a file written by it is read exactly like one
+  // written before crash repair existed at all.
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  writeThreadFile(path, join(dir, "project"), {
+    directory: join(dir, "project"),
+    session_id: null,
+    bypass: false,
+    effort: null,
+    open_reply: "msg-1",
+  });
+  const thread = new StateStore(path, { modules: MODULES }).thread(CHANNEL, THREAD);
+  assert.ok(thread !== null);
+  assert.deepEqual(thread.openReplies, []);
+});
+
+test("repair fields round trip and are ignored by code that predates them", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  store.replaceOpenReply(CHANNEL, THREAD, null, "msg-1");
+  store.addRequest(CHANNEL, THREAD, "msg-2", "question");
+  store.addRequest(CHANNEL, THREAD, "msg-3", "setup");
+  store.setStatusPending(CHANNEL, THREAD, "working");
+
+  const reloaded = new StateStore(path, { modules: MODULES }).thread(CHANNEL, THREAD);
+  assert.deepEqual(
+    reloaded,
+    threadState(join(dir, "project"), {
+      openReplies: ["msg-1"],
+      requests: ["msg-2", "msg-3"],
+      requestKinds: { "msg-2": "question", "msg-3": "setup" },
+      status: "working",
+    }),
+  );
+  // Code that only knows `parseThread`'s old fields ignores the extra keys.
+  const raw = written(path);
+  const oldShape = {
+    directory: raw.directory,
+    session_id: raw.session_id,
+    bypass: raw.bypass,
+    effort: raw.effort,
+  };
+  assert.deepEqual(parseThread(oldShape), threadState(join(dir, "project")));
+});
+
+test("a request is stored with one word for its kind, and the word leaves with it", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  for (const [ts, kind] of [
+    ["ts-1", "question"],
+    ["ts-2", "approval"],
+    ["ts-3", "setup"],
+    ["ts-4", "hold"],
+  ] as const) {
+    store.addRequest(CHANNEL, THREAD, ts, kind);
+  }
+  const raw = (): Record<string, unknown> => {
+    const channels = read(path).channels as Record<string, { threads: Record<string, unknown> }>;
+    return channels[CHANNEL]?.threads[THREAD] as Record<string, unknown>;
+  };
+  assert.deepEqual(raw().request_kinds, {
+    "ts-1": "question",
+    "ts-2": "approval",
+    "ts-3": "setup",
+    "ts-4": "hold",
+  });
+  store.removeRequest(CHANNEL, THREAD, "ts-2");
+  assert.deepEqual(Object.keys(raw().request_kinds as object), ["ts-1", "ts-3", "ts-4"]);
+  store.clearRepair(CHANNEL, THREAD);
+  assert.deepEqual(raw().request_kinds, {});
+});
+
+test("a file from before the kinds loads its requests with no kind and keeps them", () => {
+  // Written by the daemon of 663fdf4 and before: `requests` alone. No kind is read as one the
+  // repair deletes, and an unknown word or a kind for an id not in `requests` is dropped.
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  writeThreadFile(path, dir, {
+    directory: dir,
+    session_id: null,
+    requests: ["old-1", "old-2"],
+  });
+  const store = new StateStore(path, { modules: MODULES });
+  assert.deepEqual(mustThread(store).requests, ["old-1", "old-2"]);
+  assert.deepEqual(mustThread(store).requestKinds, {});
+  store.addRequest(CHANNEL, THREAD, "new-1", "approval");
+  assert.deepEqual(mustThread(store).requestKinds, { "new-1": "approval" });
+
+  const odd = parseThread({
+    directory: dir,
+    requests: ["a", "b"],
+    request_kinds: { a: "question", b: "poll", c: "hold" },
+  });
+  assert.deepEqual(odd.requestKinds, { a: "question" });
+});
+
+test("replace open reply tracks two sinks independently", () => {
+  // The bug the fix round measured: two replies open at once (a background task's own reply
+  // outliving the turn that started it) must never step on each other's entry.
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, dir);
+  store.openThread(CHANNEL, THREAD);
+  store.replaceOpenReply(CHANNEL, THREAD, null, "a-1"); // sink A's first message
+  store.replaceOpenReply(CHANNEL, THREAD, null, "b-1"); // sink B's first message
+  assert.deepEqual(mustThread(store).requests, []); // sanity: unrelated field
+  assert.deepEqual(mustThread(store).openReplies, ["a-1", "b-1"], "in the order they were opened");
+  store.replaceOpenReply(CHANNEL, THREAD, "a-1", null); // sink A settles; B untouched
+  assert.deepEqual(mustThread(store).openReplies, ["b-1"]);
+  store.replaceOpenReply(CHANNEL, THREAD, "b-1", "b-2"); // sink B's continuation
+  assert.deepEqual(mustThread(store).openReplies, ["b-2"]);
+  store.replaceOpenReply(CHANNEL, THREAD, "b-2", null);
+  assert.deepEqual(mustThread(store).openReplies, []);
+});
+
+test("replace open reply is a no op that changes nothing for an unknown thread", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, dir);
+  store.replaceOpenReply(CHANNEL, THREAD, null, "ts-1");
+  assert.equal(store.thread(CHANNEL, THREAD), null);
+});
+
+test("remove request drops only the named one", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  store.addRequest(CHANNEL, THREAD, "ts-1", "question");
+  store.addRequest(CHANNEL, THREAD, "ts-2", "question");
+  store.removeRequest(CHANNEL, THREAD, "ts-1");
+  const thread = mustThread(store);
+  assert.deepEqual(thread.requests, ["ts-2"]);
+  store.removeRequest(CHANNEL, THREAD, "ts-1"); // already gone: a no-op
+  assert.deepEqual(store.thread(CHANNEL, THREAD), thread);
+});
+
+test("repair setters are a no op for an unknown thread", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, dir);
+  store.replaceOpenReply(CHANNEL, THREAD, null, "ts-1");
+  store.addRequest(CHANNEL, THREAD, "ts-1", "question");
+  store.setStatusPending(CHANNEL, THREAD, "error");
+  assert.equal(store.thread(CHANNEL, THREAD), null);
+});
+
+test("repairs pending lists only threads with something open", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  store.openThread(CHANNEL, OTHER_THREAD);
+  store.replaceOpenReply(CHANNEL, OTHER_THREAD, null, "ts-1");
+  assert.deepEqual(store.repairsPending(), [
+    [CHANNEL, OTHER_THREAD, mustThread(store, CHANNEL, OTHER_THREAD)],
+  ]);
+});
+
+test("clear repair fields clears all three and is a no op after", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  store.replaceOpenReply(CHANNEL, THREAD, null, "ts-1");
+  store.addRequest(CHANNEL, THREAD, "ts-2", "question");
+  store.setStatusPending(CHANNEL, THREAD, "error");
+  store.clearRepair(CHANNEL, THREAD);
+  assert.deepEqual(store.thread(CHANNEL, THREAD), threadState(join(dir, "project")));
+  assert.deepEqual(
+    new StateStore(path, { modules: MODULES }).thread(CHANNEL, THREAD),
+    threadState(join(dir, "project")),
+  );
+  const before = statSync(path, { bigint: true });
+  store.clearRepair(CHANNEL, THREAD); // already clear: a no-op, no extra write
+  store.clearRepair("unknown-channel", THREAD); // unknown thread: a no-op too
+  assert.equal(statSync(path, { bigint: true }).ino, before.ino);
+});
+
+test("clear repair keeps what an unlanded answer still needs", () => {
+  // An answer that never reached the chat leaves its open stream and the root's status for the
+  // next start's repair; the requests, which a close deletes itself, are cleared.
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  store.replaceOpenReply(CHANNEL, THREAD, null, "ts-1");
+  store.addRequest(CHANNEL, THREAD, "ts-2", "question");
+  store.setStatusPending(CHANNEL, THREAD, "error");
+  store.clearRepair(CHANNEL, THREAD, { keepOpen: true });
+  const kept = new StateStore(path, { modules: MODULES }).thread(CHANNEL, THREAD);
+  assert.deepEqual(
+    kept,
+    threadState(join(dir, "project"), { openReplies: ["ts-1"], status: "error" }),
+  );
+});
+
+test("an explicit off is kept apart from never chosen", () => {
+  // `bypass` keeps its old meaning (`true` on, `false` not on); an explicit off (`!bypass off`
+  // or an unticked Start) adds `bypass_off: true`, which must survive a restart. The two keys are
+  // never both set, and clearing to unset removes `bypass_off`.
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  assert.equal(mustThread(store).bypass, null);
+  assert.ok(written(path).bypass === false && !("bypass_off" in written(path)));
+  store.setBypass(CHANNEL, THREAD, false);
+  assert.equal(mustThread(new StateStore(path, { modules: MODULES })).bypass, false);
+  assert.ok(written(path).bypass === false && written(path).bypass_off === true);
+  store.setBypass(CHANNEL, THREAD, true);
+  assert.equal(mustThread(new StateStore(path, { modules: MODULES })).bypass, true);
+  assert.ok(written(path).bypass === true && !("bypass_off" in written(path)));
+  store.setBypass(CHANNEL, THREAD, null);
+  assert.equal(mustThread(new StateStore(path, { modules: MODULES })).bypass, null);
+  assert.ok(written(path).bypass === false && !("bypass_off" in written(path)));
+  assert.equal(read(path).version, 3);
+});
+
+for (const [keys, expected] of [
+  [{ bypass: true }, true],
+  [{ bypass: false }, null], // an old file: a thread that never chose
+  [{}, null],
+  [{ bypass: false, bypass_off: true }, false],
+  [{ bypass_off: true }, false],
+] as const) {
+  test(`bypass is read from the two keys [${JSON.stringify(keys)}]`, () => {
+    const dir = scratch();
+    const path = join(dir, "state.json");
+    writeThreadFile(path, dir, { directory: dir, session_id: null, effort: null, ...keys });
+    assert.equal(mustThread(new StateStore(path, { modules: MODULES })).bypass, expected);
+  });
+}
+
+test("a written off reads as not on through bypass alone", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  store.setBypass(CHANNEL, THREAD, false);
+  assert.notEqual(written(path).bypass, true);
+});
+
+test("the ended reaction round trips and a pending one replaces it", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+
+  store.setStatusPending(CHANNEL, THREAD, null, "done");
+  assert.equal(written(path).status, null);
+  assert.equal(written(path).ended, "done");
+  assert.equal(mustThread(new StateStore(path, { modules: MODULES })).ended, "done");
+
+  store.setStatusPending(CHANNEL, THREAD, "working");
+  assert.equal(written(path).status, "working");
+  assert.equal(written(path).ended, null);
+});
+
+test("a cross shown over a kept status keeps both", () => {
+  // An answer that never reached the chat: the root shows ❌ and crash repair still owes it.
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  store.setStatusPending(CHANNEL, THREAD, "working", "error");
+  assert.deepEqual([written(path).status, written(path).ended], ["working", "error"]);
+  assert.deepEqual(
+    store.repairsPending().map(([, ts]) => ts),
+    [THREAD],
+  );
+});
+
+test("an observer that raises does not break the write", () => {
+  const dir = scratch();
+  const warnings: string[] = [];
+  const store = new StateStore(join(dir, "state.json"), {
+    modules: MODULES,
+    warn: (m) => warnings.push(m),
+  });
+  store.bind(CHANNEL, join(dir, "project"));
+
+  store.onSessionsChange = () => {
+    throw new TypeError("no running event loop");
+  };
+  store.openThread(CHANNEL, THREAD);
+  assert.notEqual(store.thread(CHANNEL, THREAD), null);
+  assert.ok(warnings.some((message) => message.includes("TypeError")));
+  assert.ok(warnings.every((message) => !message.includes("no running event loop")));
+});
+
+test("an ended reaction is nothing for crash repair to find", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  store.setStatusPending(CHANNEL, THREAD, null, "error");
+  assert.deepEqual(store.repairsPending(), []);
+});
+
+test("clear repair keeps the ended reaction", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  store.setStatusPending(CHANNEL, THREAD, null, "error");
+  store.addRequest(CHANNEL, THREAD, "msg-6", "question");
+  store.clearRepair(CHANNEL, THREAD);
+  assert.equal(mustThread(store).ended, "error");
+});
+
+test("a file without the ended key loads with none", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  writeThreadFile(path, dir, { directory: dir, session_id: SESSION, status: null });
+  assert.equal(mustThread(new StateStore(path, { modules: MODULES })).ended, null);
+});
+
+test("a copy's source round trips, is written only when set, and a broken one reads as none", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  assert.equal("fork_of" in written(path), false);
+  const source = { session: "orig-1", at: "2026-10-28T21:09:12.578Z" };
+  store.setForkOf(CHANNEL, THREAD, source);
+  assert.deepEqual(written(path).fork_of, { session_id: "orig-1", at: source.at });
+  assert.deepEqual(mustThread(new StateStore(path, { modules: MODULES })).forkOf, source);
+  store.setForkOf(CHANNEL, "thread-unknown", source); // unknown: a no-op
+  assert.equal(store.thread(CHANNEL, "thread-unknown"), null);
+  const broken = join(dir, "broken.json");
+  writeThreadFile(broken, dir, { directory: dir, session_id: SESSION, fork_of: { at: source.at } });
+  assert.equal(mustThread(new StateStore(broken, { modules: MODULES })).forkOf, null);
+});
+
+test("a bare copy's flags are written only while false, and absent means true", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  const source = { session: "orig-1", at: "2026-11-07T10:00:00.000Z" };
+  store.setForkOf(CHANNEL, THREAD, source);
+  assert.deepEqual(written(path).fork_of, { session_id: "orig-1", at: source.at });
+  store.setForkOf(CHANNEL, THREAD, source, true);
+  assert.deepEqual(written(path).fork_of, {
+    session_id: "orig-1",
+    at: source.at,
+    ran: false,
+    named: false,
+  });
+  const bare = mustThread(new StateStore(path, { modules: MODULES }));
+  assert.equal(bare.forkRan, false);
+  assert.equal(bare.forkNamed, false);
+  store.markForkRan(CHANNEL, THREAD);
+  assert.deepEqual(written(path).fork_of, {
+    session_id: "orig-1",
+    at: source.at,
+    named: false,
+  });
+  store.markForkNamed(CHANNEL, THREAD);
+  assert.deepEqual(written(path).fork_of, { session_id: "orig-1", at: source.at });
+  const whole = mustThread(new StateStore(path, { modules: MODULES }));
+  assert.equal(whole.forkRan, true);
+  assert.equal(whole.forkNamed, true);
+  store.markForkRan(CHANNEL, "thread-unknown"); // unknown: a no-op
+  assert.equal(store.thread(CHANNEL, "thread-unknown"), null);
+});
+
+test("the root's prompt round trips, and a file without it reads as none", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  assert.equal(written(path).root_prompt, null);
+  store.setRootPrompt(CHANNEL, THREAD, "fix the *footer*\nplease");
+  assert.equal(written(path).root_prompt, "fix the *footer*\nplease");
+  assert.equal(
+    mustThread(new StateStore(path, { modules: MODULES })).rootPrompt,
+    "fix the *footer*\nplease",
+  );
+  // Never replaced: the stored text is what the root held, a later one would be the title.
+  assert.equal(store.setRootPrompt(CHANNEL, THREAD, "Fix the footer"), false);
+  assert.equal(
+    mustThread(new StateStore(path, { modules: MODULES })).rootPrompt,
+    "fix the *footer*\nplease",
+  );
+  // An unknown thread is a no-op.
+  assert.equal(store.setRootPrompt(CHANNEL, "thread-unknown", "x"), false);
+  // Cleared on purpose, and then stored again.
+  store.clearRootPrompt(CHANNEL, THREAD);
+  assert.equal(written(path).root_prompt, null);
+  assert.equal(store.setRootPrompt(CHANNEL, THREAD, ""), true, "an empty text is stored too");
+  assert.equal(store.setRootPrompt(CHANNEL, THREAD, "x"), false);
+  store.clearRootPrompt(CHANNEL, "thread-unknown"); // unknown: a no-op
+  store.clearRootPrompt(CHANNEL, THREAD);
+  store.setRootPrompt(CHANNEL, THREAD, "fix the *footer*\nplease");
+  assert.equal(store.thread(CHANNEL, "thread-unknown"), null);
+  const old = join(dir, "old.json");
+  writeThreadFile(old, dir, { directory: dir, session_id: SESSION, status: null });
+  assert.equal(mustThread(new StateStore(old, { modules: MODULES })).rootPrompt, null);
+  // Pruned with its thread, as every field of it is.
+  store.removeThread(CHANNEL, THREAD);
+  assert.equal(store.thread(CHANNEL, THREAD), null);
+});
+
+test("threads lists every thread of every channel", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.bind(OTHER_CHANNEL, join(dir, "other"));
+  const first = store.openThread(CHANNEL, THREAD);
+  const second = store.openThread(OTHER_CHANNEL, OTHER_THREAD);
+  assert.deepEqual(store.threads(), [
+    [CHANNEL, THREAD, first],
+    [OTHER_CHANNEL, OTHER_THREAD, second],
+  ]);
+});
+
+test("the observer hears what the session index and the line show, and nothing else", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  const heard: (readonly ThreadRef[])[] = [];
+  store.onSessionsChange = (changed) => heard.push(changed);
+
+  store.bind(CHANNEL, join(dir, "project")); // a new channel is a new group on the page
+  assert.deepEqual(store.channels(), [CHANNEL]);
+  assert.deepEqual(heard, [[]]); // no thread of its own yet
+  store.openThread(CHANNEL, THREAD);
+  store.openThread(CHANNEL, OTHER_THREAD);
+  store.setSession(CHANNEL, THREAD, SESSION);
+  store.setStatusPending(CHANNEL, THREAD, "working");
+  store.setStatusPending(CHANNEL, THREAD, null, "done");
+  assert.equal(heard.length, 6);
+  // Each time, the thread the write touched and no other.
+  assert.deepEqual(heard[1], [{ channel: CHANNEL, thread: THREAD }]);
+  assert.deepEqual(heard[2], [{ channel: CHANNEL, thread: OTHER_THREAD }]);
+  for (const changed of heard.slice(3))
+    assert.deepEqual(changed, [{ channel: CHANNEL, thread: THREAD }]);
+
+  // What neither the index nor the channel's line shows: a reply's bookkeeping, bypass, effort,
+  // a rebind.
+  store.replaceOpenReply(CHANNEL, THREAD, null, "msg-6");
+  store.setBypass(CHANNEL, THREAD, true);
+  store.setEffort(CHANNEL, THREAD, "low");
+  store.bind(CHANNEL, join(dir, "elsewhere"));
+  assert.equal(heard.length, 6);
+
+  store.removeThread(CHANNEL, THREAD);
+  assert.deepEqual(heard.slice(6), [[{ channel: CHANNEL, thread: THREAD }]]);
+});
+
+test("the observer hears a prune that removed something", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD, SESSION);
+  store.openThread(CHANNEL, OTHER_THREAD);
+  const heard: (readonly ThreadRef[])[] = [];
+  store.onSessionsChange = (changed) => heard.push(changed);
+
+  assert.equal(store.prune(opened, ROOT_TIME).length, 0);
+  assert.deepEqual(heard, []);
+  assert.equal(store.prune(opened, OTHER_ROOT_TIME + 2 * 86_400).length, 1);
+  assert.deepEqual(heard, [[{ channel: CHANNEL, thread: OTHER_THREAD }]]);
+});
+
+// #88, #233: whether a thread blocks on the owner (an approval, a question or the setup form open)
+// changes with its requests, and the channel's line reads it; it can change while the root's
+// status stays waiting, as when the setup form is answered and the same-folder hold opens.
+test("a request is announced when it changes whether the thread blocks on the owner", () => {
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD, SESSION);
+  const heard: (readonly ThreadRef[])[] = [];
+  store.onSessionsChange = (changed) => heard.push(changed);
+  const ref = { channel: CHANNEL, thread: THREAD };
+  store.addRequest(CHANNEL, THREAD, "msg-7", "setup");
+  assert.deepEqual(heard, [[ref]]);
+  // The setup form answered, then a hold (#163): blocking already, the thread now asks the
+  // owner, and the line goes from drawing the form to asking.
+  store.addRequest(CHANNEL, THREAD, "msg-8", "hold");
+  assert.deepEqual(heard, [[ref], [ref]]);
+  store.removeRequest(CHANNEL, THREAD, "msg-7"); // the hold alone blocks and asks still
+  assert.deepEqual(heard, [[ref], [ref]]);
+  store.removeRequest(CHANNEL, THREAD, "msg-8");
+  assert.deepEqual(heard, [[ref], [ref], [ref]]);
+  heard.length = 0;
+  store.addRequest(CHANNEL, THREAD, "msg-9", "shell"); // the owner set it off
+  assert.deepEqual(heard, []);
+  heard.length = 0;
+  store.addRequest(CHANNEL, THREAD, "msg-10", "question");
+  store.addRequest(CHANNEL, THREAD, "msg-11", "approval"); // blocks already
+  store.removeRequest(CHANNEL, THREAD, "msg-10");
+  store.removeRequest(CHANNEL, THREAD, "msg-11");
+  assert.deepEqual(heard, [[ref], [ref]]);
+});
+
+test("remove channel forgets the channel and its threads and says which", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.bind(OTHER_CHANNEL, join(dir, "other"));
+  store.openThread(CHANNEL, THREAD, SESSION);
+  store.openThread(OTHER_CHANNEL, OTHER_THREAD);
+  const heard: (readonly ThreadRef[])[] = [];
+  store.onSessionsChange = (changed) => heard.push(changed);
+
+  store.removeChannel(CHANNEL);
+  assert.deepEqual(store.channels(), [OTHER_CHANNEL]);
+  assert.equal(store.thread(CHANNEL, THREAD), null);
+  assert.deepEqual(Object.keys(read(path).channels), [OTHER_CHANNEL]);
+  assert.deepEqual(heard, [[{ channel: CHANNEL, thread: THREAD }]]);
+  assert.deepEqual(new StateStore(path, { modules: MODULES }).channels(), [OTHER_CHANNEL]); // it stays forgotten after a restart
+
+  store.removeChannel(CHANNEL); // not there any more: nothing written, nothing announced
+  assert.deepEqual(heard, [[{ channel: CHANNEL, thread: THREAD }]]);
+});
+
+test("prune leaves alone the threads it is told to keep", () => {
+  // A thread with a live session in the daemon: its session id may not be on disk yet, and
+  // its setup may have been open for more than a day.
+  const dir = scratch();
+  const store = new StateStore(join(dir, "state.json"), { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD, SESSION);
+  store.openThread(CHANNEL, OTHER_THREAD);
+  const later = OTHER_ROOT_TIME + 2 * 24 * 60 * 60;
+  const keep: ThreadRef[] = [
+    { channel: CHANNEL, thread: THREAD },
+    { channel: CHANNEL, thread: OTHER_THREAD },
+  ];
+  assert.equal(store.prune(opened, later, keep).length, 0);
+  assert.equal(store.prune(opened, later, [{ channel: CHANNEL, thread: THREAD }]).length, 1);
+  assert.notEqual(store.thread(CHANNEL, THREAD), null);
+  assert.equal(store.thread(CHANNEL, OTHER_THREAD), null);
+});
+
+// The status a thread holds is a word.
+
+test("a file that holds words loads as words", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  for (const word of ["working", "waiting", "done", "error"]) {
+    writeThreadFile(path, dir, { directory: dir, status: word, ended: word });
+    const thread = mustThread(new StateStore(path, { modules: MODULES }));
+    assert.deepEqual([thread.status, thread.ended], [word, word]);
+  }
+});
+
+test("an unknown status loads as null", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  writeThreadFile(path, dir, { directory: dir, status: "eyes", ended: 3 });
+  const thread = mustThread(new StateStore(path, { modules: MODULES }));
+  assert.deepEqual([thread.status, thread.ended], [null, null]);
+});
+
+// The cases below pin the bytes the store writes and how it reads a file.
+
+// The bytes of `state.json` for the calls below: the form of the Python daemon's file (captured on
+// 2026-10-10), with a status stored as a word. The store keeps writing this form.
+// Two-space indent, key order of the code, every non-ASCII character and DEL escaped, empty
+// containers as `[]` and `{}`, and no trailing newline.
+const STATE_BYTES = String.raw`{
+  "version": 3,
+  "agent": "agent-a",
+  "chat": "chat-a",
+  "channels": {
+    "chan-1": {
+      "directory": "/work/caf\u00e9 \ud83d\ude80 \"q\" \\ \t\u007f",
+      "threads": {
+        "thread-1": {
+          "directory": "/work/caf\u00e9 \ud83d\ude80 \"q\" \\ \t\u007f",
+          "session_id": "s-1",
+          "bypass": true,
+          "effort": "high",
+          "open_replies": [
+            "msg-6",
+            "msg-10"
+          ],
+          "requests": [
+            "msg-11"
+          ],
+          "request_kinds": {
+            "msg-11": "question"
+          },
+          "status": "working",
+          "ended": null,
+          "root_prompt": "fix the *footer*\n\u00e9 \"q\""
+        },
+        "thread-2": {
+          "directory": "/work/caf\u00e9 \ud83d\ude80 \"q\" \\ \t\u007f",
+          "session_id": "s-\u00e9\u2028",
+          "bypass": false,
+          "bypass_off": true,
+          "effort": null,
+          "open_replies": [],
+          "requests": [],
+          "request_kinds": {},
+          "status": null,
+          "ended": null,
+          "root_prompt": null
+        }
+      }
+    },
+    "chan-3": {
+      "directory": "/work/empty",
+      "threads": {}
+    },
+    "chan-2": {
+      "directory": "/work/other",
+      "threads": {
+        "thread-3": {
+          "directory": "/work/other",
+          "session_id": null,
+          "bypass": false,
+          "effort": null,
+          "open_replies": [],
+          "requests": [],
+          "request_kinds": {},
+          "status": null,
+          "ended": "done",
+          "root_prompt": null
+        }
+      }
+    }
+  }
+}`;
+
+test("the file is written with these exact bytes, and read back into the same state", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const [c, e, o] = ["chan-1", "chan-3", "chan-2"];
+  const [t1, t2, t3] = [THREAD, OTHER_THREAD, "thread-3"];
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(c, '/work/café \u{1F680} "q" \\ \t\x7f');
+  store.bind(e, "/work/empty");
+  store.bind(o, "/work/other");
+  store.openThread(c, t1, "s-1");
+  store.openThread(c, t2);
+  store.openThread(o, t3);
+  store.setBypass(c, t1, true);
+  store.setBypass(c, t2, false);
+  store.setEffort(c, t1, "high");
+  store.replaceOpenReply(c, t1, null, "msg-6");
+  store.replaceOpenReply(c, t1, null, "msg-10");
+  store.addRequest(c, t1, "msg-11", "question");
+  store.setStatusPending(c, t1, "working");
+  store.setStatusPending(o, t3, null, "done");
+  store.setSession(c, t2, "s-é ");
+  store.setRootPrompt(c, t1, 'fix the *footer*\né "q"');
+  assert.equal(readFileSync(path, "utf8"), STATE_BYTES);
+  // And the same bytes read back into the same state.
+  assert.deepEqual(new StateStore(path, { modules: MODULES }).threads(), store.threads());
+});
+
+test("a file with an unreadable shape is refused with the file named", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const shapes: unknown[] = [
+    [],
+    null,
+    { version: 3, ...MODULES },
+    { version: 3, ...MODULES, channels: [] },
+    { version: 3, ...MODULES, channels: { [CHANNEL]: null } },
+    { version: 3, ...MODULES, channels: { [CHANNEL]: {} } },
+    { version: 3, ...MODULES, channels: { [CHANNEL]: { directory: 7 } } },
+    { version: 3, ...MODULES, channels: { [CHANNEL]: { directory: dir, threads: null } } },
+    {
+      version: 3,
+      ...MODULES,
+      channels: { [CHANNEL]: { directory: dir, threads: { [THREAD]: {} } } },
+    },
+  ];
+  for (const shape of shapes) {
+    writeFileSync(path, JSON.stringify(shape));
+    assert.throws(
+      () => new StateStore(path, { modules: MODULES }),
+      (error: unknown) =>
+        error instanceof StateError && error.message.startsWith(`${path} cannot be read (`),
+      JSON.stringify(shape),
+    );
+  }
+});
+
+test("a file that is not UTF-8 is refused, not repaired", () => {
+  const path = join(scratch(), "state.json");
+  writeFileSync(path, Buffer.from([0x7b, 0xff, 0x7d]));
+  assert.throws(() => new StateStore(path, { modules: MODULES }), StateError);
+});
+
+// The version of the update the owner was last told of is a top-level key beside
+// `channels`. Like `bypass_off` it is additive: a file without it reads as "never told", code
+// that does not know it ignores it, so the file stays at its version.
+test("the version told of is kept across a restart, and the file keeps its version", () => {
+  const path = join(scratch(), "state.json");
+  const modules = { agent: "agent-a", chat: "chat-a" };
+  const first = new StateStore(path, { modules });
+  assert.equal(first.updateNotice, null);
+  first.bind(CHANNEL, "/work/app");
+  first.setUpdateNotice("0.3.1");
+  assert.equal(first.updateNotice, "0.3.1");
+  const file = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+  assert.equal(file.version, 3);
+  assert.equal(file.update_notice, "0.3.1");
+  const second = new StateStore(path, { modules });
+  assert.equal(second.updateNotice, "0.3.1");
+  assert.ok(second.channel(CHANNEL) !== null, "the channels are as they were");
+  // A later write by the same store keeps the key.
+  second.bind(OTHER_CHANNEL, "/work/other");
+  assert.equal(new StateStore(path, { modules }).updateNotice, "0.3.1");
+});
+
+test("a state with no version told writes no key for it", () => {
+  const path = join(scratch(), "state.json");
+  const store = new StateStore(path, { modules: { agent: "agent-a", chat: "chat-a" } });
+  store.bind(CHANNEL, "/work/app");
+  assert.ok(!("update_notice" in read(path)));
+});
+
+test("a version told that is not a text is read as never told", () => {
+  const path = join(scratch(), "state.json");
+  writeFileSync(
+    path,
+    JSON.stringify({
+      version: 3,
+      ...MODULES,
+      update_notice: 7,
+      channels: { [CHANNEL]: { directory: "/a" } },
+    }),
+  );
+  assert.equal(new StateStore(path, { modules: MODULES }).updateNotice, null);
+});
+
+test("setting the version told announces no change of the session index", () => {
+  const path = join(scratch(), "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, "/work/app");
+  let announced = 0;
+  store.onSessionsChange = () => {
+    announced += 1;
+  };
+  store.setUpdateNotice("0.3.1");
+  assert.equal(announced, 0);
+});
+
+// The message to rewrite once the daemon is back from a restart it asked for: a
+// second top-level key, additive like `update_notice`. `version` is the one an update asked for,
+// null for a plain restart.
+test("the restart notice is kept across a restart, and the file keeps its version", () => {
+  const path = join(scratch(), "state.json");
+  const modules = { agent: "agent-a", chat: "chat-a" };
+  const first = new StateStore(path, { modules });
+  assert.equal(first.restartNotice, null);
+  first.bind(CHANNEL, "/work/app");
+  first.setRestartNotice({ channel: CHANNEL, message: "msg-12", version: "0.3.1" });
+  const file = read(path) as StateFile & { restart_notice?: unknown };
+  assert.equal(file.version, 3);
+  assert.deepEqual(file.restart_notice, {
+    channel: CHANNEL,
+    message: "msg-12",
+    version: "0.3.1",
+  });
+  const second = new StateStore(path, { modules });
+  assert.deepEqual(second.restartNotice, {
+    channel: CHANNEL,
+    message: "msg-12",
+    version: "0.3.1",
+  });
+  assert.ok(second.channel(CHANNEL) !== null, "the channels are as they were");
+  // A later write by the same store keeps the key, and a restart with no version keeps the null.
+  second.bind(OTHER_CHANNEL, "/work/other");
+  second.setRestartNotice({ channel: CHANNEL, message: "msg-13", version: null });
+  assert.deepEqual(new StateStore(path, { modules }).restartNotice, {
+    channel: CHANNEL,
+    message: "msg-13",
+    version: null,
+  });
+});
+
+test("a file written before the restart notice reads as none, and writes no key for it", () => {
+  const path = join(scratch(), "state.json");
+  writeFileSync(
+    path,
+    JSON.stringify({
+      version: 3,
+      ...MODULES,
+      update_notice: "0.3.1",
+      channels: { [CHANNEL]: { directory: "/a" } },
+    }),
+  );
+  const store = new StateStore(path, { modules: MODULES });
+  assert.equal(store.restartNotice, null);
+  store.bind(OTHER_CHANNEL, "/work/other");
+  assert.ok(!("restart_notice" in read(path)));
+  assert.equal(store.updateNotice, "0.3.1", "the other top-level key is untouched");
+});
+
+test("forgetting the restart notice removes the key and is the same when none is kept", () => {
+  const path = join(scratch(), "state.json");
+  const store = new StateStore(path, { modules: { agent: "agent-a", chat: "chat-a" } });
+  store.bind(CHANNEL, "/work/app");
+  const kept = { channel: CHANNEL, message: "msg-12", version: null };
+  store.clearRestartNotice(kept);
+  assert.ok(!("restart_notice" in read(path)));
+  store.setRestartNotice(kept);
+  store.clearRestartNotice({ ...kept });
+  assert.equal(store.restartNotice, null);
+  assert.ok(!("restart_notice" in read(path)));
+  assert.equal(
+    new StateStore(path, { modules: { agent: "agent-a", chat: "chat-a" } }).restartNotice,
+    null,
+  );
+});
+
+for (const [name, value] of [
+  ["not an object", "chan-1"],
+  ["without a message", { channel: CHANNEL, version: null }],
+  ["with a channel that is no text", { channel: 7, message: "1.1", version: null }],
+  [
+    "with a version that is neither text nor null",
+    { channel: CHANNEL, message: "1.1", version: 3 },
+  ],
+] as const) {
+  test(`a restart notice ${name} is read as none`, () => {
+    const path = join(scratch(), "state.json");
+    writeFileSync(
+      path,
+      JSON.stringify({
+        version: 3,
+        ...MODULES,
+        restart_notice: value,
+        channels: { [CHANNEL]: { directory: "/a" } },
+      }),
+    );
+    assert.equal(new StateStore(path, { modules: MODULES }).restartNotice, null);
+  });
+}
+
+test("setting the restart notice announces no change of the session index", () => {
+  const path = join(scratch(), "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, "/work/app");
+  let announced = 0;
+  store.onSessionsChange = () => {
+    announced += 1;
+  };
+  store.setRestartNotice({ channel: CHANNEL, message: "1.1", version: null });
+  store.clearRestartNotice({ channel: CHANNEL, message: "1.1", version: null });
+  assert.equal(announced, 0);
+});
+
+test("forgetting a restart notice leaves a different one in place", () => {
+  const path = join(scratch(), "state.json");
+  const store = new StateStore(path, { modules: { agent: "agent-a", chat: "chat-a" } });
+  store.bind(CHANNEL, "/work/app");
+  const newer = { channel: CHANNEL, message: "msg-13", version: null };
+  store.setRestartNotice(newer);
+  store.clearRestartNotice({ channel: CHANNEL, message: "msg-12", version: null });
+  assert.deepEqual(store.restartNotice, newer);
+  store.clearRestartNotice({ channel: OTHER_CHANNEL, message: newer.message, version: null });
+  assert.deepEqual(store.restartNotice, newer, "the message id alone is not the record");
+  assert.deepEqual((read(path) as StateFile & { restart_notice?: unknown }).restart_notice, newer);
+});
+
+test("a restart notice that could not be written is not kept in memory", () => {
+  const path = join(scratch(), "state.json");
+  const store = new StateStore(path, {
+    modules: MODULES,
+    sync: () => {
+      throw new Error("disk full");
+    },
+  });
+  assert.throws(() => store.setRestartNotice({ channel: CHANNEL, message: "1.1", version: null }));
+  assert.equal(store.restartNotice, null);
+});
+
+test("a waiting cut round trips, is written only when set, and a broken one reads as none", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  assert.equal("pending_cut" in written(path), false);
+  store.setPendingCut(CHANNEL, THREAD, { at: "prompt-1", token: "entry-9" });
+  assert.deepEqual(written(path).pending_cut, { at: "prompt-1", token: "entry-9" });
+  assert.deepEqual(mustThread(new StateStore(path, { modules: MODULES })).pendingCut, {
+    at: "prompt-1",
+    token: "entry-9",
+  });
+  store.setPendingCut(CHANNEL, THREAD, null);
+  assert.equal("pending_cut" in written(path), false);
+  store.setPendingCut(CHANNEL, "thread-unknown", { at: "p", token: null }); // unknown: a no-op
+  assert.equal(store.thread(CHANNEL, "thread-unknown"), null);
+  const broken = join(dir, "broken.json");
+  writeThreadFile(broken, dir, {
+    directory: dir,
+    session_id: SESSION,
+    pending_cut: { token: null },
+  });
+  assert.equal(mustThread(new StateStore(broken, { modules: MODULES })).pendingCut, null);
+});
+
+test("the terminals the owner allowed round trip, are written only when set, and old files load", () => {
+  const dir = scratch();
+  const path = join(dir, "state.json");
+  const store = new StateStore(path, { modules: MODULES });
+  store.bind(CHANNEL, join(dir, "project"));
+  store.openThread(CHANNEL, THREAD);
+  assert.equal("terminals_allowed" in written(path), false);
+  assert.deepEqual(mustThread(store).terminalsAllowed, []);
+  store.setTerminalsAllowed(CHANNEL, THREAD, ["holder-a", "holder-b"]);
+  assert.deepEqual(written(path).terminals_allowed, ["holder-a", "holder-b"]);
+  assert.deepEqual(mustThread(new StateStore(path, { modules: MODULES })).terminalsAllowed, [
+    "holder-a",
+    "holder-b",
+  ]);
+  store.setTerminalsAllowed(CHANNEL, THREAD, []);
+  assert.equal("terminals_allowed" in written(path), false);
+  store.setTerminalsAllowed(CHANNEL, "thread-unknown", ["x"]); // unknown: a no-op
+  assert.equal(store.thread(CHANNEL, "thread-unknown"), null);
+  // another session id is another conversation: its terminals are not the allowed ones
+  store.setTerminalsAllowed(CHANNEL, THREAD, ["holder-a"]);
+  store.setSession(CHANNEL, THREAD, SESSION);
+  assert.deepEqual(mustThread(store).terminalsAllowed, []);
+  store.setTerminalsAllowed(CHANNEL, THREAD, ["holder-a"]);
+  store.setSession(CHANNEL, THREAD, SESSION); // unchanged: kept
+  assert.deepEqual(mustThread(store).terminalsAllowed, ["holder-a"]);
+  store.setSession(CHANNEL, THREAD, "session-other");
+  assert.deepEqual(mustThread(store).terminalsAllowed, []);
+  const odd = join(dir, "odd.json");
+  writeThreadFile(odd, dir, { directory: dir, session_id: SESSION, terminals_allowed: [1, "ok"] });
+  assert.deepEqual(mustThread(new StateStore(odd, { modules: MODULES })).terminalsAllowed, ["ok"]);
+  const old = join(dir, "old.json");
+  writeThreadFile(old, dir, { directory: dir, session_id: SESSION });
+  assert.deepEqual(mustThread(new StateStore(old, { modules: MODULES })).terminalsAllowed, []);
+});

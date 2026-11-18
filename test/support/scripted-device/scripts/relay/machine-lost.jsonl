@@ -1,0 +1,6 @@
+{"op":"prove","device":"app1","enrol":"sheet1","as":"g","expect":"served"}
+{"op":"relay","act":"lose"}
+{"op":"prove","device":"app1","expect":"nothing listens"}
+{"op":"relay","act":"recreate"}
+{"op":"prove","device":"app5","enrol":"sheet5","as":"g5","expect":"served"}
+{"op":"read","from":0,"expect":{"items":["g5"],"n":1}}

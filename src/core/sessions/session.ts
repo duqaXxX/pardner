@@ -1,0 +1,5547 @@
+/**
+ * One agent session per chat thread: its agent process, its queue of turns, and the reader that
+ * turns the agent's events into replies.
+ *
+ * The session knows neither library. It starts its agent through the agent seam
+ * (`AgentBackend.start`) and reads `SessionEvent`s; it writes its thread through the chat seam
+ * (`ThreadChat`). What it keeps in `state.json` for crash repair it writes itself through
+ * `StateStore`: the root's status when it asks for one, a request once the chat has named its
+ * message, and a reply's open message when the reply says it changed.
+ *
+ * How waits and cancels are made. One convention, used everywhere in this folder:
+ *
+ * 1. Concurrent work is a `Task` (`tasks.ts`): the worker that sends one prompt at a time, the
+ *    reader that follows the agent's events, and the timers (`expireInjectedTurn`,
+ *    `expireUnreported`, `closeWhenIdle`). A `Task` starts on the next turn of the event loop,
+ *    never inside the call that made it, and the waiters of an `Event` wake on the next turn
+ *    too: the code that made them ready reaches a real wait first, and this class sets state
+ *    right after creating a task and right after releasing a turn (`Turn.done` is set before
+ *    the turn stops being the active one). `cancel()` aborts the task's `AbortSignal` with
+ *    `Cancelled`.
+ * 2. Every wait a cancel could interrupt takes that signal: `Event.wait`, `Mutex.acquire`,
+ *    `Queue.get`, `Clock.sleep` (every pause goes through the injected clock), the wait for
+ *    the agent's next event, and, through `cancellable`, the wait for a call that cannot be
+ *    cut. The wait then rejects with `Cancelled`, which unwinds through the same `try` and
+ *    `finally` blocks as any error. A catch-all rethrows `Cancelled` first.
+ * 3. A call that has begun is never cut: a write to the chat (the rule of the chat's sink), the
+ *    agent's start, a git call. The signal only releases whoever waited for it. Where the
+ *    result of such a call would be lost, an explicit cleanup picks it up: a session whose
+ *    start was given up is closed when the start returns (`connect`).
+ * 4. An aborted signal stays aborted, so a wait in a `finally` that ran after the cancel would
+ *    be interrupted at once. A `finally` therefore hands on `live(signal)`, which is no signal
+ *    at all once it has aborted.
+ * 5. What a cancelled task leaves to clean up is explicit state plus an explicit call: the
+ *    request handlers of a closing session are resolved by `Approvals.denyAll` and awaited
+ *    (`asking`).
+ * 6. Where nothing may happen between a check and an act, the stretch is synchronous and
+ *    marked `(sync)` with the reason. JavaScript yields at every `await`, also on a call that
+ *    never waits: so around a call that only looks asynchronous (making a reply, showing the
+ *    running list) there is no `await` at all, and a turn is made the active one before its
+ *    first write.
+ * 7. The root's status is asked for at once and not awaited (`react`): the chat makes the
+ *    changes in the order they were asked.
+ */
+import { basename } from "node:path";
+import type {
+  AgentAccount,
+  AgentSession,
+  AgentState,
+  ClosedReport,
+  CommandInfo,
+  ContextUsage,
+  DaemonActions,
+  ForeignTurn,
+  ForeignTurns,
+  LoadedContext,
+  ModelInfo,
+  PermissionAnswer,
+  PermissionRequest,
+  PromptContent,
+  Question,
+  QuestionAnswer,
+  QuestionRequest,
+  Repository,
+  SavedMessage,
+  ScheduledJob,
+  SessionEvent,
+  ShellMode,
+  ShellRun,
+  TaskKind,
+} from "../../agent/seam.ts";
+import { type FilesRestore, ResumeRefused, RewindRefused } from "../../agent/seam.ts";
+import type {
+  Activity,
+  FooterFields,
+  MessageId,
+  Reply,
+  RootStatus,
+  RunningAgent,
+  RunningList,
+  SessionStatus,
+  ThreadChat,
+  ThreadRef,
+} from "../../chat/seam.ts";
+import { getLogger } from "../../log.ts";
+import { blank, strip } from "../../text.ts";
+import { errorName } from "../../values.ts";
+import {
+  footerFields,
+  formatStatusFields,
+  gitReading,
+  sessionTokens,
+  type UsageCache,
+} from "../footer.ts";
+import type { Pending } from "../hold.ts";
+import { modelName, settingName } from "../models.ts";
+import { resolvePath } from "../paths.ts";
+import { LoopReply } from "../reply/loop-card.ts";
+import { Previews } from "../reply/previews.ts";
+import {
+  endedLine,
+  type TaskEvent,
+  type TaskStarted,
+  type TurnEnded,
+  TurnRenderer,
+  taskTitle,
+} from "../reply/renderer.ts";
+import { oneLine, TITLE_LIMIT } from "../reply/words.ts";
+import { DENY, type Decision, toAnswer } from "../requests.ts";
+import { type Choice, DEFAULT } from "../setup.ts";
+import { runShell, shellHead } from "../shell.ts";
+import type { PendingCut } from "../state.ts";
+import { endsWork } from "../status.ts";
+import type { Suggestions } from "../suggestions.ts";
+import * as texts from "../texts.ts";
+import { TurnChanges, type TurnEdits } from "./changes.ts";
+import {
+  FAILURE_LIMIT,
+  HOLD_MARKER,
+  IDLE_CLOSE_SECONDS,
+  INJECTED_TURN_WAIT,
+  LOOPS_BELIEVED_SECONDS,
+  PROCESS_EXITED,
+  STOP_TAIL_WAIT,
+  SUMMARY_IS_END_LINE,
+  TASK_EVENTS,
+  TASK_REPLIES_KEPT,
+  TASK_WORDS,
+  TASKS_KEPT,
+  TURN_EVENTS,
+} from "./constants.ts";
+import type { SessionDeps } from "./deps.ts";
+import {
+  checkDirectory,
+  terminalLine,
+  trustedBy,
+  untrustedNotice,
+  verdictBy,
+} from "./directory.ts";
+import {
+  BypassUnavailable,
+  DirectoryUnavailable,
+  PlanUnavailable,
+  SessionClosed,
+  SessionGone,
+  StartsBlocked,
+} from "./errors.ts";
+import { cadenceOf, promptOf } from "./loops.ts";
+import { quoted } from "./quote.ts";
+import { RewindMemory } from "./rewind-memory.ts";
+import { shareFile } from "./share.ts";
+import { Cancelled, cancellable, Event, Mutex, Queue, Task } from "./tasks.ts";
+import { ThreadTitle } from "./title.ts";
+import { type ActiveTurn, notSent, Turn, takenNote } from "./turn.ts";
+
+/** What an agent reported it could not save as a client closed. */
+type Unsaved = NonNullable<ClosedReport["unsaved"]>;
+
+export const logger = getLogger("pardner.core.sessions");
+
+type TaskEnded = Extract<SessionEvent, { type: "task_ended" }>;
+
+/** A card of the daemon's under an end line: a subagent's words, closed under `title`. */
+export interface EndCard {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string;
+}
+
+/** A task's end as the thread says it: its line, and the card of its words when it has one. */
+export interface EndLine {
+  readonly text: string;
+  readonly card: EndCard | null;
+}
+
+/**
+ * Writes `ends` into `renderer`: each run of lines as one text, `first` for the first run (an
+ * opening) and a line for the next, and a subagent's card right under its own line.
+ */
+export async function writeEnds(
+  renderer: TurnRenderer,
+  ends: readonly EndLine[],
+  first: (text: string) => Promise<void>,
+): Promise<void> {
+  let run: string[] = [];
+  let write = first;
+  const flush = async (): Promise<void> => {
+    if (run.length === 0) return;
+    await write(run.join("\n"));
+    write = (text) => renderer.feedLine(text);
+    run = [];
+  };
+  for (const end of ends) {
+    run.push(end.text);
+    if (end.card === null) continue;
+    await flush();
+    await renderer.feedCard(end.card.id, end.card.title, end.card.body);
+  }
+  await flush();
+}
+
+/** What the list shows of a subagent: when it started, its latest call and how many it made. */
+interface Step {
+  readonly since: number;
+  readonly words: string | null;
+  readonly calls: number;
+}
+
+/** How a status is changed (`Session.setStatus`). */
+interface StatusChange {
+  /** Aborts the chat's change, which may be left half made. */
+  readonly signal?: AbortSignal;
+  /** An answer never reached the chat: `state.json` keeps the status crash repair needs. */
+  readonly unlanded?: boolean;
+  /** The owner's own act made the change (`!stop`, a hold he cancelled): he is not told of it. */
+  readonly byOwner?: boolean;
+}
+
+/** The signal for a `finally`: none once it has aborted, since an aborted signal stays aborted. */
+function live(signal: AbortSignal | undefined): AbortSignal | undefined {
+  return signal?.aborted ? undefined : signal;
+}
+
+function isTaskEvent(event: SessionEvent): event is TaskEvent {
+  return TASK_EVENTS.has(event.type);
+}
+
+/**
+ * The call an event belongs to: the one a subagent's event runs under, or the one that started
+ * a task. Either leads to the reply holding that call when a background subagent works on after
+ * its turn.
+ */
+function callOf(event: SessionEvent): string | null {
+  if ("parentCallId" in event) return event.parentCallId;
+  if ("callId" in event && isTaskEvent(event)) return event.callId;
+  return null;
+}
+
+export class ThreadSession {
+  readonly channelId: string;
+  readonly threadId: string;
+  readonly directory: string;
+  // Resolved once here, not by `SessionManager.workingIn` on every live session for every
+  // message (`directory` never changes after this object is built: a rebind only takes effect
+  // for a thread not open yet).
+  private readonly resolved: string;
+  private readonly deps: SessionDeps;
+  // The session's title on the root, asked for at the end of each turn.
+  private readonly title: ThreadTitle;
+  // One status on the session's root message, which `threadId` always is, and the line under
+  // the thread's last message: both are the chat's to draw.
+  private readonly thread: ThreadChat;
+  // Set by `stop()` while it denies pending approvals, and by `read` while it settles the
+  // requests of a lost process, so `askOwner`'s own finally does not race its closing ✅ (or
+  // the ❌) back to working; `finish` and `abandon` clear it, once that turn's own tail ends,
+  // whichever way.
+  private interrupting = false;
+  /** Set once the turn `stop()` interrupted has closed its reply (`stopLanded`). */
+  private stopTail: Event | null = null;
+  /** Stops the owner's shell command while it runs (`!stop`); null when none runs. */
+  private shellStop: AbortController | null = null;
+  // True from an ❌ (`setStatus`) until new work starts (`submit`, `startTurn`), so a standing ❌ is
+  // never mistaken for idle-and-done. What the chat shows cannot serve this alone: it only
+  // changes once the chat has answered, which a quick turn can easily outrun.
+  private errorStanding = false;
+  // The reply the session's latest work wrote into (a turn, a report, a standalone update), while
+  // the footer of its end is owed: cleared only once the chat says the footer landed under it.
+  // A prompt that could not start wrote no work, and is never named here.
+  private footerOwedTo: Reply | null = null;
+  // When the work now going began, on the `now` clock: the owner's prompt, or the first turn the
+  // agent opened by itself. The footer of the session's end takes it (`takeWork`). Memory only.
+  private workStartedAt: number | null = null;
+  // The work a footer was read with and has not yet landed under its reply. The sink keeps the
+  // first line it is given, but an abort during the read leaves it none: the forced end that
+  // follows reads the footer again and must say the same duration and end time.
+  private workOwed: FooterFields["work"] = null;
+  private client: AgentSession | null = null;
+  private reader: Task | null = null;
+  private worker: Task | null = null;
+  private readonly queue = new Queue<Turn>();
+  /** Out of the queue, not sent yet. */
+  private taken: Turn | null = null;
+  /**
+   * The turn `taken` held when `stop()` ran: the worker drops it instead of sending it. One
+   * reference, so a turn taken after the stop is not affected.
+   */
+  private stopTaken: Turn | null = null;
+  /**
+   * Turns a stop took out of the queue while the worker held a taken one: the worker names them
+   * in the same note as the taken turn (`endStopped`), in the order sent.
+   */
+  private stopQueued: Turn[] = [];
+  /**
+   * True from the moment a turn's end notes were read until the next turn starts: a note pushed
+   * to `endNotes` after that has no reply left to end, so `drop` posts it.
+   */
+  private endNotesRead = false;
+  /** The files each turn of this process edited, for `!diff`. */
+  private readonly turnChanges = new TurnChanges();
+  /**
+   * The messages of each prompt's replies and the cut a rewind made, for `!rewind`. Memory only,
+   * handed on after a close as `goal` is (`SessionManager.session`).
+   */
+  rewinds = new RewindMemory();
+  /** A rewind's start of the agent is running: its refusal is the rewind's to tell. */
+  private rewinding = false;
+  private sent: Turn[] = [];
+  /**
+   * With an agent that says its state: the prompts in `sent` when a `!stop` took the gap branch.
+   * Only these can have been cut with the turn; one written after the stop never is (#252).
+   */
+  private gapSent: Turn[] = [];
+  /**
+   * With an agent that says its state: the prompts of `gapSent` a cut at start may have taken, and
+   * the work count at the cut. The agent's next `idle` drops those still in `sent` (#252).
+   */
+  private cutWait: { left: Turn[]; workAtCut: number } | null = null;
+  /**
+   * How many turns of new work started (`startTurn`, for a turn that is neither a stop's tail nor
+   * a run): tells `expectCutPrompts` whether work started after a cut, whoever started it. A
+   * status written is no work: a hold writes waiting and its cancel working.
+   */
+  private workStarts = 0;
+  private active: ActiveTurn | null = null;
+  private readonly connectLock = new Mutex();
+  /** What clients reported they could not save, kept until `announceUnsaved` posts it. */
+  private readonly unsavedReports: Unsaved[] = [];
+  /** The clients whose report was kept: a client is reported once. */
+  private readonly reportedClients = new WeakSet<AgentSession>();
+  /** Set once close starts: no client starts after it, and no word stores a setting. */
+  private closedFlag = false;
+  /**
+   * Set with `closedFlag` by a refused resume (`connectHeld`): a prompt that raced it reads
+   * `SESSION_GONE` rather than "send it again". Memory only: the next start tries the resume
+   * again from the thread's kept entry.
+   */
+  private resumeRefused = false;
+  // The predecessor this object replaced at its key (the manager evicts a closed session as
+  // soon as closing starts, not once it finishes). Awaited once, inside the connect lock,
+  // before this session's own first connect: the agent's process needs real time to flush
+  // after EOF, and a resume of the same session id must not start while that is in flight.
+  private predecessor: Event | null;
+  // Set once close() (or the SessionGone branch) has fully finished: the predecessor signal
+  // above, for whoever replaces this session next, and what `closeAll` waits on.
+  readonly doneClosing = new Event();
+  // Set by the manager that created this session; called once, right when `doneClosing` is
+  // set, so a session nobody ever looks up again does not sit in the manager's map forever.
+  onClosed: (() => void) | null = null;
+  /** A line of the daemon's own that opens the next reply. */
+  private notice: string | null = null;
+  // `expireUnreported`'s own timers only: this session's alone, so `close` can cancel them.
+  // What the session only starts and never waits on (a usage refresh, the root's status) is not kept:
+  // a usage refresh shares one probe across every session, and is never cancelled.
+  private readonly expiring = new Set<Task>();
+  // Approval ids open right now, waiting on the owner's decision (`waitingForOwner`); a hold
+  // adds `HOLD_MARKER` here too.
+  private readonly waiting = new Set<string>();
+  // The request handlers in flight (`askOwner`). A close resolves them and waits for each:
+  // none may write the root's status after the close has settled it.
+  private readonly asking = new Set<Promise<unknown>>();
+  // The starts a caller gave up (its signal aborted) with the process still launching, each as
+  // the promise of its disconnect. `close` waits for them before `doneClosing`: the seam's
+  // `start` takes no signal, so the process can only be closed once it is there.
+  private readonly abandoned = new Set<Promise<void>>();
+  /** Task events that arrived between turns, shown in the next turn's reply. */
+  private held: TaskEvent[] = [];
+  // Tasks that outlived their turn, and the reply whose line each one keeps up to date, for
+  // as long as the agent's process lives: an agent can report more than once.
+  private readonly taskReplies = new Map<string, TurnRenderer>();
+  /** The reply each renderer writes, as the session holds it. */
+  private readonly replyOf = new WeakMap<TurnRenderer, Reply>();
+  // Replies whose end did not land: no checkmark until the one retry does, a cross if it
+  // fails too. Each is settled once more when the session closes.
+  private readonly unlanded = new Set<Reply>();
+  // What the running turn's reply says when it ends: how many queued messages a restart
+  // dropped, since they get no reply of their own.
+  private endNotes: string[] = [];
+  /** The owner's messages the end notes answer (`takenNote`). */
+  private takenIds: MessageId[] = [];
+  // Tasks a subagent started and left running (a command in the background). Their end is told
+  // to the subagent, which reports it: the terminal prints no line for it in the conversation
+  // (captured 2026-10-14, Claude Code 2.1.296), and neither does a reply.
+  private readonly ownedBySubagent = new Set<string>();
+  /** The running tasks a subagent started (`parentTaskId`), each with that subagent's task id. */
+  private readonly parents = new Map<string, string>();
+  /** The words each waiting subagent's message showed, so that its final end does not repeat them. */
+  private readonly messages = new Map<string, string>();
+  /** The cards of subagents' words made so far: each gets an id of its own. */
+  private cardsMade = 0;
+  /**
+   * End lines of agents with no card that ended while a message waited for its turn, each with
+   * its task id. That message's reply says them; when a cut drops every message that waited, the
+   * drop writes them where their tasks started (`dropCutPrompts`).
+   */
+  private endedAhead: Array<readonly [taskId: string, line: EndLine]> = [];
+  // Each task's type and description, for the list of what still runs and the task's end line.
+  private readonly tasks = new Map<
+    string,
+    readonly [kind: TaskKind, description: string, agentType: string | null]
+  >();
+  // A subagent's tasks by the call that started them, and the step each is at: when it started,
+  // the call it made last as the thread words it, and how many calls it has made. They follow
+  // `tasks`: an entry goes with its task's end and with the task a cap drops.
+  private readonly agentCalls = new Map<string, string>();
+  private readonly steps = new Map<string, Step>();
+  // How many times each task started, kept past its end: a resumed task keeps its id (SDK
+  // 0.3.300, `SDKTaskStartedMessage.run_id`), and nothing else says it is one. A reply asks
+  // here, so that an agent a message continues gets no second launch line.
+  private readonly starts = new Map<string, number>();
+  // Ended tasks not yet opened into a report turn's reply: (task id, its formatted end line).
+  // The task id finds the reply that started it (the report renders there when that reply is
+  // the last thing in the thread).
+  private ended: Array<readonly [taskId: string, line: EndLine]> = [];
+  // The end lines the turn that has just begun reports, set aside when the agent starts it. A
+  // task that ends after that start is told to the agent in a later turn, and the terminal
+  // prints its line there (measured 2026-10-14, Claude Code 2.1.296: of two agents ending 0.3 s
+  // apart, the second was notified after the first report turn began, and that turn knew of
+  // the first alone).
+  private opening: Array<readonly [taskId: string, line: EndLine]> | null = null;
+  // Tasks whose end arrived without their notification yet, by the clock time it arrived: the
+  // notification starts the turn that reports them. The CLI can suppress it (SDK
+  // TaskUpdatedMessage docstring), so a stop waits for it only INJECTED_TURN_WAIT.
+  private readonly unreported = new Map<string, number>();
+  // Tasks `!stop` ended. Claude Code starts no turn to report such a task: its notification
+  // stays queued (measured twice on 2026-09-27, Claude Code 2.1.283), so none is awaited.
+  private readonly stopped = new Set<string>();
+  // True from the start of a process that resumes a session until its first turn. Such a process
+  // tells first of the tasks the session before it lost ("didn't finish before the previous
+  // session ended", measured 2026-10-18, Claude Code 2.1.302, as the cut of `!stop` or of a forced
+  // restart leaves them) and ends an empty turn; an event for a task this daemon never saw is
+  // dropped then, so neither shows nor is awaited as a report.
+  private resumedAtStart = false;
+  // The footer's model and context, read from the process `!stop` is about to close.
+  private closingContext: ContextUsage | null = null;
+  // The last model and context share a live read gave (a footer or `!status`). A footer drawn
+  // with no process to ask (after a `!stop` whose own read did not answer) shows it; a process
+  // that resumes the session replaces it with its first read. A model switch or a compaction
+  // drops it, since its share no longer holds. Never shared with another session.
+  private lastContext: ContextUsage | null = null;
+  // The advisor the last read named: a footer drawn with no process shows it, as `lastContext`.
+  private lastAdvisor: string | null = null;
+  // Counts the invalidations of `lastContext`: a read that started before one is not kept.
+  private contextGeneration = 0;
+  // Whether this turn's end already asked for the read `keepContext` makes: one per turn.
+  private contextKept = false;
+  // The replies already logged as ended with no report under them: `closeOut` sets its flag
+  // after an await, so two timers waking together would log one reply twice.
+  private readonly endedUnreported = new WeakSet<TurnRenderer>();
+  // Clear while a background notification's own turn is expected or running: the owner's
+  // next prompt waits, so the two replies never share a thread.
+  private readonly settled = new Event();
+  // Set while no turn is active; `nameCopy` waits on it for a turn the agent opened.
+  private readonly noTurn = new Event();
+  // Clear while a channel `!stop` owes the goal's drop (`oweGoalDrop`): no prompt reaches the
+  // agent until `payGoal` has run, or a close has settled the debt (`settleGoalDebt`).
+  private readonly goalCleared = new Event();
+  private goalDrop: Task | null = null;
+  private injectedExpected = false;
+  // The prompts whose replay arrived with no turn running, in order: the turn that starts next
+  // is the first one's own and takes the others in (`acknowledge`, `whoseTurn`).
+  private announced: Turn[] = [];
+  // Set by a `!stop` that found prompts sent and no turn: the turn that starts next is not
+  // covered by the stop's own status (`ActiveTurn.afterStop`).
+  private stopInGap = false;
+  // A report turn was awaited when a prompt's own turn started in its place: it is awaited
+  // again once that turn ends (`settle`).
+  private reportDue = false;
+  // Tasks that ended inside a running turn, by the reply that shows them, whose notification
+  // that turn has not taken (`notification_folded`). One still standing when the turn ends is
+  // reported in a turn the agent opens by itself: its reply rests with no footer
+  // until that turn renders into it, or `INJECTED_TURN_WAIT` passes (`expectUnfoldedReports`).
+  // Empty for an agent that does not declare `foldedNotifications`, which counts such a task as
+  // reported by the turn it ended in.
+  private readonly unfolded = new Map<string, TurnRenderer>();
+  /**
+   * The replies that rest while the session waits on a task of another reply (`stillOwed`):
+   * they own no task, so `taskReplies` does not hold them, and `restingLast` still must find them.
+   */
+  private readonly resting = new Set<TurnRenderer>();
+  // A task's notification arrived with no turn running and no report turn has started since:
+  // the agent has a report to make (`whoseTurn`).
+  private notificationWaits = false;
+  // The task the agent said its next turn reports (`report_started`): that turn is no prompt's,
+  // and it renders in the reply that started the task when that is the last thing in the thread,
+  // whether or not the task's end came yet.
+  private reportOf: string | null = null;
+  private expiry: Task | null = null;
+  /** The agent said it is compacting the conversation and has not said it ended. */
+  private compacting = false;
+  /** What the agent last said it is doing (`state_changed`); null before it said anything. */
+  private agentState: AgentState | null = null;
+  /** A turn that ended under `Working…`, not stopped, whose end, ✅ and footer are being drawn. */
+  private turnEnding = false;
+  // Armed while idle with nothing pending; any turn, task event, approval or question cancels
+  // it, and being idle with nothing pending again (re)starts it.
+  private idleExpiry: Task | null = null;
+  // A count, not a flag, since two `submit` calls can overlap. Nonzero makes `idle` false for
+  // the span between a `submit` call starting and its turn actually being queued, so the timer
+  // is genuinely cancelled there, not reset to fire again mid-await.
+  private pendingSubmits = 0;
+  commands: CommandInfo[] = [];
+  /** The agent's own model list, for the setup. */
+  models: ModelInfo[] = [];
+  // The account the agent reported at its last connect, which a login switched meanwhile leaves
+  // behind: the footer and `!status` name it only while no usage limits name theirs.
+  private account: AgentAccount | null = null;
+  // A prompt was ever queued on this object; with no stored session id it tells a thread that
+  // never ran a turn from one whose first turn is still starting.
+  private submitted = false;
+  /** `applySetup` changed something that `forgetSetup` has not undone. */
+  private setupApplied = false;
+  /** Held while Start is applied, so a `!bypass` typed meanwhile acts after it. */
+  private readonly setupLock = new Mutex();
+  /** `applySetup` is running: a model command may be in flight in the agent. */
+  private applying = false;
+  // What the live client was started with or switched to: the effort, and whether it
+  // effectively runs in bypass (the switch, or the folder's own settings starting it so).
+  // `applySetup` compares the owner's choice with these, not with what was stored, which a
+  // restart or a `!bypass on` can have moved.
+  private clientEffort: string | null = null;
+  private clientBypass = false;
+  nativeMode: string;
+  // The permission mode the client runs in now, for `!status`: what the connect left it in,
+  // then whatever the agent reports (`dispatch`).
+  mode: string;
+  cliVersion: string | null = null;
+  // The level the owner fixed (setup, `/effort`, `/model ... with X effort`, the stored one), or
+  // null for the agent's default. Kept apart from `effort`: a default setting still runs at some
+  // level, and the footer says both (`auto (medium)`), as the terminal's `/effort` does.
+  effortSetting: string | null = null;
+  // The level the last turn ran at (`effort_observed`), cleared by a command that sets the
+  // effort. Null for a model without effort, and until a turn has reported one.
+  effort: string | null = null;
+  // Whether an agent without a word for its default has said anything about the level since the
+  // client started (a report or a command): until then it is not known, since the settings do
+  // not decide it (measured 2026-09-25).
+  effortReported = false;
+  // Whether a turn has reported that the model takes no effort (the Stop hook's level is null):
+  // the footer then says so whatever the setting. Cleared by anything that may change the model
+  // or the level, and by a turn that reports one.
+  effortUnsupported = false;
+  // The condition of the goal the agent last said is set (`goal_changed`), null once it is
+  // achieved or cleared. Memory only, handed to the object that replaces this one after a close
+  // (`SessionManager.session`): a goal set before a restart is not known until its next check,
+  // since a resumed agent says nothing of it before then (measured 2026-10-20).
+  goal: string | null = null;
+  // The last message this session's own process saved (`message_saved`): what another process,
+  // a terminal, wrote after it is shown in the thread and resumed into (`flows/terminal.ts`).
+  // Memory only, handed on after a close as `goal` is; after a restart nothing is known, and
+  // the session resumes from the record, which holds whatever a terminal wrote.
+  saved: SavedMessage | null = null;
+  // `!terminal` cut a turn here: what the terminal wrote before any typed prompt is that turn
+  // going on, and only then is it shown as such (`takeForeignTurns`). Handed on after a close.
+  movedMidTurn = false;
+  // The jobs the agent last listed (`scheduled_jobs`) and when, on the clock of `deps.clock`.
+  // Memory only (invariant 3): a resumed agent lists them again at its first turn's end.
+  private jobs: readonly ScheduledJob[] = [];
+  private jobsListedAt = 0;
+  // The runs the loop card has shown since it was posted; zero when it has not been. Memory
+  // only: after a restart the card and the count start fresh.
+  private loopRuns = 0;
+  // A prompt was replayed while no turn ran, since the last turn started: the turn that comes
+  // is an owner's, whatever the list of jobs says (`opensRun`).
+  private promptReplayed = false;
+  // A report turn was given up on since the last turn started: a turn that comes may be that
+  // report arriving late, and is not taken for a run.
+  private reportGivenUp = false;
+  // The model the agent last said it switched to (`model_changed`), kept until the context
+  // usage names it too: after a command the usage still names the model before it. Null when
+  // none is awaited.
+  modelSwitched: string | null = null;
+  // Whether that switch came inside a turn: such a turn's usage may still name the model it
+  // started on, so the turn's end keeps the switch; the next turn that went to the model drops it.
+  modelSwitchedInTurn = false;
+  // Where the session works as its hooks last reported (`cwd` follows a `cd` and a worktree;
+  // Stop and PostToolUse measured 2026-09-27 on 2.1.283); null until then: `directory`.
+  workingDirectory: string | null = null;
+  /** The session's token count as the client's last result reported it, for `!status`. */
+  sessionTokens: number | null = null;
+  /** Set when the daemon stops: the turns already sent finish, no other one starts. */
+  draining = false;
+  /**
+   * Set while an install replaces pardner's own copy: this session starts no agent process
+   * (`ensureConnected`) and no usage probe, and one already connected goes on.
+   */
+  startsBlocked = false;
+  // Whether this stop has said, in a message, which background tasks it waits for: only where
+  // the thread's activity line cannot (`showRestartWait`).
+  private toldWaiting = false;
+  // The status asked of the chat last (`setStatus`): a stop that begins while it is `working`
+  // shows the root as restarting (`rootStatus`).
+  private lastStatus: SessionStatus | null = null;
+  // Set when a stop begins while this session has a turn running. The signal names no sender,
+  // and the session that sent it has its turn running then; a background task it starts from
+  // that point is often its own wait for the new process, which cannot end before this one
+  // exits. Those tasks are not waited for: the shutdown ends them with the agent's
+  // process. "After" means read after: a task the turn started just before the signal, whose
+  // start event the reader had not reached yet, counts as started after it. A single
+  // background command that sends the signal and then waits started before it, and is still
+  // waited for.
+  mayHaveOrderedRestart = false;
+  private readonly afterRestart = new Set<string>();
+  /** The names the texts of this session take from its agent and its chat. */
+  private readonly names: texts.Names;
+  /** The agent's tools the terminal shows in words of its own. */
+  private readonly previews: Previews;
+  /** The agent's last guess at the next prompt (`!next`): the manager's, or the session's own. */
+  private readonly suggestions: Suggestions;
+  // Tasks whose start the agent had no capability for, by the capability: their later events
+  // are ignored with them.
+  private readonly refusedTasks = new Map<string, string>();
+
+  constructor(
+    channelId: string,
+    threadId: string,
+    directory: string,
+    deps: SessionDeps,
+    options: {
+      readonly predecessor?: Event | null;
+      /** True once the manager is closed: a stop has begun. */
+      readonly stopped?: () => boolean;
+      /** The store the thread's suggestion is held in; the manager's, shared with the flows. */
+      readonly suggestions: Suggestions;
+    },
+  ) {
+    this.channelId = channelId;
+    this.threadId = threadId;
+    this.directory = directory;
+    this.resolved = resolvePath(directory);
+    this.deps = deps;
+    this.title = new ThreadTitle(deps, channelId, threadId, directory, options.stopped);
+    this.names = texts.namesOf(deps.agent, deps.chat);
+    this.previews = new Previews(deps.agent.tools);
+    this.thread = deps.chat.thread({ channel: channelId, thread: threadId });
+    this.predecessor = options.predecessor ?? null;
+    this.suggestions = options.suggestions;
+    this.settled.set();
+    this.noTurn.set();
+    this.goalCleared.set();
+    this.nativeMode = deps.agent.capabilities.permissionModes.default;
+    this.mode = this.nativeMode;
+  }
+
+  private get where(): string {
+    return `${this.channelId}/${this.threadId}`;
+  }
+
+  private get ref(): ThreadRef {
+    return { channel: this.channelId, thread: this.threadId };
+  }
+
+  /** False for a bare `!fork` copy in which no turn of any kind has started (`fork_of.ran`). */
+  private get forkRan(): boolean {
+    return this.deps.state.thread(this.channelId, this.threadId)?.forkRan ?? true;
+  }
+
+  /** A turn is queued or begins: a bare copy has run. Best-effort, as the root's status is. */
+  private markRan(): void {
+    if (this.forkRan) return;
+    try {
+      this.deps.state.markForkRan(this.channelId, this.threadId);
+    } catch (error) {
+      logger.warning(`could not record that ${this.where} ran in state.json: ${errorName(error)}`);
+    }
+  }
+
+  /**
+   * The first prompt with text names a bare copy (`fork_of.named`, `Turn.title`), through the live
+   * session, on an idle one: a turn the agent opened is waited out first, since the agent hides
+   * what follows a rename. Under the connect lock, so that no start or drop of the process falls
+   * in between. `named` is cleared when the agent's answer arrives; a cancel, a lost process or a
+   * refusal leaves it, and the next prompt with text tries again.
+   */
+  private async nameCopy(client: AgentSession, turn: Turn, signal: AbortSignal): Promise<void> {
+    const stored = this.deps.state.thread(this.channelId, this.threadId);
+    if (stored === null || stored.forkNamed || turn.title === null) return;
+    const title = oneLine(turn.title, TITLE_LIMIT);
+    if (
+      title === "" ||
+      client.rename === undefined ||
+      !this.deps.agent.capabilities.sessionRename
+    ) {
+      return;
+    }
+    const release = await this.idleUnderLock(signal);
+    // A stop or a drain may have come during the wait: the prompt goes no further, nor its name.
+    if (this.client !== client || turn === this.stopTaken || this.draining) {
+      release();
+      return;
+    }
+    try {
+      await cancellable(client.rename(title), signal);
+    } catch (error) {
+      if (error instanceof Cancelled) throw error;
+      logger.warning(`could not name the copy ${this.where}: ${errorName(error)}`);
+      return;
+    } finally {
+      release();
+    }
+    try {
+      this.deps.state.markForkNamed(this.channelId, this.threadId);
+    } catch (error) {
+      logger.warning(`could not record that ${this.where} is named: ${errorName(error)}`);
+    }
+  }
+
+  /**
+   * Waits for an idle session and takes the connect lock with it still idle; the caller releases.
+   * The lock is taken after the wait, not during it: a turn that runs needs the process.
+   */
+  private async idleUnderLock(signal: AbortSignal): Promise<() => void> {
+    for (;;) {
+      await this.untilIdle(signal);
+      const release = await this.connectLock.acquire(signal);
+      if (this.isIdle()) return release;
+      release();
+    }
+  }
+
+  /**
+   * Nothing runs, nothing is sent and none is expected (a task's notification is). The title's
+   * prompt waits for this: the agent hides the records of prompts sent before a rename.
+   */
+  private isIdle(): boolean {
+    return this.active === null && this.pending.length === 0 && this.settled.isSet;
+  }
+
+  /** The turns sent whose end is still awaited: one with `done` set is gone, whatever `sent` holds. */
+  private get pending(): Turn[] {
+    return this.sent.filter((turn) => !turn.done.isSet);
+  }
+
+  /** Waits, cancellable, until `isIdle` may hold; the caller re-checks it where it matters. */
+  private async untilIdle(signal: AbortSignal): Promise<void> {
+    while (!this.isIdle()) {
+      await this.noTurn.wait(signal);
+      await this.settled.wait(signal);
+      await Promise.all(this.pending.map((turn) => turn.done.wait(signal)));
+    }
+  }
+
+  /** The prompt runs one of the agent's own commands (`AgentWords.commandPrefix`). */
+  private isCommand(prompt: Turn["prompt"]): boolean {
+    return (
+      typeof prompt === "string" && strip(prompt).startsWith(this.deps.agent.words.commandPrefix)
+    );
+  }
+
+  /** The agent's own name for the mode that skips permission requests; null when it has none. */
+  private get bypassMode(): string | null {
+    return this.deps.agent.capabilities.permissionModes.bypass;
+  }
+
+  /** The account's usage limits; null when the agent reports none (`usageLimits`). */
+  private get usage(): UsageCache | null {
+    return this.deps.agent.capabilities.usageLimits ? this.deps.usage : null;
+  }
+
+  /**
+   * Whether a task can outlive its turn, the agent reporting it in a turn of its own
+   * (`backgroundTasks`): without it no report is awaited and no task is stopped.
+   */
+  private get background(): boolean {
+    return this.deps.agent.capabilities.backgroundTasks;
+  }
+
+  /** Whether the chat shows a status on the thread's root (`rootStatus`). */
+  private get reacts(): boolean {
+    return this.deps.chat.capabilities.rootStatus;
+  }
+
+  /**
+   * The owner's last word on bypass in this thread, as state.json holds it: true on, false off,
+   * null never chosen. An idle close and a restart of the daemon, whatever its cause, keep it,
+   * and `ensureConnected` gives the next agent process the mode back through
+   * `AgentSession.setPermissionMode`: on sets the bypass mode, an explicit off in a folder whose
+   * own settings start in bypass sets the default one (so the folder's bypass does not return
+   * silently), never chosen leaves the agent's own mode. Bypass is the product's word for the mode the
+   * agent declares as `permissionModes.bypass`; an agent may not restore it on resume (Claude
+   * Code does not: "Resume and bypass" in `docs/architecture.md`).
+   * Bypass and the effort level belong to the thread, not to the agent's session id, so a
+   * session `!resume` opens starts with both unset.
+   */
+  get bypassChoice(): boolean | null {
+    return this.deps.state.thread(this.channelId, this.threadId)?.bypass ?? null;
+  }
+
+  /**
+   * Whether a client runs in bypass given `choice`: what the owner chose, else what the agent
+   * itself started in (`nativeMode`, as it reported it).
+   */
+  private bypassRuns(choice: boolean | null): boolean {
+    return choice ?? (this.bypassMode !== null && this.nativeMode === this.bypassMode);
+  }
+
+  /**
+   * Whether this thread runs in bypass: the one answer the footer's ⚡, `!status`, the channel
+   * list and the setup's checkbox read.
+   */
+  get bypass(): boolean {
+    return this.bypassRuns(this.bypassChoice);
+  }
+
+  /**
+   * The permission mode that means `on`; off is the native mode, or the default one when the
+   * process itself started in bypass.
+   */
+  private modeFor(on: boolean): string {
+    const modes = this.deps.agent.capabilities.permissionModes;
+    if (on) {
+      if (modes.bypass === null) throw new BypassUnavailable();
+      return modes.bypass;
+    }
+    return this.nativeMode === modes.bypass ? modes.default : this.nativeMode;
+  }
+
+  /**
+   * `directory`, resolved once at construction and kept (`SessionManager.workingIn` reads this
+   * across sessions, instead of resolving every live session's folder on every message).
+   */
+  get resolvedDirectory(): string {
+    return this.resolved;
+  }
+
+  /** The turns of this process that edited a file, oldest first, with what each edited. */
+  editsByTurn(): TurnEdits[] {
+    return this.turnChanges.list();
+  }
+
+  get busy(): boolean {
+    return this.active !== null || this.sent.length > 0;
+  }
+
+  /** An approval or a question is open in this thread, waiting on the owner's answer. */
+  get waitingForOwner(): boolean {
+    return this.waiting.size > 0;
+  }
+
+  /** Working or waiting for the owner: a thread that is never deleted (`SessionManager.release`). */
+  get inUse(): boolean {
+    return this.rewinding || this.waitingForOwner || !this.idle;
+  }
+
+  /**
+   * `inUse` with the owner's same-folder hold or setup question left out (`HOLD_MARKER`): a turn,
+   * a rewind, an approval or an agent question still count. What a deleted first message may
+   * cancel (`SessionManager.holdGone`).
+   */
+  get inUseBesidesHold(): boolean {
+    const asked = [...this.waiting].some((marker) => marker !== HOLD_MARKER);
+    return this.rewinding || asked || !this.idle;
+  }
+
+  /** Whether the owner chose `Send here` for the terminal `id`: stored, so a restart keeps it. */
+  terminalAllowed(id: string): boolean {
+    return (
+      this.deps.state.thread(this.channelId, this.threadId)?.terminalsAllowed.includes(id) ?? false
+    );
+  }
+
+  /** Store `ids` as the terminals the owner allowed, replacing the earlier ones. */
+  allowTerminals(ids: readonly string[]): void {
+    this.deps.state.setTerminalsAllowed(this.channelId, this.threadId, ids);
+  }
+
+  /**
+   * The prompt a rewind cut the conversation at, while the agent has not yet kept the cut (no
+   * prompt was sent after it): the prompts from it on are gone for the agent, and `!rewind` lists
+   * none of them.
+   */
+  get pendingCut(): string | null {
+    return this.rewinds.cutAt;
+  }
+
+  /**
+   * What the thread's activity line says, empty for nothing, and the same after the app's
+   * name. `Working…` while a prompt of the owner's is owed its answer (`promptOwed`), however
+   * long its turn takes, and while the agent says it works (`state_changed`): a
+   * turn it starts to report a task, from before that turn's first event, and the wait for a
+   * subagent it left in the background, and from a turn's end until its ✅ and
+   * footer are drawn (`turnEnding`), so the line gives way to the footer. With neither the
+   * line nor the list of what still runs under the thread's last reply, the session has
+   * ended. An agent that
+   * declares no state shows the line for the owner's prompts alone. `Compacting conversation…`
+   * while any turn compacts, in the terminal's words. The line never counts what
+   * still runs: the list does. Nothing while an approval, a question or a hold
+   * waits on the owner, while `!stop` winds a turn down, and once the session is closed. A
+   * restart waiting on tasks says which.
+   */
+  private threadActivity(): Activity | null {
+    if (this.closedFlag || this.waitingForOwner || this.interrupting) return null;
+    if (this.compacting && (this.busy || this.promptOwed())) return { kind: "compacting" };
+    if (this.promptOwed() || this.turnEnding) return { kind: "working" };
+    const held = this.draining ? this.runningKindsOf({ awaitedOnly: true }) : "";
+    if (held) {
+      // A stop that only background tasks hold: said here whatever the list shows, since
+      // `!stop` is what ends the wait. It comes before the agent's own word, which says
+      // `working` all through a subagent left in the background.
+      return {
+        kind: "restart-wait",
+        counts: held,
+        single: held.startsWith("1 ") && !held.includes(" · "),
+      };
+    }
+    if (this.agentState === "working") return { kind: "working" };
+    return null;
+  }
+
+  /**
+   * A prompt of the owner's has no finished answer: it is being submitted, queued, taken by the
+   * worker, sent and not yet started, or its turn runs. A prompt leaves `sent` when its turn
+   * starts, in the step that sets `active`, so neither alone covers it; `active.turn` is null for
+   * a turn the agent started itself.
+   */
+  private promptOwed({ certain = false } = {}): boolean {
+    return (
+      this.pendingSubmits > 0 ||
+      !this.queue.empty ||
+      this.taken !== null ||
+      (certain ? this.owed().length : this.sent.length) > 0 ||
+      this.active?.turn != null
+    );
+  }
+
+  /**
+   * The prompts in `sent` the agent will run. One a cut at start may have taken (`Turn.inDoubt`)
+   * is left out from the cut's end until its replay claims it or the wait drops it: it stays in
+   * `sent`, and in `promptOwed` for the status, but no reader that asks whether a prompt of the
+   * owner's runs next counts it.
+   */
+  private owed(): Turn[] {
+    return this.sent.filter((turn) => !turn.inDoubt);
+  }
+
+  /** `turn` leaves `sent`, found by identity: it ran, or nobody waits on it any more. */
+  private unsend(turn: Turn): void {
+    const at = this.sent.indexOf(turn);
+    if (at !== -1) this.sent.splice(at, 1);
+  }
+
+  /**
+   * Bring the thread's activity line to `threadActivity`, after anything that can change it: it
+   * never waits on the chat.
+   */
+  private showThreadStatus(): void {
+    if (!this.deps.chat.capabilities.activityLine) return;
+    this.thread.showActivity?.(this.threadActivity());
+  }
+
+  /**
+   * `1 shell · 2 agents`, the tasks that outlived their turn and still run; empty when none
+   * does. The channel-level `!status` shows this beside a session's own state.
+   */
+  get runningKinds(): string {
+    return this.runningKindsOf();
+  }
+
+  /**
+   * The jobs the agent has scheduled and the session still believes in: its last list, unless
+   * it is older than the agent keeps a job (`LOOPS_BELIEVED_SECONDS`). The list comes with the
+   * `scheduled_jobs` event of an agent that declares `scheduledJobs`, is kept in memory only,
+   * and `!status` shows it.
+   */
+  get scheduledJobs(): readonly ScheduledJob[] {
+    const stale = this.deps.clock.time() - this.jobsListedAt >= LOOPS_BELIEVED_SECONDS;
+    return stale ? [] : this.jobs;
+  }
+
+  /**
+   * Nothing running, sent, taken or queued, no `submit` call still on its way to queuing one,
+   * and no background task still working: the session can be closed without a loss (closing it
+   * ends its agent process). `bind` waits for every thread of a channel to be idle before it
+   * stores a new folder.
+   */
+  get idle(): boolean {
+    return this.quiet({ awaitedOnly: false });
+  }
+
+  /**
+   * `idle` as a stop reads it: a background task started after the stop began, in a session
+   * that may have sent the signal (`mayHaveOrderedRestart`), does not count.
+   */
+  get restartReady(): boolean {
+    return this.quiet({ awaitedOnly: true });
+  }
+
+  /**
+   * What a stop still waits for in this thread, in words the owner can act on; empty when the
+   * thread does not hold it (`SessionManager.drain` reads the same two flags).
+   */
+  get restartHold(): string {
+    if (this.restartReady && !this.reporting) return "";
+    if (this.waitingForOwner) return texts.RESTART_HOLD_OWNER;
+    const held = this.runningKindsOf({ awaitedOnly: true });
+    if (held) {
+      if (!this.busy) return texts.fill(texts.RESTART_HOLD_TASKS, { counts: held });
+    } else if (!this.busy && this.reporting) {
+      return texts.RESTART_HOLD_REPORT;
+    }
+    return texts.RESTART_HOLD_TURN;
+  }
+
+  private quiet(options: { readonly awaitedOnly: boolean }): boolean {
+    return (
+      !this.busy &&
+      this.pendingSubmits === 0 &&
+      !this.runningKindsOf(options) &&
+      this.taken === null &&
+      this.queue.empty &&
+      this.settled.isSet
+    );
+  }
+
+  /**
+   * Closing has started (`close()`'s first line, a shutdown, the idle close, or the SessionGone
+   * branch of `ensureConnected`); the teardown itself may still be running. The manager
+   * discards this object rather than hand it out again, from its next lookup; `doneClosing`
+   * says when the teardown is over.
+   */
+  get closed(): boolean {
+    return this.closedFlag;
+  }
+
+  /** Whether the agent's process is up: what a message needs to be sent without starting one. */
+  get connected(): boolean {
+    return this.client !== null;
+  }
+
+  /**
+   * A task ended less than INJECTED_TURN_WAIT ago and the notification that makes the agent
+   * report it has not come yet.
+   */
+  get reporting(): boolean {
+    const now = this.deps.clock.time();
+    return [...this.unreported.values()].some((ended) => now - ended < INJECTED_TURN_WAIT);
+  }
+
+  /**
+   * Cancel or (re)arm the idle-close timer for the state right now. The manager calls this
+   * wherever a session is handed out (`get`/`open`), synchronously, before any await a caller
+   * might do on the way to its own `submit`: otherwise the timer could still fire, and close
+   * the session, in the gap between the lookup and the turn actually being queued.
+   */
+  touch(): void {
+    this.idleTimerCheck();
+  }
+
+  /**
+   * Mark this thread's "send anyway?" question as waiting on the owner, the same way an
+   * approval does (`waitingForOwner` covers both, so the idle-close timer stays off and the
+   * root shows ✋, including through any report turn a background task starts while held:
+   * `startTurn` reacts waiting, not working, whenever `waitingForOwner` is true). At most one
+   * hold is ever open on a thread at once, so a caller of this always pairs it with one
+   * `holdEnd`. `react` would otherwise read waiting as "no error stands": a hold is not new
+   * work, so a standing ❌ must outlive it (Cancel restores it; Continue's own `submit` clears
+   * it, same as any new work).
+   */
+  holdStart(): void {
+    const standing = this.errorStanding;
+    this.waiting.add(HOLD_MARKER);
+    this.idleTimerCheck();
+    this.react("waiting");
+    this.errorStanding = standing;
+  }
+
+  /**
+   * Undo `holdStart`. `continued`: Continue was chosen, so the status is left alone (the
+   * `submit()` right after this returns reacts ⏳ on its own); otherwise (Cancel, `!stop`, a
+   * drain) the root reflects the session's live state now, not a snapshot from when the hold
+   * started (a report turn during the hold can have changed it in the meantime).
+   */
+  async holdEnd(options: { readonly continued: boolean }): Promise<void> {
+    this.waiting.delete(HOLD_MARKER);
+    this.idleTimerCheck();
+    if (!options.continued) await this.reactAfterHold();
+  }
+
+  /**
+   * The status a hold not continued restores: none for a thread that never ran a turn (read
+   * from the stored session id: an idle close or a restart hands the thread a fresh object
+   * with its history intact, so "no client" alone is not "never ran"); otherwise ❌ when an
+   * error stands (`holdStart` kept it standing through the hold; this is what restores it,
+   * since `holdStart`'s own waiting status already overwrote whatever ❌ was showing), ✅
+   * through `reactDoneIfIdle` when idle and no error stands, ⏳ or ✋ (whichever this thread
+   * still holds) otherwise.
+   */
+  private async reactAfterHold(): Promise<void> {
+    const stored = this.deps.state.thread(this.channelId, this.threadId);
+    if (stored === null || stored.sessionId === null || !stored.forkRan) {
+      await this.setStatus(null);
+      return;
+    }
+    // A status he was told of already, or one that ends with his own click: he is not told.
+    if (this.errorStanding) this.react("error", { byOwner: true });
+    else if (this.idle) await this.reactDoneIfIdle(undefined, { byOwner: true });
+    else this.reactWaitingOrWorking();
+  }
+
+  /**
+   * A Continue whose `submit()` never ran: `holdEnd({ continued: true })` already dropped the
+   * hold and left the ✋ standing, betting on that `submit()` to show ⏳ right after; a caller
+   * that instead exits without ever calling it (the manager draining, or `ensureConnected`
+   * rejecting) must restore the status itself, or the ✋ stands forever. `error`: ❌, the same
+   * a turn that reached the queue and then failed this way gets; otherwise whatever a Cancel
+   * would show.
+   */
+  async reactHoldAbandoned(options: { readonly error: boolean }): Promise<void> {
+    if (options.error) {
+      this.reactError();
+      return;
+    }
+    await this.reactAfterHold();
+  }
+
+  /**
+   * Cancel a hold open in this thread, as the owner's own Cancel would: `stop()` and
+   * `SessionManager.drain` both call this (a drain, unlike an approval or a question, never
+   * leaves a hold open: nobody could still be typing a reply to a question that names a session
+   * about to close). The button message is removed here, silently; whoever waits on the hold
+   * tells the owner `Not sent.` once it wakes.
+   */
+  async cancelHold(): Promise<boolean> {
+    const pending = this.deps.holds.cancel(this.channelId, this.threadId);
+    if (pending === null) return false;
+    await this.deleteRequest(pending.messageId);
+    return true;
+  }
+
+  /**
+   * End every queued turn's reply with `line`, and release whoever waits on them: the turns a
+   * thread whose session is gone could not start.
+   */
+  async failQueued(line: string): Promise<void> {
+    const stopQueued = this.stopQueued.splice(0);
+    while (stopQueued.length > 0 || !this.queue.empty) {
+      try {
+        await this.fail(stopQueued.shift() ?? this.queue.getNowait(), line);
+      } catch {
+        // one reply that cannot be ended must not keep the others waiting
+      }
+    }
+  }
+
+  /**
+   * A restart will never send the queued turns: release whoever waits on them. They get no
+   * reply of their own; one note names them, at the end of the running turn's reply, or, with
+   * nothing running, as a message of its own. `error` reacts ❌ (a restart drain dropping a
+   * queued turn): a plain `close()` never needs it here, since its own cut-short check already
+   * reacts once for the whole close.
+   */
+  async dropQueued(options: { readonly error?: boolean } = {}): Promise<void> {
+    await this.drop(this.takeQueued(), texts.BECAUSE_RESTARTED, options);
+  }
+
+  /** Every turn waiting to be taken, a stop's included, in the order sent; the queue is left empty. */
+  private takeQueued(): Turn[] {
+    const turns = this.stopQueued;
+    this.stopQueued = [];
+    while (!this.queue.empty) turns.push(this.queue.getNowait());
+    return turns;
+  }
+
+  /**
+   * `drop` for a stop: a note that cannot be posted is logged (no content) and never turns the
+   * stop, or the worker's turn, into a failure.
+   */
+  private async dropStopped(turns: readonly Turn[], lines: readonly EndLine[] = []): Promise<void> {
+    try {
+      await this.drop(turns, texts.BECAUSE_OWNER_STOPPED, { lines });
+    } catch (error) {
+      logger.warning(`could not post the note of a stop in ${this.where}: ${errorName(error)}`);
+    }
+  }
+
+  /** Release `turns` that will never be sent, and say so once: see `dropQueued`. */
+  private async drop(
+    turns: readonly Turn[],
+    because: string,
+    options: { readonly error?: boolean; readonly lines?: readonly EndLine[] } = {},
+  ): Promise<void> {
+    if (turns.length === 0) return;
+    try {
+      if (options.error) this.reactError();
+      // End lines with no reply left to say them ride on the note, as plain text: a note holds no card.
+      const note = [notSent(turns, because), ...(options.lines ?? []).map((end) => end.text)].join(
+        "\n",
+      );
+      if (this.busy && !this.endNotesRead) this.endNotes.push(note);
+      else await this.post(note);
+    } finally {
+      for (const turn of turns) turn.done.set();
+      this.showThreadStatus();
+    }
+  }
+
+  /** End note: the agent took `count` prompts into the turn, and the reply answers them. */
+  private noteTaken(prompts: readonly Turn[]): void {
+    this.endNotes.push(takenNote(prompts.length, this.names));
+    for (const { messageId } of prompts) if (messageId !== null) this.takenIds.push(messageId);
+  }
+
+  /** Say, at the end of the reply that just ran, what a restart dropped meanwhile. */
+  private async feedEndNotes(renderer: TurnRenderer): Promise<void> {
+    // A note pushed while one is fed (a stop landing meanwhile) is fed in the same pass.
+    while (this.endNotes.length > 0) {
+      const notes = this.endNotes;
+      this.endNotes = [];
+      for (const note of notes) await renderer.feedError(note, { answers: this.takenIds });
+    }
+    // (sync) Right after the last check: from here `drop` posts its note itself.
+    this.endNotesRead = true;
+    this.takenIds = [];
+  }
+
+  /**
+   * Queue a prompt; its reply starts when the agent has something to show, not before.
+   * Rejects with `SessionClosed` if the session closed (an idle close, most likely) between
+   * the caller's lookup and this call; the caller retries once, against a freshly looked-up
+   * session. An aborted `signal` (the owner stopped the prompt on its way) queues nothing and
+   * rejects with its reason; the one check runs before anything is counted. A stop that lands
+   * during the `await` on the reply is not seen here: in production `sink()` does not wait, so
+   * there is no such window.
+   */
+  async submit(
+    prompt: PromptContent,
+    shell: string | null = null,
+    signal?: AbortSignal,
+    title: string | null = null,
+    messageId: MessageId | null = null,
+    replyFor: MessageId | null = messageId,
+  ): Promise<Turn> {
+    signal?.throwIfAborted();
+    if (this.closedFlag) throw new SessionClosed();
+    this.workStartedAt ??= this.now();
+    // Counted, not just checked-and-cancelled: `idle` reads false for as long as this stays
+    // above zero, so the timer is genuinely cancelled here, not reset only to fire again
+    // during the awaits below.
+    this.pendingSubmits += 1;
+    this.submitted = true;
+    let turn: Turn;
+    try {
+      this.idleTimerCheck();
+      // (sync) The prompt is queued in the same step it arrived in, ahead of whatever the
+      // reader had not read yet. So the reply is awaited here only when making it does wait,
+      // which is what the check below is for.
+      const made = this.sink(replyFor);
+      turn = new Turn(
+        prompt,
+        made instanceof Promise ? await made : made,
+        shell,
+        title,
+        messageId,
+        replyFor,
+      );
+      if (this.closedFlag) {
+        // The session closed (an idle close or a restart, or `ensureConnected`'s SessionGone
+        // branch, which already drained the queue) while the reply was made: no worker will
+        // ever take this turn from the queue, so it is resolved right here instead of left
+        // waiting for one that will not come. Only a refused resume sets `resumeRefused`:
+        // that alone tells the two apart, since both leave the session closed the same.
+        await this.fail(
+          turn,
+          this.resumeRefused ? texts.named(texts.SESSION_GONE, this.names) : texts.SESSION_CLOSED,
+          { error: true },
+        );
+        return turn;
+      }
+      // (sync) from here to the end: the turn is queued, the worker made and the idle timer
+      // read with nothing in between.
+      this.queue.putNowait(turn);
+      this.markRan();
+      // A submitted turn is working, unless an approval or question already open in this
+      // thread still holds it (that state stands until it is answered). New work, so any
+      // standing ❌ ends here.
+      if (!this.waitingForOwner) {
+        this.errorStanding = false;
+        this.react("working");
+      }
+    } finally {
+      this.pendingSubmits -= 1;
+    }
+    if (this.worker === null || this.worker.done) {
+      this.worker = new Task((signal) => this.work(signal));
+    }
+    this.idleTimerCheck(); // a queued turn is not idle
+    return turn;
+  }
+
+  /**
+   * The live client, started when there is none. `signal` is the calling task's: a cancel
+   * leaves the wait, and a start it gave up is closed when it returns.
+   */
+  async ensureConnected(signal?: AbortSignal): Promise<AgentSession> {
+    const release = await this.connectLock.acquire(signal);
+    try {
+      return await this.connectHeld(signal);
+    } finally {
+      release();
+    }
+  }
+
+  /** `ensureConnected` for a caller that holds the connect lock. */
+  private async connectHeld(signal?: AbortSignal): Promise<AgentSession> {
+    if (this.closedFlag) throw new SessionClosed();
+    if (this.client !== null) return this.client;
+    // The reader of the process before this one may still be ending (it withdraws the
+    // requests that process left, then releases its turns): a process started now would have
+    // its turn released by that reader, which ends whatever turn is active when it gets there.
+    // Nothing that reader awaits takes this lock, and a reader that has finished settles at once.
+    if (this.reader !== null) await cancellable(this.reader.settled(), signal);
+    if (this.predecessor !== null) {
+      // The agent process this thread had before may still be exiting: it needs time to
+      // flush the session file after EOF, and starting with the same id to resume before that
+      // is done would race it. The Python SDK needed up to about 20 seconds; with the
+      // TypeScript SDK 0.3.296 `close()` resolved in 282 ms and a resume of the same id right
+      // after it worked (measured 2026-10-10). The wait stays, since it costs nothing then.
+      await this.predecessor.wait(signal);
+      this.predecessor = null;
+    }
+    await cancellable(
+      checkDirectory(this.directory, trustedBy(this.deps.agent), this.names),
+      signal,
+    );
+    // Another process updating pardner (another instance on the copy, or the terminal's
+    // `pardner update`) replaces the copy this process would start from.
+    if (await cancellable(this.updatingElsewhere(), signal)) throw new StartsBlocked();
+    // After the last await before `connect`: a level the owner set meanwhile is the one the
+    // process starts with.
+    const stored = this.deps.state.thread(this.channelId, this.threadId);
+    const sessionId = stored?.sessionId ?? null;
+    const effort = stored?.effort ?? null;
+    let client: AgentSession;
+    // (sync) With the call of `connect` that starts the process: a block raised meanwhile
+    // (an install began) must not be passed by a start that checked before it.
+    if (this.startsBlocked) throw new StartsBlocked();
+    try {
+      client = await this.connect(sessionId, effort, signal);
+    } catch (error) {
+      if (!(error instanceof ResumeRefused) || sessionId === null) throw error;
+      // The stored session is gone (its transcript was deleted): the thread cannot continue.
+      // Its entry stays (the messages remain in the chat, and a transcript that comes back is
+      // resumed by the next start). The session ends itself here, so no later turn (already
+      // queued, or the next one taken by the worker) starts a second, unrecorded session in
+      // its place: it fails the same way instead.
+      logger.warning(`could not resume the stored session in ${this.where}`);
+      this.resumeRefused = true;
+      this.closedFlag = true;
+      // No client was ever connected in this branch (`connect` rejected): nothing to wait
+      // on, so the "fully closed" signal fires at once, same as `close()`'s tail.
+      this.doneClosing.set();
+      this.onClosed?.();
+      this.idleTimerCheck(); // cancels any armed timer; closed now, so none rearms
+      const worker = this.worker;
+      if (worker !== null && worker.signal !== signal) {
+        // Called directly (`!status`, `!bypass`), not from this session's own worker: an
+        // idle worker left blocked on the queue (most likely on this very connect lock,
+        // still held here) would never learn to stop otherwise. It is cancelled and awaited
+        // first, and its taken turn (if any) rescued only once it is confirmed stopped:
+        // cancelling it while it still held a turn, with nothing rescuing that turn, left
+        // that reply saying "writing" forever. When the worker IS the caller (the common
+        // case: this branch runs inside the worker's own call), its own catch up the stack
+        // already fails the taken turn itself; failing it again here too would double the
+        // reply's text.
+        worker.cancel();
+        await worker.settled();
+        const taken = this.taken;
+        this.taken = null;
+        this.stopTaken = null;
+        if (taken !== null) {
+          try {
+            await this.fail(taken, texts.named(texts.SESSION_GONE, this.names), { error: true });
+          } catch {
+            // the queued ones below are still told
+          }
+        }
+      }
+      await this.failQueued(texts.named(texts.SESSION_GONE, this.names));
+      throw new SessionGone(this.names, { cause: error });
+    }
+    let choice: boolean | null;
+    let mode: string;
+    try {
+      const info = await cancellable(client.info(), signal);
+      const offered = this.deps.agent.capabilities;
+      this.commands = offered.commands ? [...info.commands] : [];
+      this.models = offered.models ? [...info.models] : [];
+      this.account = info.account;
+      const modes = this.deps.agent.capabilities.permissionModes;
+      this.nativeMode = info.permissionMode || modes.default;
+      // Read once: a Start writing the switch meanwhile must not make the client's mode and
+      // what is recorded for it disagree.
+      choice = this.bypassChoice;
+      mode = this.nativeMode;
+      if (choice === true) {
+        mode = this.modeFor(true);
+        await cancellable(client.setPermissionMode(mode), signal);
+      } else if (choice === false && (this.nativeMode === modes.bypass || !info.permissionMode)) {
+        // An explicit off outlives a rebuild: the folder's own bypass would return. An agent
+        // that reports no mode (a release can drop the field) may have started in it.
+        if (!info.permissionMode) {
+          logger.warning(
+            `the agent reported no permission mode for ${this.where}, setting ${modes.default}`,
+          );
+        }
+        mode = modes.default;
+        await cancellable(client.setPermissionMode(mode), signal);
+      }
+    } catch (error) {
+      // A client nobody holds would leave its agent process running.
+      await this.disconnect(client, false);
+      await this.announceUnsaved();
+      throw error;
+    }
+    this.client = client;
+    this.resumedAtStart = sessionId !== null;
+    this.clientEffort = effort;
+    this.clientBypass = this.bypassRuns(choice);
+    this.mode = mode;
+    // A resumed session runs at the settings' level (measured), unknown until reported,
+    // unless the daemon itself just asked for a stored level: that request is shown at once,
+    // until the agent's own report (every turn ends with one) corrects it.
+    const requested = this.validEffort(effort);
+    this.effortSetting = requested;
+    this.effort = null;
+    this.effortReported = requested !== null;
+    this.effortUnsupported = false;
+    this.workingDirectory = null; // the new process starts in the bound folder
+    this.modelSwitched = null; // the new client starts from its own state
+    this.sessionTokens = null; // counted by the client process, which starts at zero
+    this.reader = new Task((reading) => this.read(client, reading));
+    this.idleTimerCheck(); // a daemon word (`!status`, say) connects with no turn
+    return client;
+  }
+
+  /**
+   * `!rewind`: the files as they were when the prompt `promptId` was sent, or with `preview` what
+   * restoring them would change. Starts the agent when it is not running.
+   */
+  async restoreFiles(promptId: string, preview: boolean): Promise<FilesRestore> {
+    const client = await this.ensureConnected();
+    if (client.restoreFiles === undefined) throw new Error("the agent session restores no files");
+    return client.restoreFiles(promptId, preview);
+  }
+
+  /**
+   * `!rewind`: cuts the conversation at the prompt `promptId`, everything from it on gone for the
+   * agent, the session id kept. `dropped` are the ids of the prompts the cut drops, the picked one
+   * and every later one the agent lists: what is folded and forgotten is theirs, whether or not
+   * the picked prompt was remembered. The agent process is closed and started again with the cut, so
+   * nothing may run: `busy` when a turn, a request or background work does, with nothing done.
+   * `refused` when the agent could not cut there: the session is started again as it was. On
+   * `done`, `replies` are the messages of the replies from that prompt on that this process
+   * knows, and `known` whether it knew that prompt's replies at all (a restart forgets them).
+   */
+  async rewindConversation(
+    promptId: string,
+    dropped: readonly string[],
+  ): Promise<{
+    readonly outcome: "done" | "refused" | "busy";
+    readonly replies: readonly MessageId[];
+    readonly known: boolean;
+  }> {
+    const none = { replies: [], known: false } as const;
+    if (this.inUse || this.draining || this.closedFlag) return { outcome: "busy", ...none };
+    // (sync) With the check: from here the session reads in use, so no word starts anything
+    // beside the rewind, and the lock below keeps a queued prompt from connecting in between.
+    this.rewinding = true;
+    try {
+      const known = this.rewinds.knows(dropped);
+      const replies = this.rewinds.messagesOf(dropped);
+      const release = await this.connectLock.acquire();
+      try {
+        this.rewinds.cutAt = promptId;
+        this.rewinds.token = null;
+        await this.dropClientLocked(true);
+        try {
+          await this.connectHeld();
+          // A move to a terminal during the hold clears the cut: the rewind did not stand.
+          // The process just started holds the cut, and the next prompt would make it stick.
+          // Closed at once: the terminal already uses the session id, as in `moveToTerminal`.
+          if (this.rewinds.cutAt !== promptId) {
+            await this.dropClientLocked(false);
+            return { outcome: "refused", ...none };
+          }
+        } catch (error) {
+          this.dropCut();
+          if (!(error instanceof RewindRefused)) throw error;
+          await this.connectHeld();
+          return { outcome: "refused", ...none };
+        }
+      } catch (error) {
+        this.dropCut();
+        throw error;
+      } finally {
+        release();
+        await this.announceUnsaved();
+      }
+      // The saved message may lie in the range just dropped, and so may a turn's edits.
+      this.saved = null;
+      this.rewinds.forgetIds(dropped);
+      this.turnChanges.forgetIds(dropped);
+      return { outcome: "done", replies, known };
+    } finally {
+      this.rewinding = false;
+    }
+  }
+
+  /** `effort` when the agent takes it at a start; null for none, and for a level it does not know. */
+  private validEffort(effort: string | null): string | null {
+    return effort !== null && this.deps.agent.capabilities.effortLevels.includes(effort)
+      ? effort
+      : null;
+  }
+
+  /**
+   * Set `wanted` on `client`; the mode now in force, which is the default one when the agent
+   * refuses to return to auto. Throws `SessionClosed` when a close took the client mid-call.
+   */
+  private async applyMode(client: AgentSession, wanted: string): Promise<string> {
+    const modes = this.deps.agent.capabilities.permissionModes;
+    let mode = wanted;
+    try {
+      try {
+        await client.setPermissionMode(mode);
+      } catch (error) {
+        if (mode !== modes.auto || this.closedFlag) throw error;
+        // Claude Code refuses auto mode to a session that does not meet its requirements (a
+        // model without it, measured), and the refusal leaves bypass running: off then lands
+        // on the mode the agent itself starts in when auto mode is unavailable.
+        logger.warning(
+          `could not return ${this.where} to auto mode, setting default: ${errorName(error)}`,
+        );
+        mode = modes.default;
+        await client.setPermissionMode(mode);
+      }
+    } catch (error) {
+      if (this.closedFlag) throw new SessionClosed(); // the close disconnected the client under the call
+      throw error;
+    }
+    return mode;
+  }
+
+  async setBypass(on: boolean): Promise<void> {
+    const client = await this.ensureConnected();
+    const mode = await this.applyMode(client, this.modeFor(on));
+    this.clientBypass = on;
+    this.mode = mode;
+    // The session closed while the mode was being set: the thread this would write to may
+    // already be gone, so the switch is never recorded after the fact.
+    if (this.closedFlag) throw new SessionClosed();
+    this.deps.state.setBypass(this.channelId, this.threadId, on);
+  }
+
+  /**
+   * Whether the session runs in the agent's plan mode, as the agent last reported it. Session
+   * only: a reconnect starts in the thread's normal mode (`ensureConnected`) and nothing is
+   * stored.
+   */
+  get planning(): boolean {
+    const plan = this.deps.agent.capabilities.permissionModes.plan;
+    return plan !== null && this.mode === plan;
+  }
+
+  /**
+   * The mode `!plan off` returns to: bypass when the thread's is on, else the mode the agent
+   * started in, and the default one when that was plan itself (the owner's settings start the
+   * folder in plan: setting it again would leave plan mode running).
+   */
+  private modeAfterPlan(plan: string): string {
+    const mode = this.modeFor(this.bypass);
+    return mode === plan ? this.deps.agent.capabilities.permissionModes.default : mode;
+  }
+
+  /**
+   * `!plan` or `!plan off` typed in the thread: true once switched, false, changing nothing,
+   * before Start. Off returns to the mode the thread would otherwise have (bypass when it is
+   * on). Like `switchBypass`, it waits for a Start being applied.
+   */
+  async switchPlan(on: boolean): Promise<boolean> {
+    const plan = this.deps.agent.capabilities.permissionModes.plan;
+    // Before anything is sent: the agent has no plan mode to go into or leave.
+    if (plan === null) throw new PlanUnavailable();
+    const release = await this.setupLock.acquire();
+    try {
+      if (this.beforeStart) return false;
+      const client = await this.ensureConnected();
+      this.mode = await this.applyMode(client, on ? plan : this.modeAfterPlan(plan));
+      return true;
+    } finally {
+      release();
+    }
+  }
+
+  /**
+   * `!bypass on` or `off` typed in the thread: switch and store it, true; or false, changing
+   * nothing, before Start (`beforeStart`). A Start being applied is waited for, so the word,
+   * typed after the click, is what holds; one that failed has undone itself by then, and the
+   * word is refused.
+   */
+  async switchBypass(on: boolean): Promise<boolean> {
+    // Before anything is stored or sent: there is no mode to switch to, or to come back from.
+    if (this.bypassMode === null) throw new BypassUnavailable();
+    const release = await this.setupLock.acquire();
+    try {
+      if (this.beforeStart) return false;
+      await this.setBypass(on);
+      return true;
+    } finally {
+      release();
+    }
+  }
+
+  /**
+   * No turn was ever queued in this thread: its next message is a first prompt, which asks for
+   * the setup again (after a cancelled setup or a hold's Cancel, nothing was sent).
+   */
+  get neverRan(): boolean {
+    const stored = this.deps.state.thread(this.channelId, this.threadId);
+    return !this.submitted && (stored === null || stored.sessionId === null);
+  }
+
+  /**
+   * No first prompt was sent and no Start applied: the setup's Bypass box is what sets bypass,
+   * and `applySetup` writes it over anything set before.
+   */
+  get beforeStart(): boolean {
+    return this.neverRan && !this.setupApplied;
+  }
+
+  /**
+   * Apply the owner's session setup before the first prompt. Start is authoritative: the
+   * effort and the bypass switch are written from the choice whatever state.json held (a
+   * restart can have left either; `!bypass` is refused before Start), so what runs is what the
+   * summary line says. An effort the live client does not run at is set on it when the back end
+   * can (`liveEffort`), and goes through a fresh client when it cannot (no prompt has been
+   * sent, so no session is lost); then the model on the live client, then the permission mode:
+   * when the choice differs from what the client effectively runs (the switch, or a folder
+   * whose own settings start it in bypass), `setBypass` moves it. Unticking in such a folder is
+   * an explicit off with the semantics of `!bypass off`: the mode it returns to is the default
+   * one. Measured 2026-09-30 (CLI 2.1.285): a model set on the live session survives a resume
+   * and leaves the owner's own default alone, so the daemon does not store the model. A failure
+   * undoes what was applied (`forgetSetup`) and goes on. All of it under the setup lock, which
+   * a word's `switchBypass` waits on.
+   */
+  async applySetup(choice: Choice): Promise<void> {
+    const release = await this.setupLock.acquire();
+    try {
+      this.setupApplied = true;
+      this.applying = true;
+      const effort = choice.effort === DEFAULT ? null : choice.effort;
+      try {
+        this.deps.state.setEffort(this.channelId, this.threadId, effort);
+        this.deps.state.setBypass(this.channelId, this.threadId, choice.bypass);
+        let client = await this.ensureConnected();
+        if (effort !== this.clientEffort) {
+          if (this.deps.agent.capabilities.liveEffort && client.setEffort !== undefined) {
+            await this.changeEffort(client.setEffort.bind(client), effort);
+          } else client = await this.reconnect();
+        }
+        if (choice.model !== DEFAULT && this.deps.agent.capabilities.models) {
+          await client.setModel(choice.model);
+        }
+        if (choice.bypass !== this.clientBypass) {
+          // A client connected above applies the stored switch itself: this only moves one that
+          // was already live, off meaning the mode it would have had without bypass.
+          await this.setBypass(choice.bypass);
+        }
+      } catch (error) {
+        try {
+          await this.forgetSetup();
+        } catch (undo) {
+          logger.warning(`could not undo a failed setup in ${this.where}: ${errorName(undo)}`);
+        }
+        throw error;
+      }
+    } finally {
+      this.applying = false;
+      release();
+    }
+  }
+
+  /**
+   * Set the stored effort on the live client: what the session knows of the level is left as a
+   * connect with that stored level leaves it.
+   */
+  private async changeEffort(
+    setEffort: (level: string | null) => Promise<void>,
+    effort: string | null,
+  ): Promise<void> {
+    const level = this.validEffort(effort);
+    if (effort !== null && level === null) {
+      logger.warning(`dropped an unrecognized stored effort level in ${this.where}`);
+    }
+    await setEffort(level);
+    this.clientEffort = effort;
+    this.effortSetting = level;
+    this.effort = null;
+    this.effortReported = level !== null;
+    this.effortUnsupported = false;
+  }
+
+  /**
+   * Undo a Start whose message was not sent (a failure, a stop, a hold's Cancel, or a restart
+   * that kept what it wrote): the stored effort and bypass go back to never chosen, and the
+   * client is dropped, since it carries the effort, the model and the mode, which the next
+   * connect rebuilds. A no-op for a thread that ran a turn (its choices are the owner's) and
+   * when there is nothing to undo.
+   */
+  async forgetSetup(): Promise<void> {
+    const stored = this.deps.state.thread(this.channelId, this.threadId);
+    const left = stored !== null && (stored.effort !== null || stored.bypass !== null);
+    if (!this.neverRan || !(this.setupApplied || left)) return;
+    this.setupApplied = false;
+    this.deps.state.setEffort(this.channelId, this.threadId, null);
+    this.deps.state.setBypass(this.channelId, this.threadId, null);
+    // The process has saved nothing worth a notice before the first turn, and a wait would
+    // add its exit to every new thread's start.
+    await this.dropClient(false);
+  }
+
+  /**
+   * Close the live client and connect again, so `ensureConnected` starts it from state as it
+   * is now: the way to a new effort for a back end that cannot change it live.
+   */
+  private async reconnect(): Promise<AgentSession> {
+    await this.dropClient(true);
+    return this.ensureConnected();
+  }
+
+  /**
+   * Before the owner's message reaches the session: the turns another process, a terminal,
+   * wrote after the last message this session saved. When something was, the live process,
+   * which never sees it, is closed, so the next connect resumes the record with it (a process
+   * that loaded the session before would branch it, measured 2026-10-27). Not while a turn or
+   * background work runs here, which the close would cut: the turns are still shown. Empty
+   * when the agent cannot tell, or nothing was written.
+   */
+  async takeForeignTurns(): Promise<readonly ForeignTurn[]> {
+    const { agent } = this.deps;
+    const saved = this.saved;
+    const sessionId = this.deps.state.thread(this.channelId, this.threadId)?.sessionId ?? null;
+    if (!agent.capabilities.foreignTurns || agent.turnsAfter === undefined) return [];
+    if (saved === null || sessionId === null || this.busy) return [];
+    let found: ForeignTurns;
+    try {
+      found = await agent.turnsAfter(this.directory, sessionId, saved);
+    } catch (error) {
+      logger.warning(`could not read what a terminal wrote in ${this.where}: ${errorName(error)}`);
+      return [];
+    }
+    if (!found.changed) return [];
+    if (found.last !== null) this.saved = found.last;
+    const turns = this.shownTurns(found);
+    this.movedMidTurn = false;
+    // Decided under the connect lock, after the read: a turn the agent opened by itself
+    // meanwhile (a report, a loop's run) is never cut, and no start runs beside the close.
+    const release = await this.connectLock.acquire();
+    try {
+      if (this.client !== null && this.idle && !this.injectedExpected && !this.reporting) {
+        // No wait: the terminal already uses the same session id.
+        await this.dropClientLocked(false);
+      }
+    } finally {
+      release();
+    }
+    await this.announceUnsaved();
+    return turns;
+  }
+
+  /**
+   * A turn going on with no typed prompt is shown only after a move cut one: anything else with
+   * no prompt before it is this process's own, saved late.
+   */
+  private shownTurns(found: ForeignTurns): readonly ForeignTurn[] {
+    return this.movedMidTurn ? found.turns : found.turns.filter((turn) => turn.prompt !== null);
+  }
+
+  /**
+   * What runs here in the background (`1 shell · 2 agents`) while a terminal wrote turns this
+   * process never saw: sending beside it would branch the session, and `takeForeignTurns` does
+   * not cut the work to resume. Empty when nothing runs, a turn runs here, nothing was written,
+   * or the agent cannot tell. Reads only: the record's place is not moved.
+   */
+  async writtenBesideWork(): Promise<string> {
+    const { agent } = this.deps;
+    const running = this.stillRunning;
+    const saved = this.saved;
+    const sessionId = this.deps.state.thread(this.channelId, this.threadId)?.sessionId ?? null;
+    if (running === "" || this.busy || this.client === null) return "";
+    if (!agent.capabilities.foreignTurns || agent.turnsAfter === undefined) return "";
+    if (saved === null || sessionId === null) return "";
+    let found: ForeignTurns;
+    try {
+      found = await agent.turnsAfter(this.directory, sessionId, saved);
+    } catch (error) {
+      logger.warning(`could not read what a terminal wrote in ${this.where}: ${errorName(error)}`);
+      return "";
+    }
+    return found.changed && this.shownTurns(found).length > 0 ? running : "";
+  }
+
+  /**
+   * The owner chose to stop the background work so his message reaches what a terminal wrote:
+   * the work ends with the process, drawn as `!stop` draws it, and the next connect resumes the
+   * record. The ✅ is the owner's own act, as a `!stop`'s: the sweep after the ends would
+   * otherwise tell him of an end he made. Nothing when a turn started here meanwhile: the
+   * caller waits for its end and looks again.
+   */
+  async stopForTerminal(): Promise<void> {
+    const client = this.client;
+    if (client === null || this.busy) return;
+    const tasks = this.background ? this.runningTaskIds() : [];
+    if (tasks.length > 0 && (await this.endWithProcess(client, tasks))) {
+      this.react("done", { byOwner: true });
+    }
+  }
+
+  /**
+   * Under the `!status` line that opens the session in the terminal: what writing there now
+   * would split, while a turn or background work runs here (two processes on one session
+   * branch it, measured 2026-10-27).
+   */
+  private terminalWarnings(): string[] {
+    const warnings: string[] = [];
+    if (this.busy) {
+      warnings.push(
+        this.deps.agent.words.terminalContinue === null
+          ? texts.STATUS_TERMINAL_TURN
+          : texts.STATUS_TERMINAL_TURN_MOVE,
+      );
+    }
+    const running = this.runningKindsOf();
+    if (running) warnings.push(texts.fill(texts.STATUS_TERMINAL_BACKGROUND, { counts: running }));
+    return warnings;
+  }
+
+  private async dropClient(awaitExit: boolean): Promise<void> {
+    const release = await this.connectLock.acquire();
+    try {
+      await this.dropClientLocked(awaitExit);
+    } finally {
+      release();
+    }
+    await this.announceUnsaved();
+  }
+
+  /**
+   * `dropClient` for a caller that holds the connect lock. What the agent reports it could not
+   * save is kept: the caller posts it with `announceUnsaved` once it let go of the lock.
+   */
+  private async dropClientLocked(awaitExit: boolean): Promise<void> {
+    this.settleGoalDebt();
+    const reader = this.reader;
+    this.reader = null;
+    const client = this.client;
+    this.client = null;
+    if (reader !== null) {
+      reader.cancel();
+      await reader.settled();
+    }
+    if (client !== null) await this.disconnect(client, awaitExit);
+  }
+
+  /**
+   * During a stop: bring the thread's activity line up to date. Once only background tasks are
+   * left it says which ones the restart waits for (`threadActivity`), since only the owner knows
+   * whether a task (a dev server, a watcher) ever ends. A line and not a message: a message
+   * would notify, and would stay in the thread after the restart. Where the chat refuses this
+   * app an activity line, a message says it, once: a restart that waits without a word is worse
+   * than one notification.
+   */
+  async showRestartWait(): Promise<void> {
+    this.showThreadStatus();
+    // No call when the root already shows it. A ❌ shown with ⏳ kept in the state (a reply that
+    // never landed) stands.
+    if (this.reacts && this.lastStatus === "working" && !this.errorStanding) {
+      this.thread.showStatus?.(this.rootStatus("working"))?.catch(() => {});
+    }
+    if (!this.deps.chat.capabilities.activityLine) return;
+    if (this.thread.activityRefused !== true || this.toldWaiting || this.busy) return;
+    const held = this.runningKindsOf({ awaitedOnly: true });
+    if (held) {
+      this.toldWaiting = true;
+      await this.post(texts.fill(texts.RESTART_WAITS_MESSAGE, { counts: held }));
+    }
+  }
+
+  /**
+   * The thread as this session writes it. What a flow posts through it, outside the session,
+   * counts as written here: the chat sets the activity line again.
+   */
+  get threadChat(): ThreadChat {
+    return this.thread;
+  }
+
+  /**
+   * A message of the app's was posted in this thread outside the session: the chat clears a
+   * thread's activity line when the app replies, so it is set again.
+   */
+  threadWritten(): void {
+    this.thread.written();
+  }
+
+  /**
+   * Interrupt the running turn, deny its pending approvals and stop this thread's background
+   * tasks. Every turn of this session not yet sent to the agent is dropped with a note: the
+   * queued ones, and the one the worker has taken while the process starts. A hold open in this
+   * thread is always cancelled too, silently (whoever waits on it tells the owner `Not sent.`
+   * once it wakes). Null when the only effects were a hold cancelled or turns dropped: the
+   * owner already reads `Not sent.` or the note, and a further notice would only repeat it.
+   */
+  async stop(): Promise<boolean | null> {
+    // (sync) With no hold open, nothing waits between the call and the lines below.
+    const hold = this.deps.holds.cancel(this.channelId, this.threadId);
+    const queued = this.takeQueued();
+    const caught = this.taken;
+    let dropping: Promise<void> = Promise.resolve();
+    if (caught !== null) {
+      // One note, naming the taken turn first: the worker posts it when it ends that turn.
+      this.stopTaken = caught;
+      this.stopQueued = queued;
+    } else dropping = this.dropStopped(queued);
+    let stopped: boolean | null;
+    try {
+      stopped = await this.stopWork(hold);
+    } finally {
+      await dropping;
+    }
+    if (stopped !== false || (queued.length === 0 && caught === null)) return stopped;
+    // Only submitted turns were dropped. A taken one is dropped by the worker, which then ends
+    // the root; the queued ones end it here, as a stopped shell does.
+    await this.reactDoneIfIdle(undefined, { byOwner: true });
+    return null;
+  }
+
+  private async stopWork(hold: Pending | null): Promise<boolean | null> {
+    const held = hold !== null;
+    if (hold !== null) await this.deleteRequest(hold.messageId);
+    // A shell command of the owner's that runs is stopped like a turn, and the rest still stops.
+    const shell = this.shellStop !== null;
+    this.shellStop?.abort();
+    if (shell) this.react("done", { byOwner: true });
+    const client = this.client;
+    if (client === null) return shell ? true : held ? null : false;
+    const tasks = this.background ? this.runningTaskIds() : [];
+    // A task that has just ended by itself leaves the agent about to open the turn that reports
+    // it (1.3 to 1.8 s later, measured on Claude Code 2.1.302), and carry on from
+    // there: that is still work to stop.
+    const reportOwed = this.injectedExpected || this.reporting;
+    if (!this.busy && tasks.length === 0 && !reportOwed) {
+      // A Start being applied may be inside the agent's own model command, a turn no reply
+      // shows: the interrupt ends it, and the setup then fails into `forgetSetup`, which the
+      // cancelled hold turns into `Not sent.`
+      if (held && this.applying) await this.interruptApplied(client);
+      return shell ? true : held ? null : false;
+    }
+    // What the agent said it was doing is void once the owner stops it. It says `idle` only
+    // after an interrupted turn's result (recorded 2026-10-14), and no recording holds what it
+    // says after a task stopped with no turn running. Its next word counts again.
+    this.agentState = null;
+    this.showThreadStatus();
+    // Only background tasks, or the report of one, are left. Stopping them one by one makes the
+    // agent open a turn of its own to react 1-2 s later and carry on; closing its
+    // process ends them all for good, and the owner's next message resumes the session.
+    if (!this.busy && (await this.endWithProcess(client, tasks))) {
+      this.react("done", { byOwner: true });
+      return true;
+    }
+    // A denial `denyAll` triggers below resolves `askOwner`'s own wait, whose `finally`
+    // would otherwise race this method's own closing ✅ back to working; this flag makes it
+    // skip that instead. `finish` or `abandon` clears it once this turn's own tail ends.
+    // With prompts sent and no turn yet, the next turn is not the one this stop cut (it may not
+    // even exist): it reacts working as any turn does, and its end owes the root a ✅.
+    // (An open request means a turn runs, whatever `active` says yet.)
+    const gap =
+      this.deps.agent.capabilities.promptDuringTurn &&
+      this.active === null &&
+      this.pending.length > 0 &&
+      !this.waitingForOwner;
+    if (gap) {
+      this.stopInGap = true;
+      // In the same stretch as the interrupt, before any prompt the owner writes after it: only
+      // what the agent was sent before the interrupt can be cut with the turn.
+      if (this.deps.agent.capabilities.declaredState) {
+        this.gapSent.push(...this.sent.filter((turn) => !this.gapSent.includes(turn)));
+      }
+    } else this.interrupting = true;
+    this.stopTail = this.stopTail ?? new Event();
+    for (const pending of this.deps.approvals.denyAll(this.channelId, this.threadId)) {
+      await this.deleteRequest(pending.messageId);
+    }
+    try {
+      await client.interrupt();
+    } catch (error) {
+      // A query already closed refuses the request; the tasks below still stop.
+      logger.warning(`could not interrupt ${this.where}: ${errorName(error)}`);
+    }
+    for (const taskId of tasks) {
+      this.stopped.add(taskId);
+      try {
+        await client.stopTask?.(taskId);
+      } catch (error) {
+        // it may have ended meanwhile; the others still stop
+        logger.warning(`could not stop a task in ${this.where}: ${errorName(error)}`);
+      }
+    }
+    // A stop the owner gave is not an error, and he is not told of it: he has just given it.
+    // `react` clears `errorStanding`, so a later idle sweep shows the same ✅ and `setStatus`
+    // drops the persisted ⏳. A turn that began meanwhile after a stop in the gap owns the root's
+    // status now, and its end sets the ✅.
+    if (!(gap && this.active !== null)) this.react("done", { byOwner: true });
+    return true;
+  }
+
+  /**
+   * What the live session has loaded (`loadedContext`), for `!memory` and `!skills`; its process
+   * is started when it has none, as `!help` does for the commands. Called only with the
+   * capability; a session that declares it and lacks the member is an error, never an empty list.
+   */
+  async loaded(): Promise<LoadedContext> {
+    const client = await this.ensureConnected();
+    if (client.loaded === undefined) throw new Error("the agent session lists nothing it loaded");
+    return client.loaded();
+  }
+
+  /** What still runs here in the background (`1 shell · 2 agents`), or empty. */
+  get stillRunning(): string {
+    return this.runningKindsOf();
+  }
+
+  /**
+   * `!terminal`: close this session's process so a terminal takes the session up. A turn
+   * running here is cut by the close without an interrupt, so the terminal continues it by
+   * itself (the agent's `words.terminalContinue`); its reply ends with a line saying where it
+   * went, and the messages queued behind it are not sent. Background work ends with the
+   * process, drawn as `!stop` draws it. The session keeps its thread, id, bypass and effort:
+   * the next message resumes it. `cut` when a turn was cut, `idle` otherwise.
+   */
+  async moveToTerminal(): Promise<"cut" | "idle"> {
+    // The terminal resumes the whole record (it ignores a cut), and what it writes lands after it.
+    const waited = this.rewinds.cutAt !== null;
+    this.dropCut();
+    if (waited) {
+      try {
+        await this.post(texts.REWIND_DROPPED_TERMINAL);
+      } catch {
+        // The move goes on; the owner is told when the chat takes the line.
+      }
+    }
+    const hold = this.deps.holds.cancel(this.channelId, this.threadId);
+    if (hold !== null) await this.deleteRequest(hold.messageId);
+    // Work on its way to the agent is work to cut too: a turn taken or queued, a start in
+    // progress, a shell command of the owner's, whose end would start a process again.
+    const sending =
+      this.taken !== null ||
+      !this.queue.empty ||
+      this.pendingSubmits > 0 ||
+      this.shellStop !== null;
+    const client = this.client;
+    if (!this.busy && !sending) {
+      if (client === null) return "idle";
+      const tasks = this.background ? this.runningTaskIds() : [];
+      if (tasks.length > 0 && (await this.endWithProcess(client, tasks))) {
+        this.react("done", { byOwner: true });
+        return "idle";
+      }
+      const release = await this.connectLock.acquire();
+      try {
+        if (this.idle) {
+          await this.dropClientLocked(false);
+          return "idle";
+        }
+      } finally {
+        release();
+        await this.announceUnsaved();
+      }
+    }
+    // A turn that started while the idle path waited for the lock is cut too, and said so.
+    const cut = this.busy;
+    this.agentState = null;
+    // (sync) As a stop: no handler's `finally` shows working over the end below.
+    this.interrupting = true;
+    this.shellStop?.abort();
+    const requests = this.requestMessages();
+    try {
+      // The worker waits on the cut turn (or holds the connect lock through a start) and the
+      // reader would draw what the process still says: both go before the process does, which
+      // then ends with the turn unfinished. Cancelled again under the lock, as `close` does: a
+      // start that finished meanwhile left a reader.
+      await this.cancelTasks();
+      const release = await this.connectLock.acquire();
+      try {
+        await this.cancelTasks();
+        await this.dropClientLocked(false);
+      } finally {
+        release();
+        await this.announceUnsaved();
+      }
+      // Answered once the process is gone, so no denial reaches the turn the terminal continues.
+      await this.settleRequests(requests);
+      const taken = this.taken;
+      this.taken = null;
+      this.stopTaken = null;
+      const unsent = taken === null ? [] : [taken];
+      unsent.push(...this.takeQueued());
+      await this.abandon(cut ? texts.MOVED_TO_TERMINAL : texts.MOVED_BEFORE_SENT, {
+        more: unsent,
+        because: texts.BECAUSE_MOVED,
+        callsStopped: true,
+      });
+      await this.leaveLoop().catch(() => {});
+      if (cut) this.movedMidTurn = true;
+    } finally {
+      this.interrupting = false;
+      this.react("done", { byOwner: true });
+      this.idleTimerCheck();
+    }
+    return cut ? "cut" : "idle";
+  }
+
+  /**
+   * Close the agent's process, which ends its background tasks (measured 2026-10-18, Claude
+   * Code 2.1.302: none survives), and draw each task's end as the agent would report it. The
+   * session keeps its thread, id, bypass and effort: `ensureConnected` resumes it. False, with
+   * nothing done, when a turn started while this waited for the lock.
+   */
+  private async endWithProcess(client: AgentSession, tasks: readonly string[]): Promise<boolean> {
+    // Held until the ends are drawn: a process resumed meanwhile would deliver its own word on
+    // the lost tasks into the middle of them.
+    const release = await this.connectLock.acquire();
+    // The reader kept dispatching while the lock was taken: a report turn that started meanwhile
+    // is a running turn, which the caller interrupts instead. From here to the reader's cancel in
+    // `dropClientLocked` nothing awaits, so no turn can start in between.
+    if (this.busy) {
+      release();
+      return false;
+    }
+    try {
+      for (const taskId of tasks) this.stopped.add(taskId);
+      // The footer the stop draws names the model and the context. The read starts while the
+      // process lives, and the close does not wait for it: a CLI that never answers a control
+      // request would hold the lock for good, and the SDK rejects a request still pending when
+      // the query closes (sdk.mjs 0.3.302). Used only if it answered before the process ended.
+      let answered = false;
+      void client.contextUsage().then(
+        (usage) => {
+          this.closingContext = usage;
+          answered = true;
+        },
+        () => {},
+      );
+      this.interrupting = true;
+      await this.dropClientLocked(false);
+      await this.leaveLoop().catch(() => {});
+      // An approval a background agent waits on goes with the process, as in a stopped turn.
+      for (const pending of this.deps.approvals.denyAll(this.channelId, this.threadId)) {
+        await this.deleteRequest(pending.messageId);
+      }
+      if (!answered) {
+        this.closingContext = null;
+        logger.warning(`the context usage did not answer before the stop closed ${this.where}`);
+      }
+      for (const taskId of tasks) {
+        await this.dispatch({
+          type: "task_ended",
+          taskId,
+          status: "stopped",
+          summary: "",
+          durationMs: null,
+          callId: null,
+          report: null,
+          reportSent: false,
+          foldNamed: false,
+        });
+      }
+      // A report the agent was about to open, or a task's notification still on its way, went
+      // with the process: what waited on them ends now, as when none comes. A
+      // resumed process's word on such a task is not shown, as for a stopped one.
+      for (const taskId of this.unreported.keys()) this.stopped.add(taskId);
+      this.unreported.clear();
+      for (const expiry of this.expiring) expiry.cancel();
+      this.notificationWaits = false;
+      // The end these draw is the owner's `!stop`: he is not told of it.
+      if (this.injectedExpected) {
+        this.expiry?.cancel();
+        await this.reportNotComing(undefined, { byOwner: true });
+      } else {
+        await this.sweepClosedOut(undefined, { unreported: true });
+        await this.reactDoneIfIdle(undefined, { byOwner: true });
+      }
+    } finally {
+      this.interrupting = false;
+      this.closingContext = null;
+      release();
+      await this.announceUnsaved();
+    }
+    this.idleTimerCheck();
+    return true;
+  }
+
+  private async interruptApplied(client: AgentSession): Promise<void> {
+    try {
+      await client.interrupt();
+    } catch (error) {
+      logger.warning(`could not interrupt a setup in ${this.where}: ${errorName(error)}`);
+    }
+  }
+
+  /**
+   * Return once the reply `stop()` cut short has ended, so what is posted next sits under its
+   * ending and its footer. Waits at most STOP_TAIL_WAIT, and not at all when the stop
+   * interrupted no turn (it stopped background tasks only).
+   */
+  async stopLanded(): Promise<void> {
+    const tail = this.stopTail;
+    if (tail === null || tail.isSet) return;
+    const waiting = new AbortController();
+    try {
+      await Promise.race([
+        tail.wait(waiting.signal),
+        this.deps.clock.sleep(STOP_TAIL_WAIT, waiting.signal),
+      ]);
+    } finally {
+      waiting.abort(new Cancelled()); // whichever of the two still waits leaves
+    }
+  }
+
+  /**
+   * A channel's stop ends the goals too, which a thread's stop leaves set, as the terminal's Esc
+   * does (the maintainer, 2026-10-21). Called in the stop's synchronous start: from here no
+   * prompt reaches the agent before the goal is dropped (`payGoal`), whatever the stop awaits.
+   * The prompts sent before the stop still run, extended by the goal (docs/limits.md).
+   */
+  oweGoalDrop(): void {
+    const client = this.client;
+    if (
+      client === null ||
+      client.clearGoal === undefined ||
+      !this.deps.agent.capabilities.goals ||
+      !this.goalCleared.isSet
+    ) {
+      return;
+    }
+    this.goalCleared.clear();
+    this.goalDrop = new Task((signal) => this.payGoal(client, signal));
+  }
+
+  /**
+   * The channel stop's answer: returns once the goal is dropped when the session is idle after
+   * the stop, and at once when a turn is still to run, which pays the debt when it ends.
+   */
+  async dropGoal(): Promise<void> {
+    const drop = this.goalDrop;
+    if (drop === null) return;
+    await this.stopLanded();
+    if (this.isIdle()) await drop.settled();
+  }
+
+  /**
+   * Drops the goal of a session whose agent process is still open, on an idle session under the
+   * connect lock (as `nameCopy`): a command sent into a turn would hide its records. Whether
+   * there was a goal is not asked: one set before a restart is not known here. A closed process
+   * is not started again for it; the debt is settled and its goal resumes with the next message.
+   */
+  private async payGoal(client: AgentSession, signal: AbortSignal): Promise<void> {
+    try {
+      await this.stopLanded();
+      const release = await this.idleUnderLock(signal);
+      try {
+        if (client.clearGoal === undefined || this.closed || this.client !== client) return;
+        await cancellable(client.clearGoal(), signal);
+        this.goal = null;
+      } catch (error) {
+        if (error instanceof Cancelled) throw error;
+        logger.warning(`could not drop the goal of ${this.where}: ${errorName(error)}`);
+      } finally {
+        release();
+      }
+    } finally {
+      this.goalCleared.set();
+    }
+  }
+
+  /** A closed process is not started again for the goal: the debt ends, the goal resumes later. */
+  private settleGoalDebt(): void {
+    this.goalDrop?.cancel();
+    this.goalDrop = null;
+    this.goalCleared.set();
+  }
+
+  private stopTailEnded(): void {
+    const tail = this.stopTail;
+    this.stopTail = null;
+    tail?.set();
+  }
+
+  /**
+   * The channel's directory, session and mode, then the footer's values one per line, or why
+   * the agent cannot start. Starts the client like `!help` does, since model and context come
+   * from it.
+   */
+  async status(): Promise<string> {
+    let data: FooterFields | null = null;
+    let markedRepository: Repository | null = null;
+    let unavailable: string[] = [];
+    let gone = false;
+    let usable = true;
+    try {
+      await this.ensureConnected();
+      this.refreshUsage();
+      ({ fields: data, untrusted: markedRepository } = await this.footerData(this.sessionTokens));
+    } catch (error) {
+      // Not an answer to give: the word is refused as a message is, and nothing changed.
+      if (error instanceof StartsBlocked) throw error;
+      if (error instanceof DirectoryUnavailable) {
+        unavailable = [error.message];
+        usable = false;
+      } else if (error instanceof SessionGone) {
+        // This call is the one that found it gone: `ensureConnected` already closed the
+        // session over it, which is not the race the check below guards against.
+        unavailable = [error.message];
+        gone = true;
+      } else {
+        // the status still answers, with what a prompt would get
+        logger.warning(
+          `could not read the footer's values for the status in ${this.where}: ${errorName(error)}`,
+        );
+        unavailable = [
+          texts.fill(texts.named(texts.ERROR_REPLY, this.names), { error: errorName(error) }),
+        ];
+      }
+    }
+    // Not with a folder no session can start in: that is what the owner acts on first.
+    const untrusted = usable ? await this.untrustedLines(markedRepository) : [];
+    // The agent's title is read with the footer's values, before the check below: it is the last
+    // await of this call, so a close that came while it ran is seen.
+    const stored = this.deps.state.thread(this.channelId, this.threadId);
+    const sessionId = stored?.sessionId ?? null;
+    const title = sessionId ? await this.readTitle(sessionId) : null;
+    // A title the turn's end missed (written a moment after it) reaches the root now too.
+    if (title !== null) void this.title.refresh();
+    // The daemon closed the session (shutdown, an idle close) while this call was reading it.
+    if (this.closedFlag && !gone) throw new SessionClosed();
+    const fields = data === null ? [] : formatStatusFields(data, this.now());
+    const here = this.workingDirectory;
+    if (data !== null && here && here !== this.directory) {
+      // The branch and the changes below describe this folder, not the thread's own.
+      fields.unshift(texts.fill(texts.STATUS_WORKING, { directory: here }));
+    }
+    const running = this.runningKindsOf();
+    if (running) fields.push(texts.fill(texts.STATUS_BACKGROUND, { counts: running }));
+    for (const job of this.scheduledJobs) {
+      fields.push(
+        texts.fill(texts.STATUS_LOOP, {
+          cadence: cadenceOf(job),
+          prompt: this.deps.chat.escape(promptOf(job), "reference"),
+        }),
+      );
+    }
+    const activity = this.busy
+      ? texts.fill(texts.ACTIVITY_BUSY, { queued: this.queue.size })
+      : texts.ACTIVITY_IDLE;
+    const head = [
+      texts.fill(texts.STATUS, { directory: this.directory, session: sessionId || "new" }),
+    ];
+    // Left out with a folder the line above cannot use: its `cd` would fail there.
+    const terminal = this.deps.agent.words.terminal;
+    if (sessionId && usable && terminal !== null)
+      head.push(
+        terminalLine(terminal, this.directory, sessionId, (text) =>
+          this.deps.chat.escape(text, "reference"),
+        ),
+        ...this.terminalWarnings(),
+      );
+    if (title) {
+      head.push(
+        // On one line, as the root shows it: a title set from a pasted text may hold a break.
+        texts.fill(texts.STATUS_TITLE, {
+          title: this.deps.chat.escape(title.replace(/\s+/g, " ").trim(), "reference"),
+        }),
+      );
+    }
+    const state = texts.fill(texts.named(texts.STATUS_STATE, this.names), {
+      mode: this.bypass && !this.planning ? (this.bypassMode ?? this.mode) : this.mode,
+      // Only a turn's first event carries the version, never the start (measured).
+      version: this.cliVersion || (this.client !== null ? texts.VERSION_PENDING : "not started"),
+      activity,
+    });
+    // Last: a line after a quote would read as part of it. The root's text is the chat's own
+    // markup, shown as it was written. A message past the chat's limit is split by the chat at
+    // line breaks, and every line of the quote carries its mark.
+    const prompt = stored?.rootPrompt
+      ? [
+          texts.fill(texts.STATUS_PROMPT, {
+            quote: quoted(stored.rootPrompt, (piece) => this.deps.chat.escape(piece, "words")),
+          }),
+        ]
+      : [];
+    return [...head, state, ...fields, ...unavailable, ...untrusted, ...prompt].join("\n");
+  }
+
+  /**
+   * What tells the owner which repositories below the thread's folder still need the agent's
+   * trust; nothing for an agent that keeps no record of trust.
+   */
+  private async untrustedLines(also: Repository | null): Promise<string[]> {
+    try {
+      return await untrustedNotice(
+        this.deps.agent,
+        this.directory,
+        this.names,
+        (text) => this.deps.chat.escape(text, "reference"),
+        also,
+      );
+    } catch (error) {
+      if (error instanceof Cancelled) throw error;
+      // The status still answers, without the list.
+      logger.warning(
+        `could not look for repositories to trust in ${this.where}: ${errorName(error)}`,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * The agent's title for the session, or null when it has none or cannot be read: `!status` then
+   * leaves the line out and says nothing of it beyond a log line.
+   */
+  private async readTitle(sessionId: string): Promise<string | null> {
+    try {
+      return await this.title.read(sessionId);
+    } catch (error) {
+      logger.warning(`could not read the session's title for ${this.where}: ${errorName(error)}`);
+      return null;
+    }
+  }
+
+  private now(): number {
+    return (this.deps.now ?? Date.now)();
+  }
+
+  /**
+   * Refresh the usage limits in the background when stale; the next footer shows them. A task
+   * of its own, started after what is already due (the reader of a client just started reads
+   * its first turn's limits event before the refresh asks), and never cancelled: a refresh
+   * shares one probe across every session.
+   */
+  private refreshUsage(): void {
+    const usage = this.usage;
+    // The probe starts an agent process of its own.
+    if (usage === null || this.startsBlocked) return;
+    new Task(async () => {
+      if (await this.updatingElsewhere()) return;
+      await usage.refreshIfStale();
+    });
+  }
+
+  /** Whether another process of the machine is updating pardner (`SessionDeps.updating`). */
+  private async updatingElsewhere(): Promise<boolean> {
+    return (await this.deps.updating?.()) ?? false;
+  }
+
+  /**
+   * Stop the session. The running reply ends with a line saying why, and one note names the
+   * messages that were sent or queued and will never be answered, so no stream is left open.
+   *
+   * `doneClosing` always fires, from a `finally`: a step below failing must not leave a
+   * rebuilt session's `ensureConnected` waiting on it forever, or `closeAll` hanging at
+   * shutdown, or the manager's map holding a session nothing can ever evict.
+   */
+  async close(reason: string = texts.ENDED_SHUTDOWN, awaitExit = false): Promise<void> {
+    // (sync) Read before anything below settles it back to idle. A close that cuts anything
+    // short (a shutdown or a restart's drain, most likely: `busy` alone misses a queued or
+    // taken turn and a task that outlived its own turn, which `idle` already accounts for)
+    // gets ❌; the idle close, always called on an idle session, never does, and only finishes
+    // a change of the status still on its way (`ThreadChat.settleStatus`).
+    const cutShort = !this.idle;
+    // at the end of a stop, a session whose only unfinished work is a background
+    // task the stop does not wait for (`mayHaveOrderedRestart`) ended its turn well; the task
+    // is most likely its own wait for the new process. ✅, as `!stop` would show.
+    const onlySkipped = cutShort && this.draining && this.restartReady;
+    // the one thing this close cut was the close of a reply whose turn had ended.
+    // Its answer is whole: ✅, as that turn would have shown.
+    let endedWell = false;
+    this.closedFlag = true;
+    try {
+      // A snapshot taken before any cancellation below, not `denyAll`'s own return list read
+      // afterward: a request whose handler ends first has left `Approvals` by then, and its
+      // message must go either way. Deleting each message here does not depend on the handler
+      // ever seeing a decision.
+      const requestsToDelete = this.requestMessages();
+      // The worker may hold the connect lock while the agent starts: cancelled first.
+      await this.cancelTasks();
+      // A daemon word may be starting the client on its own. Its start finishes, then the
+      // reader it started is cancelled and its client closed below: no process outlives the
+      // session, and none resumes the session id the next one will resume.
+      const release = await this.connectLock.acquire();
+      try {
+        await this.cancelTasks();
+      } finally {
+        release();
+      }
+      await this.settleRequests(requestsToDelete);
+      // A turn the worker took but had not sent yet is in no queue.
+      const taken = this.taken;
+      this.taken = null;
+      this.stopTaken = null;
+      const unsent = taken === null ? [] : [taken];
+      unsent.push(...this.takeQueued());
+      endedWell = await this.abandon(texts.fill(texts.ENDED, { reason }), {
+        more: unsent,
+        because: texts.BECAUSE_SHUTDOWN,
+      });
+      if (this.client !== null) {
+        const client = this.client;
+        this.client = null;
+        this.settleGoalDebt();
+        // The caller says whether the process may exit on its own: a shutdown keeps its time,
+        // since closes are sequential and launchd kills the job 60 s after `bootout`.
+        await this.disconnect(client, awaitExit);
+        await this.announceUnsaved();
+      }
+    } finally {
+      if (this.predecessor !== null) {
+        // This object's own predecessor may still be mid-teardown: `ensureConnected` never ran
+        // here (this session closed with no turn ever submitted), so nothing else has waited
+        // on it yet. `doneClosing` must never fire before it does, or a session built after
+        // this one could resume the same id while an earlier one is still exiting (the chain,
+        // not just the direct predecessor, must be honoured).
+        await this.predecessor.wait();
+        this.predecessor = null;
+      }
+      // Only now, with every task cancelled: a round trip to the chat must not hold those up.
+      // A loop with runs shown is over with its session, however it closed.
+      await this.leaveLoop().catch(() => {});
+      await this.thread.close();
+      // The last chance a change still only debounced gets, and the last chance of a reply
+      // whose end failed and whose retry is still waiting: each reply once.
+      let lost = false;
+      const replies = this.openReplies();
+      for (const reply of replies) {
+        try {
+          lost = !(await reply.settle()) || lost;
+        } catch {
+          lost = true;
+        }
+      }
+      if ((onlySkipped || endedWell) && !lost) {
+        await this.setStatus("done");
+      } else if (cutShort || lost) {
+        // Awaited, not `react`. Before `doneClosing`/`onClosed`, not after: those let the
+        // manager evict this session and hand the same root to a freshly built one right away,
+        // whose own first status strips every other one: this ❌ must already be on the root
+        // before that race can even start. An answer that never reached the chat keeps the
+        // persisted status (below), so the next start's repair still says so.
+        await this.setStatus("error", { unlanded: lost });
+      } else if (this.reacts) {
+        // a session reads idle as soon as its turn ends, while its reader may
+        // still be between the two calls that move ⏳ to ✅, and `cancelTasks` above stops it
+        // there. No call when the root already reads as asked. A 🔄 asked last goes back to ⏳:
+        // the stop that waited is over, and the root must not say it after the restart.
+        if (this.lastStatus === "working" && !this.errorStanding) {
+          await this.thread.showStatus?.("working");
+        } else await this.thread.settleStatus?.();
+      }
+      // Crash repair: a graceful close is not what repair is for, whatever is
+      // still live in the chat when it ends, so this thread's fields end up empty either way.
+      // Best-effort: a failed write here must never skip `doneClosing`/`onClosed`.
+      try {
+        this.deps.state.clearRepair(this.channelId, this.threadId, { keepOpen: lost });
+        if (lost) {
+          this.deps.state.setStatusPending(this.channelId, this.threadId, "working", "error");
+        }
+      } catch (error) {
+        logger.warning(
+          `could not clear state.json's crash-repair fields for ${this.where}: ${errorName(error)}`,
+        );
+      }
+      // A start the worker gave up may still be launching: its process is closed before
+      // `doneClosing`, or a session built after this one could resume the same id meanwhile.
+      // Waited for last, so the chat is settled while the agent is still coming up.
+      await Promise.allSettled([...this.abandoned]);
+      // Only now: the agent's process (if any) has had its chance to flush and exit, or
+      // closing failed partway through and there is nothing left worth waiting for either way.
+      this.doneClosing.set();
+      this.onClosed?.();
+    }
+  }
+
+  private async cancelTasks(): Promise<void> {
+    // Every task is cancelled before any is awaited: a reader left running while the worker
+    // stops could still end a turn and record its session after a rebind. `expiring`'s own
+    // timers go too: none should outlive the session, and a stray one firing after would try
+    // to post a closing through one that is already gone.
+    const tasks = [this.worker, this.reader, this.expiry, this.idleExpiry, ...this.expiring].filter(
+      (task): task is Task => task !== null,
+    );
+    for (const task of tasks) task.cancel();
+    for (const task of tasks) await task.settled();
+  }
+
+  /**
+   * Closes `client` and keeps what the agent reported it could not save, once per client; the
+   * caller posts it with `announceUnsaved`, outside the connect lock. `awaitExit`: the agent may
+   * let its process exit on its own first (`AgentSession.close`). Never throws.
+   */
+  private async disconnect(client: AgentSession, awaitExit: boolean): Promise<void> {
+    this.suggestions.clear(this.ref);
+    try {
+      const { unsaved } = await client.close({ awaitExit });
+      if (unsaved !== null && !this.reportedClients.has(client)) {
+        this.reportedClients.add(client);
+        this.unsavedReports.push(unsaved);
+      }
+    } catch (error) {
+      logger.warning(
+        `could not close ${this.deps.agent.name} in ${this.where}: ${errorName(error)}`,
+      );
+    }
+  }
+
+  /** Posts one notice per report `disconnect` kept. A failed post is logged, never thrown. */
+  private async announceUnsaved(): Promise<void> {
+    for (const unsaved of this.unsavedReports.splice(0)) {
+      const cause = texts.UNSAVED_CAUSES[unsaved.cause];
+      const text = unsaved.conversation
+        ? texts.fill(texts.named(texts.UNSAVED_CONVERSATION, this.names), { cause }) +
+          (unsaved.settings ? ` ${texts.UNSAVED_SETTINGS_TOO}` : "")
+        : texts.fill(texts.named(texts.UNSAVED_SETTINGS, this.names), { cause });
+      try {
+        await this.post(text);
+      } catch (error) {
+        logger.warning(`could not post a notice in ${this.where}: ${errorName(error)}`);
+      }
+    }
+  }
+
+  private async connect(
+    sessionId: string | null,
+    effort: string | null,
+    signal?: AbortSignal,
+  ): Promise<AgentSession> {
+    const valid = this.validEffort(effort);
+    const forkOf = this.deps.state.thread(this.channelId, this.threadId)?.forkOf;
+    if (effort !== null && valid === null) {
+      logger.warning(`dropped an unrecognized stored effort level in ${this.where}`);
+    }
+    const start = (rewindTo: string | null, rewindToken: string | null) =>
+      this.deps.agent.start(
+        {
+          folder: this.directory,
+          resume: sessionId,
+          // A copy `!fork` made is started as the terminal starts its copy, every time.
+          ...(forkOf != null && { forkOf }),
+          model: null,
+          // A model set by command survives a resume by itself (measured); the effort a command
+          // set does not, so the daemon stores it per thread and passes it back here.
+          effort: valid,
+          // The cut of a rewind, until a prompt is sent after it: the agent keeps it only then.
+          ...(rewindTo !== null && { rewindTo }),
+          ...(rewindTo !== null && rewindToken !== null && { rewindToken }),
+        },
+        {
+          permission: (request, signal) =>
+            this.answering(request, signal) as Promise<PermissionAnswer>,
+          question: (request, signal) => this.answering(request, signal) as Promise<QuestionAnswer>,
+        },
+        this.daemonActions(),
+      );
+    const cut = sessionId === null ? null : this.rewinds.cutAt;
+    const starting = cut === null ? start(null, null) : this.startCut(cut, start);
+    try {
+      return await cancellable(starting, signal);
+    } catch (error) {
+      if (signal?.aborted) {
+        // The start goes on by itself: a process nobody holds is closed when it is there, and
+        // `close` waits for that.
+        const closing = starting.then(
+          async (client) => {
+            await this.disconnect(client, false);
+            await this.announceUnsaved();
+          },
+          () => {},
+        );
+        this.abandoned.add(closing);
+        closing.finally(() => this.abandoned.delete(closing));
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * What the model may ask the daemon to do: only when the agent declares it, and a member only
+   * when the chat can serve it. Undefined when no member is present, so no tool is offered empty.
+   */
+  private daemonActions(): DaemonActions | undefined {
+    if (!this.deps.agent.capabilities.daemonActions) return undefined;
+    const limit = this.deps.chat.fileLimit;
+    const { share } = this.thread;
+    if (!this.deps.chat.capabilities.fileUpload || limit === undefined || share === undefined) {
+      return undefined;
+    }
+    const target = { share: share.bind(this.thread), written: () => this.thread.written() };
+    return {
+      // Read at the call: `folder_changed` moves the working folder.
+      share: (path, signal) =>
+        shareFile(
+          this.directory,
+          this.workingDirectory ?? this.directory,
+          target,
+          limit,
+          path,
+          signal,
+        ),
+    };
+  }
+
+  /** No cut waits any more: it was kept, or it can no longer be asked for. */
+  private dropCut(): void {
+    this.rewinds.drop();
+    this.storeCut(null);
+  }
+
+  /**
+   * Stores the waiting cut. A failed write costs only what a restart would then lose, or a cut the
+   * agent refuses by its token, so it fails neither a start nor a prompt already sent.
+   */
+  private storeCut(cut: PendingCut | null): void {
+    try {
+      this.deps.state.setPendingCut(this.channelId, this.threadId, cut);
+    } catch (error) {
+      logger.warning(`could not store the rewind's cut in ${this.where}: ${errorName(error)}`);
+    }
+  }
+
+  /**
+   * A start with the cut of a rewind. A refusal is the rewind's to tell when it asked for the
+   * start; otherwise (the cut is asked again after an idle close) the thread goes on with the
+   * whole conversation, as the agent leaves it.
+   */
+  private async startCut(
+    cut: string,
+    start: (rewindTo: string | null, rewindToken: string | null) => Promise<AgentSession>,
+  ): Promise<AgentSession> {
+    try {
+      const client = await start(cut, this.rewinds.token);
+      // The token stands for the conversation as the cut found it: asked again, the agent
+      // refuses the cut once someone else wrote to the session.
+      // A move to a terminal during the start dropped the cut: it stays dropped.
+      if (this.rewinds.cutAt === cut) {
+        this.rewinds.token ??= client.rewindToken ?? null;
+        this.storeCut({ at: cut, token: this.rewinds.token });
+      }
+      return client;
+    } catch (error) {
+      if (!(error instanceof RewindRefused)) throw error;
+      this.dropCut();
+      if (this.rewinding) throw error;
+      logger.warning(`the agent refused to cut the conversation again in ${this.where}`);
+      try {
+        await this.post(texts.REWIND_DROPPED);
+      } catch {
+        // The owner is told when the chat takes it; the thread goes on either way.
+      }
+      return start(null, null);
+    }
+  }
+
+  /** The messages of this thread's open requests, read before anything settles them. */
+  private requestMessages(): Array<MessageId | null> {
+    return this.deps.approvals
+      .pendingIn(this.channelId, this.threadId)
+      .map((pending) => pending.messageId);
+  }
+
+  /**
+   * Deny this thread's open requests and withdraw their messages (`messages`, a snapshot
+   * `requestMessages` took earlier: a handler that ends first has left `Approvals` by then, and
+   * its message must go either way).
+   */
+  private async settleRequests(messages: readonly (MessageId | null)[]): Promise<void> {
+    this.deps.approvals.denyAll(this.channelId, this.threadId);
+    // The denial above resolves each handler of a request, and each is awaited to its end.
+    await Promise.allSettled([...this.asking]);
+    for (const messageId of messages) await this.deleteRequest(messageId);
+  }
+
+  /** A request handler in flight, tracked so that a close can wait for it. */
+  private answering(
+    request: PermissionRequest | QuestionRequest,
+    signal: AbortSignal,
+  ): Promise<Decision> {
+    const answer = this.askOwner(request, signal);
+    this.asking.add(answer);
+    const forget = () => this.asking.delete(answer);
+    answer.then(forget, forget);
+    return answer;
+  }
+
+  private async work(signal: AbortSignal): Promise<void> {
+    // Closed (the SessionGone branch of `ensureConnected`, most likely) ends the loop instead
+    // of looping back to an empty queue nothing will ever fill again.
+    // An agent that takes a prompt into a running turn is sent every prompt at once.
+    const atOnce = this.deps.agent.capabilities.promptDuringTurn;
+    while (!this.closedFlag) {
+      const turn = await this.queue.get(signal);
+      // No `await` may come between the two lines: `stop()` relies on a turn out of the queue
+      // being in `taken`.
+      this.taken = turn;
+      try {
+        let client = await this.ensureConnected(signal);
+        this.refreshUsage();
+        if (turn.shell !== null) {
+          // A command runs only when nothing does, as the terminal runs one typed while busy;
+          // a stop or a drain that comes meanwhile drops it below.
+          // The debt first: the idle check must follow the clear, which a report turn may open into.
+          await this.goalCleared.wait(signal);
+          if (atOnce) await this.untilIdle(signal);
+          // A drain that has begun runs no command; one that begins while it runs drops it below.
+          if (this.draining) {
+            await this.dropForDrain(turn);
+            continue;
+          }
+          // The command has not started (`shellStarted`): a stop before it keeps it from running.
+          if (turn === this.stopTaken) {
+            await this.endStopped(turn, signal);
+            continue;
+          }
+          if (!(await this.runShell(turn, turn.shell, signal))) {
+            this.taken = null;
+            this.stopTaken = null;
+            // The stop that cut the command also dropped the messages queued behind it.
+            const queued = this.stopQueued;
+            this.stopQueued = [];
+            await this.dropStopped(queued);
+            this.idleTimerCheck();
+            continue;
+          }
+          // The run can take minutes: the process may have been lost meanwhile.
+          client = await this.ensureConnected(signal);
+        }
+        if (!atOnce && !this.settled.isSet) await this.settled.wait(signal);
+        await this.nameCopy(client, turn, signal);
+        // The agent runs a command after the turn, never folded into it, and its replay can come
+        // after its own text (measured 2026-11-09): it waits like a `!!`, and the checks below
+        // follow the wait.
+        // A channel stop's goal is dropped before any prompt after it reaches the agent.
+        await this.goalCleared.wait(signal);
+        if (atOnce && this.isCommand(turn.prompt)) await this.untilIdle(signal);
+        // A stop or a drain during either wait starts no process for a turn it ends.
+        if (this.draining) {
+          await this.dropForDrain(turn);
+          continue;
+        }
+        if (turn === this.stopTaken) {
+          await this.endStopped(turn, signal);
+          continue;
+        }
+        // Either wait may have outlived the process: the prompt goes to the one alive now.
+        client = await this.ensureConnected(signal);
+        // (sync) from the check to the send: a drain raises every flag before its first
+        // await, so no turn is sent in between.
+        if (this.draining) {
+          await this.dropForDrain(turn);
+          continue;
+        }
+        if (turn === this.stopTaken) {
+          await this.endStopped(turn, signal);
+          continue;
+        }
+        this.sent.push(turn);
+        this.taken = null;
+        this.stopTaken = null;
+        await cancellable(client.send({ id: turn.uuid, content: turn.prompt }), signal);
+        // A prompt written after a cut is what makes the agent keep it.
+        this.dropCut();
+        // Nothing is sent behind a command until its turn has ended: its replay can come after
+        // its own text (measured 2026-11-09), so a prompt sent now could take its turn.
+        if (!atOnce || this.isCommand(turn.prompt)) await turn.done.wait(signal);
+      } catch (error) {
+        if (error instanceof Cancelled) throw error;
+        this.taken = null;
+        if (turn === this.stopTaken) {
+          // A connect that failed under a turn the owner stopped is not an error to tell.
+          await this.endStopped(turn, signal);
+        } else if (
+          error instanceof DirectoryUnavailable ||
+          error instanceof SessionGone ||
+          error instanceof SessionClosed ||
+          error instanceof StartsBlocked
+        ) {
+          this.unsend(turn);
+          await this.fail(turn, error.message, { error: true });
+          this.idleTimerCheck(); // a no-op if this also closed the session
+        } else {
+          // a failed turn must not stop this thread's queue
+          logger.error(`turn failed in ${this.where}: ${errorName(error)}`);
+          this.unsend(turn);
+          await this.fail(
+            turn,
+            texts.fill(texts.named(texts.ERROR_REPLY, this.names), { error: errorName(error) }),
+            {
+              error: true,
+            },
+          );
+          this.idleTimerCheck(); // the session stays alive; may need arming again
+        }
+        // The prompt that held the session's end back is gone: the footer an earlier end owes
+        // is drawn now, on the reply of that work (a prompt that never started is never named).
+        await this.showFooterIfEnded(signal);
+      }
+    }
+  }
+
+  /** Follow the client's events until they end; whatever ends them, release the thread. */
+  private async read(client: AgentSession, signal: AbortSignal): Promise<void> {
+    let reason = texts.named(PROCESS_EXITED, this.names);
+    const events = client.events[Symbol.asyncIterator]();
+    try {
+      for (;;) {
+        const next = await cancellable(events.next(), signal);
+        if (next.done) break;
+        const event = next.value;
+        if (event.type === "process_lost") {
+          reason = event.reason;
+          break;
+        }
+        try {
+          await this.dispatch(event, signal);
+        } catch (error) {
+          if (error instanceof Cancelled) throw error;
+          // one event that fails to render must not end it all
+          logger.error(`could not render a message in ${this.where}: ${errorName(error)}`);
+        }
+        // A task event or a turn's own end (through `dispatch`) may leave the session idle
+        // again, or may end it: re-armed or cancelled here either way.
+        this.idleTimerCheck();
+      }
+    } catch (error) {
+      if (error instanceof Cancelled) {
+        // Whoever cancelled the reader closes the client: the events it still held are dropped.
+        events.return?.().catch(() => {});
+        throw error;
+      }
+      reason = errorName(error);
+    }
+    logger.error(`session reader stopped in ${this.where}: ${reason}`);
+    if (this.client === client) this.client = null;
+    this.settleGoalDebt();
+    try {
+      // Nobody is left to take an answer: the requests of the lost process go as `close` sends
+      // them, with `interrupting` up so no handler's `finally` shows working again over the ❌
+      // (`abandon` clears it). A request that waited is a loss: `abandon` may find nothing else.
+      const requests = this.requestMessages();
+      if (requests.length > 0) this.reactError();
+      this.interrupting = true;
+      try {
+        await this.settleRequests(requests);
+      } finally {
+        // Whatever the chat did meanwhile, the turn is released.
+        try {
+          await this.abandon(
+            texts.fill(texts.named(texts.ERROR_REPLY, this.names), { error: reason }),
+            {
+              error: true,
+              because: texts.named(texts.BECAUSE_STOPPED, this.names),
+            },
+          );
+        } finally {
+          // After the run the process lost was in, whose card `abandon` closes: the loop's end
+          // is the last message, and no card is posted below it.
+          await this.leaveLoop().catch(() => {});
+        }
+      }
+    } finally {
+      await this.disconnect(client, false);
+      await this.announceUnsaved();
+      // The session stays alive (not closed): the next turn reconnects. `abandon` settles it
+      // from outside this loop's own per-event check above, so it needs its own call.
+      this.idleTimerCheck();
+    }
+  }
+
+  /**
+   * Whether `promptId` names a prompt this session sent and the agent took: it renders nothing
+   * and starts no turn. One taken with no turn running comes right before the events of the
+   * turn that prompt gets of its own. One that arrives inside a running turn means the agent
+   * took the prompt into that turn, which then ends with one result for both (measured
+   * 2026-10-06, CLI 2.1.286): `finish` releases it.
+   *
+   * The session never waits for a replay: the back end makes `prompt_taken` only of a record
+   * whose uuid it sent, and an id that names no prompt still held as sent (in `sent`, or the
+   * active turn's own) is ignored. A replay with no turn running names the prompt of the turn
+   * that starts next (`whoseTurn`), whatever the session was waiting for. The worker sends one
+   * prompt at a time unless the agent declares `promptDuringTurn`; a turn then takes in as many
+   * as were sent.
+   */
+  private acknowledge(promptId: string): boolean {
+    const active = this.active;
+    const sent = [...this.sent, ...(active?.turn ? [active.turn] : [])];
+    const turn = sent.find((candidate) => candidate.uuid === promptId);
+    if (turn === undefined) return false;
+    // A replay is proof the prompt runs: it is no longer in doubt, before its turn opens (a
+    // compaction can come first, `auto-compact.jsonl`).
+    turn.inDoubt = false;
+    if (active === null) {
+      if (!this.announced.includes(turn)) this.announced.push(turn);
+    } else if (!active.taken.includes(turn)) active.taken.push(turn);
+    return true;
+  }
+
+  /**
+   * The capability `event` needs that the agent does not declare, or null. Such an event is
+   * not shown or acted on: a back end that sends one is at fault.
+   */
+  private undeclared(event: SessionEvent): string | null {
+    const declared = this.deps.agent.capabilities;
+    if ("parentCallId" in event && event.parentCallId !== null) {
+      return declared.subagents ? null : "subagents";
+    }
+    switch (event.type) {
+      case "compaction_started":
+      case "compaction_ended":
+      case "compacted":
+        return declared.compaction ? null : "compaction";
+      case "report_started":
+        return declared.backgroundTasks ? null : "backgroundTasks";
+      case "notification_folded":
+        return declared.backgroundTasks && declared.foldedNotifications
+          ? null
+          : "foldedNotifications";
+      case "state_changed":
+        return declared.declaredState ? null : "declaredState";
+      case "limits_changed":
+        return declared.usageLimits ? null : "usageLimits";
+      case "next_prompt":
+        return declared.nextPrompts ? null : "nextPrompts";
+      case "message_saved":
+        return declared.foreignTurns ? null : "foreignTurns";
+      case "model_changed":
+        return declared.models ? null : "models";
+      case "goal_changed":
+        return declared.goals ? null : "goals";
+      case "scheduled_jobs":
+        return declared.scheduledJobs ? null : "scheduledJobs";
+      case "task_started": {
+        const needs = event.kind === "subagent" ? "subagents" : "backgroundTasks";
+        if (declared[needs]) return null;
+        this.refusedTasks.set(event.taskId, needs);
+        return needs;
+      }
+      case "task_progress":
+      case "task_updated":
+        return this.refusedTasks.get(event.taskId) ?? null;
+      case "task_ended": {
+        const refused = this.refusedTasks.get(event.taskId) ?? null;
+        this.refusedTasks.delete(event.taskId);
+        return refused;
+      }
+      default:
+        return null;
+    }
+  }
+
+  private async dispatch(event: SessionEvent, signal?: AbortSignal): Promise<void> {
+    const missing = this.undeclared(event);
+    if (missing !== null) {
+      logger.warning(`ignored a ${event.type} event in ${this.where}: the agent has no ${missing}`);
+      return;
+    }
+    switch (event.type) {
+      case "limits_changed":
+        this.usage?.invalidate();
+        return;
+      case "next_prompt":
+        // Held only while no turn runs and no prompt is owed: else it belongs to a turn before.
+        if (!this.busy && !this.promptOwed()) this.suggestions.hold(this.ref, event.text);
+        return;
+      case "prompt_taken":
+        // Known or not (a prompt a guess already settled is no longer sent): the turn it
+        // starts is the owner's.
+        if (this.active === null) this.promptReplayed = true;
+        if (this.acknowledge(event.promptId)) await this.headTaken(event.promptId);
+        return;
+      case "state_changed":
+        // The state first, so the activity line does not read working beside the drop; a
+        // repeated idle still ends the wait.
+        if (event.state !== this.agentState) {
+          this.agentState = event.state;
+          this.showThreadStatus();
+        }
+        if (event.state === "idle") await this.endCutWait(signal);
+        return;
+      case "report_started":
+        // Said with no turn running, right before the turn it names. Inside a running turn it
+        // names no turn to come.
+        if (this.active === null) this.reportOf = event.taskId;
+        return;
+      case "notification_folded":
+        this.unfolded.delete(event.taskId);
+        return;
+      case "effort_observed":
+        // The Stop hook's input carries the level, absent when the model takes none.
+        this.effort = event.level;
+        this.effortReported = true;
+        this.effortUnsupported = event.level === null;
+        return;
+      case "effort_changed":
+        // What ran before the command is no longer what runs: the next turn reports the level.
+        this.effort = null;
+        this.effortReported = true;
+        this.effortUnsupported = false;
+        // Stored so the next connect can pass it back (a model set by command survives a
+        // resume by itself; effort does not). A null level means "unknown" (a model change
+        // that names no effort), not "back to default": the stored override, if any, is left
+        // alone. The agent's word for its default (`effortDefault`) IS an explicit reset,
+        // stored as none.
+        if (event.level !== null) {
+          const reset = event.level === this.deps.agent.capabilities.effortDefault;
+          this.effortSetting = reset ? null : event.level;
+          this.deps.state.setEffort(this.channelId, this.threadId, this.effortSetting);
+        }
+        return;
+      case "model_changed":
+        this.modelSwitched = event.model;
+        this.modelSwitchedInTurn = this.active !== null;
+        // The share was measured against the old model's window.
+        this.forgetContext();
+        return;
+      case "folder_changed":
+        this.workingDirectory = event.folder;
+        return;
+      case "message_saved":
+        this.saved = event.message;
+        return;
+      case "scheduled_jobs":
+        this.jobs = event.jobs;
+        this.jobsListedAt = this.deps.clock.time();
+        // The last job going is what lets the idle close run again.
+        this.idleTimerCheck();
+        await this.endLoopIfOver();
+        return;
+      case "goal_changed": {
+        const { state, condition } = event.goal;
+        this.goal = state === "set" || state === "not_met" ? condition : null;
+        // A check and an achievement are lines of the running turn's reply.
+        break;
+      }
+      case "session_started":
+        this.cliVersion = event.agentVersion;
+        // Recorded as soon as the agent reports it, not only at the turn's end, so a
+        // still-running first turn is already this session id's holder and `!resume` cannot
+        // put a second process on the same transcript.
+        if (event.sessionId !== null) {
+          this.deps.state.setSession(this.channelId, this.threadId, event.sessionId);
+        }
+        // A turn of the agent's own begins: the ends told so far are the ones it reports.
+        if (this.owed().length === 0 && this.opening === null && this.ended.length > 0) {
+          this.opening = this.ended;
+          this.ended = [];
+        }
+        break;
+      case "mode_changed":
+        // Claude Code reports the permission mode after a change (measured after each
+        // `set_permission_mode`): the mode shown follows what it says.
+        this.mode = event.mode;
+        break;
+      case "compaction_started":
+      case "compaction_ended": {
+        // A compaction opens with a status the agent repeats while it lasts, and ends 14 to 37
+        // seconds later in the recordings (2026-10-08, CLI 2.1.292). The back end says each
+        // once.
+        const compacting = event.type === "compaction_started";
+        // A compaction shrinks the context: a share read before it is no longer true.
+        if (compacting) this.forgetContext();
+        if (compacting !== this.compacting) {
+          this.compacting = compacting;
+          this.showThreadStatus();
+        }
+        break;
+      }
+      default:
+        break;
+    }
+    this.followStep(event);
+    const task = isTaskEvent(event) ? event : null;
+    if (this.resumedAtStart) {
+      if (TURN_EVENTS.has(event.type)) {
+        this.resumedAtStart = false;
+      } else if (task !== null && event.type !== "task_started" && !this.tasks.has(task.taskId)) {
+        return;
+      }
+    }
+    if (task !== null) {
+      this.trackOwnWork(task);
+      const inner = this.nestingReply(task);
+      if (inner !== null) {
+        // A task of a call inside another call (a long command a subagent runs) is that call's
+        // root's work: the agent reports it to the subagent, so no turn follows it. None of
+        // what a task of the conversation sets up (its record, its end line, a wait for its
+        // report, a held event) applies; the reply keeps the event off its cards.
+        await inner.feed(task);
+        return;
+      }
+    }
+    if (event.type === "task_started") {
+      // A task whose parent is a subagent this session knows is that subagent's, even when its
+      // call is one this process never saw: a subagent continued after a restart still names
+      // its first call, and its task. An unknown parent counts as none (`sdk.d.ts` 0.3.300).
+      if (event.parentTaskId !== null && this.tasks.has(event.parentTaskId)) {
+        this.ownedBySubagent.add(event.taskId);
+      }
+      this.recordTask(event);
+    }
+    const stopped = task !== null && this.stopped.has(task.taskId);
+    const owned = task !== null && this.ownedBySubagent.has(task.taskId);
+    if (
+      event.type === "task_ended" &&
+      this.active === null &&
+      this.owed().length === 0 &&
+      !stopped &&
+      !owned &&
+      this.background
+    ) {
+      this.ended.push([event.taskId, this.endedLine(event)]);
+    }
+    if (event.type === "task_ended" && !stopped && !owned) {
+      // An agent in the background that ends while a turn runs: with no card to complete, its
+      // end is said where the conversation is, as the terminal prints `Agent "..." finished`
+      // among the turn's calls (captured 2026-10-13 on Claude Code 2.1.296). One that ends
+      // with a message of the owner's already waiting says it in that message's reply.
+      const writing = this.active?.renderer ?? null;
+      const reply = this.taskReplies.get(event.taskId) ?? writing;
+      if (reply?.lineless(event.taskId)) {
+        if (
+          writing !== null &&
+          event.foldNamed &&
+          this.deps.agent.capabilities.foldedNotifications
+        ) {
+          this.unfolded.set(event.taskId, reply);
+        }
+        if (writing !== null) await this.writeEnds(writing, [this.endedLine(event)]);
+        else if (this.owed().length > 0)
+          this.endedAhead.push([event.taskId, this.endedLine(event)]);
+      }
+    }
+    if (
+      event.type === "task_updated" &&
+      event.terminal &&
+      this.background &&
+      !this.unreported.has(event.taskId) &&
+      !stopped
+    ) {
+      this.unreported.set(event.taskId, this.deps.clock.time());
+      // The CLI can suppress the notification altogether (SDK TaskUpdatedMessage docstring);
+      // nothing else rechecks this reply once the wait that holds it passes, so this
+      // schedules that recheck itself.
+      const taskId = event.taskId;
+      const expiry: Task = new Task((waiting) => this.expireUnreported(taskId, waiting));
+      this.expiring.add(expiry);
+      expiry.settled().then(() => this.expiring.delete(expiry));
+    }
+    if (event.type === "task_ended") {
+      if (this.active === null && !stopped && this.background) this.notificationWaits = true;
+      this.unreported.delete(event.taskId);
+      this.stopped.delete(event.taskId);
+      this.ownedBySubagent.delete(event.taskId);
+      this.noteMessage(event);
+      // Read above for the end line, which comes after the terminal task_updated (recorded
+      // order); a task whose notification never comes goes with the process.
+      this.tasks.delete(event.taskId);
+      this.forgetSteps(event.taskId);
+    }
+    const holder = task === null ? undefined : this.taskReplies.get(task.taskId);
+    if (task !== null && holder !== undefined) {
+      // A task that outlived its turn shows only on its own line, wherever it started.
+      await holder.feed(task);
+      this.showRunning();
+      if (this.active === null && event.type === "task_ended" && !stopped) this.notified();
+      // The task that just ended may have been the last thing keeping this reply's stream
+      // open; `notified` above, if it fired, already re-armed the wait.
+      const owed = this.stillOwed(holder) || this.injectedExpected || !this.settled.isSet;
+      // A task promoted out of a subagent's call sits here while its turn still runs: that
+      // turn's own `closeReply` ends the reply, with the footer, as `sweepClosedOut` also
+      // leaves it to.
+      const writing = this.active?.renderer ?? null;
+      if (!owed && holder !== writing) {
+        this.trackLanding(await holder.closeOut(signal), this.reply(holder));
+        this.showThreadStatus(); // the task's end may change what the line says
+        // `!stop` already reacted ✅ itself; skipped so a stopped task's end does not show it
+        // a second time. The footer is the stop's end all the same.
+        if (stopped) await this.showFooterIfEnded(signal);
+        else await this.reactDoneIfIdle(signal);
+      }
+      return;
+    }
+    const call = callOf(event);
+    const origin = call ? this.originOf(call) : null;
+    if (origin !== null) {
+      if (event.type === "agent_error") {
+        // A subagent's failed request: the category only, as for the turn's own below.
+        logger.warning(
+          `${this.deps.agent.name} reported a subagent's error in ${this.where}: ${event.category}`,
+        );
+      }
+      await origin.feed(event);
+      this.adoptPromoted(origin);
+      if (event.type === "task_started") {
+        this.taskReplies.set(event.taskId, origin);
+        this.showRunning();
+      }
+      return;
+    }
+    if (this.active === null) {
+      if (event.type === "turn_ended" && this.saidNothing(event)) {
+        await this.nothingReported(event, signal);
+        return;
+      }
+      // A task started by no call, while an owner prompt is sent and no report turn is
+      // expected, is that prompt's: a skill with `context: fork` typed as a command (`!review`
+      // → `/review`) runs its agent before the turn's first message (recorded:
+      // `skill-fork-command.jsonl`, CLI 2.1.283, the only recording with no call id). Its
+      // turn starts now, so its line shows while it works.
+      const startsOwnerTurn =
+        event.type === "task_started" &&
+        event.callId === null &&
+        this.owed().length > 0 &&
+        !this.injectedExpected;
+      // Whether the turn opens with its own words: the case in which a prompt's replay is
+      // known to come first (`whoseTurn`).
+      let worded = false;
+      if (!startsOwnerTurn) {
+        if (task !== null) {
+          // A task that ends between turns is reported in a turn of the agent's own, or not at all.
+          if (!this.background) return;
+          this.held.push(task);
+          if (event.type === "task_ended" && !stopped) this.notified();
+          return;
+        }
+        // A compaction comes before every event of its turn that shows something, on
+        // `/compact` and on an automatic compaction at a turn's start (recorded:
+        // `compact.jsonl`, `auto-compact.jsonl`, CLI 2.1.292). The turn starts when the
+        // compaction does, so a report turn that compacts first is not given up on after
+        // `INJECTED_TURN_WAIT`, and at the latest with the boundary, whose line the reply
+        // shows. Only a turn that is due starts so: with no prompt sent and no report awaited,
+        // either event would open a reply that no result is known to end.
+        const compaction =
+          (event.type === "compacted" || event.type === "compaction_started") &&
+          (this.owed().length > 0 || this.injectedExpected);
+        // A refusal opens a turn the same way: a fork or a side question that falls back
+        // while the thread is idle (`scope: local`) has no result to end a reply it would open.
+        if (event.type === "model_refused" && this.owed().length === 0 && !this.injectedExpected) {
+          return;
+        }
+        if (!TURN_EVENTS.has(event.type) && !compaction) return;
+        worded = !compaction;
+        if (call) {
+          // A subagent's own event, whose call no reply holds: an agent continued by a
+          // message to it, in a daemon that never saw the call that first started it (recorded:
+          // `report-turn-agent-resume.jsonl`, CLI 2.1.286, whose events name that first call,
+          // not the one that sent the message). It is no turn of the conversation's, so it starts none
+          // and takes no owner prompt's.
+          return;
+        }
+      }
+      // A turn another session's message opens says so first: it is no run of a loop. A
+      // subagent's message needs no such test: `report_started` came first, and `opensRun` is
+      // false while a report is awaited.
+      const run = worded && task === null && event.type !== "peer_message" && this.opensRun();
+      // A turn a stop in the gap cut at its start shows nothing before its end, which says a
+      // prompt started it: it is the turn of the prompt at the head of `sent`, in doubt or not,
+      // since the agent runs its prompts in the order sent (a second stop can cut a prompt the
+      // first cut left in doubt). One the agent started itself never takes a prompt in doubt, nor
+      // one whose end does not name that prompt among those it answered (a scheduled run's end
+      // names none, and says the agent started it where the agent can tell). With no name the prompt stays in doubt for the wait to drop,
+      // and the turn goes to the next prompt owed: a real cut that names none (no such result was
+      // seen, 2026-11-10) then tells that prompt not sent, which no thread is left stuck for.
+      const head = this.sent[0];
+      const cutShaped =
+        event.type === "turn_ended" &&
+        event.startedBy === "owner" &&
+        event.steps === 0 &&
+        this.stopInGap &&
+        head !== undefined &&
+        event.answers.includes(head.uuid);
+      await this.startTurn(worded, run, cutShaped);
+      // A report turn has no prompt behind it: only now does `threadActivity` read it.
+      this.showThreadStatus();
+    }
+    const active = this.active;
+    if (active === null) return; // abandoned while the turn's opening was written
+    if (event.type === "agent_error") {
+      // The category only: the words Claude Code wrote about it go to the thread.
+      logger.warning(
+        `${this.deps.agent.name} reported an error in ${this.where}: ${event.category}`,
+      );
+    }
+    if (event.type === "call_ended" && event.fileChange !== null) {
+      this.turnChanges.note(event.fileChange);
+    }
+    await active.renderer.feed(event);
+    this.adoptPromoted(active.renderer);
+    // A call's end can leave its task running in the background, which the list then counts.
+    if (event.type === "call_ended" && active.renderer.backgroundTasks.length > 0)
+      this.showRunning();
+    if (event.type === "turn_ended") {
+      // A turn that went to the model leaves the usage naming the model it ran on, whatever
+      // the id a switch before it said (`model_changed`). A switch inside this turn is newer
+      // than that usage and waits for the next one.
+      if (event.steps !== null && event.steps > 0 && !this.modelSwitchedInTurn)
+        this.modelSwitched = null;
+      this.modelSwitchedInTurn = false;
+      // The turn stays active until its reply is closed: the footer is read first, and a
+      // drain that saw this thread idle meanwhile would exit before the reply's end, leaving
+      // its stream open.
+      let turnStopped = false;
+      // A `Working…` that shows stays until the footer is drawn, so the thread's bottom never
+      // goes blank between the two; a line that shows something else, or nothing, is not turned
+      // into it, and a stop clears it at once, as `interrupting` already does.
+      this.turnEnding = this.threadActivity()?.kind === "working";
+      try {
+        try {
+          turnStopped = await this.finish(active, event, signal);
+        } finally {
+          if (turnStopped) this.turnEnding = false;
+          // A turn cut before its reply closed stays the active one, for `abandon` to end.
+          if (!active.cut) {
+            this.active = null;
+            this.noTurn.set();
+            this.compacting = false;
+            this.showThreadStatus(); // whichever way it ended, `!stop` included
+            // An end told after this turn had begun is reported in a turn to come, which
+            // nothing waits for yet: the turn's start cancelled the wait.
+            if (this.ended.length > 0) this.notified();
+          }
+        }
+        // Checked only now, with the turn no longer active: `finish` alone still reads busy.
+        // `!stop` already reacted ✅ itself; the stop's end is the session's end all the same.
+        // A run that took no prompt in changed no status of its own and owes no footer; one that
+        // asked for an approval left the root at work, which its end settles.
+        const ownerTurn = !active.run || active.taken.length > 0;
+        const moved = this.lastStatus === "working" || this.lastStatus === "waiting";
+        if (turnStopped && !active.afterStop) await this.showFooterIfEnded(signal);
+        else if (turnStopped) await this.reactDoneIfIdle(signal, { byOwner: true });
+        else if (ownerTurn || moved) await this.reactDoneIfIdle(signal);
+        // The loop may have ended with this turn, the owner's or a run's.
+        await this.endLoopIfOver();
+      } finally {
+        this.turnEnding = false;
+        this.showThreadStatus();
+        void this.title.refresh();
+      }
+    }
+  }
+
+  /**
+   * Keeps which running tasks a subagent started (`parentTaskId`), before a nested one is handed
+   * to its subagent's card: a command the subagent runs is that call's work, and still the work
+   * the subagent waits on. A task that ended is none, notification or not (SDK docstring: the
+   * notification can be suppressed).
+   */
+  private trackOwnWork(task: TaskEvent): void {
+    if (task.type === "task_started") {
+      if (task.parentTaskId !== null && this.tasks.has(task.parentTaskId)) {
+        this.parents.set(task.taskId, task.parentTaskId);
+      }
+    } else if (task.type === "task_ended" || (task.type === "task_updated" && task.terminal)) {
+      this.parents.delete(task.taskId);
+    }
+  }
+
+  /**
+   * The words a subagent's end shows as its message, or null: a report it sent stands at once,
+   * what it said last only once nothing of its own runs, and the same words are not shown twice
+   * for one task (the agent repeats a report it sent with its final end). Reads only:
+   * `noteMessage` records what was shown, once the end is told.
+   */
+  private messageOf(event: TaskEnded, kind: TaskKind): string | null {
+    const report = (event.report ?? "").trim();
+    if (kind !== "subagent" || event.status !== "completed" || report === "") return null;
+    if (!event.reportSent && this.waitsOnOwnWork(event.taskId)) return null;
+    return this.messages.get(event.taskId) === report ? null : report;
+  }
+
+  /** After a subagent's end was told: what it showed is not shown again; a final end forgets. */
+  private noteMessage(event: TaskEnded): void {
+    const [kind] = this.tasks.get(event.taskId) ?? ["other"];
+    const report = this.messageOf(event, kind);
+    if (report !== null) this.messages.set(event.taskId, report);
+    if (!this.waitsOnOwnWork(event.taskId)) this.messages.delete(event.taskId);
+  }
+
+  /** Whether a task the subagent `taskId` started still runs. */
+  private waitsOnOwnWork(taskId: string): boolean {
+    for (const parent of this.parents.values()) if (parent === taskId) return true;
+    return false;
+  }
+
+  private recordTask(event: TaskStarted): void {
+    this.tasks.set(event.taskId, [event.kind, event.description, event.agentType]);
+    if (event.kind === "subagent" && event.callId !== null) {
+      this.agentCalls.set(event.callId, event.taskId);
+      // A resumed subagent runs again from its latest start, its calls counted anew.
+      this.steps.set(event.taskId, { since: this.deps.clock.time(), words: null, calls: 0 });
+    }
+    if (this.mayHaveOrderedRestart) this.afterRestart.add(event.taskId);
+    const starts = (this.starts.get(event.taskId) ?? 0) + 1;
+    this.starts.delete(event.taskId); // the latest start is the newest entry
+    this.starts.set(event.taskId, starts);
+    const kept = this.deps.tasksKept ?? TASKS_KEPT;
+    for (const known of [this.tasks, this.starts]) {
+      for (const taskId of known.keys()) {
+        if (known.size <= kept) break;
+        known.delete(taskId);
+      }
+    }
+    for (const taskId of [...this.steps.keys(), ...this.agentCalls.values()]) {
+      if (!this.tasks.has(taskId)) this.forgetSteps(taskId);
+    }
+  }
+
+  /** Drops what is kept of a subagent's calls. */
+  private forgetSteps(taskId: string): void {
+    this.steps.delete(taskId);
+    for (const [callId, owner] of this.agentCalls) {
+      if (owner === taskId) this.agentCalls.delete(callId);
+    }
+  }
+
+  /**
+   * Keeps the step of each subagent up to date from the calls it starts, which arrive while it
+   * runs and after its turn has ended: a call whose parent is the call that started the
+   * subagent. A call nested deeper has the nested agent's call as parent and is none of this
+   * subagent's. The list is redrawn when the subagent shows on it; the activity line is not.
+   */
+  private followStep(event: SessionEvent): void {
+    if (event.type !== "call_started" || event.parentCallId === null) return;
+    const taskId = this.agentCalls.get(event.parentCallId);
+    const before = taskId === undefined ? undefined : this.steps.get(taskId);
+    if (taskId === undefined || before === undefined) return;
+    const words =
+      this.previews.described(event.toolName, event.input) ??
+      taskTitle(event.toolName, event.input);
+    this.steps.set(taskId, {
+      ...before,
+      words: oneLine(words, TITLE_LIMIT),
+      calls: before.calls + 1,
+    });
+    if (this.taskReplies.get(taskId)?.backgroundTasks.includes(taskId)) {
+      this.thread.showRunning(this.runningList());
+    }
+  }
+
+  /**
+   * Tasks that just outlived the nested call that started them are ordinary background tasks
+   * from now on: recorded and counted as one that outlived its turn.
+   */
+  private adoptPromoted(renderer: TurnRenderer): void {
+    const promoted = renderer.takePromoted();
+    for (const started of promoted) {
+      this.recordTask(started);
+      this.taskReplies.set(started.taskId, renderer);
+      this.ownedBySubagent.add(started.taskId);
+    }
+    if (promoted.length > 0) this.showRunning();
+  }
+
+  /**
+   * The terminal's line for a task's end: a command's own summary, or `Agent "..." finished`
+   * from the task's description, plus the duration when the task reports one. An agent that
+   * failed says why, as the terminal's line does (`Agent "..." failed: <reason>`, captured
+   * 2026-10-13 on Claude Code 2.1.296): its summary is the reason then, not a report. A
+   * subagent's words come as a card under the line (`messageOf`).
+   */
+  private endedLine(event: TaskEnded): EndLine {
+    const [kind, description, agentType] = this.tasks.get(event.taskId) ?? ["other", "", null];
+    const name = TASK_WORDS[kind][1];
+    let text: string;
+    let marked = true;
+    if (SUMMARY_IS_END_LINE.has(kind) && event.summary) {
+      text = oneLine(event.summary, 200);
+    } else {
+      const origin = this.taskReplies.get(event.taskId);
+      const label = oneLine(description || origin?.taskTitle(event.taskId) || event.taskId, 120);
+      if (
+        kind === "subagent" &&
+        event.status === "completed" &&
+        this.waitsOnOwnWork(event.taskId)
+      ) {
+        // A subagent whose own background work still runs is not done: it resumes once that
+        // work ends, and the terminal says so, with its usual mark for every line (the
+        // notification's summary is a note for Claude). No ✓, which would claim an end.
+        text = `${name} "${label}" ${texts.AGENT_WAITING}`;
+        marked = false;
+      } else {
+        const outcome = event.status === "completed" ? "finished" : event.status;
+        text = `${name} "${label}" ${outcome}`;
+        if (kind === "subagent" && event.status === "failed" && event.summary) {
+          text += `: ${oneLine(event.summary, FAILURE_LIMIT)}`;
+        }
+      }
+    }
+    const line = endedLine(text, event.status, event.durationMs, marked);
+    const report = this.messageOf(event, kind);
+    if (report === null) return { text: line, card: null };
+    // Cut by code points, as every other cut of the core: no emoji is split in half.
+    const points = Array.from(report);
+    const body =
+      points.length > texts.MESSAGE_LIMIT
+        ? `${points.slice(0, texts.MESSAGE_LIMIT - 1).join("")}…`
+        : report;
+    this.cardsMade += 1;
+    const title = texts.fill(texts.MESSAGE_FROM, { name: agentType ?? name });
+    return { text: line, card: { id: `message-${this.cardsMade}`, title, body } };
+  }
+
+  /**
+   * What opens a report of the agent's own turn (the end of each task it reports), and the
+   * reply of the first of those tasks (then of the task the agent named) that is still tracked,
+   * not ended and the last thing in the thread: the report renders there. When none is (a
+   * restart or an idle close dropped it, it already ended because a notification later than
+   * INJECTED_TURN_WAIT let `expireUnreported` end it first, or something sits below it), the
+   * report renders into the thread's last reply if it is at rest (`restingLast`). Null when that
+   * fails too: the report then gets a reply of its own at the bottom, rather than an edit of a
+   * reply that ended and will not notify again or one the owner has scrolled past. The text is null when
+   * no end line opens the report: the SDK says nothing of what woke a turn with none (a
+   * Monitor's event), and a report the agent named the task of needs none.
+   */
+  private openingTarget(): readonly [
+    ends: readonly EndLine[],
+    target: TurnRenderer | null,
+    aside: boolean,
+  ] {
+    // The lines set aside when this turn began, when it began with any; a task that ended
+    // since waits for the turn that reports it.
+    const lines = this.opening ?? this.ended;
+    if (this.opening === null) this.ended = [];
+    this.opening = null;
+    // The task the agent named for this turn, when no end line names one: a subagent's
+    // hand-back can come before its task's end, or after an end that came inside a turn.
+    const reported = this.reportOf;
+    this.reportOf = null;
+    // The report belongs at the bottom of the thread: only a reply that is still the last thing
+    // in it takes the report in; one with a message of the owner's or of another reply below
+    // it would hide the report above them. So does a run's loop card, for the report of a task
+    // the run started: that report is the run's answer, rewritten on the card with no push (#49).
+    const candidates = [
+      ...lines.map(([taskId]) => taskId),
+      ...this.unfolded.keys(),
+      ...(reported === null ? [] : [reported]),
+    ];
+    let target: TurnRenderer | null = null;
+    for (const taskId of candidates) {
+      const reply =
+        this.unfolded.get(taskId) ?? this.taskReplies.get(taskId) ?? this.showing(taskId);
+      if (reply === null || reply.closedOut) continue;
+      const shown = this.reply(reply);
+      if (shown instanceof LoopReply ? shown.newest : shown.last) {
+        target = reply;
+        break;
+      }
+    }
+    // None of those replies qualifies (or the turn names no task, a Monitor's event): the
+    // report goes where the owner is looking, into the last reply when it is at rest.
+    target ??= this.restingLast();
+    // The tasks that ended inside a turn are reported now, or given up on.
+    this.unfolded.clear();
+    const ends = lines.map(([, line]) => line);
+    // End lines are lines about the work.
+    return [ends, target, ends.length > 0];
+  }
+
+  /**
+   * The thread's last reply when it is at rest: its turn ended, it still owes a task or a
+   * report (tracked, not ended) and nothing sits below it. A report no reply of its own tasks
+   * can take renders there, as the terminal prints everything in order, instead of opening a
+   * message and a push of its own. Null when the last thing in the thread is a message of the
+   * owner's or a reply that has ended.
+   */
+  private restingLast(): TurnRenderer | null {
+    for (const reply of this.resting) if (reply.closedOut) this.resting.delete(reply);
+    const tracked = new Set([
+      ...this.taskReplies.values(),
+      ...this.unfolded.values(),
+      ...this.resting,
+    ]);
+    for (const reply of tracked) {
+      if (!reply.closedOut && this.reply(reply).last) return reply;
+    }
+    return null;
+  }
+
+  /**
+   * A reply still tracked that shows `taskId` though the task is not its to wait for: a
+   * task that ended inside the turn that started it is tracked nowhere (`closeReply` records the
+   * ones that outlive the turn), and its reply stays open only for another task of that turn.
+   */
+  private showing(taskId: string): TurnRenderer | null {
+    for (const reply of this.taskReplies.values()) {
+      if (reply.shows(taskId)) return reply;
+    }
+    return null;
+  }
+
+  /**
+   * Whether a turn's end is all there is of a turn the agent started and nothing waits to be
+   * said with it: no step taken, no text, no task's end line, no held task event, no notice.
+   * The seam defines it (`turn_ended.steps`, `startedBy`); Claude Code gives a task's
+   * notification such a turn once the task's report was handed back (measured 2026-10-10,
+   * `subagent-handback.jsonl`). With an end line or a held event waiting, the turn is the
+   * report that says them.
+   */
+  private saidNothing(event: TurnEnded): boolean {
+    return (
+      event.startedBy === "agent" &&
+      event.steps === 0 &&
+      !event.finalText &&
+      event.ending === "done" &&
+      this.ended.length === 0 &&
+      this.opening === null &&
+      this.held.length === 0 &&
+      this.notice === null
+    );
+  }
+
+  /**
+   * The turn the agent started and that did nothing has ended: no reply is opened for it, and
+   * what waited on a report turn stops waiting, as at the end of one (`startTurn`, `settle`).
+   */
+  private async nothingReported(event: TurnEnded, signal?: AbortSignal): Promise<void> {
+    if (event.sessionId) {
+      this.deps.state.setSession(this.channelId, this.threadId, event.sessionId);
+    }
+    this.reportOf = null;
+    this.injectedExpected = false;
+    this.expiry?.cancel();
+    this.notificationWaits = false;
+    this.settled.set();
+    // A reply that waited only for this report has nothing more coming.
+    await this.sweepClosedOut(live(signal));
+    await this.reactDoneIfIdle(signal);
+  }
+
+  /**
+   * A task ended while no turn runs. The agent starts a turn to report it, unless an owner
+   * prompt already sits in its queue: that turn comes first and carries the report (measured
+   * 2026-09-24, Claude Code 2.1.280), and no turn of its own follows.
+   */
+  private notified(): void {
+    if (this.background && this.owed().length === 0) this.expectInjectedTurn();
+  }
+
+  private expectInjectedTurn(): void {
+    this.injectedExpected = true;
+    this.settled.clear();
+    if (this.expiry === null || this.expiry.done) {
+      this.expiry = new Task((signal) => this.expireInjectedTurn(signal));
+    }
+  }
+
+  private async expireInjectedTurn(signal: AbortSignal): Promise<void> {
+    await this.deps.clock.sleep(INJECTED_TURN_WAIT, signal);
+    if (!this.injectedExpected || this.active !== null) return;
+    logger.warning(`no turn followed a task notification in ${this.where}`);
+    await this.reportNotComing(signal);
+  }
+
+  /**
+   * The report turn a task notification made the session expect will not come: say the end
+   * lines it would have carried where they belong, and end the replies that waited on it.
+   */
+  private async reportNotComing(
+    signal?: AbortSignal,
+    change: Omit<StatusChange, "signal"> = {},
+  ): Promise<void> {
+    this.injectedExpected = false;
+    this.reportGivenUp = true;
+    const held = this.held;
+    this.held = [];
+    // An end line waits to be said: of a task with no card (a command or an agent in the
+    // background), nothing else in the reply says that it ended.
+    const pending = this.opening ?? this.ended;
+    const unsaid = pending.map(([, line]) => line);
+    const said = unsaid.length > 0;
+    // The reply that holds the first of those tasks, whatever sits below it.
+    const [first] = pending;
+    const holder =
+      first === undefined ? null : (this.taskReplies.get(first[0]) ?? this.showing(first[0]));
+    const [ends, target, aside] = this.openingTarget();
+    try {
+      if (held.length > 0) {
+        const renderer = target ?? this.newRenderer(this.newReply());
+        await this.standalone(held, ends, aside, renderer, signal);
+      } else if (said && target !== null && ends.length > 0) {
+        // Into the reply that started the task, which the sweep below then ends. A reply that
+        // is no longer the last thing in the thread gets no line: none is posted for it.
+        await this.writeEnds(target, unsaid);
+      } else if (said && this.promptOwed({ certain: true })) {
+        // A message of the owner's waits below that reply: its own reply says the line.
+        this.endedAhead.push(...pending);
+      } else if (said && holder !== null && !holder.closedOut) {
+        // Something sits below that reply and nothing is coming: the line is written where the
+        // task started, by an edit that notifies nobody, as its card ended in place before.
+        await this.writeEnds(holder, unsaid);
+      }
+    } catch (error) {
+      if (error instanceof Cancelled) throw error;
+      logger.warning(`could not post a background update in ${this.where}: ${errorName(error)}`);
+    } finally {
+      // A notification that arrived while this wrote is expected on a wait of its own, armed
+      // below: `expectInjectedTurn` found this task still running and started none, and it
+      // cleared `settled`, which stays so. (`startTurn` cancelling this task leaves
+      // `injectedExpected` false.)
+      if (!this.injectedExpected) this.settled.set();
+      try {
+        // Catches `target` (nothing more coming for it either, when `held` was empty) and any
+        // other reply a joint report turn left stranded, since a report only ever renders into
+        // one reply, the first of the tasks it covers that is the last thing in the thread.
+        // A standalone update was posted for `held`: something sits under the replies it left.
+        await this.sweepClosedOut(live(signal), { unreported: held.length === 0 });
+        await this.reactDoneIfIdle(live(signal), change);
+      } finally {
+        // (sync) Whatever the sweep did: a notification that arrived during its own writes is
+        // waiting on a timer this task alone can arm, since nothing awaits between here and its
+        // end. None once the session is closed: `close` has cancelled this task and a timer
+        // made now would outlive `cancelTasks`.
+        if (this.injectedExpected && !this.closedFlag) {
+          this.expiry = new Task((waiting) => this.expireInjectedTurn(waiting));
+        }
+        // Runs outside `read`'s loop (its own INJECTED_TURN_WAIT timer), so nothing else
+        // re-checks idleness for this transition: it may need to arm the timer itself.
+        this.idleTimerCheck();
+      }
+    }
+  }
+
+  /**
+   * Show `state` on the thread's root, asked for at once and never awaited: a status must
+   * never delay a turn, and the chat makes the changes in the order asked and swallows their
+   * failures.
+   */
+  private react(state: SessionStatus, change: StatusChange = {}): void {
+    const shown = this.setStatus(state, change);
+    this.showThreadStatus();
+    shown.catch(() => {});
+  }
+
+  /**
+   * The one place the session's status changes: the status asked of the chat last
+   * (`lastStatus`), whether an error stands (`errorStanding`, set here synchronously, since what
+   * the chat shows changes only once it has answered), the root's status in `state.json` for
+   * crash repair, and what the root shows; null leaves the root with none. Resolves once the
+   * chat has answered. `unlanded`: an answer never reached the chat, and `state.json` keeps the
+   * ⏳ or ✋ it holds beside the ❌ (`recordUnlanded`). A change that ends the session's work
+   * (`endsWork`) tells the owner, unless his own act made it.
+   */
+  private setStatus(state: SessionStatus | null, change: StatusChange = {}): Promise<unknown> {
+    const notify = !change.byOwner && endsWork(this.lastStatus, state);
+    this.lastStatus = state;
+    this.errorStanding = state === "error";
+    if (change.unlanded) this.recordUnlanded();
+    else this.recordPending(state);
+    if (!this.reacts) return Promise.resolve();
+    if (state === null) return this.thread.clearStatus?.() ?? Promise.resolve();
+    return (
+      this.thread.showStatus?.(this.rootStatus(state), { signal: change.signal, notify }) ??
+      Promise.resolve()
+    );
+  }
+
+  /**
+   * What the root shows for `state`: `restarting` in place of `working` while a stop waits for
+   * this thread (`SessionManager.drain` reads the same two flags), so the channel's own view says
+   * why it has not ended. An edit of the root, which notifies nobody; the close that ends the
+   * wait replaces it with how the session ended.
+   */
+  private rootStatus(state: SessionStatus): RootStatus {
+    const held = this.draining && !(this.restartReady && !this.reporting);
+    return state === "working" && held ? "restarting" : state;
+  }
+
+  /**
+   * Crash repair: the root's status while it is ⏳ or ✋, cleared once ✅ or ❌ is
+   * requested; that one is kept as the thread's ended status, which the session index shows.
+   * Both cleared for a root left with no status.
+   */
+  private recordPending(state: SessionStatus | null): void {
+    const pending = state === "working" || state === "waiting";
+    this.recordStatus(() =>
+      this.deps.state.setStatusPending(
+        this.channelId,
+        this.threadId,
+        pending ? state : null,
+        pending ? null : state,
+      ),
+    );
+  }
+
+  /**
+   * Run a write of the root's status to `state.json`. Best-effort, like the other crash-repair
+   * writes: a failed one (a folder that cannot be written, a full disk) is logged by the
+   * error's name and the session goes on, since the status is bookkeeping for a repair that
+   * may never be needed and must not fail a prompt, an approval or a close.
+   */
+  private recordStatus(write: () => void): void {
+    try {
+      write();
+    } catch (error) {
+      logger.warning(
+        `could not record the root's status in state.json for ${this.where}: ${errorName(error)}`,
+      );
+    }
+  }
+
+  /**
+   * ❌ is shown while the persisted ⏳ or ✋ stays for crash repair (an answer never reached the
+   * chat): kept as the ended status, which is what the session index shows.
+   */
+  private recordUnlanded(): void {
+    const stored = this.deps.state.thread(this.channelId, this.threadId);
+    if (stored !== null) {
+      this.recordStatus(() =>
+        this.deps.state.setStatusPending(this.channelId, this.threadId, stored.status, "error"),
+      );
+    }
+  }
+
+  /**
+   * ❌. It stands until another state is asked for: `react` records it in `errorStanding` at
+   * once, before the chat answers, so a quick turn's own idle sweep cannot mistake this session
+   * for done.
+   */
+  private reactError(): void {
+    this.react("error");
+  }
+
+  /**
+   * Back to waiting, or working, right after an approval or question settles: whichever the
+   * thread still holds, since a parallel tool call can leave another one open.
+   */
+  private reactWaitingOrWorking(): void {
+    this.react(this.waitingForOwner ? "waiting" : "working");
+  }
+
+  /**
+   * ✅, once the reply that just ended turns out to have been the last thing the session owed:
+   * awaited, unlike `react`, so the checkmark never shows before the reply's end has landed. A
+   * no-op while another prompt, a running task or an unreported one still keeps the session
+   * going, or while `errorStanding` says a ❌ from `abandon` already stands: that lasts until
+   * new work starts (a submit or a report turn shows ⏳ again, both clearing it), not until
+   * some unrelated task's own sweep decides the session reads idle again. The footer is read
+   * and drawn beside it (`showFooterIfEnded`).
+   */
+  private async reactDoneIfIdle(
+    signal?: AbortSignal,
+    change: Omit<StatusChange, "signal"> = {},
+  ): Promise<void> {
+    this.showThreadStatus();
+    let done: Promise<unknown> = Promise.resolve();
+    if (!this.forkRan) {
+      // A bare copy no turn has started in: the empty turn of a connect is not work done.
+      logger.info(`no done status set in ${this.where}, no turn has started in this copy`);
+    } else if (this.sessionEnded() && !this.errorStanding) {
+      done = this.setStatus("done", { ...change, signal });
+    } else {
+      logger.info(`no done status set in ${this.where}, held by: ${this.doneHeldBy().join(", ")}`);
+    }
+    // Beside the checkmark, which never waits on the agent the footer asks; and not held back
+    // by an error: an error ends the session too, and its footer says how it stood.
+    await Promise.all([done, this.showFooterIfEnded(signal)]);
+  }
+
+  /**
+   * Whether the session has ended everything it was doing: nobody to answer, nothing running,
+   * owed, queued or expected, and every reply's end landed. The one definition behind the
+   * checkmark and the footer.
+   */
+  private sessionEnded(): boolean {
+    return !this.waitingForOwner && this.unlanded.size === 0 && this.quiet({ awaitedOnly: false });
+  }
+
+  /**
+   * The footer, once the session has ended everything it was doing (`sessionEnded`): under the
+   * reply its latest work wrote into, by an edit. Owed until the chat says it landed there; work
+   * that starts while it is read owes its own, on its own reply, and this one is not drawn.
+   * `live` false leaves the agent unasked (see `readFooter`).
+   */
+  private async showFooterIfEnded(
+    signal?: AbortSignal,
+    options: { readonly live?: boolean } = {},
+  ): Promise<void> {
+    const reply = this.footerOwedTo;
+    if (reply === null) {
+      // No footer to draw, but the work is over all the same: a stale start must not leak into
+      // the next footer.
+      if (this.sessionEnded()) this.workStartedAt = null;
+      return;
+    }
+    if (!this.sessionEnded()) {
+      this.keepContext();
+      return;
+    }
+    // Taken before the footer is read: work that starts during the read gets its own start.
+    const work = this.takeWork();
+    const footer = await this.readFooter(signal, options.live ?? true, work);
+    if (footer === null || this.footerOwedTo !== reply || !this.sessionEnded()) return;
+    if (await reply.showFooter(footer, signal)) {
+      if (this.footerOwedTo === reply) {
+        this.footerOwedTo = null;
+        this.workOwed = null;
+      }
+    }
+  }
+
+  /**
+   * The work that has just ended, and the start of the next one cleared. A footer whose draw did
+   * not land is read again with the same work; null when no start is known.
+   */
+  private takeWork(): FooterFields["work"] {
+    const started = this.workStartedAt;
+    if (started === null) return this.workOwed;
+    const now = this.now();
+    this.workStartedAt = null;
+    this.workOwed = { durationMs: Math.max(0, now - started), doneAt: now };
+    return this.workOwed;
+  }
+
+  /** Drop the kept model and context share, and any read that is on its way to replace it. */
+  private forgetContext(): void {
+    this.lastContext = null;
+    this.contextGeneration += 1;
+  }
+
+  /**
+   * A turn has ended and its footer waits for background work: ask for the context usage now,
+   * while the process is alive and idle, and keep it for the footer a `!stop` draws after it
+   * closed the process (a read made at the stop loses the race against the close, measured
+   * 2026-10-18, Claude Code 2.1.302). One request per turn; it delays nothing, and a model
+   * switch or a compaction that comes first voids it.
+   */
+  private keepContext(): void {
+    const client = this.client;
+    if (client === null || this.busy || this.contextKept || !this.runningKindsOf()) return;
+    this.contextKept = true;
+    const generation = this.contextGeneration;
+    client.contextUsage().then(
+      (usage) => {
+        if (generation === this.contextGeneration && this.client === client) {
+          this.lastContext = usage;
+        }
+      },
+      (error: unknown) => {
+        logger.warning(`could not read the context usage in ${this.where}: ${errorName(error)}`);
+      },
+    );
+  }
+
+  /**
+   * The footer as the session stands now; null when it would say nothing or cannot be read.
+   * `live` false leaves the agent unasked (a forced end: its process is lost, closing or busy
+   * with a turn that was cut, and would not answer).
+   */
+  private async readFooter(
+    signal?: AbortSignal,
+    live = true,
+    work: FooterFields["work"] = null,
+  ): Promise<FooterFields | null> {
+    try {
+      return await cancellable(this.footer(this.sessionTokens, live, work), signal);
+    } catch (error) {
+      if (error instanceof Cancelled) throw error;
+      // the end still lands, with no footer
+      logger.warning(`could not build the footer in ${this.where}: ${errorName(error)}`);
+      return null;
+    }
+  }
+
+  /**
+   * What keeps `reactDoneIfIdle` from ✅ right now, as flag names and counts, never content:
+   * every condition it and `quiet` read, so a root left on ⏳ can be traced to one of them from
+   * the log.
+   */
+  private doneHeldBy(): string[] {
+    const counts: ReadonlyArray<readonly [string, number]> = [
+      ["waiting_for_owner", this.waiting.size],
+      ["sent", this.sent.length],
+      ["pending_submits", this.pendingSubmits],
+      ["queued", this.queue.size],
+      ["unlanded", this.unlanded.size],
+    ];
+    const flags: ReadonlyArray<readonly [string, boolean]> = [
+      ["active", this.active !== null],
+      ["taken", this.taken !== null],
+      ["unsettled", !this.settled.isSet],
+      ["error_standing", this.errorStanding],
+    ];
+    const held = counts.filter(([, count]) => count > 0).map(([name, count]) => `${name}=${count}`);
+    held.push(...flags.filter(([, on]) => on).map(([name]) => name));
+    const running = this.runningKindsOf();
+    if (running) held.push(`running=${running}`);
+    return held;
+  }
+
+  /**
+   * A reply whose end failed is not done: no ✅ until its one retry lands, ❌ if that fails
+   * too. The persisted status stays as it is meanwhile (and after a final failure), so a crash
+   * still gets the repair's notice.
+   */
+  private trackLanding(landed: boolean, reply: Reply): void {
+    if (landed) return;
+    this.unlanded.add(reply);
+    if (this.closedFlag) return; // `close` settles every unlanded reply itself
+    this.awaitLanding(reply).catch(() => {});
+  }
+
+  private async awaitLanding(reply: Reply): Promise<void> {
+    const landed = await reply.waitLanded();
+    this.unlanded.delete(reply);
+    if (this.closedFlag) return;
+    if (landed) {
+      await this.reactDoneIfIdle();
+    } else {
+      // ❌ shown, but `state.json` keeps ⏳ or ✋: the answer never reached the chat. Its reply
+      // takes no footer (`Reply.showFooter`).
+      this.setStatus("error", { unlanded: true }).catch(() => {});
+      // It no longer holds the session's end back: a later reply may have ended meanwhile.
+      await this.showFooterIfEnded();
+    }
+  }
+
+  /**
+   * (Re)arm the idle-close timer when the session is now idle with no approval or question
+   * pending; cancel it otherwise. Cheap and idempotent, so every place that could change either
+   * just calls it again.
+   */
+  private idleTimerCheck(): void {
+    if (this.idleExpiry !== null) {
+      this.idleExpiry.cancel();
+      this.idleExpiry = null;
+    }
+    if (this.closedFlag || this.draining || this.waitingForOwner || !this.idle) return;
+    this.idleExpiry = new Task((signal) => this.closeWhenIdle(signal));
+  }
+
+  /**
+   * Close an agent process nothing has needed for IDLE_CLOSE_SECONDS. Silent: idle means
+   * nothing is running, sent or queued for `close()` to end with a line. The next message
+   * rebuilds the `ThreadSession` and starts the agent again with the stored session id to
+   * resume, silently, as any other start does. A thread whose agent lists a scheduled job is
+   * not closed: the agent starts its turns by itself, and a closed process would stop them.
+   */
+  private async closeWhenIdle(signal: AbortSignal): Promise<void> {
+    // A session with a scheduled job is idle by the hour and not for closing: the agent wakes
+    // it by itself. The wait goes on for as long as the list is believed.
+    do {
+      await this.deps.clock.sleep(IDLE_CLOSE_SECONDS, signal);
+      if (this.closedFlag || this.draining || this.waitingForOwner || !this.idle) {
+        return; // something started again before the hour was up
+      }
+    } while (this.scheduledJobs.length > 0);
+    logger.info(`closing an idle session in ${this.where}`);
+    // Cleared first: `close()` cancels its tasks through `cancelTasks`, and a task cannot
+    // await itself.
+    this.idleExpiry = null;
+    await this.close(texts.ENDED_IDLE, true);
+    // The agent may write its title a moment after the turn's end, when the turn's own read had
+    // already found none: a session that rested an hour asks once more, after its close so that
+    // nothing awaited sits between the idle check and the close. The read needs no live process.
+    void this.title.refresh();
+  }
+
+  /**
+   * The prompt the turn that starts now answers, taken out of `sent`; null for a turn the
+   * agent starts itself, to report a task.
+   *
+   * Claude Code replays a prompt of plain text after its turn's `init` and before the turn's
+   * first words, and replays nothing before a report turn: so in every turn of the fixtures
+   * `prompt-replay-*`, `compact` and `auto-compact*` (CLI 2.1.286 and 2.1.292). A replay
+   * therefore names the turn's prompt, whatever was awaited. And when a task's notification is
+   * waiting to be reported, a turn that opens with words (`worded`) and no replay is that
+   * report, not the plain prompt that waits beside it (measured: "Prompt replay" and "Prompt
+   * sent before a notification" in `docs/architecture.md`).
+   *
+   * Everywhere else the answer is the older guess, which `settle` corrects at the turn's end.
+   * No recording covers those turns: one that opens with a compaction starts before its
+   * replay, a command (`/compact`) is not replayed as a prompt is, and a prompt with an image,
+   * a turn that fails before its first word (a logged-out CLI, a limit reached) and a turn with
+   * no notification waiting were never recorded without their replay.
+   */
+  private whoseTurn(worded: boolean, behind: Turn[], cutShaped = false): Turn | null {
+    const [announced, ...others] = this.announced.filter((turn) => this.sent.includes(turn));
+    this.announced = [];
+    if (announced !== undefined) {
+      this.unsend(announced);
+      // The others were replayed behind it: the turn takes them in (`finish` releases them).
+      behind.push(...others);
+      this.reportDue = this.injectedExpected;
+      return announced;
+    }
+    // The agent said whose report this turn is: no prompt's, even with one waiting.
+    if (this.reportOf !== null) return null;
+    // Never a prompt a cut may have taken, but for a turn cut at its start: a live one is replayed
+    // before its turn shows anything, a compaction's boundary included (`auto-compact.jsonl`).
+    const first = cutShaped ? this.sent[0] : this.owed()[0];
+    if (this.injectedExpected || first === undefined) return null;
+    const head = first.prompt;
+    const plain = typeof head === "string" && !this.isCommand(head);
+    if (worded && this.notificationWaits && plain) return null;
+    this.unsend(first);
+    return first;
+  }
+
+  /**
+   * Whether the turn that starts now is a scheduled run: the agent opens it with no owner prompt
+   * behind it and no task end to report, while a scheduled job is believed. Nothing marks a run's
+   * start, so this is all there is to tell it by; a run that comes while an owner prompt is queued
+   * is guessed to be that prompt's turn, and its end corrects the guess (`settle`) when it says the
+   * agent started it. A prompt replayed since the last
+   * turn, a task still running and a report given up on all say the turn may be another's (an
+   * owner's, a Monitor's event, a report that came late): it is then an ordinary reply, which
+   * is the safe way to be wrong. Only where the chat has the loop card.
+   */
+  private opensRun(): boolean {
+    return (
+      this.deps.chat.capabilities.loopCard &&
+      this.scheduledJobs.length > 0 &&
+      !this.promptOwed() &&
+      !this.promptReplayed &&
+      !this.reportGivenUp &&
+      this.runningKindsOf() === "" &&
+      !this.injectedExpected &&
+      this.announced.length === 0 &&
+      this.reportOf === null &&
+      this.ended.length === 0 &&
+      this.opening === null &&
+      this.held.length === 0 &&
+      this.endedAhead.length === 0 &&
+      this.notice === null
+    );
+  }
+
+  /** The loop card's label for the run that starts: its cadence when one job could have fired. */
+  private runLabel(): string {
+    const [only, ...others] = this.scheduledJobs;
+    const run = this.loopRuns;
+    return only !== undefined && others.length === 0
+      ? texts.fill(texts.LOOP_RUN, { cadence: cadenceOf(only), run })
+      : texts.fill(texts.LOOP_RUN_MANY, { run });
+  }
+
+  /**
+   * The loop is over once its list is empty and no run still writes: the one message that says
+   * so, with the runs counted. Called wherever either could have changed.
+   */
+  private async endLoopIfOver(): Promise<void> {
+    // A turn of the owner's that deleted the loop says so when it ends, as a run does.
+    if (this.scheduledJobs.length > 0 || this.active !== null) return;
+    await this.leaveLoop();
+  }
+
+  /**
+   * The session's view of the loop ends: the one message that says so, and the jobs and the
+   * count forgotten, so that `!status` and the idle close stop treating the loop as live. Three
+   * messages: paused when a believed job is recurring (Claude Code restores it on resume),
+   * stopped-with-a-maybe when the believed jobs are all one-shot, and ended when none is
+   * believed (deleted, or expired). Nothing when no job was believed and no run shown, and
+   * where the chat has no loop card.
+   */
+  private async leaveLoop(): Promise<void> {
+    if (!this.deps.chat.capabilities.loopCard) return;
+    // On resume Claude Code restores a recurring task, and a one-shot one whose time has not
+    // passed, but not a self-paced loop's pending wakeup (scheduled tasks documentation, read
+    // 2026-10-23). The two one-shot kinds cannot be told apart, so a believed list with no
+    // recurring job is said to be stopped, with a maybe.
+    const believed = this.scheduledJobs;
+    const runs = this.loopRuns;
+    if (believed.length === 0 && runs === 0) return;
+    this.jobs = [];
+    this.loopRuns = 0;
+    const count = runs === 0 ? "" : ` · ${runs === 1 ? "1 run" : `${runs} runs`}`;
+    let line: string;
+    if (believed.length === 0) line = texts.fill(texts.LOOP_ENDED, { runs: count });
+    else if (believed.some((job) => job.recurring)) {
+      line = texts.fill(texts.LOOP_PAUSED, { runs: count });
+    } else line = texts.named(texts.LOOP_STOPPED, this.names);
+    await this.thread.endLoop?.(line);
+  }
+
+  private async startTurn(worded: boolean, run = false, cutShaped = false): Promise<ActiveTurn> {
+    // A turn of any kind, the agent's own included, outdates the last guess.
+    this.suggestions.clear(this.ref);
+    // Skipped while `stop()` is still winding an interrupt down (`finish` clears the flag once
+    // that very turn's own end says so): this can be that turn's own trailing events, not a
+    // new one, and `stop()`'s own ✅ must stand. `read` raises it too, while it settles a lost
+    // process's requests, for the same reason.
+    if (!this.interrupting && !run) {
+      this.markRan();
+      this.workStarts += 1;
+      this.errorStanding = false; // a turn is sent, or a report turn starts: new work
+      // A background task's own report turn can start while a hold waits on this very
+      // session; ✋ must stand through it, not be overwritten by ⏳ (`waitingForOwner` covers a
+      // hold the same way it covers an open approval or question).
+      this.react(this.waitingForOwner ? "waiting" : "working");
+    }
+    this.promptReplayed = false;
+    this.reportGivenUp = false;
+    const behind: Turn[] = [];
+    const replayed = this.announced.some((announced) => this.sent.includes(announced));
+    const turn = run ? null : this.whoseTurn(worded, behind, cutShaped);
+    // An agent that takes no prompt into a running turn is sent the next one once this turn has
+    // ended: `work` waits on `settled`, as it does for a report turn that was expected.
+    if (turn === null && !this.deps.agent.capabilities.promptDuringTurn) this.settled.clear();
+    this.injectedExpected = false;
+    this.expiry?.cancel();
+    let renderer: TurnRenderer;
+    let opening: string | null = null;
+    let openingAside = false;
+    let openingEnds: readonly EndLine[] = [];
+    if (run) {
+      this.loopRuns += 1;
+      renderer = this.newRenderer(new LoopReply(this.thread, this.runLabel(), this.now()));
+    } else if (turn === null) {
+      this.notificationWaits = false;
+      // A report turn renders into the reply that started a task it reports, so no new message
+      // follows for it, but only a reply that is still tracked, not ended and the last thing in
+      // the thread (`openingTarget`); otherwise into the last reply when at rest, and with none
+      // it gets a reply of its own at the bottom.
+      const [ends, target, aside] = this.openingTarget();
+      renderer = target ?? this.newRenderer(this.newReply());
+      openingEnds = ends;
+      openingAside = aside;
+    } else {
+      this.reportOf = null; // the prompt's own turn: what was named is not the next turn
+      renderer = this.newRenderer(turn.sink);
+      // A shell command's run opens the reply, before the agent's answer to it.
+      opening = turn.head;
+      turn.head = null;
+      // The ends told since the last turn and not reported: the agent takes their notifications
+      // into this turn, and the terminal prints their lines before its answer.
+      const unsaid = [...(this.opening ?? []), ...this.ended];
+      this.opening = null;
+      this.ended = [];
+      this.endedAhead.unshift(...unsaid);
+    }
+    // (sync) The turn is the active one before its first write: every `await` below yields, and
+    // a turn already out of `sent` and not yet active would read as idle to a drain, a `!stop`
+    // or a timer.
+    const active: ActiveTurn = {
+      turn,
+      renderer,
+      taken: behind,
+      afterStop: this.stopInGap,
+      replayed,
+      cut: false,
+      released: [],
+      takenNoted: false,
+      unanswered: null,
+      run,
+      startedAt: this.now(),
+    };
+    this.active = active;
+    this.stopInGap = false;
+    this.noTurn.clear();
+    this.endNotesRead = false;
+    this.takenIds = [];
+    if (turn !== null) this.turnChanges.begin(turn.uuid);
+    const reply = this.reply(renderer);
+    if (!(reply instanceof LoopReply)) {
+      if (turn !== null) this.rewinds.begin(turn.uuid, reply);
+      else this.rewinds.add(reply);
+    }
+    // A run is no work of the owner's, nor is the report of a task it started: the card times
+    // and foots them (`dateRun`).
+    if (!(this.reply(renderer) instanceof LoopReply)) {
+      this.workStartedAt ??= this.now();
+      this.footerOwedTo = this.reply(renderer);
+    }
+    if (opening !== null) await renderer.feedOpening(opening, openingAside);
+    await writeEnds(renderer, openingEnds, (text) => renderer.feedOpening(text, openingAside));
+    const ahead = this.endedAhead;
+    this.endedAhead = [];
+    await this.writeEnds(
+      renderer,
+      ahead.map(([, line]) => line),
+    );
+    if (this.notice !== null) {
+      const notice = this.notice;
+      this.notice = null;
+      await renderer.feedNotice(notice);
+    }
+    const held = this.held;
+    this.held = [];
+    for (const event of held) await renderer.feed(event);
+    return active;
+  }
+
+  /** End lines where the turn is, each subagent's card under its own line. */
+  private async writeEnds(renderer: TurnRenderer, ends: readonly EndLine[]): Promise<void> {
+    await writeEnds(renderer, ends, (text) => renderer.feedLine(text));
+  }
+
+  /**
+   * The turn the CLI never started to report an ended task, on its own reply (usually the one
+   * that started the task, `renderer`; `expireInjectedTurn` resolves it).
+   */
+  private async standalone(
+    events: readonly TaskEvent[],
+    ends: readonly EndLine[],
+    aside: boolean,
+    renderer: TurnRenderer,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (!(this.reply(renderer) instanceof LoopReply)) {
+      this.workStartedAt ??= this.now();
+      this.footerOwedTo = this.reply(renderer);
+    }
+    await writeEnds(renderer, ends, (text) => renderer.feedOpening(text, aside));
+    for (const event of events) await renderer.feed(event);
+    await this.closeReply(renderer, { signal });
+  }
+
+  private async closeReply(
+    renderer: TurnRenderer,
+    options: { readonly force?: boolean; readonly signal?: AbortSignal } = {},
+  ): Promise<void> {
+    for (const taskId of renderer.runningTasks) this.taskReplies.set(taskId, renderer);
+    // Forgetting one whose reply has not ended yet would strand it exactly as a joint report
+    // turn can: `stillOwed`, and the sweep that acts on it, both read this map.
+    const ended = [...this.taskReplies]
+      .filter(([taskId, reply]) => !reply.runningTasks.includes(taskId) && reply.closedOut)
+      .map(([taskId]) => taskId);
+    const kept = this.deps.taskRepliesKept ?? TASK_REPLIES_KEPT;
+    for (const taskId of ended.slice(0, Math.max(0, this.taskReplies.size - kept))) {
+      this.taskReplies.delete(taskId);
+    }
+    // Before the close, so the reply's last write already carries the list.
+    this.showRunning();
+    await renderer.close(options.signal);
+    // The reply ends at once unless a task this renderer started outlives this very turn;
+    // `force` is a stop, an error or a restart, which never waits for one.
+    if (options.force || !this.stillOwed(renderer)) {
+      this.trackLanding(await renderer.closeOut(options.signal), this.reply(renderer));
+    } else {
+      // Still owed a report: the reply rests, its stream stopped with no footer, so that the
+      // list of what still runs shows under it.
+      this.reply(renderer).rest();
+      this.resting.add(renderer);
+    }
+  }
+
+  /**
+   * The agent's process is going away with its tasks: no reply keeps showing one, and none is
+   * left waiting on an end that will now never come. Each ends at once, with whatever footer
+   * its own turn already decided.
+   */
+  private async stopTaskReplies(): Promise<void> {
+    const renderers = new Set(this.taskReplies.values());
+    this.taskReplies.clear();
+    this.resting.clear();
+    this.tasks.clear();
+    this.agentCalls.clear();
+    this.steps.clear();
+    this.ended = [];
+    this.opening = null;
+    this.endedAhead = [];
+    this.ownedBySubagent.clear();
+    this.parents.clear();
+    this.messages.clear();
+    this.unreported.clear();
+    this.notificationWaits = false;
+    this.unfolded.clear();
+    this.stopped.clear();
+    this.refusedTasks.clear();
+    for (const renderer of renderers) {
+      await renderer.stopRunning().catch(() => {});
+    }
+    // Before closeOut: the list must already read empty, or the reply that holds it would end
+    // with a stale card.
+    this.showRunning();
+    for (const renderer of renderers) {
+      try {
+        this.trackLanding(await renderer.closeOut(), this.reply(renderer));
+      } catch {
+        // the others still end
+      }
+    }
+    // The cards `stopRunning` just ended, and the list above, only debounce: a caller closing
+    // everything down cannot wait a whole debounce for them.
+    for (const renderer of renderers) {
+      await this.reply(renderer)
+        .settle()
+        .catch(() => {});
+    }
+  }
+
+  /**
+   * The reply that holds the root of the call this task event's task belongs to, when a call
+   * inside another call started it. Null when no tracked reply can tell (a restart dropped
+   * it): the task is then treated as any other, since a top-level task of a call no reply holds
+   * looks the same.
+   */
+  private nestingReply(event: TaskEvent): TurnRenderer | null {
+    const replies = new Set(this.taskReplies.values());
+    if (this.active !== null) replies.add(this.active.renderer);
+    for (const reply of replies) if (reply.nests(event)) return reply;
+    return null;
+  }
+
+  private originOf(callId: string): TurnRenderer | null {
+    for (const reply of this.taskReplies.values()) if (reply.owns(callId)) return reply;
+    return null;
+  }
+
+  /**
+   * Whether one of `renderer`'s own tasks still keeps its reply's stream open: one still runs,
+   * or ended with its end line still to be said, or ended less than INJECTED_TURN_WAIT ago with
+   * no notification yet (its report, if any, not in yet). The CLI can suppress the notification altogether (SDK TaskUpdatedMessage
+   * docstring), so past that wait this stops counting it: `expireUnreported` rechecks then,
+   * since nothing else would.
+   */
+  private stillOwed(renderer: TurnRenderer): boolean {
+    if (this.owesItself(renderer)) return true;
+    // The thread's last reply also waits while a reply above it does: that reply is no longer
+    // last, so its report renders here (`restingLast`), and closing this one out now would
+    // leave the report a reply of its own. The expiry (`expireUnreported`) and the sweep end
+    // such a wait when no report comes.
+    if (!this.reply(renderer).last) return false;
+    for (const other of new Set([...this.taskReplies.values(), ...this.unfolded.values()])) {
+      if (other !== renderer && !other.closedOut && this.owesItself(other)) return true;
+    }
+    return false;
+  }
+
+  /** Whether one of `renderer`'s own tasks keeps it open (`stillOwed` says which). */
+  private owesItself(renderer: TurnRenderer): boolean {
+    if (renderer.runningTasks.length > 0) return true;
+    // An end line not yet said belongs to a turn to come, or to the wait for one: the reply
+    // that started its task stays open to take it.
+    for (const [taskId] of [...(this.opening ?? []), ...this.ended]) {
+      if (this.taskReplies.get(taskId) === renderer) return true;
+    }
+    // A task that ended inside a turn without that turn taking its notification: the report
+    // turn is due and renders into this reply.
+    for (const reply of this.unfolded.values()) if (reply === renderer) return true;
+    const now = this.deps.clock.time();
+    for (const [taskId, ended] of this.unreported) {
+      if (now - ended < INJECTED_TURN_WAIT && this.taskReplies.get(taskId) === renderer) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * A report turn renders into one reply only (the first of the tasks it covers that is the
+   * last thing in the thread, `openingTarget`) when several end together, so every other reply
+   * whose own tasks also finished is checked here instead, since nothing else rechecks it once
+   * the wait that deferred it lifts. `options.unreported` says that no report followed (the
+   * notification never came): a reply closed out then with a message of the owner's or of another
+   * reply below it is logged. Only while nothing is still expected or running session-wide:
+   * `closeReply` already handles the renderer whose own turn or report just ended, and a
+   * currently active one is skipped outright, whatever it reads: its own turn has not closed it
+   * yet, so nothing here is its call to make.
+   */
+  private async sweepClosedOut(
+    signal?: AbortSignal,
+    options: { readonly unreported?: boolean } = {},
+  ): Promise<void> {
+    const active = this.active?.renderer ?? null;
+    for (const renderer of new Set(this.taskReplies.values())) {
+      if (this.injectedExpected || !this.settled.isSet) {
+        return; // a notification arrived meanwhile: its report may render into this reply
+      }
+      if (renderer !== active && !this.stillOwed(renderer)) {
+        const reply = this.reply(renderer);
+        // Read before the close: closing it out changes what the thread shows below it.
+        if (
+          options.unreported &&
+          !renderer.closedOut &&
+          !this.endedUnreported.has(renderer) &&
+          !reply.last
+        ) {
+          this.endedUnreported.add(renderer);
+          logger.info(`a reply ended with no report under it in ${this.where}`);
+        }
+        this.trackLanding(await renderer.closeOut(signal), reply);
+      }
+    }
+  }
+
+  /**
+   * Give up waiting on a task's notification after INJECTED_TURN_WAIT (the CLI can suppress
+   * it) and sweep for whatever that frees.
+   */
+  private async expireUnreported(taskId: string, signal: AbortSignal): Promise<void> {
+    await this.deps.clock.sleep(INJECTED_TURN_WAIT, signal);
+    this.unreported.delete(taskId);
+    await this.sweepClosedOut(signal, { unreported: true });
+    await this.reactDoneIfIdle(signal);
+  }
+
+  /**
+   * The replies this session still tracks, which hold a change that only debounced: the ones
+   * whose end did not land, those a task outlives their turn in, and the active turn's.
+   */
+  private openReplies(): Set<Reply> {
+    const replies = new Set(this.unlanded);
+    for (const renderer of this.taskReplies.values()) replies.add(this.reply(renderer));
+    if (this.active !== null) replies.add(this.reply(this.active.renderer));
+    return replies;
+  }
+
+  /** The tasks still running: those that outlived their turn, and the running turn's. */
+  private runningTaskIds(): string[] {
+    const outlived = [...this.taskReplies]
+      .filter(([taskId, reply]) => reply.backgroundTasks.includes(taskId))
+      .map(([taskId]) => taskId);
+    // What runs in the background, as the terminal counts it: a command the turn is still
+    // waiting for shows on its own line and is no shell left running.
+    const current = this.active?.renderer.backgroundTasks ?? [];
+    return [...new Set([...outlived, ...current])];
+  }
+
+  /**
+   * `1 shell · 2 agents`, or empty when no task outlived its turn. `awaitedOnly` leaves out
+   * the tasks a stop does not wait for (`mayHaveOrderedRestart`).
+   */
+  private runningKindsOf(options: { readonly awaitedOnly?: boolean } = {}): string {
+    const counts = new Map<string, number>();
+    for (const [taskId, renderer] of this.taskReplies) {
+      if (options.awaitedOnly && this.afterRestart.has(taskId)) continue;
+      if (renderer.backgroundTasks.includes(taskId)) {
+        const counted = TASK_WORDS[this.tasks.get(taskId)?.[0] ?? "other"][0];
+        counts.set(counted, (counts.get(counted) ?? 0) + 1);
+      }
+    }
+    return [...counts].map(([kind, n]) => `${n} ${kind}${n > 1 ? "s" : ""}`).join(" · ");
+  }
+
+  private showRunning(): void {
+    this.showThreadStatus(); // the activity line follows the same tasks (it never counts them)
+    this.thread.showRunning(this.runningList());
+  }
+
+  /**
+   * What the chat draws above the footer under the thread's last reply at rest: `2 agents · 1
+   * shell still running` and a line per task, in the order they started. Null when none runs.
+   */
+  private runningList(): RunningList | null {
+    const counts = this.runningKindsOf();
+    if (!counts) return null;
+    const order = [...this.tasks.keys()];
+    const rank = (taskId: string): number => {
+      const at = order.indexOf(taskId);
+      return at === -1 ? Number.POSITIVE_INFINITY : at;
+    };
+    const lines = [...this.taskReplies]
+      .filter(([taskId, renderer]) => renderer.backgroundTasks.includes(taskId))
+      .sort(([a], [b]) => rank(a) - rank(b))
+      .map(([taskId, renderer]) => {
+        const [kind, description, agentType] = this.tasks.get(taskId) ?? ["other", "", null];
+        const agent = kind === "subagent" ? this.agentOf(taskId) : null;
+        let label: string;
+        if (description && kind === "subagent") {
+          // The terminal's row: the agent's type, then what it does.
+          if (agentType !== null) {
+            const type = oneLine(agentType, TITLE_LIMIT / 2);
+            const text = `${type}  ${oneLine(description, TITLE_LIMIT - Array.from(type).length - 2)}`;
+            return { text, agent };
+          }
+          label = `${TASK_WORDS.subagent[1]}: ${description}`;
+        } else if (description) {
+          label = description;
+        } else {
+          label = renderer.taskTitle(taskId) || taskId;
+        }
+        return { text: oneLine(label, TITLE_LIMIT), agent };
+      });
+    return { title: texts.fill(texts.STILL_RUNNING, { counts }), lines };
+  }
+
+  /** A subagent as the list shows it; null before its first call. */
+  private agentOf(taskId: string): RunningAgent | null {
+    const step = this.steps.get(taskId);
+    if (step?.words === undefined || step.words === null) return null;
+    return { since: step.since, calls: step.calls, step: step.words };
+  }
+
+  private newRenderer(reply: Reply): TurnRenderer {
+    const renderer = new TurnRenderer(
+      reply,
+      this.names,
+      this.previews,
+      this.directory,
+      this.deps.chat.capabilities.nativeStreaming,
+      // Recorded before any reply sees the start (`dispatch`), so a first start counts one.
+      (taskId) => (this.starts.get(taskId) ?? 0) > 1,
+      (id) => modelName(this.models, id),
+      // Started in an earlier reply and ended: a message to it resumes it.
+      (taskId) => this.starts.has(taskId) && !this.tasks.has(taskId),
+      () => this.deps.clock.time(),
+      (text) => this.deps.chat.escape(text, "reference"),
+    );
+    this.replyOf.set(renderer, reply);
+    return renderer;
+  }
+
+  /** The reply `renderer` writes: a renderer of this session is always made by `newRenderer`. */
+  private reply(renderer: TurnRenderer): Reply {
+    const reply = this.replyOf.get(renderer);
+    if (reply === undefined) throw new Error("a renderer this session did not make");
+    return reply;
+  }
+
+  /** A new reply. It writes nothing until the agent has something to show. (sync) */
+  private newReply(prompt?: MessageId): Reply {
+    return this.thread.openReply(
+      (old, fresh) => this.deps.state.replaceOpenReply(this.channelId, this.threadId, old, fresh),
+      prompt,
+    );
+  }
+
+  /**
+   * `newReply`, as the step of `submit` that makes the reply. It does not wait; a test replaces
+   * it with one that does, to hold a prompt between its arrival and its queue.
+   */
+  private sink(prompt: MessageId | null): Reply | Promise<Reply> {
+    return this.newReply(prompt ?? undefined);
+  }
+
+  /**
+   * Close the turn's reply and release it; true when `!stop` cut it short, which the caller
+   * reads once the turn is no longer active (it still is, for `closeReply`'s own checks), to
+   * skip the ✅, since `stop()` already showed its own.
+   */
+  private async finish(
+    active: ActiveTurn,
+    result: TurnEnded,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    let stopped = false;
+    let takenNoted = false;
+    const injected = result.startedBy === "agent";
+    // The agent ends a turn it took prompts into with one result of its own for all of them. A
+    // run it took a prompt into is that prompt's turn from then on.
+    // An owner's turn answers its own prompt itself: only the others it took in are released.
+    const released =
+      injected || active.run ? active.taken : active.taken.filter((turn) => turn !== active.turn);
+    const handedOver = active.run && released.length > 0;
+    try {
+      if (result.sessionId) {
+        this.deps.state.setSession(this.channelId, this.threadId, result.sessionId);
+      }
+      // Kept for `!status`, even when this result reports none (`/usage`, `/clear`): the two
+      // lines never disagree.
+      this.sessionTokens = sessionTokens(result.tokens);
+      this.contextKept = false;
+      stopped = result.ending === "interrupted";
+      // A turn that did not end well is no ground to wait for a report under its reply.
+      if (result.ending !== "done") this.unfolded.clear();
+      this.interrupting = false; // this turn's own tail, whichever way it ended
+      if (released.length > 0) {
+        this.noteTaken(released);
+        takenNoted = true;
+      }
+      // The stop cut the turn the moment it began: the agent never took the prompt in, and the
+      // note stands in the reply where the turn's own empty `Stopped.` would.
+      if (this.cutAtStart(active, result) && active.turn !== null) {
+        this.endNotes.push(notSent([active.turn], texts.BECAUSE_OWNER_STOPPED));
+      }
+      // What a restart dropped meanwhile is said where the running turn ends.
+      await this.feedEndNotes(active.renderer);
+      const card = this.reply(active.renderer);
+      let handed: string | null = null;
+      if (card instanceof LoopReply) {
+        card.setFinal(result.finalText);
+        if (handedOver) handed = card.takeOver();
+        else await this.dateRun(card, stopped, signal);
+      }
+      // `!stop` cut this turn short, the owner's own or a report's: its reply ends like any
+      // other, and never waits on a task it may still owe (`force`: `!stop` never does).
+      await this.closeReply(active.renderer, { force: stopped, signal });
+      if (handed !== null) {
+        await this.answerTakenRun(
+          handed,
+          released.find((t) => t.replyFor !== null)?.replyFor,
+          signal,
+        );
+      }
+    } catch (error) {
+      active.cut = this.cutBeforeClose(active, error);
+      if (active.cut) {
+        active.released = released;
+        active.takenNoted = takenNoted;
+        // `settle` sends such a prompt back to wait for its own turn, which will not come.
+        const unanswered = injected && active.turn !== null && !released.includes(active.turn);
+        active.unanswered = unanswered ? active.turn : null;
+      }
+      throw error;
+    } finally {
+      // Not settled when the cancel came before the reply closed: the turn stays active and
+      // `abandon` ends the reply and releases the turn, as for a close while the turn runs.
+      if (!active.cut) {
+        // A run has no prompt of its own: it releases the ones it took in, and the owner prompt
+        // that waits behind it is not its.
+        if (active.run) this.releaseTaken(released);
+        else this.settle(active.turn, result, released);
+        this.expectCutPrompts(active, result);
+        this.expectUnfoldedReports();
+        // A report turn's own reply is `closeReply`'s concern above; this catches every other
+        // reply a joint one left stranded.
+        await this.sweepClosedOut(live(signal));
+        this.stopTailEnded();
+      }
+    }
+    return stopped;
+  }
+
+  /**
+   * The stop cut the turn the moment it began: it took no step, was not a replay, is not a command
+   * (whose turn takes no step and whose replay is not measured under a stop: never told unsent
+   * when it may have run) and no turn had taken it in. A turn the agent says it started itself is
+   * no prompt's cut (a scheduled run that failed at once, #270): the prompt it was guessed to be
+   * still runs, and `settle` gives it back its turn.
+   */
+  private cutAtStart(active: ActiveTurn, result: TurnEnded): boolean {
+    return (
+      result.startedBy === "owner" &&
+      active.afterStop &&
+      !active.replayed &&
+      active.turn !== null &&
+      !this.isCommand(active.turn.prompt) &&
+      !active.taken.includes(active.turn) &&
+      result.steps === 0
+    );
+  }
+
+  /**
+   * A `!stop` in the gap cut a turn the moment it began (`init`, then an error with no replay,
+   * measured 2026-11-09), and prompts sent behind it are still waiting: the agent either runs
+   * each as a turn of its own (the terminal does, M3) or the cut took them with it, and nothing
+   * tells the two apart at this end. Those that no turn has claimed after `INJECTED_TURN_WAIT`
+   * were taken: they are said not to be sent, and the session is idle again. A turn running when
+   * the wait ends may still claim them, so the wait starts again while one runs (#252). The done
+   * status is the owner's own act only when no work started after the cut (`workStarts`): the
+   * root still reads working then only because these held the stop's done back. Work that did
+   * start (a later prompt's, or a turn the agent started) ended behind these, and its end tells
+   * him as any other does.
+   */
+  private expectCutPrompts(active: ActiveTurn, result: TurnEnded): void {
+    if (!this.cutAtStart(active, result) || this.closedFlag) return;
+    const waiting = this.sent.filter((turn) => !active.taken.includes(turn));
+    if (this.deps.agent.capabilities.declaredState) {
+      // The agent says when it rests (the seam's contract): no clock. Only the prompts it was
+      // sent before the stop's interrupt count.
+      // A cut settles the record: what left `sent` (taken, dropped) is no longer owed.
+      this.gapSent = this.gapSent.filter((turn) => this.sent.includes(turn));
+      const left = waiting.filter((turn) => this.gapSent.includes(turn));
+      if (left.length === 0) return;
+      for (const turn of left) turn.inDoubt = true;
+      // A second cut before the idle adds its prompts and keeps the first work count.
+      this.cutWait = {
+        left: [
+          ...(this.cutWait?.left ?? []),
+          ...left.filter((t) => !this.cutWait?.left.includes(t)),
+        ],
+        workAtCut: this.cutWait?.workAtCut ?? this.workStarts,
+      };
+      return;
+    }
+    if (waiting.length === 0) return;
+    for (const turn of waiting) turn.inDoubt = true;
+    const workAtCut = this.workStarts;
+    const expiry: Task = new Task(async (signal) => {
+      let left = waiting;
+      do {
+        await this.deps.clock.sleep(INJECTED_TURN_WAIT, signal);
+        left = left.filter((turn) => this.sent.includes(turn) && turn.inDoubt);
+      } while (this.active !== null && left.length > 0);
+      await this.dropCutPrompts(left, workAtCut, signal);
+    });
+    this.expiring.add(expiry);
+    expiry.settled().then(() => this.expiring.delete(expiry));
+  }
+
+  /** The agent says `idle`: the prompts a cut at start may have taken and are still in `sent` are dropped. */
+  private async endCutWait(signal?: AbortSignal): Promise<void> {
+    const wait = this.cutWait;
+    if (wait === null) return;
+    this.cutWait = null;
+    // Only what this wait covered: a later stop's record stays for its own cut.
+    this.gapSent = this.gapSent.filter((turn) => !wait.left.includes(turn));
+    await this.dropCutPrompts(
+      wait.left.filter((turn) => this.sent.includes(turn) && turn.inDoubt),
+      wait.workAtCut,
+      signal,
+    );
+  }
+
+  /** Tell `left` not sent and end the work the stop held back; the done status is the owner's act when no work started since. */
+  private async dropCutPrompts(
+    left: readonly Turn[],
+    workAtCut: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (left.length === 0) return;
+    for (const turn of left) this.unsend(turn);
+    const [inPlace, stranded] = this.partitionEndedAhead();
+    // The turns are released first: a write cancelled after them leaves nobody waiting.
+    await this.dropStopped(left, stranded);
+    await this.writeInPlace(inPlace, signal);
+    await this.reactDoneIfIdle(signal, { byOwner: this.workStarts === workAtCut });
+  }
+
+  /**
+   * With no prompt of the owner's left to say them, the end lines kept for a dropped message are
+   * taken out of `endedAhead`: those whose task has a reply to write into (by an edit that
+   * notifies nobody) grouped by reply, and the others, whose reply is gone or closed out, for the
+   * note of the drop. Both empty while a prompt still waits: its reply says the lines.
+   */
+  private partitionEndedAhead(): [Map<TurnRenderer, EndLine[]>, EndLine[]] {
+    const inPlace = new Map<TurnRenderer, EndLine[]>();
+    const stranded: EndLine[] = [];
+    if (this.promptOwed({ certain: true }) || this.endedAhead.length === 0)
+      return [inPlace, stranded];
+    const ahead = this.endedAhead;
+    this.endedAhead = [];
+    for (const [taskId, line] of ahead) {
+      const reply = this.taskReplies.get(taskId) ?? this.showing(taskId);
+      if (reply === null || reply.closedOut) stranded.push(line);
+      else inPlace.set(reply, [...(inPlace.get(reply) ?? []), line]);
+    }
+    return [inPlace, stranded];
+  }
+
+  /** Write `lines` into their replies, then end the ones that rest, as `reportNotComing` does. */
+  private async writeInPlace(
+    inPlace: ReadonlyMap<TurnRenderer, readonly EndLine[]>,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (inPlace.size === 0) return;
+    for (const [reply, lines] of inPlace) {
+      try {
+        await this.writeEnds(reply, lines);
+      } catch (error) {
+        if (error instanceof Cancelled) throw error;
+        logger.warning(`could not write an end line in ${this.where}: ${errorName(error)}`);
+      }
+    }
+    await this.sweepClosedOut(live(signal), { unreported: true });
+  }
+
+  /**
+   * A turn ended with a task that ended inside it and whose notification it did not take
+   * (`unfolded`): the agent opens a turn of its own to report it, as for a task that ends between
+   * turns, and the wait for that turn is the same one (`expectInjectedTurn`).
+   */
+  private expectUnfoldedReports(): void {
+    if (this.unfolded.size === 0) return;
+    // Tracked as a reply a task outlived its turn in: the sweep that closes it out, if no report
+    // turn comes, reads this map.
+    for (const [taskId, reply] of this.unfolded) this.taskReplies.set(taskId, reply);
+    this.notificationWaits = true;
+    this.notified();
+  }
+
+  /**
+   * Whether `error` is the cancel of the reader by a close (`closedFlag` is set before `close`
+   * cancels it) before the turn's reply was closed out. `dropClient` cancels the reader too, and
+   * leaves nothing to end the turn: it settles as for any other error. A reply whose end was
+   * asked for is `close`'s to settle, so a cancel after that point keeps the turn ending as any
+   * other.
+   */
+  private cutBeforeClose(active: ActiveTurn, error: unknown): boolean {
+    return error instanceof Cancelled && this.closedFlag && !active.renderer.closedOut;
+  }
+
+  /**
+   * The footer of a run's end goes to its card, built as an ordinary reply's is, with the run's
+   * own duration, from its start to the end of its last turn (the report of a task it started,
+   * when one came): the card is rewritten on every run, so it is an edit and no push.
+   */
+  private async dateRun(card: LoopReply, stopped: boolean, signal?: AbortSignal): Promise<void> {
+    const at = this.now();
+    const work = { durationMs: Math.max(0, at - card.startedAt), doneAt: at };
+    // A run cut short ends with a process on its way out, which a live read can lose to.
+    const live = !stopped && !this.closedFlag;
+    card.setEnd(await this.readFooter(signal, live, work), at);
+  }
+
+  /** The prompts a run took into itself are answered: nobody waits on them any more. */
+  private releaseTaken(taken: readonly Turn[]): void {
+    for (const turn of taken) {
+      this.unsend(turn);
+      turn.done.set();
+    }
+    this.settled.set();
+  }
+
+  /**
+   * A run that took an owner's prompt into itself wrote nothing to the card: its words are the
+   * answer to that prompt, in a reply of their own that the owner is told of. The run does not
+   * count among the runs the card showed.
+   */
+  private async answerTakenRun(
+    words: string,
+    prompt: MessageId | null | undefined,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    this.loopRuns = Math.max(0, this.loopRuns - 1);
+    const reply = this.newReply(prompt ?? undefined);
+    if (!blank(words)) await reply.text(words);
+    await reply.finish([], signal);
+    this.workStartedAt ??= this.now();
+    this.footerOwedTo = reply;
+    this.trackLanding(await reply.closeOut(signal), reply);
+  }
+
+  /**
+   * Release whoever waits on this turn. The result says whose turn it really was: when an
+   * owner prompt and a task notification cross, the guess made at the turn's start can be
+   * wrong; this puts the queue back in order (that one reply carries the other's text).
+   * `released`: prompts the agent took into this turn; no result of their own follows.
+   */
+  private settle(turn: Turn | null, result: TurnEnded, released: readonly Turn[]): void {
+    const injected = result.startedBy === "agent";
+    // Read once and lowered: only the turn it was raised for may await the report again.
+    const reportDue = this.reportDue;
+    this.reportDue = false;
+    for (const taken of released) {
+      this.unsend(taken);
+      taken.done.set();
+    }
+    const waiting = this.owed()[0];
+    if (turn === null && !injected && waiting !== undefined && released.length === 0) {
+      logger.warning(`an owner reply in ${this.where} went to a background reply`);
+      // Only misrouted, not failed, so no ❌. Its answer is already in the reply that was
+      // guessed to be the report: the owner turn's own reply is never written.
+      this.unsend(waiting);
+      waiting.done.set();
+      this.expectInjectedTurn();
+    } else if (turn !== null && injected && !released.includes(turn)) {
+      logger.warning(`a background reply in ${this.where} went to an owner reply`);
+      // That reply is spent: the owner's own turn gets a fresh one.
+      turn.sink = this.newReply(turn.replyFor ?? undefined);
+      this.sent.unshift(turn);
+      this.settled.set();
+    } else if (turn !== null && !injected) {
+      turn.done.set();
+      if (reportDue) {
+        // The report that was awaited when this prompt's turn started is still to come.
+        this.expectInjectedTurn();
+      }
+    } else {
+      this.settled.set();
+    }
+  }
+
+  /**
+   * The client is gone: end the reply that was open with `line`, and release whoever waits on
+   * it, on the turns sent and on `more` (queued ones, when the session closes). Those get no
+   * reply of their own: one note says they were not sent, `because` of what. With no turn
+   * active, an `error` says `line` in each reply that still waited for a task, and says nothing
+   * at all, the cross included, when nothing ran and nothing waited.
+   *
+   * A turn whose result had arrived when a close cut its reply's close (`ActiveTurn.cut`) is no
+   * turn cut short: its answer is whole. Its reply ends without `line`, and the prompts its
+   * result released get the note of a normal end, since the agent did take them.
+   * True when that was all there was to end: nothing was dropped and no task of the turn's still
+   * ran, so the thread's status is the one of a turn that ended.
+   */
+  private async abandon(
+    line: string,
+    options: {
+      readonly error?: boolean;
+      readonly more?: readonly Turn[];
+      readonly because?: string;
+      /** The calls still running are drawn stopped: the owner cut them (`!terminal`). */
+      readonly callsStopped?: boolean;
+    } = {},
+  ): Promise<boolean> {
+    const {
+      error = false,
+      more = [],
+      because = texts.named(texts.BECAUSE_STOPPED, this.names),
+      callsStopped = false,
+    } = options;
+    // (sync) The turn, the sent prompts and every flag of a turn in progress are taken before
+    // the first write: whatever reads the session meanwhile sees it with no turn.
+    const active = this.active;
+    this.active = null;
+    this.noTurn.set();
+    const ended = active?.cut ? active : null;
+    const whole = ended !== null;
+    const released = ended?.released ?? [];
+    if (ended !== null && released.length > 0 && !ended.takenNoted) {
+      this.noteTaken(released);
+    }
+    const unanswered = ended?.unanswered ?? null;
+    // Prompts the agent took into the running turn were received: they get the taken note, not
+    // the not-sent one (a cut turn's are in `released` and noted above).
+    const takenIn =
+      active !== null && !active.cut ? active.taken.filter((turn) => turn !== active.turn) : [];
+    if (takenIn.length > 0) this.noteTaken(takenIn);
+    const dropped = [
+      ...(unanswered === null ? [] : [unanswered]),
+      ...this.sent.filter(
+        (turn) => !released.includes(turn) && !takenIn.includes(turn) && turn !== unanswered,
+      ),
+      ...more,
+    ];
+    this.sent = [];
+    this.gapSent = [];
+    this.cutWait = null;
+    const waiting = [...(active?.turn ? [active.turn] : []), ...released, ...takenIn, ...dropped];
+    // What `reactDoneIfIdle` reads at a normal end, before anything below changes it: an error
+    // that stands (a restart dropped prompts) and a task of any reply's that still runs keep the
+    // root from the status of a turn that ended.
+    const endedWell =
+      ended !== null &&
+      dropped.length === 0 &&
+      !this.errorStanding &&
+      ended.renderer.runningTasks.length === 0 &&
+      !this.runningKindsOf();
+    this.injectedExpected = false;
+    this.announced = [];
+    this.stopInGap = false;
+    this.reportDue = false;
+    this.notificationWaits = false;
+    this.unfolded.clear();
+    this.interrupting = false; // whatever it was waiting on, this ends it
+    this.compacting = false; // the process that was compacting is gone
+    this.agentState = null; // and it will never say that it rests
+    this.showThreadStatus();
+    // The replies still waiting for a task of theirs, when no turn is active: a process lost
+    // then leaves them the only place that can say so. `taskReplies` also keeps
+    // replies whose tasks all ended (TASK_REPLIES_KEPT): only one that has not closed still
+    // waits.
+    const waitingReplies = new Set<TurnRenderer>();
+    if (active === null) {
+      for (const reply of this.taskReplies.values()) {
+        if (!reply.closedOut) waitingReplies.add(reply);
+      }
+    }
+    const owed =
+      active !== null || dropped.length > 0 || this.endNotes.length > 0 || waitingReplies.size > 0;
+    if (error && owed) {
+      // Not for a session that was idle with nothing running: its last reply ended well,
+      // nothing is lost, and the next message connects a new process.
+      this.reactError();
+    }
+    try {
+      if (error) {
+        for (const renderer of waitingReplies) await renderer.feedEnding(line).catch(() => {});
+      }
+      if (active !== null) {
+        try {
+          if (!whole) await active.renderer.feedEnding(line, { callsStopped });
+          if (dropped.length > 0) await active.renderer.feedError(notSent(dropped, because));
+          await this.feedEndNotes(active.renderer);
+          await this.closeReply(active.renderer, { force: true });
+        } catch {
+          // the tasks' replies below still end, and the waiters are still released
+        }
+      } else if (dropped.length > 0 || this.endNotes.length > 0) {
+        const notes = this.endNotes;
+        this.endNotes = [];
+        if (dropped.length > 0) notes.push(notSent(dropped, because));
+        await this.post(notes.join("\n")).catch(() => {});
+      }
+      await this.stopTaskReplies();
+    } finally {
+      for (const turn of waiting) turn.done.set();
+      this.settled.set();
+      this.stopTailEnded();
+    }
+    // A forced end is an end: the footer reads what it can, under the reply of the latest work.
+    await this.showFooterIfEnded(undefined, { live: false }).catch(() => {});
+    return endedWell;
+  }
+
+  /** The reply's footer, or null when it would say nothing. */
+  private async footer(
+    tokens: number | null,
+    live = true,
+    work: FooterFields["work"] = null,
+  ): Promise<FooterFields | null> {
+    const data = { ...(await this.footerData(tokens, live)).fields, work };
+    const says =
+      work !== null ||
+      data.bypass ||
+      (data.folder !== null && basename(data.folder) !== "") ||
+      footerFields(data, this.now()).length > 0;
+    return says ? data : null;
+  }
+
+  /**
+   * What the footer says of the effort. A fixed level shows as it is, unless a turn ran at
+   * another one (that is what ran). The default shows as the agent's word for it, with the level
+   * of the last turn beside it once there is one, as the terminal's `/effort` reads
+   * `auto (currently medium)`. An agent with no such word shows the level alone, once known, and
+   * `default` for a model that takes none. Once a turn has reported that the model takes no
+   * effort, the footer says so whatever the setting, as the terminal's `/model` picker does.
+   */
+  private effortFields(): Pick<FooterFields, "effort" | "effortObserved"> {
+    if (this.effortUnsupported) return { effort: texts.EFFORT_NOT_SUPPORTED, effortObserved: null };
+    const word = this.deps.agent.capabilities.effortDefault;
+    if (this.effortSetting !== null) {
+      return { effort: this.effort ?? this.effortSetting, effortObserved: null };
+    }
+    if (word !== null) return { effort: word, effortObserved: this.effort };
+    return {
+      effort: this.effortReported ? this.effort || "default" : null,
+      effortObserved: null,
+    };
+  }
+
+  /**
+   * The advisor the agent's settings name now, read at every footer and `!status`: the owner may
+   * set it in a terminal at any moment, and every running session follows. With no live process
+   * to read through, or a failed read, the last one read.
+   */
+  private async advisorSetting(live: boolean): Promise<string | null> {
+    if (!live || this.client === null || !this.deps.agent.capabilities.advisor) {
+      return this.lastAdvisor;
+    }
+    try {
+      this.lastAdvisor = (await this.client.advisor?.()) ?? null;
+    } catch (error) {
+      logger.warning(`could not read the advisor in ${this.channelId}: ${errorName(error)}`);
+    }
+    return this.lastAdvisor;
+  }
+
+  /**
+   * The footer's values from what the session knows now and `tokens`: the one source for both
+   * the footer and `!status`, so the two never disagree; with them, the repository the
+   * `git: not trusted` mark is for, which `!status` names.
+   */
+  private async footerData(
+    tokens: number | null,
+    live = true,
+  ): Promise<{ fields: FooterFields; untrusted: Repository | null }> {
+    let context: ContextUsage = { model: null, percentage: null };
+    if (live && this.client === null) {
+      context = this.closingContext ?? this.lastContext ?? context;
+    } else if (live && this.client !== null) {
+      try {
+        context = await this.client.contextUsage();
+        this.lastContext = context;
+      } catch (error) {
+        // model and context are left out of the footer
+        logger.warning(
+          `could not read the context usage in ${this.channelId}: ${errorName(error)}`,
+        );
+      }
+    }
+    const here = this.workingDirectory || this.directory;
+    const reading = await gitReading(here, verdictBy(this.deps.agent));
+    const [branch, changes] = reading.state;
+    const gitUntrusted = reading.untrusted !== null;
+    const usage = this.usage?.current ?? null;
+    // The limits name the account they were read for, never one beside another's (#276).
+    const account = usage === null ? this.account : usage.account;
+    // A switch the usage does not name yet is the newer word; once a request has gone to the
+    // new model the usage names it, and from then on the usage alone speaks.
+    if (context.model === this.modelSwitched) this.modelSwitched = null;
+    const model = this.modelSwitched ?? context.model;
+    const advisor = await this.advisorSetting(live);
+    const fields: FooterFields = {
+      bypass: this.bypass,
+      planning: this.planning,
+      model: model === null ? null : modelName(this.models, model),
+      advisor: advisor === null ? null : settingName(this.models, advisor),
+      ...this.effortFields(),
+      folder: this.directory,
+      branch,
+      gitUntrusted,
+      changes,
+      sessionTokens: tokens,
+      contextPercent: context.percentage,
+      sessionLimit: usage?.session ?? null,
+      weekLimit: usage?.week ?? null,
+      account: account?.name ?? null,
+      accountPlan: account?.plan ?? null,
+      work: null,
+    };
+    return { fields, untrusted: reading.untrusted };
+  }
+
+  /**
+   * A request of the agent's, put to the owner: a tool's permission, or its questions. Resolves
+   * with what the owner chose, for as long as that takes; with a refusal when the chat could
+   * not show the request, since nobody can answer one that was never shown. `signal` is the
+   * agent's: aborted, the request is refused and its message withdrawn; aborted before the
+   * request arrives, nothing is posted. Nothing is posted either for a request that arrives once
+   * the session is closing: it is refused at once.
+   */
+  private async askOwner(
+    request: PermissionRequest | QuestionRequest,
+    signal: AbortSignal,
+  ): Promise<Decision> {
+    const questions = request.type === "question" ? request.questions : null;
+    if (signal.aborted) return toAnswer(DENY, questions, this.names);
+    // A session that is closing has denied its open requests (`close`), and the agent can ask
+    // again on that denial while the close still waits for the first handler: this one would be
+    // shown in a thread whose session is going away, and nothing would ever settle it. It gets
+    // the answer the others got.
+    if (this.closedFlag) return toAnswer(DENY, questions, this.names);
+    const title =
+      request.title ||
+      (request.type === "question" ? request.toolName : taskTitle(request.toolName, request.input));
+    const [approvalId, pending] = this.deps.approvals.open(
+      this.channelId,
+      this.threadId,
+      title,
+      questions,
+    );
+    this.waiting.add(approvalId);
+    this.idleTimerCheck(); // an open approval or question holds the session
+    this.react("waiting");
+    // Set only when the agent's abort settled a request still open, so an abort after the answer
+    // changes nothing.
+    let givenUp = false;
+    let withdrawn = false;
+    const giveUp = () => {
+      givenUp = this.deps.approvals.giveUp(approvalId) !== null;
+    };
+    signal.addEventListener("abort", giveUp, { once: true });
+    let messageId: MessageId;
+    let decision: Decision;
+    try {
+      try {
+        messageId = await this.thread.ask(
+          approvalId,
+          request.type === "permission"
+            ? { ...request, plan: this.previews.plan(request.toolName, request.input) }
+            : request,
+          title,
+        );
+      } catch (error) {
+        // Nobody can answer a request that was never shown: deny it, and say why.
+        logger.error(`could not post an approval request in ${this.where}: ${errorName(error)}`);
+        return questions === null
+          ? { allow: false, message: texts.named(texts.APPROVAL_UNPOSTED, this.names) }
+          : { answered: false, message: texts.named(texts.APPROVAL_UNPOSTED, this.names) };
+      }
+      logger.info(
+        `posted ${questions === null ? "an approval" : "a question"} request in ` +
+          `${this.where}: message ${messageId}`,
+      );
+      if (this.deps.approvals.posted(approvalId, messageId)) {
+        // Crash repair: still carrying buttons, until it is answered. Best-effort:
+        // the message is already live either way, so a failed write here is logged loudly
+        // rather than left silently unrecorded.
+        try {
+          this.deps.state.addRequest(
+            this.channelId,
+            this.threadId,
+            messageId,
+            questions === null ? "approval" : "question",
+          );
+        } catch (error) {
+          logger.error(
+            `posted a request in ${this.where} that state.json could not record: ${errorName(error)}`,
+          );
+        }
+      } else {
+        withdrawn = true;
+        await this.deleteRequest(messageId); // decided while it was posted
+      }
+      decision = await pending.decision;
+    } finally {
+      signal.removeEventListener("abort", giveUp);
+      this.deps.approvals.discard(approvalId);
+      this.waiting.delete(approvalId);
+      this.idleTimerCheck(); // may (re)start the idle-close timer
+      if (!this.interrupting) this.reactWaitingOrWorking();
+    }
+    // After the bookkeeping above, so a turn that ends during the chat round trip finds the
+    // request gone and the root free to settle on done.
+    if (givenUp && !withdrawn) await this.deleteRequest(messageId);
+    if (questions !== null && "answered" in decision && decision.answered) {
+      await this.keepAnswers(request.callId, messageId, questions, decision.answers);
+    }
+    return decision;
+  }
+
+  /**
+   * Where an answered question's answers stay. In the reply, under the line of the call, where
+   * the question was asked: the request has done its job and goes. When the reply
+   * has no line of its own for that call, in the request itself, rewritten with nothing left to
+   * press, so the answers are never lost. The permission request names its call (measured on
+   * Claude Code 2.1.286, 2026-10-03).
+   */
+  private async keepAnswers(
+    callId: string | null,
+    messageId: MessageId,
+    questions: readonly Question[],
+    answers: Readonly<Record<string, string | readonly string[]>>,
+  ): Promise<void> {
+    const active = this.active;
+    if (callId !== null && active?.renderer.answered(callId, questions, answers)) {
+      await this.deleteRequest(messageId);
+      return;
+    }
+    try {
+      await this.thread.keepAnswers(messageId, questions, answers);
+    } catch (error) {
+      // The request must not keep buttons that no longer work: remove it.
+      logger.warning(`could not record an answer in ${this.where}: ${errorName(error)}`);
+      await this.deleteRequest(messageId);
+      return;
+    }
+    // Crash repair: it carries no buttons now, so it leaves the tracked list.
+    // Outside the try above: a failed write here must never delete a message just rewritten.
+    try {
+      this.deps.state.removeRequest(this.channelId, this.threadId, messageId);
+    } catch (error) {
+      logger.warning(
+        `could not clear an answered request from state.json in ${this.where}: ${errorName(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Ends the turn a stop caught in the worker's hands. One whose command already ran shows its
+   * run and says it was not told to the agent; any other is dropped with the note.
+   */
+  private async endStopped(turn: Turn, signal: AbortSignal): Promise<void> {
+    this.taken = null;
+    this.stopTaken = null;
+    const queued = this.stopQueued;
+    this.stopQueued = [];
+    if (turn.shellStarted) {
+      try {
+        await this.fail(turn, texts.SHELL_NOT_TOLD_STOPPED);
+      } catch (error) {
+        logger.warning(`could not end a stopped command in ${this.where}: ${errorName(error)}`);
+      }
+      await this.dropStopped(queued);
+    } else await this.dropStopped([turn, ...queued]);
+    this.idleTimerCheck();
+    await this.reactDoneIfIdle(signal, { byOwner: true });
+  }
+
+  /** Drops `turn`, which a drain will never send, with a note. */
+  private async dropForDrain(turn: Turn): Promise<void> {
+    this.taken = null;
+    this.stopTaken = null;
+    // A prompt genuinely dropped by the drain, reacting ❌; like the queued ones, it gets no
+    // reply of its own, only a note.
+    await this.drop([turn], texts.BECAUSE_RESTARTED, { error: true });
+    this.idleTimerCheck(); // only cancels: draining itself blocks it from arming
+  }
+
+  /**
+   * A prompt the agent took into the turn that runs: a shell command's run, when it is one, is
+   * written there, where the agent answers it.
+   */
+  private async headTaken(promptId: string): Promise<void> {
+    const active = this.active;
+    const turn = active?.taken.find((candidate) => candidate.uuid === promptId);
+    if (active == null || turn?.head == null) return;
+    const head = turn.head;
+    turn.head = null;
+    await active.renderer.feedNotice(head);
+  }
+
+  /**
+   * Runs the owner's shell command of `turn` in the session's folder. True when its run is to
+   * be sent: what the thread shows of it waits on the turn (`Turn.head`) and the agent's prompt
+   * replaces the typed command. False when `!stop` stopped it: the reply says so and ends, and
+   * the agent is told nothing, as a command stopped in the terminal leaves nothing behind.
+   */
+  private async runShell(turn: Turn, command: string, signal: AbortSignal): Promise<boolean> {
+    // The word is refused for an agent that declares no `shellCommands`, so one that queued a
+    // command has its mode.
+    const mode = this.deps.agent.shell as ShellMode;
+    turn.shellStarted = true;
+    const stop = new AbortController();
+    this.shellStop = stop;
+    let run: ShellRun;
+    try {
+      run = await runShell(command, {
+        folder: this.resolved,
+        environment: mode.environment,
+        timeoutMs: mode.timeoutMs,
+        clock: this.deps.clock,
+        signal: AbortSignal.any([signal, stop.signal]),
+      });
+    } finally {
+      this.shellStop = null;
+    }
+    // A close cancelled the worker: whoever closes ends the turn.
+    if (signal.aborted) throw signal.reason;
+    if (run.end === "stopped") {
+      await this.fail(turn, shellHead(run));
+      return false;
+    }
+    turn.head = shellHead(run);
+    turn.prompt = mode.prompt(run);
+    return true;
+  }
+
+  /**
+   * End a turn's reply with a line saying why, and release whoever waits on it. `error` reacts
+   * ❌. A shell command that ran and was never answered shows its run first.
+   */
+  private async fail(
+    turn: Turn,
+    text: string,
+    options: { readonly error?: boolean } = {},
+  ): Promise<void> {
+    const head = turn.head;
+    turn.head = null;
+    try {
+      await turn.sink.text(head === null ? text : `${head}\n\n${text}`, { notice: true });
+      await turn.sink.finish([]);
+      this.trackLanding(await turn.sink.closeOut(), turn.sink);
+      if (options.error) this.reactError();
+    } finally {
+      turn.done.set();
+      this.showThreadStatus();
+    }
+  }
+
+  /** A notice of the daemon's own, small and grey as the footer. */
+  private async post(text: string): Promise<void> {
+    await this.thread.notice(text);
+  }
+
+  /** Remove a decided request: the tool's line in the reply records what happened. */
+  private async deleteRequest(messageId: MessageId | null): Promise<void> {
+    if (messageId === null) return;
+    await this.thread.withdraw(messageId);
+    try {
+      // Crash repair: the request is spoken for either way, so a startup repair
+      // never retries a delete this call already made (or gave up on). Best-effort: a failed
+      // write here must never surface past this point.
+      this.deps.state.removeRequest(this.channelId, this.threadId, messageId);
+    } catch (error) {
+      logger.warning(
+        `could not clear a deleted request from state.json in ${this.where}: ${errorName(error)}`,
+      );
+    }
+  }
+}

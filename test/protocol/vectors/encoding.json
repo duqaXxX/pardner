@@ -1,0 +1,418 @@
+{
+  "structure": "encoding",
+  "version": 1,
+  "source": "written from protocol-package design section 4, 2026-11-14; bytes computed by hand with Python's struct, independent of the package",
+  "cases": [
+    {
+      "name": "u8 u16 u32 at their maxima",
+      "op": "roundtrip",
+      "schema": [
+        "u8",
+        "u16",
+        "u32"
+      ],
+      "values": [
+        255,
+        65535,
+        4294967295
+      ],
+      "bytes": "ffffffffffffff"
+    },
+    {
+      "name": "u16 is big-endian",
+      "op": "roundtrip",
+      "schema": [
+        "u16"
+      ],
+      "values": [
+        258
+      ],
+      "bytes": "0102"
+    },
+    {
+      "name": "u64 at 0",
+      "op": "roundtrip",
+      "schema": [
+        "u64"
+      ],
+      "values": [
+        0
+      ],
+      "bytes": "0000000000000000"
+    },
+    {
+      "name": "u64 at 2^32",
+      "op": "roundtrip",
+      "schema": [
+        "u64"
+      ],
+      "values": [
+        4294967296
+      ],
+      "bytes": "0000000100000000"
+    },
+    {
+      "name": "u64 at 2^53 - 1",
+      "op": "roundtrip",
+      "schema": [
+        "u64"
+      ],
+      "values": [
+        9007199254740991
+      ],
+      "bytes": "001fffffffffffff"
+    },
+    {
+      "name": "u64 at 2^53 does not encode",
+      "op": "roundtrip",
+      "schema": [
+        "u64"
+      ],
+      "fails": "throws",
+      "values": [
+        9007199254740992
+      ],
+      "error": "RangeError"
+    },
+    {
+      "name": "u64 at 2^53 does not decode",
+      "op": "roundtrip",
+      "schema": [
+        "u64"
+      ],
+      "fails": "decode",
+      "bytes": "0020000000000000"
+    },
+    {
+      "name": "u64 with every bit set does not decode",
+      "op": "roundtrip",
+      "schema": [
+        "u64"
+      ],
+      "fails": "decode",
+      "bytes": "ffffffffffffffff"
+    },
+    {
+      "name": "u32 cut short",
+      "op": "roundtrip",
+      "schema": [
+        "u32"
+      ],
+      "fails": "decode",
+      "bytes": "000001"
+    },
+    {
+      "name": "opt absent",
+      "op": "roundtrip",
+      "schema": [
+        [
+          "opt",
+          "u8"
+        ]
+      ],
+      "values": [
+        null
+      ],
+      "bytes": "00"
+    },
+    {
+      "name": "opt present",
+      "op": "roundtrip",
+      "schema": [
+        [
+          "opt",
+          "u8"
+        ]
+      ],
+      "values": [
+        7
+      ],
+      "bytes": "0107"
+    },
+    {
+      "name": "opt byte 2",
+      "op": "roundtrip",
+      "schema": [
+        [
+          "opt",
+          "u8"
+        ]
+      ],
+      "fails": "decode",
+      "bytes": "0207"
+    },
+    {
+      "name": "opt present with nothing after",
+      "op": "roundtrip",
+      "schema": [
+        [
+          "opt",
+          "u8"
+        ]
+      ],
+      "fails": "decode",
+      "bytes": "01"
+    },
+    {
+      "name": "var",
+      "op": "roundtrip",
+      "schema": [
+        "var"
+      ],
+      "values": [
+        "abcd"
+      ],
+      "bytes": "00000002abcd"
+    },
+    {
+      "name": "var empty",
+      "op": "roundtrip",
+      "schema": [
+        "var"
+      ],
+      "values": [
+        ""
+      ],
+      "bytes": "00000000"
+    },
+    {
+      "name": "var length runs past the end",
+      "op": "roundtrip",
+      "schema": [
+        "var"
+      ],
+      "fails": "decode",
+      "bytes": "00000005abcd"
+    },
+    {
+      "name": "list of u16",
+      "op": "roundtrip",
+      "schema": [
+        [
+          "list",
+          "u16"
+        ]
+      ],
+      "values": [
+        [
+          1,
+          2
+        ]
+      ],
+      "bytes": "0000000200010002"
+    },
+    {
+      "name": "list empty",
+      "op": "roundtrip",
+      "schema": [
+        [
+          "list",
+          "u16"
+        ]
+      ],
+      "values": [
+        []
+      ],
+      "bytes": "00000000"
+    },
+    {
+      "name": "list count past the end of the bytes",
+      "op": "roundtrip",
+      "schema": [
+        [
+          "list",
+          "u8"
+        ]
+      ],
+      "fails": "decode",
+      "bytes": "ffffffff"
+    },
+    {
+      "name": "set in order",
+      "op": "roundtrip",
+      "schema": [
+        [
+          "set",
+          "b16",
+          "u8"
+        ]
+      ],
+      "values": [
+        [
+          [
+            "01010101010101010101010101010101",
+            1
+          ],
+          [
+            "02020202020202020202020202020202",
+            2
+          ],
+          [
+            "03030303030303030303030303030303",
+            3
+          ]
+        ]
+      ],
+      "bytes": "00000003010101010101010101010101010101010102020202020202020202020202020202020303030303030303030303030303030303"
+    },
+    {
+      "name": "set out of order",
+      "op": "roundtrip",
+      "schema": [
+        [
+          "set",
+          "b16",
+          "u8"
+        ]
+      ],
+      "fails": "decode",
+      "bytes": "0000000202020202020202020202020202020202010101010101010101010101010101010102"
+    },
+    {
+      "name": "set with one id twice and another rest",
+      "op": "roundtrip",
+      "schema": [
+        [
+          "set",
+          "b16",
+          "u8"
+        ]
+      ],
+      "fails": "decode",
+      "bytes": "0000000201010101010101010101010101010101010101010101010101010101010101010102"
+    },
+    {
+      "name": "set with one id twice does not encode",
+      "op": "roundtrip",
+      "schema": [
+        [
+          "set",
+          "b16",
+          "u8"
+        ]
+      ],
+      "fails": "throws",
+      "values": [
+        [
+          [
+            "01010101010101010101010101010101",
+            1
+          ],
+          [
+            "01010101010101010101010101010101",
+            2
+          ]
+        ]
+      ],
+      "error": "RangeError"
+    },
+    {
+      "name": "b16 b32 pk sig",
+      "op": "roundtrip",
+      "schema": [
+        "b16",
+        "b32",
+        "pk",
+        "sig"
+      ],
+      "values": [
+        "01010101010101010101010101010101",
+        "0202020202020202020202020202020202020202020202020202020202020202",
+        "0403030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303",
+        "04040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404"
+      ],
+      "bytes": "010101010101010101010101010101010202020202020202020202020202020202020202020202020202020202020202040303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030304040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404"
+    },
+    {
+      "name": "pk not starting with 4",
+      "op": "roundtrip",
+      "schema": [
+        "pk"
+      ],
+      "fails": "decode",
+      "bytes": "0203030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303"
+    },
+    {
+      "name": "pk does not encode",
+      "op": "roundtrip",
+      "schema": [
+        "pk"
+      ],
+      "fails": "throws",
+      "values": [
+        "0203030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303"
+      ],
+      "error": "RangeError"
+    },
+    {
+      "name": "b16 cut short",
+      "op": "roundtrip",
+      "schema": [
+        "b16"
+      ],
+      "fails": "decode",
+      "bytes": "000000000000000000000000000000"
+    },
+    {
+      "name": "label then u8",
+      "op": "roundtrip",
+      "schema": [
+        [
+          "label",
+          "device-entry"
+        ],
+        "u8"
+      ],
+      "values": [
+        null,
+        1
+      ],
+      "bytes": "1a626c696e642d72656c61792f31206465766963652d656e74727901"
+    },
+    {
+      "name": "another label",
+      "op": "roundtrip",
+      "schema": [
+        [
+          "label",
+          "device-entry"
+        ]
+      ],
+      "fails": "decode",
+      "bytes": "1a626c696e642d72656c61792f31206d656d6265722d656e747279"
+    },
+    {
+      "name": "encode sorts a set by its ids",
+      "op": "encode",
+      "schema": [
+        [
+          "set",
+          "b16",
+          "u8"
+        ]
+      ],
+      "values": [
+        [
+          [
+            "02020202020202020202020202020202",
+            2
+          ],
+          [
+            "01010101010101010101010101010101",
+            1
+          ]
+        ]
+      ],
+      "output": "0000000201010101010101010101010101010101010202020202020202020202020202020202"
+    },
+    {
+      "name": "a trailing byte",
+      "op": "roundtrip",
+      "schema": [
+        "u8"
+      ],
+      "fails": "decode",
+      "bytes": "0102"
+    }
+  ]
+}

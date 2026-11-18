@@ -1,0 +1,9 @@
+{"op":"prove","device":"app1","enrol":"sheet1","as":"g","expect":"served"}
+{"op":"submit","entry":"add","device":"app2","as":"a2","expect":"result 0"}
+{"op":"prove","conn":"r0","device":"app9","recovery":"sheet2","expect":"refused 3"}
+{"op":"prove","conn":"r1","device":"app9","recovery":"sheet1","wait":300,"expect":"silent"}
+{"op":"recovery-log","conn":"r1","expect":{"log":["g","a2"]}}
+{"op":"submit","conn":"r1","entry":"reset","by":"sheet1","set":["app9"],"newDevice":"app9","as":"x1","expect":"result 0"}
+{"op":"prove","conn":"c2","device":"app9","expect":"served"}
+{"op":"read","conn":"c2","from":0,"expect":{"items":["g","a2","x1"],"n":3}}
+{"op":"read","conn":"c1","from":0,"expect":"refused 1"}

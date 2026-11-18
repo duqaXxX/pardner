@@ -1,0 +1,20 @@
+{"op":"prove","device":"app1","enrol":"sheet1","as":"g","expect":"served"}
+{"op":"submit","entry":"create","as":"ch","expect":"result 0"}
+{"op":"submit","entry":"add","device":"app2","as":"a2","expect":"result 0"}
+{"op":"submit","entry":"epoch","as":"e0","expect":"result 0"}
+{"op":"submit","entry":"epoch","as":"stale-seq","seq":5,"expect":"result 2"}
+{"op":"submit","entry":"epoch","as":"held-seq","seq":0,"prevOf":null,"expect":"result 2"}
+{"op":"submit","entry":"epoch","as":"past-device","deviceHeadLength":9,"expect":"result 1"}
+{"op":"submit","entry":"epoch","as":"past-member","memberHeadLength":9,"expect":"result 1"}
+{"op":"submit","entry":"epoch","as":"by-another","sender":"app2","by":"app2","expect":"result 1"}
+{"op":"submit","entry":"epoch","as":"e1","expect":"result 0"}
+{"op":"submit","entry":"epoch","as":"stale-prev","prevOf":"e0","expect":"result 2"}
+{"op":"submit","entry":"epoch","resend":"e1","expect":"result 0"}
+{"op":"put-blob","as":"b1","expect":"result 0"}
+{"op":"submit","entry":"message","epoch":"e1","files":["b1"],"fileKeys":{"b1":"wrong"},"counter":1,"as":"m1","expect":"result 0"}
+{"op":"submit","entry":"message","epoch":"e1","files":["b1"],"counter":2,"as":"m2","expect":"result 0"}
+{"op":"submit","entry":"epoch","as":"e2","expect":"result 0"}
+{"op":"submit","entry":"epoch","as":"e2w","wrongSeal":true,"expect":"result 0"}
+{"op":"prove","conn":"c2","device":"app2","expect":"served"}
+{"op":"submit","conn":"c2","entry":"epoch","as":"e3","expect":"result 0"}
+{"op":"read","from":0,"expect":{"items":["g","ch","a2","e0","e1","m1","m2","e2","e2w","e3"],"n":10}}

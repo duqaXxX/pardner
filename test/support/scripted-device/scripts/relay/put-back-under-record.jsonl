@@ -1,0 +1,9 @@
+{"op":"prove","device":"app1","enrol":"sheet1","as":"g","expect":"served"}
+{"op":"read","from":0,"expect":{"items":["g"],"n":1}}
+{"op":"relay","act":"copy","as":"k1"}
+{"op":"submit","entry":"add","device":"app2","as":"a2","expect":"result 0"}
+{"op":"read","from":0,"expect":{"items":["g","a2"],"n":2}}
+{"op":"relay","act":"put-back-under","copy":"k1"}
+{"op":"relay","act":"probe"}
+{"op":"prove","device":"app1","expect":"served"}
+{"op":"read","from":1,"expect":{"items":[],"n":1,"chained":true}}

@@ -1,0 +1,47 @@
+{
+  "structure": "blob",
+  "version": 1,
+  "source": "protocol-package design 6.5 and SD 5.12, 2026-11-14; AES-256-GCM by node:crypto with a zero nonce, SHA-256 of the ciphertext; synthetic keys",
+  "cases": [
+    {
+      "name": "a blob and its id",
+      "op": "blob",
+      "k": "6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283",
+      "input": "612073796e7468657469632066696c653a206c696e6573206f6620746578742c207468656e2061207a65726f20627974650a00616e64206d6f7265",
+      "id": "f5f2defa93434096e7dc367a7f1177c517dc13f7ac9035c002be91903feb6271",
+      "output": "3d4788eb1ee1c718332338e887955c26c6035e6b63db2bba46040bff2fe33a8c96e32d9de6d06d7a527a1f430aaff017d8117599b1a72f00c6db30b55717a886e086fa9c5232fdb6848ec5"
+    },
+    {
+      "name": "an empty file",
+      "op": "blob",
+      "k": "6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283",
+      "input": "",
+      "id": "205d2203f654dba95901ee7a889bccc039a14f45bf846f52edb878cd19725603",
+      "output": "df6dcee65710e55ce396522c5ecc3432"
+    },
+    {
+      "name": "a blob whose bytes do not match its id is refused before the key is tried",
+      "op": "blob-open",
+      "k": "6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283",
+      "input": "3d4788ea1ee1c718332338e887955c26c6035e6b63db2bba46040bff2fe33a8c96e32d9de6d06d7a527a1f430aaff017d8117599b1a72f00c6db30b55717a886e086fa9c5232fdb6848ec5",
+      "id": "f5f2defa93434096e7dc367a7f1177c517dc13f7ac9035c002be91903feb6271",
+      "fails": "open-failed"
+    },
+    {
+      "name": "a blob opened with another key is refused",
+      "op": "blob-open",
+      "k": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+      "input": "3d4788eb1ee1c718332338e887955c26c6035e6b63db2bba46040bff2fe33a8c96e32d9de6d06d7a527a1f430aaff017d8117599b1a72f00c6db30b55717a886e086fa9c5232fdb6848ec5",
+      "id": "f5f2defa93434096e7dc367a7f1177c517dc13f7ac9035c002be91903feb6271",
+      "fails": "open-failed"
+    },
+    {
+      "name": "a blob shorter than a tag is refused",
+      "op": "blob-open",
+      "k": "6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283",
+      "input": "0102030405060708090a0b0c0d0e0f",
+      "id": "36030fcc7e566294905b49a720eb45bf962209d2ee1c9b73e2b7bc7ae8830376",
+      "fails": "open-failed"
+    }
+  ]
+}

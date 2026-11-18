@@ -1,0 +1,4 @@
+{"op":"prove","conn":"c1","device":"app1","enrol":"sheet1","secret":"wrong","expect":"refused 2"}
+{"op":"prove","conn":"c1","device":"app1","enrol":"sheet1","as":"g","expect":"served"}
+{"op":"submit","conn":"c1","entry":"create","as":"ch","expect":"result 0"}
+{"op":"read","conn":"c1","from":0,"expect":{"items":["g","ch"],"n":2}}

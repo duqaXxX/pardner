@@ -1,0 +1,151 @@
+{
+  "structure": "labels",
+  "version": 1,
+  "source": "protocol-package design section 5, 2026-11-14; each label is its length byte then its ASCII text, computed with Python",
+  "cases": [
+    {
+      "name": "device-id",
+      "op": "label",
+      "text": "blind-relay/1 device-id",
+      "output": "17626c696e642d72656c61792f31206465766963652d6964"
+    },
+    {
+      "name": "recovery-id",
+      "op": "label",
+      "text": "blind-relay/1 recovery-id",
+      "output": "19626c696e642d72656c61792f31207265636f766572792d6964"
+    },
+    {
+      "name": "relay-id",
+      "op": "label",
+      "text": "blind-relay/1 relay-id",
+      "output": "16626c696e642d72656c61792f312072656c61792d6964"
+    },
+    {
+      "name": "relay-chain",
+      "op": "label",
+      "text": "blind-relay/1 relay-chain",
+      "output": "19626c696e642d72656c61792f312072656c61792d636861696e"
+    },
+    {
+      "name": "device-entry",
+      "op": "label",
+      "text": "blind-relay/1 device-entry",
+      "output": "1a626c696e642d72656c61792f31206465766963652d656e747279"
+    },
+    {
+      "name": "device-possession",
+      "op": "label",
+      "text": "blind-relay/1 device-possession",
+      "output": "1f626c696e642d72656c61792f31206465766963652d706f7373657373696f6e"
+    },
+    {
+      "name": "member-entry",
+      "op": "label",
+      "text": "blind-relay/1 member-entry",
+      "output": "1a626c696e642d72656c61792f31206d656d6265722d656e747279"
+    },
+    {
+      "name": "epoch-entry",
+      "op": "label",
+      "text": "blind-relay/1 epoch-entry",
+      "output": "19626c696e642d72656c61792f312065706f63682d656e747279"
+    },
+    {
+      "name": "message",
+      "op": "label",
+      "text": "blind-relay/1 message",
+      "output": "15626c696e642d72656c61792f31206d657373616765"
+    },
+    {
+      "name": "proof-active",
+      "op": "label",
+      "text": "blind-relay/1 proof-active",
+      "output": "1a626c696e642d72656c61792f312070726f6f662d616374697665"
+    },
+    {
+      "name": "proof-recovery",
+      "op": "label",
+      "text": "blind-relay/1 proof-recovery",
+      "output": "1c626c696e642d72656c61792f312070726f6f662d7265636f76657279"
+    },
+    {
+      "name": "proof-upload",
+      "op": "label",
+      "text": "blind-relay/1 proof-upload",
+      "output": "1a626c696e642d72656c61792f312070726f6f662d75706c6f6164"
+    },
+    {
+      "name": "relay-head",
+      "op": "label",
+      "text": "blind-relay/1 relay-head",
+      "output": "18626c696e642d72656c61792f312072656c61792d68656164"
+    },
+    {
+      "name": "history-seal",
+      "op": "label",
+      "text": "blind-relay/1 history-seal",
+      "output": "1a626c696e642d72656c61792f3120686973746f72792d7365616c"
+    },
+    {
+      "name": "epoch-seal",
+      "op": "label",
+      "text": "blind-relay/1 epoch-seal",
+      "output": "18626c696e642d72656c61792f312065706f63682d7365616c"
+    },
+    {
+      "name": "store-seal",
+      "op": "label",
+      "text": "blind-relay/1 store-seal",
+      "output": "18626c696e642d72656c61792f312073746f72652d7365616c"
+    },
+    {
+      "name": "commit",
+      "op": "label",
+      "text": "blind-relay/1 commit",
+      "output": "14626c696e642d72656c61792f3120636f6d6d6974"
+    },
+    {
+      "name": "sender",
+      "op": "label",
+      "text": "blind-relay/1 sender",
+      "output": "14626c696e642d72656c61792f312073656e646572"
+    },
+    {
+      "name": "recovery-signing",
+      "op": "label",
+      "text": "blind-relay/1 recovery-signing",
+      "output": "1e626c696e642d72656c61792f31207265636f766572792d7369676e696e67"
+    },
+    {
+      "name": "recovery-receiving",
+      "op": "label",
+      "text": "blind-relay/1 recovery-receiving",
+      "output": "20626c696e642d72656c61792f31207265636f766572792d726563656976696e67"
+    },
+    {
+      "name": "file",
+      "op": "label",
+      "text": "blind-relay/1 file",
+      "output": "12626c696e642d72656c61792f312066696c65"
+    },
+    {
+      "name": "cut-name",
+      "op": "label",
+      "text": "blind-relay/1 cut-name",
+      "output": "16626c696e642d72656c61792f31206375742d6e616d65"
+    },
+    {
+      "name": "unread-name",
+      "op": "label",
+      "text": "blind-relay/1 unread-name",
+      "output": "19626c696e642d72656c61792f3120756e726561642d6e616d65"
+    },
+    {
+      "name": "tls-exporter",
+      "op": "exporter-label",
+      "text": "EXPORTER-blind-relay/1 binding",
+      "output": "4558504f525445522d626c696e642d72656c61792f312062696e64696e67"
+    }
+  ]
+}

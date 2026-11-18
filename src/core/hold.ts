@@ -1,0 +1,213 @@
+/**
+ * Questions that hold a message before it is sent. The same-folder hold: before a message wakes
+ * an idle session while a live session of another thread (any channel) is busy in the same
+ * resolved folder, the daemon asks
+ * `Another session is working in this folder: <link>. Send anyway?`, with two buttons,
+ * `Send anyway` and `Don't send`, which the code calls Continue and Cancel.
+ * The session setup (`setup.ts`) is another: model, effort and bypass, then Start. The third is
+ * the confirmation of a shell command the owner sent (`!!`): Run or Cancel.
+ *
+ * Kept in memory only, like `Approvals`: a hold never outlives the process (`!stop`, a top-level
+ * `!stop` of its channel, and a drain all cancel one exactly as Cancel does), so nothing here
+ * needs to survive a restart. A thread has at most one open at a time, whichever kind.
+ */
+import { randomBytes } from "node:crypto";
+import type { ModelInfo } from "../agent/seam.ts";
+import type { Choice } from "./setup.ts";
+
+/**
+ * What the owner chose: `true` for Continue on the same-folder hold or Run on a shell command's
+ * confirmation, the `Choice` of a setup.
+ */
+export type HoldAnswer = true | Choice;
+
+/** Which question holds the message: an answer is checked to be of its request's kind. */
+export type HoldKind = "hold" | "setup" | "shell" | "terminal";
+
+/** One question waiting for the owner. */
+export interface Pending {
+  readonly channelId: string;
+  readonly threadId: string;
+  /** What the owner chose, or null when the question was cancelled (Cancel, `!stop`, a drain). */
+  readonly answer: Promise<HoldAnswer | null>;
+  /** Whether `answer` is settled. */
+  decided: boolean;
+  messageId: string | null;
+  readonly kind: HoldKind;
+  /**
+   * What the asker needs back with a click that carries only the id: the setup's model list,
+   * empty for an agent that lists none; null for the other kinds.
+   */
+  readonly context: readonly ModelInfo[] | null;
+  /**
+   * Set by `Holds.cancel` while an answer is being applied (the setup's Start settling): the
+   * asker sends nothing once it is done.
+   */
+  cancelled: boolean;
+  /**
+   * Set by `Holds.cancel` when the thread's first message is gone: the asker posts and rewrites
+   * nothing, and `ended` tells whoever cancelled that it is done.
+   */
+  gone: boolean;
+  /** Settles once the asker discarded the hold, though `cancel` removed its entry long before. */
+  readonly ended: Promise<void>;
+}
+
+interface Entry {
+  readonly pending: Pending;
+  readonly settle: (answer: HoldAnswer | null) => void;
+}
+
+/**
+ * Questions waiting for the owner, by an id that only the posted buttons carry (as `Approvals`
+ * keys its own requests).
+ */
+export class Holds {
+  private readonly entries = new Map<string, Entry>();
+  /** Resolves a hold's `ended`; kept after `cancel` deletes the entry, until the asker discards. */
+  private readonly endings = new Map<string, () => void>();
+
+  open(
+    channelId: string,
+    threadId: string,
+    context: readonly ModelInfo[] | null = null,
+    kind: HoldKind = context === null ? "hold" : "setup",
+  ): [holdId: string, pending: Pending] {
+    const holdId = randomBytes(16).toString("base64url");
+    let settle: (answer: HoldAnswer | null) => void = () => {};
+    const answer = new Promise<HoldAnswer | null>((resolve) => {
+      settle = resolve;
+    });
+    const ended = new Promise<void>((resolve) => {
+      this.endings.set(holdId, resolve);
+    });
+    const pending: Pending = {
+      channelId,
+      threadId,
+      answer,
+      decided: false,
+      messageId: null,
+      kind,
+      context,
+      cancelled: false,
+      gone: false,
+      ended,
+    };
+    this.entries.set(holdId, { pending, settle });
+    return [holdId, pending];
+  }
+
+  get(holdId: string): Pending | null {
+    return this.entries.get(holdId)?.pending ?? null;
+  }
+
+  /**
+   * Resolve once with `value` (null cancels), and only from the channel and thread the request
+   * was posted in. A value keeps the entry until the asker `discard`s it, so a stop that arrives
+   * while the answer is applied still finds it (`cancel`).
+   */
+  resolve(
+    holdId: string,
+    channelId: string,
+    threadId: string,
+    value: HoldAnswer | null,
+  ): Pending | null {
+    const entry = this.entries.get(holdId);
+    if (
+      entry === undefined ||
+      entry.pending.channelId !== channelId ||
+      entry.pending.threadId !== threadId ||
+      entry.pending.decided
+    ) {
+      return null;
+    }
+    entry.pending.decided = true;
+    entry.settle(value);
+    if (value === null) this.entries.delete(holdId);
+    return entry.pending;
+  }
+
+  /**
+   * Record the message that shows a hold, so it can be removed once decided; false when the hold
+   * was decided before its message was known (a click or `!stop` while posting).
+   */
+  posted(holdId: string, messageId: string): boolean {
+    const entry = this.entries.get(holdId);
+    if (entry === undefined) return false;
+    entry.pending.messageId = messageId;
+    return !entry.pending.decided;
+  }
+
+  /**
+   * Cancel the hold open in this thread, if any: the same outcome as the owner clicking Cancel
+   * (`!stop`, a top-level `!stop` of its channel, a drain). One already answered but still being
+   * applied is flagged `cancelled` instead: its asker sends nothing. With `gone` the pending is
+   * also marked `gone` (the thread's first message was deleted).
+   */
+  cancel(
+    channelId: string,
+    threadId: string,
+    options: { readonly gone?: boolean } = {},
+  ): Pending | null {
+    for (const [holdId, entry] of [...this.entries]) {
+      const { pending } = entry;
+      if (pending.channelId !== channelId || pending.threadId !== threadId) continue;
+      if (options.gone === true) pending.gone = true;
+      if (!pending.decided) {
+        pending.decided = true;
+        // withdrawn, not answered: whoever waits removes nothing and rewrites nothing
+        pending.cancelled = true;
+        entry.settle(null);
+        this.entries.delete(holdId);
+        return pending;
+      }
+      // Already cancelled: a `gone` cancel still returns it, so its caller awaits `ended`.
+      if (!pending.cancelled || options.gone === true) {
+        pending.cancelled = true;
+        return pending;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The id of the open hold shown by this message, for a control that carries no id of its own
+   * (a select): null when it is decided, gone, or shown elsewhere.
+   */
+  atMessage(channelId: string, threadId: string, messageId: string): string | null {
+    for (const [holdId, { pending }] of this.entries) {
+      if (
+        pending.channelId === channelId &&
+        pending.threadId === threadId &&
+        pending.messageId === messageId &&
+        !pending.decided
+      ) {
+        return holdId;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Whether this message shows a hold that was decided and whose answer is still being applied:
+   * false once its asker discarded it, as for a hold never held (a restart).
+   */
+  decidedAt(channelId: string, threadId: string, messageId: string): boolean {
+    for (const { pending } of this.entries.values()) {
+      if (
+        pending.channelId === channelId &&
+        pending.threadId === threadId &&
+        pending.messageId === messageId
+      ) {
+        return pending.decided;
+      }
+    }
+    return false;
+  }
+
+  discard(holdId: string): void {
+    this.entries.delete(holdId);
+    this.endings.get(holdId)?.();
+    this.endings.delete(holdId);
+  }
+}

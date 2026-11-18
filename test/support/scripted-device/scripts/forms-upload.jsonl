@@ -1,0 +1,8 @@
+{"op":"prove","device":"app1","enrol":"sheet1","as":"g","expect":"served"}
+{"op":"submit","entry":"add","device":"app2","as":"a2","expect":"result 0"}
+{"op":"read","from":0,"head":"h1","expect":{"items":["g","a2"],"n":2}}
+{"op":"prove","conn":"u1","device":"app1","head":"h1","unread":9,"wait":300,"expect":"refused 5"}
+{"op":"prove","conn":"u2","device":"app1","head":"h1","wait":300,"expect":"silent"}
+{"op":"upload-done","conn":"u2","head":"h1","unread":9,"expect":"result 1"}
+{"op":"prove","conn":"u3","device":"app1","head":"h1","wait":300,"expect":"silent"}
+{"op":"upload-done","conn":"u3","head":"h1","expect":"result 0"}

@@ -1,0 +1,78 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import * as texts from "../../src/core/texts.ts";
+import { MEMORY_NAMES } from "../support/names.ts";
+
+test("no text of the core holds a chat's own syntax for a channel, a user or a broadcast", () => {
+  const templates = Object.values(texts).flatMap((value) =>
+    typeof value === "string" ? [value] : value instanceof texts.Named ? [value.template] : [],
+  );
+  assert.ok(templates.length > 100);
+  for (const template of templates) {
+    for (const syntax of ["<#", "<@", "<!"]) assert.ok(!template.includes(syntax), template);
+  }
+});
+
+test("fill takes a number for a field", () => {
+  assert.equal(
+    texts.fill(texts.NOT_SENT_MANY, { count: 12, because: "the agent was busy" }),
+    "12 messages were not sent because the agent was busy: send them again.",
+  );
+  assert.equal(texts.fill("{count} of {count}", { count: 3 }), "3 of 3");
+});
+
+test("fill refuses a field with no value, as format raised a KeyError", () => {
+  assert.throws(() => texts.fill(texts.named(texts.BIND_LIST, MEMORY_NAMES), {}), /\{root\}/);
+});
+
+test("fill leaves a value that holds braces alone", () => {
+  assert.equal(texts.fill("{a}{b}", { a: "{b}", b: "x" }), "{b}x");
+});
+
+// What an agent that keeps a record of trust reads is quoted in docs/setup.md: these are the
+// words as the owner sees them with an agent that keeps one.
+test("the notice of an unbound channel and the !bind help line keep their words for an agent with trust", () => {
+  assert.equal(
+    texts.fill(texts.named(texts.UNBOUND, MEMORY_NAMES), { root: "/work" }),
+    "This channel is not bound to a folder yet. Send `!bind` to choose one of the folders " +
+      "Plain trusts, or `!bind <folder>` with the folder's path relative to `/work`, for " +
+      "example `!bind my-project`. `!guide` explains how pardner works.",
+  );
+  const bind = texts.HELP_WORDS.map((word) => texts.named(word, MEMORY_NAMES)).find((line) =>
+    line.startsWith("`!bind"),
+  );
+  assert.equal(
+    bind,
+    "`!bind [folder]` the folders Plain trusts, or bind this channel to one, its path " +
+      "relative to the allowed root; in the channel, refused inside a thread",
+  );
+});
+
+test("for an agent with no record of trust the same two texts say nothing of trust", () => {
+  const unbound = texts.fill(texts.UNBOUND_ANY, { root: "/work" });
+  assert.ok(unbound.includes("the folders under `/work`") && !unbound.includes("trust"));
+  const words = texts.HELP_WORDS_ANY.map((word) => texts.named(word, MEMORY_NAMES));
+  assert.equal(words.length, texts.HELP_WORDS.length);
+  assert.ok(!words.some((line) => line.includes("trust")));
+  // Only the `!bind` line differs.
+  const withTrust = texts.HELP_WORDS.map((word) => texts.named(word, MEMORY_NAMES));
+  assert.deepEqual(
+    words.filter((line, at) => line !== withTrust[at]),
+    [
+      "`!bind [folder]` the folders under the allowed root, or bind this channel to one, its path relative to that root; in the channel, refused inside a thread",
+    ],
+  );
+});
+
+test("the refusals shown inside a thread send the owner to the channel, and give no cause", () => {
+  // Both are shown inside a thread, where `!bind` is refused and a reply meets the same refusal
+  // again: each says that its way out is typed in the channel.
+  assert.ok(
+    texts.DIRECTORY_MISSING.includes("in the channel, bind another folder with `!bind <path>`"),
+  );
+  assert.ok(texts.NOT_A_SESSION.includes("In the channel, send a new message"));
+  assert.ok(texts.NOT_A_SESSION.includes("`!resume`"));
+  // No cause: the daemon cannot tell a thread that never held a session from one whose entry it
+  // dropped while the agent still has the session.
+  assert.ok(!texts.NOT_A_SESSION.includes("deleted"));
+});

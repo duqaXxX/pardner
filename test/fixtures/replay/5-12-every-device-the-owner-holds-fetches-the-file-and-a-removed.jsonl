@@ -1,0 +1,146 @@
+{"op":"prove","conn":"455230930f9d3b96ce6a","device":"455230930f9d3b96ce6a","enrol":"76721cd2564cdb94ee71","as":"5b1f9b8508f05715d0c7","expect":"served"}
+{"op":"submit","conn":"455230930f9d3b96ce6a","entry":"create","as":"create:5b1f9b8508f05715d0c7","expect":"result 0"}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":0,"head":"h1","expect":{"items":["5b1f9b8508f05715d0c7","create:5b1f9b8508f05715d0c7"],"n":2,"inc":"If0052acc368ffa219777","chained":true}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":0,"head":"h2","expect":{"items":["5b1f9b8508f05715d0c7","create:5b1f9b8508f05715d0c7"],"n":2,"inc":"If0052acc368ffa219777","chained":true}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":2,"expect":{"items":[],"n":2,"seals":0}}
+{"op":"submit","conn":"455230930f9d3b96ce6a","entry":"epoch","as":"8af28f5405d4824d7245","seq":0,"prevOf":null,"expect":"result 0","deviceLength":1}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":["8af28f5405d4824d7245"],"n":3}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":2,"head":"h3","expect":{"items":["8af28f5405d4824d7245"],"n":3,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":3,"expect":{"items":[],"n":3,"seals":0}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":3,"head":"h4","expect":{"items":[],"n":3,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":3,"expect":{"items":[],"n":3,"seals":0}}
+{"op":"submit","conn":"455230930f9d3b96ce6a","entry":"add","as":"7fdaa3ba85ab1a757774","expect":"result 0","seq":1,"prevOf":"5b1f9b8508f05715d0c7","device":"4f0a9750c182a6fdcaf0","bots":["4f0a9750c182a6fdcaf0"]}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":["7fdaa3ba85ab1a757774"],"n":4}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":3,"head":"h5","expect":{"items":["7fdaa3ba85ab1a757774"],"n":4,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":4,"expect":{"items":[],"n":4,"seals":0}}
+{"op":"prove","conn":"4f0a9750c182a6fdcaf0","device":"4f0a9750c182a6fdcaf0","expect":"served"}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":0,"head":"h6","expect":{"items":["5b1f9b8508f05715d0c7","create:5b1f9b8508f05715d0c7","8af28f5405d4824d7245","7fdaa3ba85ab1a757774"],"n":4,"inc":"If0052acc368ffa219777","chained":true}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":0,"head":"h7","expect":{"items":["5b1f9b8508f05715d0c7","create:5b1f9b8508f05715d0c7","8af28f5405d4824d7245","7fdaa3ba85ab1a757774"],"n":4,"inc":"If0052acc368ffa219777","chained":true}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":4,"expect":{"items":[],"n":4,"seals":0}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":4,"head":"h8","expect":{"items":[],"n":4,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":4,"expect":{"items":[],"n":4,"seals":0}}
+{"op":"submit","conn":"455230930f9d3b96ce6a","entry":"epoch","as":"43cbe4cfe3eb98ce0e31","seq":1,"prevOf":"8af28f5405d4824d7245","expect":"result 0","deviceLength":2}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":["43cbe4cfe3eb98ce0e31"],"n":5}}
+{"op":"follow","conn":"4f0a9750c182a6fdcaf0","wait":1000,"expect":{"items":["43cbe4cfe3eb98ce0e31"],"n":5}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":4,"head":"h9","expect":{"items":["43cbe4cfe3eb98ce0e31"],"n":5,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":5,"expect":{"items":[],"n":5,"seals":0}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":5,"head":"h10","expect":{"items":[],"n":5,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":5,"expect":{"items":[],"n":5,"seals":0}}
+{"op":"give-seal","conn":"455230930f9d3b96ce6a","epoch":"8af28f5405d4824d7245","recipient":"4f0a9750c182a6fdcaf0","expect":"result 0"}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"follow","conn":"4f0a9750c182a6fdcaf0","wait":1000,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":4,"head":"h11","expect":{"items":["43cbe4cfe3eb98ce0e31"],"n":5,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":5,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":5,"head":"h12","expect":{"items":[],"n":5,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":5,"expect":{"items":[],"n":5,"seals":1}}
+{"op":"submit","conn":"455230930f9d3b96ce6a","entry":"add","as":"e95c8709a79a782fc791","expect":"result 0","seq":2,"prevOf":"7fdaa3ba85ab1a757774","device":"b2f3983528739e5a79f3"}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":["e95c8709a79a782fc791"],"n":6}}
+{"op":"follow","conn":"4f0a9750c182a6fdcaf0","wait":1000,"expect":{"items":["e95c8709a79a782fc791"],"n":6}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":5,"head":"h13","expect":{"items":["e95c8709a79a782fc791"],"n":6,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":6,"expect":{"items":[],"n":6,"seals":1}}
+{"op":"prove","conn":"b2f3983528739e5a79f3","device":"b2f3983528739e5a79f3","expect":"served"}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":0,"head":"h14","expect":{"items":["5b1f9b8508f05715d0c7","create:5b1f9b8508f05715d0c7","8af28f5405d4824d7245","7fdaa3ba85ab1a757774","43cbe4cfe3eb98ce0e31","e95c8709a79a782fc791"],"n":6,"inc":"If0052acc368ffa219777","chained":true}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":0,"head":"h15","expect":{"items":["5b1f9b8508f05715d0c7","create:5b1f9b8508f05715d0c7","8af28f5405d4824d7245","7fdaa3ba85ab1a757774","43cbe4cfe3eb98ce0e31","e95c8709a79a782fc791"],"n":6,"inc":"If0052acc368ffa219777","chained":true}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":6,"expect":{"items":[],"n":6,"seals":1}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":6,"head":"h16","expect":{"items":[],"n":6,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":6,"expect":{"items":[],"n":6,"seals":1}}
+{"op":"submit","conn":"455230930f9d3b96ce6a","entry":"epoch","as":"16a04ca1e54c1070f851","seq":2,"prevOf":"43cbe4cfe3eb98ce0e31","expect":"result 0","deviceLength":3}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":["16a04ca1e54c1070f851"],"n":7}}
+{"op":"follow","conn":"4f0a9750c182a6fdcaf0","wait":1000,"expect":{"items":["16a04ca1e54c1070f851"],"n":7}}
+{"op":"follow","conn":"b2f3983528739e5a79f3","wait":1000,"expect":{"items":["16a04ca1e54c1070f851"],"n":7}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":6,"head":"h17","expect":{"items":["16a04ca1e54c1070f851"],"n":7,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":7,"expect":{"items":[],"n":7,"seals":1}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":7,"head":"h18","expect":{"items":[],"n":7,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":7,"expect":{"items":[],"n":7,"seals":1}}
+{"op":"give-seal","conn":"455230930f9d3b96ce6a","epoch":"8af28f5405d4824d7245","recipient":"b2f3983528739e5a79f3","expect":"result 0"}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":[],"n":7,"seals":1}}
+{"op":"follow","conn":"4f0a9750c182a6fdcaf0","wait":1000,"expect":{"items":[],"n":7,"seals":1}}
+{"op":"follow","conn":"b2f3983528739e5a79f3","wait":1000,"expect":{"items":[],"n":7,"seals":1}}
+{"op":"give-seal","conn":"455230930f9d3b96ce6a","epoch":"43cbe4cfe3eb98ce0e31","recipient":"b2f3983528739e5a79f3","expect":"result 0"}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":[],"n":7,"seals":1}}
+{"op":"follow","conn":"4f0a9750c182a6fdcaf0","wait":1000,"expect":{"items":[],"n":7,"seals":1}}
+{"op":"follow","conn":"b2f3983528739e5a79f3","wait":1000,"expect":{"items":[],"n":7,"seals":1}}
+{"op":"put-blob","conn":"455230930f9d3b96ce6a","as":"6afd74879b765dbaf810","text":"file of prompt 1","expect":"result 0"}
+{"op":"submit","conn":"455230930f9d3b96ce6a","entry":"message","as":"325c91acfe2cf7f7df13","epoch":"16a04ca1e54c1070f851","counter":1,"run":"167ff24aa5224187bdc3","kind":2,"name":"9bb2a4cf3b2c3fcf9858","expect":"result 0","to":"4f0a9750c182a6fdcaf0","incarnation":"f0052acc368ffa219777","files":["6afd74879b765dbaf810"]}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":["325c91acfe2cf7f7df13"],"n":8}}
+{"op":"follow","conn":"4f0a9750c182a6fdcaf0","wait":1000,"expect":{"items":["325c91acfe2cf7f7df13"],"n":8}}
+{"op":"follow","conn":"b2f3983528739e5a79f3","wait":1000,"expect":{"items":["325c91acfe2cf7f7df13"],"n":8}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":7,"head":"h19","expect":{"items":["325c91acfe2cf7f7df13"],"n":8,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":8,"expect":{"items":[],"n":8,"seals":3}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":8,"head":"h20","expect":{"items":[],"n":8,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":8,"expect":{"items":[],"n":8,"seals":3}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":8,"head":"h21","expect":{"items":[],"n":8,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":8,"expect":{"items":[],"n":8,"seals":3}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":5,"head":"h22","expect":{"items":["e95c8709a79a782fc791","16a04ca1e54c1070f851","325c91acfe2cf7f7df13"],"n":8,"inc":"If0052acc368ffa219777"}}
+{"op":"get-blob","conn":"4f0a9750c182a6fdcaf0","blob":"6afd74879b765dbaf810","expect":"blob"}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":8,"expect":{"items":[],"n":8,"seals":3}}
+{"op":"submit","conn":"4f0a9750c182a6fdcaf0","entry":"message","as":"384782211131db09dd00","epoch":"16a04ca1e54c1070f851","counter":1,"run":"d02dccaf582693da523e","kind":3,"name":"b1fbc696ad63159e4af8","expect":"result 0","re":{"device":"455230930f9d3b96ce6a","name":"9bb2a4cf3b2c3fcf9858"},"incarnation":"f0052acc368ffa219777"}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":["384782211131db09dd00"],"n":9}}
+{"op":"follow","conn":"4f0a9750c182a6fdcaf0","wait":1000,"expect":{"items":["384782211131db09dd00"],"n":9}}
+{"op":"follow","conn":"b2f3983528739e5a79f3","wait":1000,"expect":{"items":["384782211131db09dd00"],"n":9}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":8,"head":"h23","expect":{"items":["384782211131db09dd00"],"n":9,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":9,"expect":{"items":[],"n":9,"seals":3}}
+{"op":"submit","conn":"4f0a9750c182a6fdcaf0","entry":"message","as":"336c559586ae64c30558","epoch":"16a04ca1e54c1070f851","counter":2,"run":"d02dccaf582693da523e","kind":5,"name":"9e22d8b10b7a504be963","expect":"result 0","re":{"device":"455230930f9d3b96ce6a","name":"9bb2a4cf3b2c3fcf9858"},"incarnation":"f0052acc368ffa219777"}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":["336c559586ae64c30558"],"n":10}}
+{"op":"follow","conn":"4f0a9750c182a6fdcaf0","wait":1000,"expect":{"items":["336c559586ae64c30558"],"n":10}}
+{"op":"follow","conn":"b2f3983528739e5a79f3","wait":1000,"expect":{"items":["336c559586ae64c30558"],"n":10}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":9,"head":"h24","expect":{"items":["336c559586ae64c30558"],"n":10,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":10,"expect":{"items":[],"n":10,"seals":3}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":10,"head":"h25","expect":{"items":[],"n":10,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":10,"expect":{"items":[],"n":10,"seals":3}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":6,"head":"h26","expect":{"items":["16a04ca1e54c1070f851","325c91acfe2cf7f7df13","384782211131db09dd00","336c559586ae64c30558"],"n":10,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":10,"expect":{"items":[],"n":10,"seals":3}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":10,"head":"h27","expect":{"items":[],"n":10,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":10,"expect":{"items":[],"n":10,"seals":3}}
+{"op":"get-blob","conn":"b2f3983528739e5a79f3","blob":"6afd74879b765dbaf810","expect":"blob"}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":8,"head":"h28","expect":{"items":["384782211131db09dd00","336c559586ae64c30558"],"n":10,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":10,"expect":{"items":[],"n":10,"seals":3}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":10,"head":"h29","expect":{"items":[],"n":10,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":10,"expect":{"items":[],"n":10,"seals":3}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":10,"head":"h30","expect":{"items":[],"n":10,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":10,"expect":{"items":[],"n":10,"seals":3}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":10,"head":"h31","expect":{"items":[],"n":10,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":10,"expect":{"items":[],"n":10,"seals":3}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":10,"head":"h32","expect":{"items":[],"n":10,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":10,"expect":{"items":[],"n":10,"seals":3}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":10,"head":"h33","expect":{"items":[],"n":10,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"b2f3983528739e5a79f3","from":10,"expect":{"items":[],"n":10,"seals":3}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":0,"expect":{"items":["5b1f9b8508f05715d0c7","create:5b1f9b8508f05715d0c7","8af28f5405d4824d7245","7fdaa3ba85ab1a757774","43cbe4cfe3eb98ce0e31","e95c8709a79a782fc791","16a04ca1e54c1070f851","325c91acfe2cf7f7df13","384782211131db09dd00","336c559586ae64c30558"],"n":10,"inc":"If0052acc368ffa219777","seals":3,"chained":true}}
+{"op":"get-blob","conn":"455230930f9d3b96ce6a","blob":"6afd74879b765dbaf810","expect":"blob"}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":10,"head":"h34","expect":{"items":[],"n":10,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":10,"expect":{"items":[],"n":10,"seals":3}}
+{"op":"close","conn":"b2f3983528739e5a79f3"}
+{"op":"submit","conn":"455230930f9d3b96ce6a","entry":"remove","as":"edd1d2192af97391a98d","expect":"result 0","seq":3,"prevOf":"e95c8709a79a782fc791","device":"b2f3983528739e5a79f3"}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":["edd1d2192af97391a98d"],"n":11}}
+{"op":"follow","conn":"4f0a9750c182a6fdcaf0","wait":1000,"expect":{"items":["edd1d2192af97391a98d"],"n":11}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":10,"head":"h35","expect":{"items":["edd1d2192af97391a98d"],"n":11,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":11,"expect":{"items":[],"n":11,"seals":3}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":11,"head":"h36","expect":{"items":[],"n":11,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":11,"expect":{"items":[],"n":11,"seals":3}}
+{"op":"submit","conn":"455230930f9d3b96ce6a","entry":"epoch","as":"55254b9ce270a181bb72","seq":3,"prevOf":"16a04ca1e54c1070f851","expect":"result 0","deviceLength":4}
+{"op":"follow","conn":"455230930f9d3b96ce6a","wait":1000,"expect":{"items":["55254b9ce270a181bb72"],"n":12}}
+{"op":"follow","conn":"4f0a9750c182a6fdcaf0","wait":1000,"expect":{"items":["55254b9ce270a181bb72"],"n":12}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":11,"head":"h37","expect":{"items":["55254b9ce270a181bb72"],"n":12,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":12,"expect":{"items":[],"n":12,"seals":3}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":12,"head":"h38","expect":{"items":[],"n":12,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":12,"expect":{"items":[],"n":12,"seals":3}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":12,"head":"h39","expect":{"items":[],"n":12,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":12,"expect":{"items":[],"n":12,"seals":3}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":10,"head":"h40","expect":{"items":["edd1d2192af97391a98d","55254b9ce270a181bb72"],"n":12,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":12,"expect":{"items":[],"n":12,"seals":3}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":12,"head":"h41","expect":{"items":[],"n":12,"inc":"If0052acc368ffa219777"}}
+{"op":"read","conn":"4f0a9750c182a6fdcaf0","from":12,"expect":{"items":[],"n":12,"seals":3}}
+{"op":"prove","conn":"b2f3983528739e5a79f3","device":"b2f3983528739e5a79f3","expect":"refused 1 or refused 2"}
+{"op":"prove","conn":"u1","device":"b2f3983528739e5a79f3","head":"h34","wait":200,"expect":"silent"}
+{"op":"upload-done","conn":"u1","head":"h34","expect":"result 0"}
+{"op":"close","conn":"u1"}
+{"op":"prove","conn":"b2f3983528739e5a79f3","device":"b2f3983528739e5a79f3","expect":"refused 1 or refused 2"}
+{"op":"prove","conn":"b2f3983528739e5a79f3","device":"b2f3983528739e5a79f3","expect":"refused 1 or refused 2"}
+{"op":"prove","conn":"u1","device":"b2f3983528739e5a79f3","head":"h34","wait":200,"expect":"silent"}
+{"op":"upload-done","conn":"u1","head":"h34","expect":"result 0"}
+{"op":"close","conn":"u1"}
+{"op":"prove","conn":"b2f3983528739e5a79f3","device":"b2f3983528739e5a79f3","expect":"refused 1 or refused 2"}
+{"op":"read","conn":"455230930f9d3b96ce6a","from":0,"expect":{"items":["5b1f9b8508f05715d0c7","create:5b1f9b8508f05715d0c7","8af28f5405d4824d7245","7fdaa3ba85ab1a757774","43cbe4cfe3eb98ce0e31","e95c8709a79a782fc791","16a04ca1e54c1070f851","325c91acfe2cf7f7df13","384782211131db09dd00","336c559586ae64c30558","edd1d2192af97391a98d","55254b9ce270a181bb72"],"n":12,"inc":"If0052acc368ffa219777","seals":3,"chained":true}}
+{"op":"get-blob","conn":"455230930f9d3b96ce6a","blob":"6afd74879b765dbaf810","expect":"blob"}
+{"op":"prove","conn":"b2f3983528739e5a79f3","device":"b2f3983528739e5a79f3","expect":"refused 1 or refused 2"}
+{"op":"prove","conn":"b2f3983528739e5a79f3","device":"b2f3983528739e5a79f3","expect":"refused 1 or refused 2"}

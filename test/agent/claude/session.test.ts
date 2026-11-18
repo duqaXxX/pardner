@@ -1,0 +1,1499 @@
+/**
+ * `ClaudeSession` on a fake `query()`, scripted from the recordings under `test/fixtures/sdk/`.
+ * `test/support/fake-query.ts` scripts the fake: batches, injected turns, permission calls, hook
+ * runs, an end of stream and a failing stream.
+ *
+ * The SDK's option names are those of the TypeScript SDK 0.3.296 (`sdk.d.ts`).
+ * `allow-dangerously-skip-permissions` is the SDK's own option `allowDangerouslySkipPermissions`,
+ * which writes the same flag on the command line.
+ */
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { type TestContext, test } from "node:test";
+import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import {
+  ClaudeSession,
+  logger,
+  SessionClosedError,
+  type SessionConfig,
+} from "../../../src/agent/claude/session.ts";
+import { Transcript } from "../../../src/agent/claude/transcript.ts";
+import { Translator } from "../../../src/agent/claude/translate.ts";
+import type {
+  PermissionAnswer,
+  PermissionRequest,
+  Prompt,
+  QuestionAnswer,
+  QuestionRequest,
+  RequestHandler,
+  SessionEvent,
+} from "../../../src/agent/seam.ts";
+import { ResumeRefused } from "../../../src/agent/seam.ts";
+import {
+  ask,
+  type Batch,
+  END,
+  type FakeQuery,
+  type FakeScript,
+  FakeSdk,
+  fail,
+  hook,
+  written,
+} from "../../support/fake-query.ts";
+import { type JsonObject, sdkJson, sdkRecords } from "../../support/fixtures.ts";
+
+const LIMIT = { timeout: 10_000 };
+const FOLDER = "/srv/alice/app";
+const CONFIG: SessionConfig = {
+  folder: FOLDER,
+  resume: null,
+  settingsSources: ["user", "project", "local"],
+  model: null,
+  effort: null,
+  chrome: false,
+};
+const PROMPT: Prompt = { id: "00000000-0000-4000-8000-0000000000b1", content: "Say ok" };
+const TOOLS = sdkRecords("tools");
+const STOP = sdkJson("stop-hook") as JsonObject;
+const POST_TOOL_USE = sdkJson("post-tool-use-hook") as JsonObject;
+const MODEL_SWITCH = sdkJson("post-model-switch-hook") as JsonObject;
+const ASK = sdkJson("ask-can-use-tool") as JsonObject;
+const BASH = { command: "echo ok", description: "Print ok" };
+// The transcript entries of a recorded session, as a session store received them
+// (`goal-lifecycle-store.json`, 2026-10-20, SDK 0.3.304).
+const GOAL_APPENDS = sdkJson("goal-lifecycle-store") as Array<{ entries: JsonObject[] }>;
+const GOAL_ENTRIES = GOAL_APPENDS.flatMap((append) => append.entries);
+const EXITED = "the Claude Code process exited";
+
+// The record of the `tools` turn that holds its first tool call, and the one that answers it.
+const FIRST_CALL = TOOLS.findIndex((record) => record.type === "assistant" && hasToolUse(record));
+
+function hasToolUse(record: JsonObject): boolean {
+  const message = record.message as JsonObject | undefined;
+  const content = message?.content;
+  return (
+    Array.isArray(content) && content.some((block) => (block as JsonObject).type === "tool_use")
+  );
+}
+
+/** A handler that records what it is asked and answers with `permission` and `question`. */
+function handlerOf(
+  permission: PermissionAnswer = { allow: true },
+  question: QuestionAnswer = { answered: false, message: "skipped" },
+): RequestHandler & { asked: (PermissionRequest | QuestionRequest)[] } {
+  const asked: (PermissionRequest | QuestionRequest)[] = [];
+  return {
+    asked,
+    permission: async (request) => {
+      asked.push(request);
+      return permission;
+    },
+    question: async (request) => {
+      asked.push(request);
+      return question;
+    },
+  };
+}
+
+interface Started {
+  readonly session: ClaudeSession;
+  readonly query: FakeQuery;
+  readonly events: AsyncIterator<SessionEvent>;
+}
+
+/** A session on a fake query, ready, closed when the test ends. */
+async function started(
+  t: TestContext,
+  script: FakeScript = {},
+  config: Partial<SessionConfig> = {},
+  requests: RequestHandler = handlerOf(),
+): Promise<Started> {
+  const sdk = new FakeSdk(script);
+  const session = new ClaudeSession({ ...CONFIG, ...config }, requests, sdk.query);
+  t.after(() => session.close());
+  await session.ready();
+  return { session, query: sdk.only, events: session.events[Symbol.asyncIterator]() };
+}
+
+/**
+ * A transcript in a folder of its own, removed when the test ends: the file a script's `written`
+ * appends to, and the session's reader of it, which knows the file once the stream names the
+ * session (the recordings' first record names `cce8a58a-…`).
+ */
+async function transcriptOf(t: TestContext): Promise<{ path: string; transcript: Transcript }> {
+  const folder = await mkdtemp(join(tmpdir(), "transcript-"));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const path = join(folder, "cce8a58a-5d75-487b-a79a-2f38a183fea7.jsonl");
+  return { path, transcript: new Transcript(async () => path, { project: folder }) };
+}
+
+/** The events up to and including the first of `type`, or all of them when the stream ends. */
+async function until(
+  events: AsyncIterator<SessionEvent>,
+  type: SessionEvent["type"],
+): Promise<SessionEvent[]> {
+  const seen: SessionEvent[] = [];
+  for (;;) {
+    const next = await events.next();
+    if (next.done) return seen;
+    seen.push(next.value);
+    if (next.value.type === type) return seen;
+  }
+}
+
+async function drain(events: AsyncIterable<SessionEvent>): Promise<SessionEvent[]> {
+  const seen: SessionEvent[] = [];
+  for await (const event of events) seen.push(event);
+  return seen;
+}
+
+function types(events: readonly SessionEvent[]): string[] {
+  return events.map((event) => event.type);
+}
+
+// The keys of a thread's options, `mcpServers` aside (a session given actions has it too). No
+// `sessionStore`: the SDK refuses one beside `enableFileCheckpointing` at `query()` (SDK 0.3.312),
+// which failed every start; the transcript is read instead.
+const OPTION_KEYS = [
+  "allowDangerouslySkipPermissions",
+  "canUseTool",
+  "cwd",
+  "enableFileCheckpointing",
+  "env",
+  "extraArgs",
+  "hooks",
+  "includePartialMessages",
+  "promptSuggestions",
+  "settingSources",
+  "stderr",
+  "systemPrompt",
+  "toolConfig",
+];
+
+// Options.
+
+test(
+  "a new session starts Claude Code in its folder with the owner's settings",
+  LIMIT,
+  async (t) => {
+    const { query } = await started(t);
+    const { options } = query;
+    assert.equal(options.cwd, FOLDER);
+    assert.deepEqual(options.settingSources, ["user", "project", "local"]);
+    assert.equal(options.includePartialMessages, true);
+    // Makes bypass possible, not active.
+    assert.equal(options.allowDangerouslySkipPermissions, true);
+    // The checkpoints `!rewind` restores the files from.
+    assert.equal(options.enableFileCheckpointing, true);
+    // The agent's guess at the next prompt, which `!next` offers (#151).
+    assert.equal(options.promptSuggestions, true);
+    assert.deepEqual(options.extraArgs, { "replay-user-messages": null });
+    assert.deepEqual(Object.keys(options).sort(), OPTION_KEYS);
+    assert.deepEqual(Object.keys(options.hooks ?? {}).sort(), [
+      "PostModelSwitch",
+      "PostToolUse",
+      "Stop",
+    ]);
+  },
+);
+
+test("a session given a share action serves it as the pardner server, a bare one never", async (t) => {
+  const actions = { share: async () => "done" };
+  const { query } = await started(t, {}, { actions });
+  assert.deepEqual(Object.keys(query.options).sort(), [...OPTION_KEYS, "mcpServers"].sort());
+  assert.deepEqual(Object.keys(query.options.mcpServers ?? {}), ["pardner"]);
+  const bare = await started(t, {}, { actions, bare: true });
+  assert.equal("mcpServers" in bare.query.options, false);
+  const empty = await started(t, {}, { actions: {} });
+  assert.equal("mcpServers" in empty.query.options, false);
+});
+
+/** Calls the share tool's handler through the SDK server's own table. */
+async function callShare(query: { options: { mcpServers?: unknown } }) {
+  const server = (query.options.mcpServers as Record<string, unknown>).pardner as {
+    instance: {
+      _registeredTools: Record<string, { handler: (...args: unknown[]) => Promise<unknown> }>;
+    };
+  };
+  // `_registeredTools` is the MCP SDK's private table: the handler is not otherwise reachable.
+  await server.instance._registeredTools.share_file?.handler({ path: "a" }, {});
+}
+
+test("the signal an action gets is aborted when the session is closed", LIMIT, async (t) => {
+  const signals: AbortSignal[] = [];
+  const share = async (_path: string, signal: AbortSignal) => {
+    signals.push(signal);
+    return "done";
+  };
+  const { session, query } = await started(t, {}, { actions: { share } });
+  await callShare(query);
+  assert.equal(signals[0]?.aborted, false);
+  await session.close();
+  assert.equal(signals[0]?.aborted, true);
+});
+
+test("the signal an action gets is aborted when the stream ends", LIMIT, async (t) => {
+  t.mock.method(logger, "error", () => undefined);
+  const signals: AbortSignal[] = [];
+  const share = async (_path: string, signal: AbortSignal) => {
+    signals.push(signal);
+    return "done";
+  };
+  const { events, query } = await started(t, { start: [END] }, { actions: { share } });
+  await until(events, "process_lost");
+  await callShare(query);
+  assert.equal(signals[0]?.aborted, true);
+});
+
+// What an interactive session has by default and a session of the SDK does not (measured
+// 2026-10-13 on the first request of both, Claude Code 2.1.296).
+
+test("a session works under Claude Code's own system prompt", LIMIT, async (t) => {
+  const { query } = await started(t);
+  assert.deepEqual(query.options.systemPrompt, { type: "preset", preset: "claude_code" });
+});
+
+test(
+  "a session's questions may carry a preview for each option, as in the terminal",
+  LIMIT,
+  async (t) => {
+    const { query } = await started(t);
+    assert.deepEqual(query.options.toolConfig, { askUserQuestion: { previewFormat: "markdown" } });
+  },
+);
+
+test("a session starts with the defaults of an interactive one", LIMIT, async (t) => {
+  const { query } = await started(t);
+  const env = query.options.env ?? {};
+  assert.equal(env.CLAUDE_CODE_FORK_SUBAGENT, "1");
+  assert.equal(env.CLAUDE_CODE_WEB_SEARCH_REFILLS_PER_HOUR, "100");
+  // `env` replaces the inherited environment: without the daemon's own, no path and no home.
+  // Read name by name as the copy holds them: on Windows the path is `Path`, which only
+  // `process.env` itself answers under another case.
+  // The names the daemon sets over it are checked by tests of their own.
+  const over = new Set(["CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS", "CLAUDE_CODE_ENTRYPOINT"]);
+  const own = Object.entries(process.env).filter(([name]) => !over.has(name));
+  assert.ok(own.length > 0);
+  for (const [name, value] of own) assert.equal(env[name], value, name);
+});
+
+test(
+  "a copy is started as the terminal's /fork starts one, and no other session is",
+  LIMIT,
+  async (t) => {
+    const name = "CLAUDE_CODE_RESUME_SOURCE_ALIVE";
+    const at = "2026-10-28T21:09:12.578Z";
+    const { query } = await started(t, {}, { resume: "copy-1", forkOf: { session: "orig-1", at } });
+    assert.equal(query.options.env?.[name], `copy-1|${at}|orig-1`);
+    const plain = await started(t, {}, { resume: "orig-1" });
+    assert.equal(plain.query.options.env?.[name], process.env[name]);
+  },
+);
+
+// What the daemon reads from the stream is asked for whatever the owner's file says.
+test("a session is asked to say its state, over the owner's variables", LIMIT, async (t) => {
+  const asked = "CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS";
+  const { query } = await started(t, {}, { variables: { [asked]: "0" } });
+  assert.equal(query.options.env?.[asked], "1");
+});
+
+// A daemon started from an editor's terminal inherits its name, which would mark every line of
+// the session's transcript as not its own (`transcript.ts`).
+test("a session runs under the SDK's own entrypoint, whatever it inherits", LIMIT, async (t) => {
+  const name = "CLAUDE_CODE_ENTRYPOINT";
+  const before = process.env[name];
+  process.env[name] = "claude-vscode";
+  t.after(() => {
+    if (before === undefined) delete process.env[name];
+    else process.env[name] = before;
+  });
+  const { query } = await started(t, {}, { variables: { [name]: "cli" } });
+  assert.equal(query.options.env?.[name], "sdk-ts");
+});
+
+// Claude Code then writes a turn's transcript to disk before it yields the turn's result.
+test("a session's transcript is written out before each result", LIMIT, async (t) => {
+  const name = "CLAUDE_CODE_EAGER_FLUSH";
+  const { query } = await started(t, {}, { variables: { [name]: "0" } });
+  assert.equal(query.options.env?.[name], "1");
+});
+
+test("a variable the daemon's environment sets wins over a default", LIMIT, async (t) => {
+  const before = process.env.CLAUDE_CODE_FORK_SUBAGENT;
+  process.env.CLAUDE_CODE_FORK_SUBAGENT = "0";
+  t.after(() => {
+    if (before === undefined) delete process.env.CLAUDE_CODE_FORK_SUBAGENT;
+    else process.env.CLAUDE_CODE_FORK_SUBAGENT = before;
+  });
+  const { query } = await started(t);
+  assert.equal(query.options.env?.CLAUDE_CODE_FORK_SUBAGENT, "0");
+});
+
+test(
+  "the owner's variables reach Claude Code as written, over the environment",
+  LIMIT,
+  async (t) => {
+    const before = process.env.BASH_DEFAULT_TIMEOUT_MS;
+    process.env.BASH_DEFAULT_TIMEOUT_MS = "1";
+    t.after(() => {
+      if (before === undefined) delete process.env.BASH_DEFAULT_TIMEOUT_MS;
+      else process.env.BASH_DEFAULT_TIMEOUT_MS = before;
+    });
+    const { query } = await started(t, {}, { variables: { BASH_DEFAULT_TIMEOUT_MS: "21600000" } });
+    assert.equal(query.options.env?.BASH_DEFAULT_TIMEOUT_MS, "21600000");
+  },
+);
+
+test("a session of the daemon's own keeps the SDK's defaults", LIMIT, async (t) => {
+  const { query } = await started(t, {}, { bare: true, settingsSources: [] });
+  assert.equal("systemPrompt" in query.options, false);
+  assert.equal("env" in query.options, false);
+  assert.equal("toolConfig" in query.options, false);
+});
+
+test("a resumed session passes the stored id, effort and model", LIMIT, async (t) => {
+  const { query } = await started(
+    t,
+    {},
+    {
+      resume: "68da9311-0000-4000-8000-0000000000aa",
+      effort: "high",
+      model: "haiku",
+    },
+  );
+  const { options } = query;
+  assert.equal(options.resume, "68da9311-0000-4000-8000-0000000000aa");
+  assert.equal(options.effort, "high");
+  assert.equal(options.model, "haiku");
+});
+
+test("the settings sources are those the seam gives", LIMIT, async (t) => {
+  const { query } = await started(t, {}, { settingsSources: [] });
+  assert.deepEqual(query.options.settingSources, []);
+});
+
+test("Chrome adds its flag to the extra arguments, and nothing else", LIMIT, async (t) => {
+  const { query } = await started(t, {}, { chrome: true });
+  assert.deepEqual(query.options.extraArgs, { "replay-user-messages": null, chrome: null });
+});
+
+test("the process's stderr is counted and never logged", LIMIT, async (t) => {
+  const lines: string[] = [];
+  t.mock.method(logger, "debug", (message: string) => lines.push(message));
+  const { query } = await started(t);
+  query.options.stderr?.("the conversation, quoted");
+  assert.deepEqual(lines, ["claude stderr: 24 chars"]);
+});
+
+// Events.
+
+test("a recorded turn gives the events its records give, in order", LIMIT, async (t) => {
+  const { session, events } = await started(t, { turns: [TOOLS] });
+  await session.send(PROMPT);
+  const seen = await until(events, "turn_ended");
+  const expected = new Translator();
+  const records = TOOLS.flatMap((record) => expected.translate(record));
+  // Claude Code's replay of the prompt comes with the turn and is the only addition.
+  assert.deepEqual(
+    seen.filter((event) => event.type !== "prompt_taken"),
+    records,
+  );
+  assert.equal(seen[0]?.type, "session_started");
+  assert.equal(seen.filter((event) => event.type === "turn_ended").length, 1);
+  const calls = types(seen).filter((type) => type === "call_started" || type === "call_ended");
+  assert.ok(calls.length >= 2);
+  assert.equal(calls[0], "call_started");
+});
+
+test("a prompt that comes back is prompt_taken, before the words of its turn", LIMIT, async (t) => {
+  const { session, query, events } = await started(t, { turns: [TOOLS] });
+  await session.send(PROMPT);
+  const seen = await until(events, "turn_ended");
+  const taken = seen.filter((event) => event.type === "prompt_taken");
+  assert.deepEqual(taken, [{ type: "prompt_taken", promptId: PROMPT.id }]);
+  assert.ok(types(seen).indexOf("prompt_taken") < types(seen).indexOf("message_started"));
+  // The SDK was given one user message, under the prompt's id.
+  assert.equal(query.sent.length, 1);
+  assert.equal(query.sent[0]?.uuid, PROMPT.id);
+  assert.equal(query.sent[0]?.message.content, "Say ok");
+  assert.equal(query.sent[0]?.parent_tool_use_id, null);
+});
+
+test("a batch nobody asked for gives its events at once", LIMIT, async (t) => {
+  const { query, events } = await started(t);
+  query.inject(TOOLS);
+  const seen = await until(events, "turn_ended");
+  assert.equal(seen.at(-1)?.type, "turn_ended");
+  assert.equal(
+    seen.some((event) => event.type === "prompt_taken"),
+    false,
+  );
+});
+
+test("two prompts get one batch each, in the order they were sent", LIMIT, async (t) => {
+  const first = sdkRecords("usage");
+  const { session, events } = await started(t, { turns: [first, TOOLS] });
+  await session.send({ id: "00000000-0000-4000-8000-0000000000b2", content: "/usage" });
+  const one = await until(events, "turn_ended");
+  await session.send(PROMPT);
+  const two = await until(events, "turn_ended");
+  assert.equal(one.find((event) => event.type === "turn_ended")?.type, "turn_ended");
+  assert.ok(two.some((event) => event.type === "call_started"));
+  assert.ok(two.some((event) => event.type === "prompt_taken"));
+});
+
+// Requests.
+
+test("a permission request reaches the handler and an allow is passed on", LIMIT, async (t) => {
+  const handler = handlerOf({ allow: true });
+  const batch: Batch = [
+    ...TOOLS.slice(0, FIRST_CALL + 1),
+    ask({
+      toolName: "Bash",
+      input: BASH,
+      toolUseID: "toolu_000",
+      description: "Print ok",
+    }),
+    ...TOOLS.slice(FIRST_CALL + 1),
+  ];
+  const { session, query, events } = await started(t, { turns: [batch] }, {}, handler);
+  await session.send(PROMPT);
+  const seen = await until(events, "turn_ended");
+  assert.deepEqual(handler.asked, [
+    {
+      type: "permission",
+      callId: "toolu_000",
+      toolName: "Bash",
+      input: BASH,
+      title: null,
+      description: "Print ok",
+    },
+  ]);
+  // The SDK's result, field by field.
+  assert.deepEqual(query.permissionResults, [{ behavior: "allow", updatedInput: BASH }]);
+  // The turn went on after the answer: the call and the end are both there.
+  assert.ok(types(seen).includes("call_started"));
+  assert.equal(seen.at(-1)?.type, "turn_ended");
+});
+
+// Invariant 2: the project owns no permission rule, so no tool is answered without the owner.
+// Found by a mutation run of 2026-10-11: a callback that allowed `Read` by itself failed nothing,
+// since only `Bash` was ever asked about.
+const CALLS: readonly { readonly toolName: string; readonly input: Record<string, unknown> }[] = [
+  { toolName: "Read", input: { file_path: `${FOLDER}/notes.txt` } },
+  { toolName: "Bash", input: BASH },
+  { toolName: "Edit", input: { file_path: `${FOLDER}/a.ts`, old_string: "a", new_string: "b" } },
+  { toolName: "Write", input: { file_path: `${FOLDER}/b.ts`, content: "b" } },
+  { toolName: "Glob", input: { pattern: "*.ts" } },
+  { toolName: "mcp__alice-server__lookup", input: { term: "ok" } },
+  { toolName: "ToolNobodyHasSeen", input: { anything: 1 } },
+];
+
+for (const { toolName, input } of CALLS) {
+  for (const answer of [
+    { allow: true },
+    { allow: false, message: "No: the owner refused." },
+  ] satisfies PermissionAnswer[]) {
+    test(
+      `a call of ${toolName} is asked once and the owner's ${answer.allow ? "allow" : "deny"} is the result`,
+      LIMIT,
+      async (t) => {
+        const handler = handlerOf(answer);
+        const { session, query, events } = await started(
+          t,
+          { turns: [[...TOOLS.slice(0, 2), ask({ toolName, input }), ...TOOLS.slice(-1)]] },
+          {},
+          handler,
+        );
+        await session.send(PROMPT);
+        await until(events, "turn_ended");
+        assert.equal(handler.asked.length, 1, "the owner is asked, once");
+        assert.equal(handler.asked[0]?.toolName, toolName);
+        assert.deepEqual(
+          query.permissionResults,
+          answer.allow
+            ? [{ behavior: "allow", updatedInput: input }]
+            : [{ behavior: "deny", message: answer.message }],
+        );
+      },
+    );
+  }
+}
+
+test("the stream waits for an answer the owner has not given", LIMIT, async (t) => {
+  let answer: (value: PermissionAnswer) => void = () => undefined;
+  const handler: RequestHandler = {
+    permission: () => new Promise<PermissionAnswer>((resolve) => (answer = resolve)),
+    question: async () => ({ answered: false, message: "" }),
+  };
+  const batch: Batch = [
+    ...TOOLS.slice(0, FIRST_CALL + 1),
+    ask({ toolName: "Bash", input: BASH }),
+    TOOLS[78] as JsonObject,
+  ];
+  const { session, query, events } = await started(t, { turns: [batch] }, {}, handler);
+  await session.send(PROMPT);
+  const before = await until(events, "call_started");
+  assert.equal(before.at(-1)?.type, "call_started");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(query.permissionResults, []);
+  answer({ allow: true });
+  const after = await until(events, "turn_ended");
+  assert.equal(after.at(-1)?.type, "turn_ended");
+  assert.equal(query.permissionResults.length, 1);
+});
+
+test(
+  "a question is answered through the updated input, a multi-select with a list",
+  LIMIT,
+  async (t) => {
+    const input = ASK.input as Record<string, unknown>;
+    const answers = {
+      "Which colour do you prefer?": "Red",
+      "Do you also like green?": ["Yes", "No"],
+    };
+    const handler = handlerOf({ allow: true }, { answered: true, answers, notes: {} });
+    const { session, query, events } = await started(
+      t,
+      {
+        turns: [
+          [
+            ...TOOLS.slice(0, 2),
+            ask({ toolName: "AskUserQuestion", input, toolUseID: "toolu_001" }),
+            ...TOOLS.slice(-1),
+          ],
+        ],
+      },
+      {},
+      handler,
+    );
+    await session.send(PROMPT);
+    await until(events, "turn_ended");
+    const [request] = handler.asked;
+    assert.equal(request?.type, "question");
+    assert.equal(request?.callId, "toolu_001");
+    assert.deepEqual(query.permissionResults, [
+      { behavior: "allow", updatedInput: { questions: input.questions, answers } },
+    ]);
+  },
+);
+
+test("a question the owner skips is a deny with what the agent is told", LIMIT, async (t) => {
+  const input = ASK.input as Record<string, unknown>;
+  const handler = handlerOf({ allow: true }, { answered: false, message: "The owner skipped it." });
+  const { session, query, events } = await started(
+    t,
+    {
+      turns: [
+        [...TOOLS.slice(0, 2), ask({ toolName: "AskUserQuestion", input }), ...TOOLS.slice(-1)],
+      ],
+    },
+    {},
+    handler,
+  );
+  await session.send(PROMPT);
+  await until(events, "turn_ended");
+  assert.deepEqual(query.permissionResults, [
+    { behavior: "deny", message: "The owner skipped it." },
+  ]);
+});
+
+test("the handler's signal is the SDK's, and fires when the SDK's does", LIMIT, async (t) => {
+  const signals: AbortSignal[] = [];
+  const handler: RequestHandler = {
+    permission: (_request, signal) => {
+      signals.push(signal);
+      return new Promise((resolve) => {
+        signal.addEventListener("abort", () => resolve({ allow: false, message: "gone" }), {
+          once: true,
+        });
+      });
+    },
+    question: async () => ({ answered: false, message: "" }),
+  };
+  const sdk = new AbortController();
+  const { session, query, events } = await started(
+    t,
+    {
+      turns: [
+        [
+          ...TOOLS.slice(0, 2),
+          ask({ toolName: "Bash", input: BASH, abort: sdk }),
+          ...TOOLS.slice(-1),
+        ],
+      ],
+    },
+    {},
+    handler,
+  );
+  await session.send(PROMPT);
+  while (signals.length === 0) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(signals[0]?.aborted, false);
+  sdk.abort();
+  assert.equal(signals[0]?.aborted, true);
+  await until(events, "turn_ended");
+  assert.deepEqual(query.permissionResults, [{ behavior: "deny", message: "gone" }]);
+});
+
+// The review round of 2026-10-10: a request that cannot be answered is a deny, never a rejection.
+// SDK 0.3.296 answers a callback that rejects with a `control_response` of subtype `error`
+// (`handleControlRequest`, sdk.mjs), which is not a deny.
+
+const UNSHOWN = "pardner could not show this request to the owner, so nobody approved it.";
+const SECRET = "a secret sentence from the tool's input";
+
+/** One Bash call against `handler`, with the error log recorded; what the SDK was answered. */
+async function askBash(t: TestContext, handler: RequestHandler, errors: string[]) {
+  t.mock.method(logger, "error", (message: string) => errors.push(message));
+  const { session, query, events } = await started(
+    t,
+    { turns: [[...TOOLS.slice(0, 2), ask({ toolName: "Bash", input: BASH }), ...TOOLS.slice(-1)]] },
+    {},
+    handler,
+  );
+  await session.send(PROMPT);
+  await until(events, "turn_ended");
+  return query.permissionResults;
+}
+
+test(
+  "a handler that rejects is a deny, and the log has the error's name alone",
+  LIMIT,
+  async (t) => {
+    const errors: string[] = [];
+    const failure = Object.assign(new Error(SECRET), { name: "ChatDown" });
+    const handler: RequestHandler = {
+      permission: async () => {
+        throw failure;
+      },
+      question: async () => ({ answered: false, message: "" }),
+    };
+    assert.deepEqual(await askBash(t, handler, errors), [{ behavior: "deny", message: UNSHOWN }]);
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0]?.includes("ChatDown"));
+    assert.ok(!errors[0]?.includes(SECRET));
+  },
+);
+
+test("a handler that throws at once is a deny", LIMIT, async (t) => {
+  const errors: string[] = [];
+  const handler: RequestHandler = {
+    permission: () => {
+      throw new TypeError(SECRET);
+    },
+    question: async () => ({ answered: false, message: "" }),
+  };
+  assert.deepEqual(await askBash(t, handler, errors), [{ behavior: "deny", message: UNSHOWN }]);
+  assert.equal(errors.length, 1);
+  assert.ok(errors[0]?.includes("TypeError"));
+  assert.ok(!errors[0]?.includes(SECRET));
+});
+
+test("a question whose input cannot be read is a deny", LIMIT, async (t) => {
+  const errors: string[] = [];
+  t.mock.method(logger, "error", (message: string) => errors.push(message));
+  const handler = handlerOf();
+  const { session, query, events } = await started(
+    t,
+    {
+      turns: [
+        [
+          ...TOOLS.slice(0, 2),
+          ask({ toolName: "AskUserQuestion", input: null as never }),
+          ...TOOLS.slice(-1),
+        ],
+      ],
+    },
+    {},
+    handler,
+  );
+  await session.send(PROMPT);
+  await until(events, "turn_ended");
+  assert.deepEqual(query.permissionResults, [{ behavior: "deny", message: UNSHOWN }]);
+  assert.deepEqual(handler.asked, []);
+  assert.deepEqual(errors, ["could not ask the owner about a call: TypeError"]);
+});
+
+// Hooks.
+
+test(
+  "the Stop hook gives the effort, the scheduled jobs and the folder, where it ran in the stream",
+  LIMIT,
+  async (t) => {
+    const batch: Batch = [...TOOLS.slice(0, -1), hook("Stop", STOP), TOOLS.at(-1) as JsonObject];
+    const { session, events } = await started(t, { turns: [batch] });
+    await session.send(PROMPT);
+    const seen = await until(events, "turn_ended");
+    const tail = seen.slice(-4);
+    assert.deepEqual(tail, [
+      { type: "effort_observed", level: "medium" },
+      { type: "scheduled_jobs", jobs: [] },
+      { type: "folder_changed", folder: "/home/dev/project" },
+      seen.at(-1),
+    ]);
+    assert.equal(seen.at(-1)?.type, "turn_ended");
+  },
+);
+
+// The goal's changes reach only the transcript (measured 2026-10-20, SDK 0.3.304, and
+// 2026-10-29, SDK 0.3.312).
+
+test(
+  "a goal's changes the session's process wrote are events, before the turn's end",
+  LIMIT,
+  async (t) => {
+    const { path, transcript } = await transcriptOf(t);
+    // What a terminal wrote to the same session, `entrypoint` `cli`, is not this process's.
+    const terminal = GOAL_ENTRIES.map((entry) => ({ ...entry, entrypoint: "cli" }));
+    const batch: Batch = [
+      ...TOOLS.slice(0, -1),
+      written(terminal),
+      written(GOAL_ENTRIES),
+      TOOLS.at(-1) as JsonObject,
+    ];
+    const { session, events } = await started(
+      t,
+      { turns: [batch], transcript: path },
+      { transcript },
+    );
+    await session.send(PROMPT);
+    const seen = await until(events, "turn_ended");
+    const goals = seen.flatMap((event) => (event.type === "goal_changed" ? [event.goal] : []));
+    assert.deepEqual(
+      goals.map((goal) => goal.state),
+      ["set", "not_met", "achieved", "set", "cleared"],
+    );
+    assert.equal(
+      seen.findLastIndex((event) => event.type === "goal_changed"),
+      seen.length - 2,
+    );
+  },
+);
+
+// The SDK runs a hook from the loop that queues the stream's records, without waiting for them to
+// be read (`readMessages`, `sdk.mjs` 0.3.312): records that came before a hook may still be in line
+// behind a slow read of the transcript when it runs.
+test(
+  "a hook's events come after every record that came before it, a read held or not",
+  LIMIT,
+  async (t) => {
+    const { path } = await transcriptOf(t);
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reads = 0;
+    // The first read of the turn is held until the hook has run.
+    const transcript = new Transcript(async () => {
+      reads += 1;
+      if (reads === 1) await held;
+      return path;
+    });
+    const { session, query, events } = await started(
+      t,
+      { turns: [TOOLS.slice(0, -1)] },
+      { transcript },
+    );
+    await session.send(PROMPT);
+    // Every record before the result has come; the hook runs as Claude Code's Stop does, then the
+    // result comes, and only then is the held read let go.
+    await pause();
+    const stop = query.options.hooks?.Stop?.[0]?.hooks[0];
+    assert.ok(stop !== undefined);
+    // Not awaited, as the SDK does not await it (`handleControlRequest`).
+    const hooked = stop(STOP as never, undefined, { signal: new AbortController().signal });
+    query.inject([TOOLS.at(-1) as JsonObject]);
+    await pause();
+    release();
+    await hooked;
+    const seen = await until(events, "turn_ended");
+    const types = seen.map((event) => event.type);
+    assert.deepEqual(types.slice(-4), [
+      "effort_observed",
+      "scheduled_jobs",
+      "folder_changed",
+      "turn_ended",
+    ]);
+    assert.ok(types.indexOf("effort_observed") > types.lastIndexOf("message_ended"));
+  },
+);
+
+test("a transcript that cannot be read loses its lines, not the session", LIMIT, async (t) => {
+  const { path } = await transcriptOf(t);
+  // A folder where the file should be: every read of it fails.
+  await mkdir(path);
+  const transcript = new Transcript(async () => path);
+  const errors: string[] = [];
+  t.mock.method(logger, "error", (message: string) => errors.push(message));
+  const batch: Batch = [...TOOLS.slice(0, -1), TOOLS.at(-1) as JsonObject];
+  const { session, events } = await started(t, { turns: [batch] }, { transcript });
+  await session.send(PROMPT);
+  const seen = await until(events, "turn_ended");
+  assert.equal(seen.at(-1)?.type, "turn_ended");
+  // Once for a failure that lasts the whole turn, by its name alone.
+  assert.deepEqual(errors, ["could not read the transcript: NotAFileError"]);
+});
+
+test("the PostToolUse hook gives the folder alone", LIMIT, async (t) => {
+  const batch: Batch = [...TOOLS.slice(0, 3), hook("PostToolUse", POST_TOOL_USE)];
+  const { session, events } = await started(t, { turns: [batch] });
+  await session.send(PROMPT);
+  const seen = await until(events, "folder_changed");
+  assert.deepEqual(seen.at(-1), { type: "folder_changed", folder: "/home/dev/project" });
+  assert.equal(
+    seen.some((event) => event.type === "effort_observed"),
+    false,
+  );
+});
+
+test("the PostModelSwitch hook gives the model before the turn ends", LIMIT, async (t) => {
+  const batch: Batch = [
+    ...TOOLS.slice(0, -1),
+    hook("PostModelSwitch", MODEL_SWITCH),
+    TOOLS.at(-1) as JsonObject,
+  ];
+  const { session, events } = await started(t, { turns: [batch] });
+  await session.send(PROMPT);
+  const seen = await until(events, "turn_ended");
+  const at = seen.findIndex((event) => event.type === "model_changed");
+  assert.deepEqual(seen[at], { type: "model_changed", model: "claude-opus-5-5" });
+  assert.ok(at < seen.length - 1);
+});
+
+// The end of the process.
+
+test("a stream that ends gives process_lost, then ends", LIMIT, async (t) => {
+  const errors: string[] = [];
+  t.mock.method(logger, "error", (message: string) => errors.push(message));
+  const { session, events } = await started(t, { turns: [[...TOOLS.slice(0, 3), END]] });
+  await session.send(PROMPT);
+  const seen = await until(events, "process_lost");
+  assert.deepEqual(seen.at(-1), { type: "process_lost", reason: EXITED });
+  assert.deepEqual(await events.next(), { done: true, value: undefined });
+  assert.deepEqual(errors, [`session stopped: ${EXITED}`]);
+});
+
+test("a stream that throws gives process_lost with the error's name", LIMIT, async (t) => {
+  const errors: string[] = [];
+  t.mock.method(logger, "error", (message: string) => errors.push(message));
+  const failure = Object.assign(new Error("exit 1: a secret sentence"), {
+    name: "ProcessExitError",
+  });
+  const { session, events } = await started(t, { turns: [[...TOOLS.slice(0, 3), fail(failure)]] });
+  await session.send(PROMPT);
+  const seen = await until(events, "process_lost");
+  assert.deepEqual(seen.at(-1), { type: "process_lost", reason: "ProcessExitError" });
+  // The name, never the message.
+  assert.deepEqual(errors, ["session stopped: ProcessExitError"]);
+});
+
+// The three messages the SDK's troubleshooting page gives for a process that ended, each with
+// what follows it there: the CLI's stderr, or its error report.
+for (const [message, name] of [
+  ["Claude Code process exited with code 1. stderr: a secret sentence", "ProcessExited"],
+  ["Claude Code process exited with code 137", "ProcessExited"],
+  ["Claude Code process terminated by signal SIGKILL. stderr: a secret sentence", "ProcessKilled"],
+  ["Claude Code returned an error result: a secret sentence", "ErrorResult"],
+] as const) {
+  test(
+    `a process the SDK reports as a plain error is named for how it ended [${message.slice(0, 44)}]`,
+    LIMIT,
+    async (t) => {
+      // the SDK gives these no class and no code, so the owner read `Error`.
+      const errors: string[] = [];
+      t.mock.method(logger, "error", (line: string) => errors.push(line));
+      const { session, events } = await started(t, { turns: [[fail(new Error(message))]] });
+      await session.send(PROMPT);
+      const seen = await until(events, "process_lost");
+      assert.deepEqual(seen.at(-1), { type: "process_lost", reason: name });
+      // The name, never the message.
+      assert.deepEqual(errors, [`session stopped: ${name}`]);
+    },
+  );
+}
+
+test(
+  "a plain error with other words, and a named one with these words, keep their own name",
+  LIMIT,
+  async (t) => {
+    t.mock.method(logger, "error", () => {});
+    const other = await started(t, {
+      turns: [[fail(new Error("Cannot write to terminated process"))]],
+    });
+    await other.session.send(PROMPT);
+    assert.deepEqual((await until(other.events, "process_lost")).at(-1), {
+      type: "process_lost",
+      reason: "Error",
+    });
+    const inside = await started(t, {
+      turns: [[fail(new Error("it said: Claude Code process exited with code 1"))]],
+    });
+    await inside.session.send(PROMPT);
+    assert.deepEqual((await until(inside.events, "process_lost")).at(-1), {
+      type: "process_lost",
+      reason: "Error",
+    });
+    const named = Object.assign(new Error("Claude Code process exited with code 1"), {
+      name: "AbortError",
+    });
+    const own = await started(t, { turns: [[fail(named)]] });
+    await own.session.send(PROMPT);
+    assert.deepEqual((await until(own.events, "process_lost")).at(-1), {
+      type: "process_lost",
+      reason: "AbortError",
+    });
+  },
+);
+
+test("a session that was closed gives no process_lost", LIMIT, async (t) => {
+  const { session, events, query } = await started(t, { turns: [TOOLS.slice(0, 3)] });
+  await session.send(PROMPT);
+  await until(events, "prompt_taken");
+  await session.close();
+  assert.equal(query.closed, true);
+  const rest = await drain(session.events);
+  assert.equal(
+    rest.some((event) => event.type === "process_lost"),
+    false,
+  );
+});
+
+test("a prompt sent after the process was lost, or after close, is refused", LIMIT, async (t) => {
+  t.mock.method(logger, "error", () => undefined);
+  const lost = await started(t, { start: [END] });
+  await until(lost.events, "process_lost");
+  await assert.rejects(lost.session.send(PROMPT), SessionClosedError);
+  const closed = await started(t);
+  await closed.session.close();
+  await assert.rejects(closed.session.send(PROMPT), SessionClosedError);
+});
+
+test("close ends the input and resolves only once the stream has ended", LIMIT, async (t) => {
+  const { session, query } = await started(t, { holdClose: true });
+  let resolved = false;
+  const closing = session.close().then(() => {
+    resolved = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(query.inputEnded, true);
+  assert.equal(query.closed, true);
+  assert.equal(resolved, false);
+  query.finishClose();
+  await closing;
+  assert.equal(resolved, true);
+});
+
+test("close is idempotent: the query is closed once", LIMIT, async (t) => {
+  const { session, query } = await started(t);
+  await session.close();
+  await session.close();
+  assert.equal(query.calls.filter((call) => call.method === "close").length, 1);
+});
+
+// Commands.
+
+test("interrupt and stop_task reach Claude Code", LIMIT, async (t) => {
+  const { session, query } = await started(t);
+  await session.interrupt();
+  await session.stopTask("task-1");
+  assert.deepEqual(query.calls, [
+    { method: "interrupt" },
+    { method: "stopTask", taskId: "task-1" },
+  ]);
+});
+
+test(
+  "a permission mode reaches Claude Code, and one it does not know is refused",
+  LIMIT,
+  async (t) => {
+    const { session, query } = await started(t);
+    await session.setPermissionMode("bypassPermissions");
+    await session.setPermissionMode("auto");
+    await assert.rejects(session.setPermissionMode("everything"), RangeError);
+    assert.deepEqual(query.calls, [
+      { method: "setPermissionMode", mode: "bypassPermissions" },
+      { method: "setPermissionMode", mode: "auto" },
+    ]);
+  },
+);
+
+// What Claude Code writes for a `/model` typed to a session: a local command, so a turn with no
+// model request in it, named by the uuid it was sent under (the replayed `user` record's `uuid`
+// and `command_lifecycle`'s `command_uuid`), ended by that uuid's `completed` and followed by the
+// session's `idle`. Recorded 2026-10-16 on Claude Code 2.1.301 with the daemon's options, ids
+// replaced and the init record of `goal.jsonl` in place of the recorded one. The fake query puts
+// the uuid the command was sent under where the recording has its own.
+const MODEL_COMMAND = sdkJson("model-command") as JsonObject[];
+const COMMAND_RESULT = MODEL_COMMAND.findIndex((record) => record.type === "result");
+const COMMAND_COMPLETED = MODEL_COMMAND.findIndex(
+  (record) => record.type === "command_lifecycle" && record.state === "completed",
+);
+const IDLE: SessionEvent = { type: "state_changed", state: "idle" };
+const STATUS: JsonObject = { type: "system", subtype: "status", status: "requesting" };
+const RUNNING = MODEL_COMMAND[0] as JsonObject;
+
+/** The content of a user message the session sent. */
+function textOf(message: SDKUserMessage | undefined): unknown {
+  return message?.message.content;
+}
+
+function pause(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 20));
+}
+
+test(
+  "a model is set with Claude Code's own command, and its turn shows nothing",
+  LIMIT,
+  async (t) => {
+    const { session, query, events } = await started(t, { turns: [MODEL_COMMAND, TOOLS] });
+    const control = await started(t, { turns: [TOOLS] });
+    await control.session.send(PROMPT);
+    const alone = await until(control.events, "turn_ended");
+
+    await session.setModel("haiku");
+    // No control call: the SDK's own `setModel` leaves an override that a later `/model` to the
+    // default model's alias does not undo.
+    assert.deepEqual(query.calls, []);
+    assert.equal(textOf(query.sent[0]), "/model haiku");
+    assert.match(String(query.sent[0]?.uuid), /^[0-9a-f-]{36}$/);
+    // The next prompt is a turn of its own: the events up to its end are those it gives alone,
+    // after the one `idle` the command's own end leaves.
+    await session.send(PROMPT);
+    assert.deepEqual(await until(events, "turn_ended"), [IDLE, ...alone]);
+    assert.equal(query.sent.length, 2);
+  },
+);
+
+test(
+  "the command's wait ends at its result, and the records up to its completed stay hidden",
+  LIMIT,
+  async (t) => {
+    const { session, query, events } = await started(t);
+    let settled = false;
+    const set = session.setModel("haiku").then(() => {
+      settled = true;
+    });
+    await pause();
+    query.answer(MODEL_COMMAND.slice(0, COMMAND_RESULT));
+    await pause();
+    assert.equal(settled, false);
+    // A status between the result and the completed is the command's too, and a completed of
+    // another command does not end the hiding.
+    const other = { ...MODEL_COMMAND[COMMAND_COMPLETED], command_uuid: "another-command" };
+    query.answer([MODEL_COMMAND[COMMAND_RESULT] as JsonObject]);
+    query.inject([STATUS, other, RUNNING]);
+    await set;
+    query.answer(MODEL_COMMAND.slice(COMMAND_COMPLETED));
+    await pause();
+    await session.close();
+    // Only what follows the completed leaves: the session's `idle`.
+    assert.deepEqual(await drain({ [Symbol.asyncIterator]: () => events }), [IDLE]);
+  },
+);
+
+test("a command that wrote no result is done at its completed", LIMIT, async (t) => {
+  const { session, query } = await started(t);
+  const set = session.setModel("haiku");
+  await pause();
+  query.answer(MODEL_COMMAND.filter((record) => record.type !== "result"));
+  await set;
+});
+
+// `sdk.d.ts` 0.3.301 (the comment of `cancel_queued`): "closed with a terminal 'cancelled' lifecycle".
+// It ends the command's turn as `completed` does, and fails a caller that had no result.
+test("a cancelled of the command ends it: an error without a result", LIMIT, async (t) => {
+  const { session, query, events } = await started(t);
+  const set = session.setModel("haiku");
+  await pause();
+  const cancelled = { ...MODEL_COMMAND[COMMAND_COMPLETED], state: "cancelled" };
+  query.answer([MODEL_COMMAND[0] as JsonObject, cancelled]);
+  await assert.rejects(set, /cancelled/);
+  // The hiding ended: what follows reaches the core.
+  query.answer(MODEL_COMMAND.slice(COMMAND_COMPLETED + 1));
+  await pause();
+  await session.close();
+  assert.deepEqual(await drain({ [Symbol.asyncIterator]: () => events }), [IDLE]);
+});
+
+test("a cancelled of another command, or after the result, changes nothing", LIMIT, async (t) => {
+  const { session, query } = await started(t);
+  let failed = false;
+  const set = session.setModel("haiku").catch(() => {
+    failed = true;
+  });
+  await pause();
+  const completed = MODEL_COMMAND[COMMAND_COMPLETED];
+  query.inject([{ ...completed, state: "cancelled", command_uuid: "another-command" }]);
+  await pause();
+  query.answer([MODEL_COMMAND[COMMAND_RESULT] as JsonObject]);
+  await set;
+  query.answer([{ ...completed, state: "cancelled" }]);
+  await pause();
+  assert.equal(failed, false);
+});
+
+test("a hook of the command's turn does not reach the core", LIMIT, async (t) => {
+  const { session, query, events } = await started(t);
+  const set = session.setModel("haiku");
+  await pause();
+  const batch: Batch = [
+    ...MODEL_COMMAND.slice(0, COMMAND_RESULT),
+    hook("Stop", STOP),
+    hook("PostToolUse", POST_TOOL_USE),
+    ...MODEL_COMMAND.slice(COMMAND_RESULT, COMMAND_COMPLETED + 1),
+  ];
+  query.answer(batch);
+  await set;
+  await pause();
+  await session.close();
+  assert.deepEqual(types(await drain({ [Symbol.asyncIterator]: () => events })), []);
+});
+
+// The recorded `/goal clear` (`goal-lifecycle`, 2026-10-20): its lifecycle, replay and result.
+// The recording closed at the result; Claude Code then writes the command's `completed`, as every
+// recorded command turn shows, here the recorded `started` record in that state.
+const GOAL_RECORDS = sdkRecords("goal-lifecycle");
+const CLEAR_START = GOAL_RECORDS.findLastIndex(
+  (record) => record.type === "command_lifecycle" && record.state === "queued",
+);
+const CLEAR_TURN = GOAL_RECORDS.slice(CLEAR_START);
+const CLEAR_STARTED = CLEAR_TURN.find((record) => record.state === "started") as JsonObject;
+
+test("clearGoal sends `/goal clear` and nothing of its turn reaches the core", LIMIT, async (t) => {
+  const { path, transcript } = await transcriptOf(t);
+  const { session, query, events } = await started(t, { transcript: path }, { transcript });
+  const clearing = session.clearGoal();
+  await pause();
+  assert.equal(textOf(query.sent.at(-1)), "/goal clear");
+  const cleared = GOAL_ENTRIES.filter(
+    (entry) => (entry.attachment as JsonObject | undefined)?.sentinel === true,
+  ).slice(-1);
+  query.answer([
+    ...CLEAR_TURN.slice(0, -1),
+    written(cleared),
+    CLEAR_TURN.at(-1) as JsonObject,
+    { ...CLEAR_STARTED, state: "completed" },
+  ]);
+  await clearing;
+  await pause();
+  await session.close();
+  assert.deepEqual(types(await drain({ [Symbol.asyncIterator]: () => events })), []);
+});
+
+test("two model commands at once: the second is refused, the first settles", LIMIT, async (t) => {
+  const { session, query } = await started(t);
+  const first = session.setModel("haiku");
+  const second = session.setModel("opus");
+  await assert.rejects(second, /already running/);
+  await pause();
+  query.answer(MODEL_COMMAND);
+  await first;
+  assert.equal(query.sent.length, 1);
+});
+
+// `/rename <title>` sent to a live session with no turn, recorded on 2026-11-07 with the TypeScript
+// SDK 0.3.319 and Claude Code 2.1.319, with the daemon's options (`replay-user-messages`, a uuid
+// per message): `fixtures/sdk/rename-command.json`, the init record of `model-command.json` in
+// place of the recorded one. The same command turn as `/model`, with a `session_title_changed`
+// record carrying the title, ended by that uuid's `completed`.
+const RENAME_COMMAND = sdkJson("rename-command") as JsonObject[];
+const RENAME_RESULT = RENAME_COMMAND.findIndex((record) => record.type === "result");
+
+test("rename sends `/rename` and settles at its completed, not at the result", LIMIT, async (t) => {
+  const { session, query, events } = await started(t);
+  let settled = false;
+  const renaming = session.rename("Fix the timeout").then(() => {
+    settled = true;
+  });
+  await pause();
+  assert.equal(textOf(query.sent[0]), "/rename Fix the timeout");
+  assert.match(String(query.sent[0]?.uuid), /^[0-9a-f-]{36}$/);
+  // The result of a connect turn, or of the command, is not the end: only its own completed is.
+  query.answer(RENAME_COMMAND.slice(0, RENAME_RESULT + 1));
+  await pause();
+  assert.equal(settled, false);
+  query.answer(RENAME_COMMAND.slice(RENAME_RESULT + 1));
+  await renaming;
+  await pause();
+  await session.close();
+  // Nothing of the command's records reached the core; only the session's own `idle` follows.
+  assert.deepEqual(await drain({ [Symbol.asyncIterator]: () => events }), [IDLE]);
+});
+
+test("a cancelled rename fails the call", LIMIT, async (t) => {
+  const { session, query } = await started(t);
+  const renaming = session.rename("Fix the timeout");
+  await pause();
+  const cancelled = { ...MODEL_COMMAND[COMMAND_COMPLETED], state: "cancelled" };
+  query.answer([RUNNING, cancelled as JsonObject]);
+  await assert.rejects(renaming, /cancelled/);
+});
+
+test("a rename fails when the session is closed, and a closed one is refused", LIMIT, async (t) => {
+  const { session, query } = await started(t);
+  const renaming = session.rename("Fix the timeout");
+  await pause();
+  query.answer([RUNNING, END]);
+  await assert.rejects(renaming, SessionClosedError);
+  await assert.rejects(session.rename("again"), SessionClosedError);
+});
+
+test("clearGoal waits for a rename, then sends `/goal clear`", LIMIT, async (t) => {
+  const { session, query } = await started(t);
+  const renaming = session.rename("Fix the timeout");
+  await pause();
+  const clearing = session.clearGoal();
+  await pause();
+  assert.equal(query.sent.length, 1, "nothing is sent while the rename runs");
+  query.answer(RENAME_COMMAND);
+  await renaming;
+  await pause();
+  assert.equal(textOf(query.sent[1]), "/goal clear");
+  query.answer(MODEL_COMMAND);
+  await clearing;
+});
+
+test("clearGoal that waited out a session's end throws instead of sending", LIMIT, async (t) => {
+  const { session, query } = await started(t);
+  const renaming = session.rename("Fix the timeout");
+  renaming.catch(() => {});
+  await pause();
+  const clearing = session.clearGoal();
+  clearing.catch(() => {});
+  await pause();
+  query.answer([RUNNING, END]);
+  await assert.rejects(clearing, SessionClosedError);
+  assert.equal(query.sent.length, 1);
+});
+
+test("a session that ends while the model is checked fails the call", LIMIT, async (t) => {
+  const { session, query } = await started(t, { initDelayMs: 30 });
+  const set = session.setModel("haiku");
+  query.inject([END]);
+  await assert.rejects(set, SessionClosedError);
+  assert.deepEqual(query.sent, []);
+});
+
+// An interrupt while the command runs rejects the call and closes the session, whether the
+// command's turn began or not: nothing of it is read for a state.
+for (const [name, written] of [
+  ["before the command's turn began", 0],
+  ["while the command's turn runs", 1],
+] as const) {
+  test(`an interrupt ${name} rejects the call and closes the session`, LIMIT, async (t) => {
+    const { session, query, events } = await started(t);
+    const set = session.setModel("haiku");
+    await pause();
+    if (written > 0) query.answer(MODEL_COMMAND.slice(0, written));
+    await pause();
+    await session.interrupt();
+    await assert.rejects(set, /interrupted/);
+    assert.equal(query.closed, true);
+    // The query was closed, not interrupted: no control call asked it to stop.
+    assert.deepEqual(query.calls, [{ method: "close" }]);
+    await assert.rejects(session.send(PROMPT), SessionClosedError);
+    await assert.rejects(session.setModel("opus"), SessionClosedError);
+    // Nothing reached the core: no state, no session, no text of the command, no loss.
+    assert.deepEqual(await drain({ [Symbol.asyncIterator]: () => events }), []);
+  });
+}
+
+test("an interrupt with no model command running goes to the query", LIMIT, async (t) => {
+  const { session, query } = await started(t, { turns: [MODEL_COMMAND] });
+  await session.setModel("haiku");
+  await session.interrupt();
+  assert.deepEqual(query.calls, [{ method: "interrupt" }]);
+  assert.equal(query.closed, false);
+});
+
+test("no model means the agent's default: the command names it", LIMIT, async (t) => {
+  const { session, query } = await started(t, { turns: [MODEL_COMMAND] });
+  await session.setModel(null);
+  assert.equal(textOf(query.sent[0]), "/model default");
+});
+
+test("a model the session does not list is refused and nothing is sent", LIMIT, async (t) => {
+  const { session, query } = await started(t, { turns: [MODEL_COMMAND] });
+  await assert.rejects(session.setModel("nosuchmodel"), RangeError);
+  await assert.rejects(session.setModel("haiku\nrm -rf /"), RangeError);
+  assert.deepEqual(query.sent, []);
+});
+
+test("a model set fails when the session ends first, and after it", LIMIT, async (t) => {
+  const { session, query } = await started(t);
+  const pending = session.setModel("haiku");
+  await pause();
+  query.answer([MODEL_COMMAND[0] as JsonObject, END]);
+  await assert.rejects(pending, SessionClosedError);
+  await assert.rejects(session.setModel("haiku"), SessionClosedError);
+});
+
+test("an effort level is applied to the live session, none clearing it", LIMIT, async (t) => {
+  const { session, query } = await started(t);
+  await session.setEffort("high");
+  await session.setEffort(null);
+  await assert.rejects(session.setEffort("turbo"), RangeError);
+  assert.deepEqual(query.calls, [
+    { method: "applyFlagSettings", effortLevel: "high" },
+    { method: "applyFlagSettings", effortLevel: null },
+  ]);
+});
+
+test("a command Claude Code refuses rejects with its error", LIMIT, async (t) => {
+  const refusal = new Error("auto mode is not available on this model");
+  const { session } = await started(t, { rejects: { setPermissionMode: refusal } });
+  await assert.rejects(session.setPermissionMode("auto"), (error) => error === refusal);
+});
+
+test(
+  "a mode the owner's settings start a session in is taken, and an unknown one refused",
+  LIMIT,
+  async (t) => {
+    // A bypass switched off hands back the mode the session started in, which is none of the
+    // three roles the capabilities declare when the owner's `defaultMode` says so.
+    const { session, query } = await started(t);
+    for (const mode of ["acceptEdits", "plan", "dontAsk"]) await session.setPermissionMode(mode);
+    assert.deepEqual(
+      query.calls.map((call) => (call.method === "setPermissionMode" ? call.mode : null)),
+      ["acceptEdits", "plan", "dontAsk"],
+    );
+    await assert.rejects(session.setPermissionMode("anything"), RangeError);
+  },
+);
+
+test("the context usage is the model and the share of its window in use", LIMIT, async (t) => {
+  const { session, query } = await started(t);
+  assert.deepEqual(await session.contextUsage(), {
+    model: "claude-haiku-4-5-20251001",
+    percentage: 7,
+  });
+  assert.deepEqual(query.calls, [{ method: "getContextUsage" }]);
+});
+
+test(
+  "the info holds the models, the commands with their aliases and the mode",
+  LIMIT,
+  async (t) => {
+    const { session } = await started(t);
+    const info = await session.info();
+    assert.equal(info.permissionMode, "default");
+    assert.ok(info.models.length > 0);
+    assert.ok(info.models.every((model) => model.value !== ""));
+    assert.ok(info.commands.length > 0);
+    assert.ok(info.commands.some((command) => command.aliases.length > 0));
+  },
+);
+
+// Start.
+
+test(
+  "a resume Claude Code refuses is ResumeRefused, and the process is closed",
+  LIMIT,
+  async () => {
+    const failure = new Error("Claude Code returned an error result: No conversation found");
+    const refusal = sdkRecords("interrupt").at(-1) as JsonObject;
+    assert.equal(refusal.type, "result");
+    const sdk = new FakeSdk({
+      initError: failure,
+      start: [{ ...refusal, is_error: true }, fail(failure)],
+    });
+    const session = new ClaudeSession(
+      { ...CONFIG, resume: "68da9311-0000-4000-8000-0000000000aa" },
+      handlerOf(),
+      sdk.query,
+    );
+    await assert.rejects(session.ready(), (error) => {
+      assert.ok(error instanceof ResumeRefused);
+      assert.equal(error.cause, failure);
+      return true;
+    });
+    assert.equal(sdk.only.closed, true);
+  },
+);
+
+test("a start that fails with no session to resume rethrows the failure", LIMIT, async () => {
+  const failure = new Error("Claude Code returned an error result: something");
+  const refusal = sdkRecords("interrupt").at(-1) as JsonObject;
+  const sdk = new FakeSdk({
+    initError: failure,
+    start: [{ ...refusal, is_error: true }, fail(failure)],
+  });
+  const session = new ClaudeSession(CONFIG, handlerOf(), sdk.query);
+  // under the name of how the process ended, the SDK's error as its cause.
+  await assert.rejects(
+    session.ready(),
+    (error) => error instanceof Error && error.name === "ErrorResult" && error.cause === failure,
+  );
+  assert.equal(sdk.only.closed, true);
+});
+
+test("a start that fails with other words rethrows the failure itself", LIMIT, async () => {
+  const failure = new Error("Claude Code executable not found at /nowhere");
+  const sdk = new FakeSdk({ initError: failure, start: [fail(failure)] });
+  const session = new ClaudeSession(CONFIG, handlerOf(), sdk.query);
+  await assert.rejects(session.ready(), (error) => error === failure);
+});
+
+test(
+  "a request the SDK rejects because the process ended fails under that name",
+  LIMIT,
+  async (t) => {
+    // Not measured on a real process: which message a request on a dead process is rejected with.
+    const failure = new Error("Claude Code process exited with code 1. stderr: a secret sentence");
+    const { session } = await started(t, {
+      rejects: { interrupt: failure, getContextUsage: failure },
+    });
+    for (const request of [() => session.interrupt(), () => session.contextUsage()]) {
+      await assert.rejects(request(), (error) => {
+        assert.ok(error instanceof Error);
+        assert.equal(error.name, "ProcessExited");
+        assert.equal(error.message.includes("secret"), false);
+        assert.equal(error.cause, failure);
+        return true;
+      });
+    }
+  },
+);
+
+test(
+  "a resume that fails to start with no error result is not a refused resume",
+  LIMIT,
+  async () => {
+    const failure = new Error("spawn claude ENOENT");
+    const sdk = new FakeSdk({ initError: failure, start: [fail(failure)] });
+    const session = new ClaudeSession(
+      { ...CONFIG, resume: "68da9311-0000-4000-8000-0000000000aa" },
+      handlerOf(),
+      sdk.query,
+    );
+    await assert.rejects(session.ready(), (error) => error === failure);
+  },
+);
+
+test("a query whose close throws does not make the pump reject", LIMIT, async (t) => {
+  const errors: string[] = [];
+  t.mock.method(logger, "error", (message: string) => errors.push(message));
+  const failure = Object.assign(new Error(SECRET), { name: "KillFailed" });
+  const { session, events } = await started(t, {
+    turns: [[...TOOLS.slice(0, 3), END]],
+    closeThrows: failure,
+  });
+  await session.send(PROMPT);
+  await until(events, "process_lost");
+  assert.deepEqual(await events.next(), { done: true, value: undefined });
+  await assert.doesNotReject(session.close());
+  assert.ok(errors.some((line) => line.includes("KillFailed")));
+  assert.ok(!errors.some((line) => line.includes(SECRET)));
+});
+
+test("a query whose close throws does not make a close of the session reject", LIMIT, async (t) => {
+  const errors: string[] = [];
+  t.mock.method(logger, "error", (message: string) => errors.push(message));
+  const failure = Object.assign(new Error(SECRET), { name: "KillFailed" });
+  const { session } = await started(t, { turns: [], closeThrows: failure });
+  await assert.doesNotReject(session.close());
+  assert.ok(errors.some((line) => line.includes("KillFailed")));
+  assert.ok(!errors.some((line) => line.includes(SECRET)));
+});

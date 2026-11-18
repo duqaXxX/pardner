@@ -1,0 +1,531 @@
+/**
+ * `!resume` as a flow of the core, over the memory chat and the plain agent's record of
+ * sessions: the list, a typed target, a pick, and every way a pick can be stale.
+ */
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import type { ListedSession } from "../../../src/agent/seam.ts";
+import type { ThreadRef } from "../../../src/chat/seam.ts";
+import { logger } from "../../../src/core/flows/talk.ts";
+import { oneLine } from "../../../src/core/reply/words.ts";
+import * as texts from "../../../src/core/texts.ts";
+import { AsyncEvent } from "../../support/fake-clock.ts";
+import { OWNER } from "../../support/memory-chat.ts";
+import { PLAIN_CAPABILITIES, PlainAgent } from "../../support/plain-agent.ts";
+import { settledTurn } from "../../support/settle.ts";
+import { ListsWorld } from "./lists-world.ts";
+import { WithDatedSessions } from "./messages-world.ts";
+
+const { fill, named } = texts;
+
+const FIRST = "aaaaaaaa-0000-4000-8000-000000000001";
+const SECOND = "aaaaaaaa-0000-4000-8000-000000000002";
+const THIRD = "bbbbbbbb-0000-4000-8000-000000000003";
+
+/** A bound channel whose folder holds three sessions, the second the newest. */
+async function withSessions(t: Parameters<typeof ListsWorld.build>[0]): Promise<ListsWorld> {
+  const world = await ListsWorld.build(t);
+  await world.bound(world.app);
+  world.remember(world.app, FIRST, "Fix the footer", 1_000);
+  world.remember(world.app, SECOND, "Add a trust gate", 3_000);
+  world.remember(world.app, THIRD, "Rename the folder", 2_000);
+  return world;
+}
+
+/** The link the memory chat gives, which is none: the text falls back to the thread's name. */
+function linkTo(thread: string): string {
+  return fill(texts.STATUS_CHANNEL_LINK_FALLBACK, { thread_ts: thread });
+}
+
+test("an unbound channel is told how to bind, and no list is posted", async (t) => {
+  const world = await ListsWorld.build(t);
+  await world.flows.resume.word(await world.word(), "");
+  assert.deepEqual(world.said().slice(1), [fill(texts.UNBOUND_ANY, { root: world.root })]);
+  assert.deepEqual(world.chat.lists(), []);
+});
+
+test("with no target the sessions are listed newest first, with the thread they resume into", async (t) => {
+  const world = await withSessions(t);
+  const ref = await world.word();
+  await world.flows.resume.word(ref, "");
+  const [list] = world.chat.lists();
+  assert.equal(list?.title, fill(texts.RESUME_LIST, { directory: world.app }));
+  assert.equal(list?.list.type, "sessions");
+  if (list?.list.type !== "sessions") return;
+  assert.equal(list.list.folder, world.app);
+  assert.deepEqual(
+    list.list.sessions.map((session) => session.id),
+    [SECOND, THIRD, FIRST],
+  );
+  assert.equal(list.list.held, 0);
+  assert.deepEqual(list.list.thread, ref);
+});
+
+test("the rows leave out the sessions a thread holds, and count them", async (t) => {
+  const world = await withSessions(t);
+  world.state.openThread(world.channel, "thread-9", SECOND);
+  await world.flows.resume.word(await world.word(), "");
+  const [list] = world.chat.lists();
+  assert.ok(list?.list.type === "sessions");
+  if (list?.list.type !== "sessions") return;
+  assert.deepEqual(
+    list.list.sessions.map((session) => session.id),
+    [THIRD, FIRST],
+  );
+  assert.equal(list.list.held, 1);
+});
+
+test("a typed id prefix resumes the session into the thread of the word", async (t) => {
+  const world = await withSessions(t);
+  const ref = await world.word("!resume bbbbbbbb");
+  await world.flows.resume.word(ref, "bbbbbbbb");
+  assert.equal(world.state.thread(ref.channel, ref.thread)?.sessionId, THIRD);
+  assert.deepEqual(world.chat.texts(ref.channel, ref.thread).slice(1), [
+    fill(texts.RESUME_OK, { title: "Rename the folder" }),
+  ]);
+  assert.deepEqual(world.chat.lists(), []);
+});
+
+test("a title is shown to the chat as a reference, shortened to one line", async (t) => {
+  const world = await ListsWorld.build(t);
+  await world.bound(world.app);
+  const title = `${"long ".repeat(40)}\nsecond line`;
+  world.remember(world.app, FIRST, title, 1);
+  const ref = await world.word();
+  await world.flows.resume.word(ref, FIRST);
+  assert.deepEqual(world.chat.texts(ref.channel, ref.thread).slice(1), [
+    fill(texts.RESUME_OK, { title: oneLine(title, 80) }),
+  ]);
+});
+
+test("a target that two sessions start with is ambiguous and resumes nothing", async (t) => {
+  const world = await withSessions(t);
+  const ref = await world.word();
+  await world.flows.resume.word(ref, "aaaaaaaa");
+  assert.equal(world.state.thread(ref.channel, ref.thread), null);
+  assert.deepEqual(world.said().slice(-1), [
+    fill(texts.RESUME_AMBIGUOUS, { directory: world.app, target: "aaaaaaaa" }),
+  ]);
+});
+
+test("an unknown target, and an id too short to be one, name no session", async (t) => {
+  const world = await withSessions(t);
+  const ref = await world.word();
+  await world.flows.resume.word(ref, "nothing-like-it");
+  await world.flows.resume.word(ref, "bbbbbbb");
+  assert.equal(world.state.thread(ref.channel, ref.thread), null);
+  assert.deepEqual(world.said().slice(-2), [
+    fill(texts.RESUME_NONE, { directory: world.app, target: "nothing-like-it" }),
+    fill(texts.RESUME_NONE, { directory: world.app, target: "bbbbbbb" }),
+  ]);
+});
+
+test("a pick resumes the session into the thread the list names and takes the list away", async (t) => {
+  const world = await withSessions(t);
+  const ref = await world.word();
+  await world.flows.resume.word(ref, "");
+  const [list] = world.chat.lists();
+  assert.equal(await world.chat.as(OWNER).picks(list?.message ?? "", THIRD), true);
+  assert.deepEqual(world.picked, [
+    { type: "session", channel: world.channel, sessionId: THIRD, thread: ref, list: list?.message },
+  ]);
+  assert.equal(world.state.thread(ref.channel, ref.thread)?.sessionId, THIRD);
+  assert.deepEqual(world.chat.texts(ref.channel, ref.thread).slice(1), [
+    fill(texts.RESUME_OK, { title: "Rename the folder" }),
+  ]);
+  assert.deepEqual(world.chat.lists(), []);
+  assert.equal(world.faulty.rewrites.length, 0);
+});
+
+test("two picks at once into one thread resume one: the checks and the resume share a step", async (t) => {
+  const world = await withSessions(t);
+  const ref = await world.word();
+  await world.flows.resume.word(ref, "");
+  const [list] = world.chat.lists();
+  const message = list?.message ?? "";
+  await Promise.all([
+    world.chat.as(OWNER).picks(message, FIRST),
+    world.chat.as(OWNER).picks(message, THIRD),
+  ]);
+  assert.equal(world.state.thread(ref.channel, ref.thread)?.sessionId, FIRST);
+  assert.ok(world.said().includes(texts.RESUME_HELD));
+});
+
+test("a pick of a session another thread took meanwhile is refused and leaves the list", async (t) => {
+  const world = await withSessions(t);
+  const ref = await world.word();
+  await world.flows.resume.word(ref, "");
+  const [list] = world.chat.lists();
+  world.state.openThread(world.channel, "thread-9", THIRD);
+  await world.chat.as(OWNER).picks(list?.message ?? "", THIRD);
+  assert.equal(world.state.thread(ref.channel, ref.thread), null);
+  assert.deepEqual(world.said().slice(-1), [
+    fill(texts.RESUME_ELSEWHERE, { link: linkTo("thread-9") }),
+  ]);
+  assert.equal(world.chat.lists().length, 1);
+  assert.equal(world.faulty.rewrites.length, 0);
+});
+
+/** The refusal for a session held in a channel the chat says is gone, freed as `free` says. */
+function unreachable(thread: string, free: string): string {
+  return fill(texts.RESUME_HELD_UNREACHABLE, { thread, free });
+}
+
+test("a session held in a channel the chat no longer has is refused with how it is freed", async (t) => {
+  const world = await withSessions(t);
+  const ref = await world.word();
+  world.state.bind("chan-gone", world.app);
+  world.state.openThread("chan-gone", "thread-9", THIRD);
+  await world.flows.resume.word(ref, THIRD);
+  assert.equal(world.state.thread(ref.channel, ref.thread), null);
+  const later = fill(texts.RESUME_FREE_LATER, { hours: "6" });
+  assert.deepEqual(world.said().slice(-1), [unreachable("thread-9", later)]);
+});
+
+test("a chat with a control that runs the cleanup names it in the refusal", async (t) => {
+  const world = await withSessions(t);
+  world.chat.cleanupControl = "Sweep in the side panel";
+  const ref = await world.word();
+  world.state.bind("chan-gone", world.app);
+  world.state.openThread("chan-gone", "thread-9", THIRD);
+  await world.flows.resume.word(ref, THIRD);
+  const now = fill(texts.RESUME_FREE_NOW, { control: "Sweep in the side panel", hours: "6" });
+  assert.deepEqual(world.said().slice(-1), [unreachable("thread-9", now)]);
+});
+
+test("a gone channel with a live session keeps the plain refusal: the cleanup skips it", async (t) => {
+  const world = await withSessions(t);
+  const ref = await world.word();
+  const gone = world.chat.openChannel("gone");
+  world.state.bind(gone, world.app);
+  world.state.openThread(gone, "thread-9", THIRD);
+  await world.work((await world.chat.as(OWNER).says(gone, "busy")).ref);
+  world.chat.removeChannel(gone);
+  await world.flows.resume.word(ref, THIRD);
+  assert.deepEqual(world.said().slice(-1), [
+    fill(texts.RESUME_ELSEWHERE, { link: linkTo("thread-9") }),
+  ]);
+});
+
+test("a held session's channel the chat cannot answer about keeps the plain refusal", async (t) => {
+  const world = await withSessions(t);
+  const ref = await world.word();
+  world.state.bind("chan-gone", world.app);
+  world.state.openThread("chan-gone", "thread-9", THIRD);
+  world.chat.failChannelLookups();
+  await world.flows.resume.word(ref, THIRD);
+  assert.deepEqual(world.said().slice(-1), [
+    fill(texts.RESUME_ELSEWHERE, { link: linkTo("thread-9") }),
+  ]);
+});
+
+test("a pick into a thread that already holds a session is refused and leaves the list", async (t) => {
+  const world = await withSessions(t);
+  const ref = await world.word();
+  await world.flows.resume.word(ref, "");
+  const [list] = world.chat.lists();
+  world.state.openThread(ref.channel, ref.thread, FIRST);
+  await world.chat.as(OWNER).picks(list?.message ?? "", THIRD);
+  assert.equal(world.state.thread(ref.channel, ref.thread)?.sessionId, FIRST);
+  assert.deepEqual(world.said().slice(-1), [texts.RESUME_HELD]);
+  assert.equal(world.chat.lists().length, 1);
+});
+
+test("a pick after the channel was bound elsewhere finds the session gone", async (t) => {
+  const world = await withSessions(t);
+  const ref = await world.word();
+  await world.flows.resume.word(ref, "");
+  const [list] = world.chat.lists();
+  await world.bound(world.docs);
+  await world.chat.as(OWNER).picks(list?.message ?? "", THIRD);
+  assert.equal(world.state.thread(ref.channel, ref.thread), null);
+  assert.deepEqual(world.said().slice(-1), [texts.RESUME_GONE]);
+  assert.equal(world.chat.lists().length, 1);
+});
+
+/** A pick of `THIRD`, as a list would give it, but for the thread and channel named. */
+function pick(world: ListsWorld, thread: ThreadRef | null, channel = world.channel): Promise<void> {
+  return world.flows.picks.picked({
+    type: "session",
+    channel,
+    sessionId: THIRD,
+    thread,
+    list: "msg-none",
+  });
+}
+
+test("a pick that names no thread is a list from before it did", async (t) => {
+  const world = await withSessions(t);
+  await pick(world, null);
+  assert.deepEqual(world.said(), [texts.RESUME_STALE]);
+  assert.equal(world.state.channel(world.channel)?.threads.size, 0);
+});
+
+test("a pick from a channel that is not bound is told how to bind", async (t) => {
+  const world = await withSessions(t);
+  const elsewhere = world.chat.openChannel("elsewhere");
+  await pick(world, { channel: elsewhere, thread: "thread-9" }, elsewhere);
+  assert.deepEqual(world.chat.texts(elsewhere), [fill(texts.UNBOUND_ANY, { root: world.root })]);
+});
+
+test("a pick is not trusted: the thread opens in the channel that was checked", async (t) => {
+  const world = await withSessions(t);
+  const elsewhere = world.chat.openChannel("elsewhere");
+  await pick(world, { channel: elsewhere, thread: "thread-9" });
+  assert.equal(world.state.thread(world.channel, "thread-9")?.sessionId, THIRD);
+  assert.equal(world.state.channel(elsewhere), null);
+});
+
+test("a pick of a session the folder does not hold finds it gone", async (t) => {
+  const world = await withSessions(t);
+  world.remember(world.docs, "cccccccc-0000-4000-8000-000000000004", "Elsewhere", 1);
+  await world.flows.picks.picked({
+    type: "session",
+    channel: world.channel,
+    sessionId: "cccccccc-0000-4000-8000-000000000004",
+    thread: { channel: world.channel, thread: "thread-9" },
+    list: "msg-none",
+  });
+  assert.deepEqual(world.said(), [texts.RESUME_GONE]);
+});
+
+test("when the confirmation fails the list is rewritten into the record, and the failure is told", async (t) => {
+  const world = await withSessions(t);
+  const ref = await world.word();
+  await world.flows.resume.word(ref, "");
+  const [list] = world.chat.lists();
+  world.faulty.sayFails = true;
+  await world.chat.as(OWNER).picks(list?.message ?? "", THIRD);
+  // The session is resumed either way.
+  assert.equal(world.state.thread(ref.channel, ref.thread)?.sessionId, THIRD);
+  assert.deepEqual(world.faulty.rewrites, [
+    [
+      list?.message,
+      fill(texts.RESUME_LISTED, { title: "Rename the folder", link: linkTo(ref.thread) }),
+    ],
+  ]);
+  assert.deepEqual(world.chat.lists(), []);
+  const shown = world.chat.messages(world.channel).find((m) => m.id === list?.message);
+  assert.ok(shown !== undefined && !shown.pressable && shown.kind === "notice");
+  assert.deepEqual(world.said().slice(-1), [
+    fill(named(texts.ERROR_REPLY, world.names), { error: "Error" }),
+  ]);
+});
+
+test("when the chat refuses to remove the list it is rewritten into the record", async (t) => {
+  const world = await withSessions(t);
+  const ref = await world.word();
+  await world.flows.resume.word(ref, "");
+  const [list] = world.chat.lists();
+  world.faulty.withdrawRefused = true;
+  await world.chat.as(OWNER).picks(list?.message ?? "", THIRD);
+  assert.deepEqual(world.faulty.rewrites, [
+    [
+      list?.message,
+      fill(texts.RESUME_LISTED, { title: "Rename the folder", link: linkTo(ref.thread) }),
+    ],
+  ]);
+  assert.deepEqual(world.chat.texts(ref.channel, ref.thread).slice(1), [
+    fill(texts.RESUME_OK, { title: "Rename the folder" }),
+  ]);
+});
+
+/** An agent that keeps no list of its sessions. */
+class Unlisted extends PlainAgent {
+  override readonly capabilities = { ...PLAIN_CAPABILITIES, sessionListing: false };
+}
+
+test("an agent with no session listing is offered no list and finds no target", async (t) => {
+  const agent = new Unlisted();
+  const world = await ListsWorld.build(t, agent);
+  await world.bound(world.app);
+  world.remember(world.app, FIRST, "Fix the footer", 1_000);
+  const unlisted = `${agent.name} keeps no list of its sessions, so \`!resume\` has nothing to pick from.`;
+  await world.flows.resume.word(await world.word(), "");
+  assert.deepEqual(world.chat.lists(), []);
+  assert.deepEqual(world.said().slice(-1), [unlisted]);
+  await world.flows.resume.word(await world.word(), FIRST);
+  assert.deepEqual(world.said().slice(-1), [unlisted]);
+});
+
+/** Lets what is ready run, and what it starts. */
+async function settle(): Promise<void> {
+  for (let round = 0; round < 30; round += 1) await settledTurn();
+}
+
+/** The link the chat gives to a thread when it has permalinks (`ListsWorld.faulty.linked`). */
+function permalinkTo(thread: string): string {
+  return `<https://chat.test/${thread}|Session>`;
+}
+
+test("a typed resume of a session another thread holds is refused with a link to that thread", async (t) => {
+  const world = await withSessions(t);
+  world.faulty.linked = true;
+  world.state.openThread(world.channel, "thread-9", THIRD);
+  const ref = await world.word();
+  await world.flows.resume.word(ref, THIRD);
+  assert.equal(world.state.thread(ref.channel, ref.thread), null);
+  assert.deepEqual(world.said().slice(-1), [
+    fill(texts.RESUME_ELSEWHERE, { link: permalinkTo("thread-9") }),
+  ]);
+});
+
+test("a pick of a session another thread holds is refused with a link to that thread, and leaves the list", async (t) => {
+  const world = await withSessions(t);
+  world.faulty.linked = true;
+  const ref = await world.word();
+  await world.flows.resume.word(ref, "");
+  const [list] = world.chat.lists();
+  world.state.openThread(world.channel, "thread-9", THIRD);
+  await world.chat.as(OWNER).picks(list?.message ?? "", THIRD);
+  assert.equal(world.state.thread(ref.channel, ref.thread), null);
+  assert.deepEqual(world.said().slice(-1), [
+    fill(texts.RESUME_ELSEWHERE, { link: permalinkTo("thread-9") }),
+  ]);
+  assert.equal(world.chat.lists().length, 1);
+});
+
+test("a session whose first turn still runs already holds its id, and is not resumed a second time", async (t) => {
+  const world = await withSessions(t);
+  const first = await world.word("start");
+  const working = await world.work(first);
+  // The id is recorded when the agent reports it, not only at the turn's end.
+  await settle();
+  const held = world.state.thread(first.channel, first.thread)?.sessionId;
+  assert.ok(typeof held === "string" && held.length > 0);
+  assert.equal(working.busy, true);
+  const ref = await world.word(`!resume ${held}`);
+  await world.flows.resume.word(ref, held);
+  assert.equal(world.state.thread(ref.channel, ref.thread), null);
+  assert.deepEqual(world.said().slice(-1), [
+    fill(texts.RESUME_ELSEWHERE, { link: linkTo(first.thread) }),
+  ]);
+});
+
+test("a resume opens an independent thread while another thread of the folder is busy", async (t) => {
+  const world = await withSessions(t);
+  const first = await world.word("start");
+  const working = await world.work(first);
+  await settle();
+  assert.equal(working.busy, true);
+  const ref = await world.word();
+  await world.flows.resume.word(ref, SECOND);
+  assert.equal(world.state.thread(ref.channel, ref.thread)?.sessionId, SECOND);
+  assert.deepEqual(world.chat.texts(ref.channel, ref.thread).slice(1), [
+    fill(texts.RESUME_OK, { title: "Add a trust gate" }),
+  ]);
+  assert.equal(working.busy, true);
+});
+
+/** An agent whose listing of the sessions waits, once held, until the test lets it go. */
+class SlowListing extends PlainAgent {
+  held = false;
+  readonly began = new AsyncEvent();
+  readonly release = new AsyncEvent();
+
+  override async listSessions(folder: string): Promise<readonly ListedSession[]> {
+    const found = await super.listSessions(folder);
+    if (this.held) {
+      this.began.set();
+      await this.release.wait();
+    }
+    return found;
+  }
+}
+
+test("a typed resume never stores a session of a folder bound while the listing ran", async (t) => {
+  const agent = new SlowListing();
+  const world = await ListsWorld.build(t, agent);
+  await world.bound(world.app);
+  world.remember(world.app, THIRD, "Rename the folder", 2_000);
+  const ref = await world.word();
+  agent.held = true;
+  const resuming = world.flows.resume.word(ref, THIRD);
+  await agent.began.wait();
+  await world.bound(world.docs);
+  agent.release.set();
+  await resuming;
+  assert.equal(world.state.channel(world.channel)?.directory, world.docs);
+  assert.equal(world.state.thread(ref.channel, ref.thread), null);
+  assert.equal(world.state.channel(world.channel)?.threads.size, 0);
+  assert.deepEqual(world.said().slice(-1), [texts.RESUME_GONE]);
+});
+
+test("a pick never stores a session of a folder bound while the listing ran", async (t) => {
+  const agent = new SlowListing();
+  const world = await ListsWorld.build(t, agent);
+  await world.bound(world.app);
+  world.remember(world.app, THIRD, "Rename the folder", 2_000);
+  const ref = await world.word();
+  await world.flows.resume.word(ref, "");
+  const [list] = world.chat.lists();
+  agent.held = true;
+  const picking = world.chat.as(OWNER).picks(list?.message ?? "", THIRD);
+  await agent.began.wait();
+  await world.bound(world.docs);
+  agent.release.set();
+  await picking;
+  assert.equal(world.state.channel(world.channel)?.directory, world.docs);
+  assert.equal(world.state.channel(world.channel)?.threads.size, 0);
+  assert.deepEqual(world.said().slice(-1), [texts.RESUME_GONE]);
+});
+
+/** An agent whose listing of the sessions fails, as an unreadable transcript folder does. */
+class Unreadable extends PlainAgent {
+  override async listSessions(): Promise<readonly ListedSession[]> {
+    const error = new Error("transcripts unreadable");
+    error.name = "PermissionError";
+    throw error;
+  }
+}
+
+test("a pick whose listing fails tells the owner in the channel", async (t) => {
+  const world = await ListsWorld.build(t, new Unreadable());
+  await world.bound(world.app);
+  await pick(world, await world.word());
+  assert.deepEqual(world.said().slice(-1), [
+    fill(texts.named(texts.ERROR_REPLY, world.names), { error: "PermissionError" }),
+  ]);
+});
+
+test("a pick whose failure cannot be told raises nothing, and the log says so", async (t) => {
+  const warnings: string[] = [];
+  t.mock.method(logger, "warning", (line: string) => warnings.push(line));
+  const world = await ListsWorld.build(t, new Unreadable());
+  await world.bound(world.app);
+  const ref = await world.word();
+  world.faulty.noticeFails = true;
+  await assert.doesNotReject(pick(world, ref));
+  assert.deepEqual(world.said().slice(1), []);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0] ?? "", /could not report a failure in .*: Error/);
+});
+
+test("only the list reads the transcripts for dates: a typed target and a pick cost no file read", async (t) => {
+  const agent = new WithDatedSessions();
+  const world = await ListsWorld.build(t, agent);
+  await world.bound(world.app);
+  world.remember(world.app, FIRST, "Fix the footer", 1_000);
+  world.remember(world.app, SECOND, "Add a trust gate", 3_000);
+  world.remember(world.app, THIRD, "Rename the folder", 2_000);
+  await world.flows.resume.word(await world.word(`!resume ${FIRST}`), FIRST);
+  const picked = await world.word("!resume");
+  await pick(world, picked);
+  assert.equal(world.state.thread(picked.channel, picked.thread)?.sessionId, THIRD);
+  assert.deepEqual(agent.dated, []);
+  await world.flows.resume.word(await world.word(), "");
+  // The session the first target took is held by its thread: the list leaves it out and dates the rest.
+  assert.deepEqual(agent.dated, [[world.app, [SECOND]]]);
+});
+
+test("a resumed session with no title shows its id", async (t) => {
+  const world = await ListsWorld.build(t);
+  await world.bound(world.app);
+  world.remember(world.app, FIRST, "", 1_000);
+  const ref = await world.word();
+  await world.flows.resume.word(ref, FIRST);
+  assert.equal(world.state.thread(ref.channel, ref.thread)?.sessionId, FIRST);
+  assert.deepEqual(world.chat.texts(ref.channel, ref.thread).slice(1), [
+    fill(texts.RESUME_OK, { title: FIRST }),
+  ]);
+});

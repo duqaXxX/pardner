@@ -1,0 +1,199 @@
+/**
+ * The memory chat: a second chat provider held in memory, for the tests of the seam. Its
+ * capabilities are all false (no native streaming, no reactions, no activity line, no session
+ * index, no file upload, no line for the owner alone) unless a test asks for command suggestions,
+ * and it implements every required member of the chat seam for real. It is written against the seam and the core's port alone, and places the
+ * footer and the list by a rule of its own model.
+ *
+ * `memoryChat()` is a registry entry that is also the handle on what the provider it builds
+ * holds, and on the people a test plays:
+ *
+ *     const chat = memoryChat();
+ *     const channel = chat.openChannel("work");
+ *     // ... the daemon builds and starts the provider through `chat` ...
+ *     const sent = await chat.as(OWNER).says(channel, "hello");  // top-level: opens a thread
+ *     await chat.as(OWNER).says(channel, "more", { thread: sent.ref.thread });
+ *     chat.texts(channel, sent.ref.thread);                      // what the thread shows
+ *     chat.requests();                                           // what the owner can answer
+ *     await chat.as(OWNER).answers(requestId, { type: "permission", allow: true });
+ *     await chat.as(SOMEONE).says(channel, "hi");                // in the chat, never delivered
+ *
+ * Messages, threads and channels keep their names across a restart (build a new provider from
+ * the same entry): the chat outlives the daemon.
+ */
+import type { ChatProvider } from "../../src/chat/seam.ts";
+import type { ChatContext, ChatEntry } from "../../src/core/port.ts";
+import { MemoryProvider, type Recorded } from "./memory-chat/provider.ts";
+import { OWNER, Room } from "./memory-chat/room.ts";
+
+export type {
+  Holdable,
+  OpenList,
+  OpenRequest,
+  OpenSuggestion,
+  OpenThreadList,
+  Person,
+  RecordedCall,
+  Refusable,
+  SaysOptions,
+  Sent,
+  SharedFile,
+  ShownMessage,
+} from "./memory-chat/room.ts";
+export { DAEMON, ELSEWHERE, HOME, OWNER, SOMEONE } from "./memory-chat/room.ts";
+
+export interface MemoryChatOptions {
+  /** The owner's user id; `OWNER` when absent. */
+  readonly owner?: string;
+  /** The keys the provider reports (`ChatProvider.identities`); `[MEMORY_IDENTITY]` when absent. */
+  readonly identities?: readonly string[];
+  /** The provider declares `commandSuggestions` and shows a suggestion as a message. */
+  readonly suggestions?: boolean;
+  /** The provider declares `threadLists` and posts a list in a thread as a message with rows. */
+  readonly lists?: boolean;
+  /** The provider declares `fileUpload` and keeps the files shared into a thread (`Room.shared`). */
+  readonly files?: boolean;
+  /**
+   * The provider declares `messageFold`: a rewind folds a message into its title, and the message
+   * keeps its text behind it (`ShownMessage.inside`).
+   */
+  readonly folds?: boolean;
+  /**
+   * With `lists`: the provider can draw a diff in a list's own message (`ThreadChat.fitsList`) up
+   * to this many characters of it; absent, it has no `fitsList` and a diff is shared as a file.
+   */
+  readonly fits?: number;
+  /** With `files`: the thread chat has no `unshare` (`false`). */
+  readonly unshare?: boolean;
+  /** With `files`: the thread chat has no `share`, though the provider declares `fileUpload` (`false`). */
+  readonly share?: boolean;
+  /** With `files`: the most bytes the provider takes as one shared file (1 MiB when absent). */
+  readonly fileLimit?: number;
+  /**
+   * The provider declares `rootStatus`, `acknowledgement` or `activityLine` (`nativeStreaming`
+   * also changes what the core hands a reply) and records the calls made for it, in order and
+   * with their arguments, in `MemoryChat.calls`. It derives no state from them. With
+   * `activityLine`, `activityRefused` is what `ThreadChat.activityRefused` answers.
+   */
+  readonly nativeStreaming?: boolean;
+  readonly rootStatus?: boolean;
+  readonly acknowledgement?: boolean;
+  readonly activityLine?: boolean;
+  readonly activityRefused?: boolean;
+  /** `threadOpen` and `loopCard` are declared unless false: the relay declares neither. */
+  readonly threadOpen?: boolean;
+  readonly loopCard?: boolean;
+  /** The provider has a session index that records its refreshes (`Recorded.index`). */
+  readonly index?: { readonly page?: () => unknown };
+  /**
+   * How a thread is named: by a name of its own (the default, never the id of the message that
+   * opened it), or by the id of its opening message (`opening`).
+   */
+  readonly threadIds?: "own" | "opening";
+  /**
+   * False for a chat that cannot rewrite a message once its reply ended: the list of what still
+   * runs is not drawn, and the session's footer is a message of its own.
+   */
+  readonly edits?: boolean;
+}
+
+/** The identity of a memory chat given none. */
+export const MEMORY_IDENTITY = "memory:daemon";
+
+/** The registry entry of the memory chat, and the handle on its room. */
+export class MemoryChat extends Room implements ChatEntry {
+  readonly name = "memory";
+  readonly required: readonly string[] = [];
+  readonly optional: readonly string[] = [];
+  readonly limitsHeading = "Limits of the memory chat";
+  readonly words = { names: [], literals: [], patterns: [] };
+  readonly #identities: readonly string[];
+  readonly #suggests: boolean;
+  readonly #lists: boolean;
+  readonly #files: boolean;
+  readonly #fileLimit: number | undefined;
+  readonly #folds: boolean;
+  readonly #fits: number | undefined;
+  readonly #recorded: Recorded;
+  #built: MemoryProvider | null = null;
+
+  constructor(
+    owner: string,
+    identities: readonly string[],
+    suggests = false,
+    threadIds: "own" | "opening" = "own",
+    edits = true,
+    lists = false,
+    files = false,
+    fileLimit?: number,
+    folds = false,
+    fits?: number,
+    recorded: Recorded = {},
+  ) {
+    super(owner, threadIds, edits);
+    this.#recorded = recorded;
+    this.#fits = fits;
+    this.#folds = folds;
+    this.#identities = identities;
+    this.#suggests = suggests;
+    this.#lists = lists;
+    this.#files = files;
+    this.#fileLimit = fileLimit;
+  }
+
+  /** The provider `build` made last; throws before the first build. */
+  get provider(): ChatProvider {
+    if (this.#built === null) throw new Error("the memory chat is not built yet");
+    return this.#built;
+  }
+
+  async build(context: ChatContext): Promise<ChatProvider> {
+    return this.provide(context.clock);
+  }
+
+  /** `build` for a harness that has the clock at hand and nothing to wait for. */
+  provide(clock: ChatContext["clock"]): ChatProvider {
+    this.bind(clock);
+    this.#built = new MemoryProvider(
+      this,
+      this.#identities,
+      this.#suggests,
+      this.#lists,
+      this.#files,
+      this.#fileLimit,
+      this.#folds,
+      this.#fits,
+      this.#recorded,
+    );
+    return this.#built;
+  }
+}
+
+/** A memory chat with no channel yet. */
+export function memoryChat(options: MemoryChatOptions = {}): MemoryChat {
+  const chat = new MemoryChat(
+    options.owner ?? OWNER,
+    options.identities ?? [MEMORY_IDENTITY],
+    options.suggestions ?? false,
+    options.threadIds ?? "own",
+    options.edits ?? true,
+    options.lists ?? false,
+    options.files ?? false,
+    options.fileLimit,
+    options.folds ?? false,
+    options.fits,
+    {
+      nativeStreaming: options.nativeStreaming,
+      rootStatus: options.rootStatus,
+      acknowledgement: options.acknowledgement,
+      activityLine: options.activityLine,
+      activityRefused: options.activityRefused,
+      threadOpen: options.threadOpen,
+      loopCard: options.loopCard,
+      index: options.index,
+    },
+  );
+  chat.noUnshare = options.unshare === false;
+  chat.noShare = options.share === false;
+  return chat;
+}

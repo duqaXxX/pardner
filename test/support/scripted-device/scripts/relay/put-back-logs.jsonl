@@ -1,0 +1,9 @@
+{"op":"prove","device":"app1","enrol":"sheet1","as":"g","expect":"served"}
+{"op":"submit","entry":"add","device":"app2","as":"a2","expect":"result 0"}
+{"op":"relay","act":"copy","as":"k1"}
+{"op":"submit","entry":"add","device":"app3","as":"a3","expect":"result 0"}
+{"op":"relay","act":"put-back","copy":"k1"}
+{"op":"prove","device":"app1","expect":"served"}
+{"op":"submit","entry":"add","device":"app4","seq":3,"as":"stale","expect":"result 2"}
+{"op":"submit","entry":"add","device":"app4","as":"a4","expect":"result 0"}
+{"op":"read","from":0,"expect":{"items":["g","a2","a4"],"n":3}}

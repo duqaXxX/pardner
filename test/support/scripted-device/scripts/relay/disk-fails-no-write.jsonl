@@ -1,0 +1,7 @@
+{"op":"prove","device":"app1","enrol":"sheet1","as":"g","expect":"served"}
+{"op":"submit","entry":"create","as":"c1","expect":"result 0"}
+{"op":"relay","act":"kill"}
+{"op":"relay","act":"serve"}
+{"op":"prove","device":"app1","expect":"served"}
+{"op":"submit","entry":"create","as":"c1","expect":"result 0"}
+{"op":"read","from":0,"expect":{"items":["g","c1"],"n":2}}

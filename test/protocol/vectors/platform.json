@@ -1,0 +1,278 @@
+{
+  "structure": "platform",
+  "version": 1,
+  "source": "SHA-256: FIPS 180-4 abc and empty message. HKDF: RFC 5869 Appendix A.3, test case 3 (https://www.rfc-editor.org/rfc/rfc5869.txt), read 2026-11-14. AES-256-GCM: test case 16 of The Galois/Counter Mode of Operation (GCM), McGrew and Viega, Appendix B (https://csrc.nist.rip/groups/ST/toolkit/BCM/documents/proposedmodes/gcm/gcm-spec.pdf), read 2026-11-14. ECDSA: a key made for this file on 2026-11-14 and discarded; UTF-8: written for this file.",
+  "cases": [
+    {
+      "name": "sha256 of abc",
+      "op": "sha256",
+      "input": "616263",
+      "output": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    },
+    {
+      "name": "sha256 of the empty string",
+      "op": "sha256",
+      "input": "",
+      "output": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "hkdf RFC 5869 test case 3, empty salt and info",
+      "op": "hkdf",
+      "ikm": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "info": "",
+      "length": 42,
+      "output": "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8"
+    },
+    {
+      "name": "aes-256-gcm seal, GCM spec test case 16",
+      "op": "aes-seal",
+      "k": "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308",
+      "nonce": "cafebabefacedbaddecaf888",
+      "aad": "feedfacedeadbeeffeedfacedeadbeefabaddad2",
+      "input": "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
+      "output": "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f66276fc6ece0f4e1768cddf8853bb2d551b"
+    },
+    {
+      "name": "aes-256-gcm open, GCM spec test case 16",
+      "op": "aes-open",
+      "k": "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308",
+      "nonce": "cafebabefacedbaddecaf888",
+      "aad": "feedfacedeadbeeffeedfacedeadbeefabaddad2",
+      "input": "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f66276fc6ece0f4e1768cddf8853bb2d551b",
+      "output": "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39"
+    },
+    {
+      "name": "aes-256-gcm open refuses a changed tag",
+      "op": "aes-open",
+      "k": "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308",
+      "nonce": "cafebabefacedbaddecaf888",
+      "aad": "feedfacedeadbeeffeedfacedeadbeefabaddad2",
+      "input": "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f66277fc6ece0f4e1768cddf8853bb2d551b",
+      "fails": "open-failed"
+    },
+    {
+      "name": "aes-256-gcm open refuses a changed aad",
+      "op": "aes-open",
+      "k": "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308",
+      "nonce": "cafebabefacedbaddecaf888",
+      "aad": "ffedfacedeadbeeffeedfacedeadbeefabaddad2",
+      "input": "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f66276fc6ece0f4e1768cddf8853bb2d551b",
+      "fails": "open-failed"
+    },
+    {
+      "name": "ecdsa verifies a signature made once",
+      "op": "verify",
+      "public": "04584b02d29ddcdf5b1666cd2372f81bad8a3b238c586b1457975fdac37b657ac63a77948d943635a559b82f8ba96ca04c494d1b17187fd908ee9ee571ba53512c",
+      "message": "766563746f72206d657373616765",
+      "signature": "e9d9c85be92762d7ee69cd81a73a71f0bf4a095376dde1c2f6e1cd5c26637df5a7a0fdb2f3b795e0d60b42f1e5dfe2c688e187e88c50bf895919bf99fbd3a866",
+      "valid": true
+    },
+    {
+      "name": "ecdsa refuses another message",
+      "op": "verify",
+      "public": "04584b02d29ddcdf5b1666cd2372f81bad8a3b238c586b1457975fdac37b657ac63a77948d943635a559b82f8ba96ca04c494d1b17187fd908ee9ee571ba53512c",
+      "message": "6f74686572",
+      "signature": "e9d9c85be92762d7ee69cd81a73a71f0bf4a095376dde1c2f6e1cd5c26637df5a7a0fdb2f3b795e0d60b42f1e5dfe2c688e187e88c50bf895919bf99fbd3a866",
+      "valid": false
+    },
+    {
+      "name": "ecdsa refuses a signature of 63 bytes",
+      "op": "verify",
+      "public": "04584b02d29ddcdf5b1666cd2372f81bad8a3b238c586b1457975fdac37b657ac63a77948d943635a559b82f8ba96ca04c494d1b17187fd908ee9ee571ba53512c",
+      "message": "766563746f72206d657373616765",
+      "signature": "e9d9c85be92762d7ee69cd81a73a71f0bf4a095376dde1c2f6e1cd5c26637df5a7a0fdb2f3b795e0d60b42f1e5dfe2c688e187e88c50bf895919bf99fbd3a8",
+      "valid": false
+    },
+    {
+      "name": "a signature made under a fresh key verifies",
+      "op": "sign-roundtrip",
+      "message": "766563746f72206d657373616765"
+    },
+    {
+      "name": "an hpke seal opens, and not under another info",
+      "op": "hpke-roundtrip",
+      "info": "696e666f",
+      "aad": "616164",
+      "input": "706c61696e74657874"
+    },
+    {
+      "name": "utf-8 of a character outside the BMP",
+      "op": "utf8",
+      "text": "a€😀",
+      "bytes": "61e282acf09f9880"
+    },
+    {
+      "name": "utf-8 keeps a byte order mark in the text",
+      "op": "utf8",
+      "text": "﻿a",
+      "bytes": "efbbbf61"
+    },
+    {
+      "name": "utf-8 refuses a byte that starts nothing",
+      "op": "utf8-refuses",
+      "bytes": "ff"
+    },
+    {
+      "name": "utf-8 refuses an overlong form",
+      "op": "utf8-refuses",
+      "bytes": "c0af"
+    },
+    {
+      "name": "utf-8 refuses an encoded surrogate",
+      "op": "utf8-refuses",
+      "bytes": "eda080"
+    },
+    {
+      "name": "hkdf takes an info of 1,024 bytes",
+      "op": "hkdf",
+      "ikm": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "info": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "length": 1,
+      "output": "99"
+    },
+    {
+      "name": "hkdf throws on an info of 1,025 bytes",
+      "op": "hkdf",
+      "ikm": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "info": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "length": 1,
+      "fails": "throws"
+    },
+    {
+      "name": "hkdf throws on a length of 0",
+      "op": "hkdf",
+      "ikm": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "info": "",
+      "length": 0,
+      "fails": "throws"
+    },
+    {
+      "name": "hkdf throws on a length of 8,161",
+      "op": "hkdf",
+      "ikm": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "info": "",
+      "length": 8161,
+      "fails": "throws"
+    },
+    {
+      "name": "aes-256-gcm seal throws on a key of 16 bytes",
+      "op": "aes-seal",
+      "k": "feffe9928665731c6d6a8f9467308308",
+      "nonce": "cafebabefacedbaddecaf888",
+      "aad": "feedfacedeadbeeffeedfacedeadbeefabaddad2",
+      "input": "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
+      "fails": "throws"
+    },
+    {
+      "name": "aes-256-gcm seal throws on a nonce of 8 bytes",
+      "op": "aes-seal",
+      "k": "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308",
+      "nonce": "cafebabefacedbad",
+      "aad": "feedfacedeadbeeffeedfacedeadbeefabaddad2",
+      "input": "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
+      "fails": "throws"
+    },
+    {
+      "name": "aes-256-gcm open refuses a key of 16 bytes",
+      "op": "aes-open",
+      "k": "feffe9928665731c6d6a8f9467308308",
+      "nonce": "cafebabefacedbaddecaf888",
+      "aad": "feedfacedeadbeeffeedfacedeadbeefabaddad2",
+      "input": "0000000000000000000000000000000000000000",
+      "fails": "bad-input"
+    },
+    {
+      "name": "aes-256-gcm open refuses a nonce of 8 bytes",
+      "op": "aes-open",
+      "k": "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308",
+      "nonce": "cafebabefacedbad",
+      "aad": "feedfacedeadbeeffeedfacedeadbeefabaddad2",
+      "input": "0000000000000000000000000000000000000000",
+      "fails": "bad-input"
+    },
+    {
+      "name": "hpke seal refuses a compressed recipient key",
+      "op": "hpke-seal-refuses",
+      "public": "02abc7e49a4c6b3566d77d0304addc6ed0e98512ffccf505e6a8e3eb25c685136f",
+      "fails": "bad-input"
+    },
+    {
+      "name": "hpke seal refuses a hybrid recipient key",
+      "op": "hpke-seal-refuses",
+      "public": "06abc7e49a4c6b3566d77d0304addc6ed0e98512ffccf505e6a8e3eb25c685136f853148544876de76c0f2ef99cdc3a05ccf5ded7860c7c021238f9e2073d2356c",
+      "fails": "bad-input"
+    },
+    {
+      "name": "hpke open refuses a compressed enc",
+      "op": "hpke-open-refuses",
+      "bytes": "02abc7e49a4c6b3566d77d0304addc6ed0e98512ffccf505e6a8e3eb25c685136f",
+      "fails": "bad-input"
+    },
+    {
+      "name": "hpke open refuses a hybrid enc",
+      "op": "hpke-open-refuses",
+      "bytes": "06abc7e49a4c6b3566d77d0304addc6ed0e98512ffccf505e6a8e3eb25c685136f853148544876de76c0f2ef99cdc3a05ccf5ded7860c7c021238f9e2073d2356c",
+      "fails": "bad-input"
+    },
+    {
+      "name": "a key pair is made for sign or receive alone, before the name is looked at",
+      "op": "make-key-refuses",
+      "text": "other",
+      "fails": "bad-input"
+    },
+    {
+      "name": "sha256 throws on a value that is not bytes",
+      "op": "not-bytes",
+      "text": "sha256",
+      "fails": "throws"
+    },
+    {
+      "name": "hkdf throws on a value that is not bytes",
+      "op": "not-bytes",
+      "text": "hkdf",
+      "fails": "throws"
+    },
+    {
+      "name": "aesGcmSeal throws on a value that is not bytes",
+      "op": "not-bytes",
+      "text": "aesGcmSeal",
+      "fails": "throws"
+    },
+    {
+      "name": "aesGcmOpen throws on a value that is not bytes",
+      "op": "not-bytes",
+      "text": "aesGcmOpen",
+      "fails": "throws"
+    },
+    {
+      "name": "verify throws on a value that is not bytes",
+      "op": "not-bytes",
+      "text": "verify",
+      "fails": "throws"
+    },
+    {
+      "name": "hpkeSeal throws on a value that is not bytes",
+      "op": "not-bytes",
+      "text": "hpkeSeal",
+      "fails": "throws"
+    },
+    {
+      "name": "sign throws on a value that is not bytes",
+      "op": "not-bytes",
+      "text": "sign",
+      "fails": "throws"
+    },
+    {
+      "name": "hpkeOpen throws on a value that is not bytes",
+      "op": "not-bytes",
+      "text": "hpkeOpen",
+      "fails": "throws"
+    },
+    {
+      "name": "utf8Decode throws on a value that is not bytes",
+      "op": "not-bytes",
+      "text": "utf8Decode",
+      "fails": "throws"
+    }
+  ]
+}

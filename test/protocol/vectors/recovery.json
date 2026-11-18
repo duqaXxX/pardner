@@ -1,0 +1,49 @@
+{
+  "structure": "recovery",
+  "version": 1,
+  "source": "protocol-package design 3.1, 3.2, 5 and 7.2, 2026-11-14; DeriveKeyPair of RFC 9180, 7.1.3, written again in gen-recovery-blob.mjs on node:crypto; synthetic secrets",
+  "cases": [
+    {
+      "name": "a recovery secret of sequential bytes",
+      "op": "recovery",
+      "s": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "ikmSign": "7239ebc352c4c910899a3fe0fedee95f7e3caedb85cf0be3b0fdff71c982ed7e",
+      "ikmReceive": "25702c79aef01399b93674cfca26b90053f04d6713a6a4b0da26f6df00026a62",
+      "signing": "04ba5814674eb3229f148118896af2e64b501eb1514a50c32f169190fb412ff80804dc5087f7ffaacf37714742f68c5e406c97617596f70376b603b170989878ad",
+      "receiving": "04310a7b63cb729b85bc65a2cda3921d03638aeea2db150863ba505e47f5220616c1919555c24899e0ac29d8f03dbad0ae23d464d6470808b951165c0fab236da3",
+      "skSigning": "a74fda3499a1cbe71a01f21d2037a9afa046672f23b0742edbdfdadb0aee9b3d",
+      "skReceiving": "041999cddaab2b8fad6b7392f6127ececdb3c2feb95b9c3f4792ca8cbe2505ff",
+      "output": "7318bf7064d95f83507077a1c589e560a39d80ea8c33576766954602c9ea7d61"
+    },
+    {
+      "name": "a recovery secret of one repeated byte",
+      "op": "recovery",
+      "s": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "ikmSign": "07a058e3cb36d93fdb5ff198e2cbcd247c3e1ae41029bf251eb41f432a367a32",
+      "ikmReceive": "22d6a4f3b289d973c84fb30fe2928416c39c82c98d58d91a19ba9d02055bd604",
+      "signing": "04d282687c86bb77945581984ac3bf0adfeb0aa1151cdc204f389f920954b109b12c8859cd4327d26e442420baac01f938fd8a068c122758fc04e6c5879ff10b9b",
+      "receiving": "044556a2e0ca6d8a36817a742af7cc74a5057216ab4947faa9caa48dba0eda35701a758747c12352f7e255fa95ed7b4f7a5db4dd9b07e0c6f479ef5e8e42709a6a",
+      "skSigning": "1138667b13dcf5181f7764368747cd84370e83a1efbeb2f9d657fbf008ec0554",
+      "skReceiving": "be782fb3118834836b9b07f3d594b08658e860e88b5fbd5e77eb01c409c7d2e5",
+      "output": "dd840887ba0fd9c16bd6ebc9e0cabf04e3097c070800eb69d08d2bec18edec52"
+    },
+    {
+      "name": "a created key holds nothing, an entered one holds both pairs until deleteKey",
+      "op": "recovery-holds",
+      "s": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "output": "held"
+    },
+    {
+      "name": "one info for both halves is refused",
+      "op": "recovery-same-info",
+      "s": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "fails": "bad-input"
+    },
+    {
+      "name": "a name that is taken holds neither key",
+      "op": "recovery-taken",
+      "s": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "fails": "key-exists"
+    }
+  ]
+}

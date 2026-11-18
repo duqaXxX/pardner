@@ -1,0 +1,7 @@
+{"op":"prove","device":"app1","enrol":"sheet1","as":"g","expect":"served"}
+{"op":"submit","entry":"create","as":"ch","expect":"result 0"}
+{"op":"submit","entry":"epoch","as":"e1","expect":"result 0"}
+{"op":"submit","entry":"add","device":"app2","as":"a2","expect":"result 0"}
+{"op":"give-seal","epoch":"e1","recipient":"app2","by":"app2","expect":"result 1"}
+{"op":"give-seal","epoch":"e1","recipient":"app2","expect":"result 0"}
+{"op":"read","from":4,"expect":{"items":[],"n":4,"seals":1}}
