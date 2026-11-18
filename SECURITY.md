@@ -25,7 +25,10 @@ pardner runs Claude Code on the owner's machine on behalf of one owner, the pers
 - the daemon's own git (the footer, `/status`, `/open`, `/diff`) run in a repository the owner has not
   trusted in Claude Code, or `/diff` run git with an external diff or a text conversion filter: it
   reads the repository with plumbing commands, `--no-ext-diff` and `--no-textconv`, and never
-  writes its index.
+  writes its index;
+- from 0.16.0 on, a version of the npm package that `.github/workflows/release.yml` did not
+  publish for a `v*` tag the owner pushed, or that it published with a version other than the
+  tag's (0.15.0 and the placeholder `0.0.0-stage` were published by the owner by hand).
 
 Out of scope: what Claude Code does once the owner approves it, and whoever controls the owner's
 device, who controls the machine by design. [docs/setup.md](docs/setup.md) lists the
