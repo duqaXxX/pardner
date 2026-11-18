@@ -1113,7 +1113,7 @@ async function effortCommands(s: Stage): Promise<Seen> {
 }
 
 async function goal(s: Stage): Promise<Seen> {
-  // A goal met by its first turn, so the scene is one turn and leaves no goal behind.
+  // A goal its first turn can meet, so the scene is one turn and leaves no goal behind.
   const condition = "Reply with the single word tick.";
   const line = `Goal set: ${condition}`;
   const recorded = s.records.length;
@@ -1135,8 +1135,12 @@ async function goal(s: Stage): Promise<Seen> {
     achieved.turns !== null &&
     achieved.durationMs !== null &&
     achieved.tokens !== null;
+  // The evaluator is a model: it may judge the first reply not met and let the goal run again,
+  // as it did on 2.1.327 on 2026-11-18, so any number of `not_met` entries may come between.
   const lifecycle =
-    goals.map((change) => change.state).join(",") === "set,achieved" && counted && last < ended;
+    /^set(,not_met)*,achieved$/.test(goals.map((change) => change.state).join(",")) &&
+    counted &&
+    last < ended;
   const said = lifecycle
     ? ""
     : `goal changes: ${goals.map((change) => change.state).join(", ") || "none"}, counted: ${counted}, before the end: ${last < ended}`;

@@ -390,8 +390,8 @@ export const CLAIMS: readonly Claim[] = [
   claim(
     "P33",
     "gesture",
-    "a `/goal` reaches the session's transcript as `goal_status` entries: the goal set, then achieved " +
-      "with whole `iterations`, `durationMs` and `tokens`, both before the turn's result",
+    "a `/goal` reaches the session's transcript as `goal_status` entries: the goal set, any not met, " +
+      "then achieved with whole `iterations`, `durationMs` and `tokens`, all before the turn's result",
     "src/agent/claude/goals.ts#goalChange",
     "send `/goal reply with the single word tick`; the reply ends with `✔ Goal achieved (…)` " +
       "before its footer. If it fails, the reply shows no goal line and `/stop` never says a " +

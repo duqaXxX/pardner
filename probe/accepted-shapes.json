@@ -33,7 +33,8 @@
       "tool_use_meta[].id:string": "2.1.323",
       "tool_use_meta[].server_display_name:string": "2.1.323",
       "tool_use_meta[].tool_name:string": "2.1.323",
-      "wire_tool_inputs.*.path:string": "2.1.323"
+      "wire_tool_inputs.*.path:string": "2.1.323",
+      "api_error_type:string": "2.1.327"
     },
     "rate_limit_event": {
       "rate_limit_info.unifiedWindows.five_hour.status:string": "2.1.310",
@@ -85,7 +86,9 @@
       "model_usage_since_last_result:object": "2.1.309",
       "origin.handbackReportText:string": "2.1.310",
       "credential_expires_at:string": "2.1.318",
-      "first_request_cache_read_input_tokens:number": "2.1.321"
+      "first_request_cache_read_input_tokens:number": "2.1.321",
+      "api_error_type:string": "2.1.327",
+      "origin.handbackToolUseId:string": "2.1.327"
     },
     "stream_event/message_delta": {
       "event.context_management:null": "2.1.304",
@@ -141,13 +144,18 @@
       "tool_use_result.sections[].total:number": "2.1.319",
       "tool_use_result:array": "2.1.323",
       "tool_use_result[].text:string": "2.1.323",
-      "tool_use_result[].type:string": "2.1.323"
+      "tool_use_result[].type:string": "2.1.323",
+      "origin.handbackToolUseId:string": "2.1.327"
     },
     "stream_event/message_start": {
       "event.message.input_transformations[].path:string": "2.1.318",
       "event.message.input_transformations[].reason:string": "2.1.318",
       "event.message.input_transformations[].type:string": "2.1.318",
       "owed_rows:array": "2.1.323"
+    },
+    "system/task_notification": {
+      "handback_report.toolUseId:string": "2.1.327",
+      "summary_is_report:boolean": "2.1.327"
     }
   },
   "tools": {

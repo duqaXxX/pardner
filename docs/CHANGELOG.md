@@ -13,6 +13,9 @@ All notable changes to this project are documented here. The format follows
   where it started with `!!`. A `/` followed by a space is plain text, and so is a message with
   anything but a space before the prefix (`\/goal`, `\!ls`). `!` alone is refused as a shell command
   with nothing after it.
+- `@anthropic-ai/claude-agent-sdk` is pinned to 0.3.327, which bundles Claude Code 2.1.327. The release probe
+  certified it; six stream paths it adds, which the Claude back end does not read, are accepted in
+  `probe/accepted-shapes.json`, and claim P33 accepts a goal its evaluator judged not met before it was achieved.
 
 ## [0.15.0] - 2026-11-18
 
