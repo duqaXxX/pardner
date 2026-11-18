@@ -1,5 +1,5 @@
 /**
- * `!next`: the agent's suggested next prompt, offered with Send and Cancel. Send sends the shown
+ * `/next`: the agent's suggested next prompt, offered with Send and Cancel. Send sends the shown
  * text as a typed prompt (`sendPrompt`). The offer holds nothing open, so it never blocks the thread.
  */
 import type { ListPick, ThreadRef } from "../../chat/seam.ts";

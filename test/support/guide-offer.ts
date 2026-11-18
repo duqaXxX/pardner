@@ -1,4 +1,4 @@
-/** What `!guide` is told when the agent and the chat declare every capability, as Claude and the memory chat do. */
+/** What `/guide` is told when the agent and the chat declare every capability, as Claude and the memory chat do. */
 import type { GuideOffer } from "../../src/core/guide.ts";
 
 export const EVERYTHING_OFFERED: GuideOffer = {

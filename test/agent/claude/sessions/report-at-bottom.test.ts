@@ -37,7 +37,7 @@ test("a command typed under the waiting reply sends the report to a reply at the
   const h = memoryHarnessFor(t)({ turns: [first] });
   const session = h.session();
   await (await session.submit("start it")).done.wait();
-  // The `!status` of the owner is a message in the thread, below the waiting reply, which opens
+  // The `/status` of the owner is a message in the thread, below the waiting reply, which opens
   // no reply of its own (the harness tells the provider of it, as the listener does).
   await session.status();
   h.clients[0]?.inject([...notice, ...injected]);

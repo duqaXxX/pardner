@@ -26,7 +26,7 @@ import { string } from "./wire.ts";
 
 export const logger = getLogger("pardner.agent.claude.listing");
 
-/** The rows `!resume` lists: dating stops once the rest cannot enter them. */
+/** The rows `/resume` lists: dating stops once the rest cannot enter them. */
 export const RESUME_ROWS = 20;
 /** The end of a transcript that is read for its last message. */
 export const TAIL_BYTES = 256 * 1024;

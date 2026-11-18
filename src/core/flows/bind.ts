@@ -1,5 +1,5 @@
 /**
- * `!bind`, typed or picked from the list of folders: which folder a channel's next thread
+ * `/bind`, typed or picked from the list of folders: which folder a channel's next thread
  * starts in. The core decides which folders the list holds and what the answer says; the chat
  * draws the list.
  */
@@ -38,7 +38,7 @@ export function boundText(
   return fill(texts.BIND_OK_ELSEWHERE, { directory: inNotice(directory), old });
 }
 
-/** A folder picked from the list, and what follows `!bind <folder>`. */
+/** A folder picked from the list, and what follows `/bind <folder>`. */
 export interface Binding extends BindFlow {
   /** The pick of a folder from a list `list()` posted. */
   picked(pick: Extract<ListPick, { type: "folder" }>): Promise<void>;
@@ -128,7 +128,7 @@ export function binding(deps: FlowDeps, talk: Talk): Binding {
 
     async picked(pick) {
       const { channel } = pick;
-      // The pick is not trusted: its folder goes through the same check as a typed `!bind`.
+      // The pick is not trusted: its folder goes through the same check as a typed `/bind`.
       const directory = await folderNamed(channel, pick.path);
       if (directory === null) return;
       const record = state.channel(channel);
@@ -136,14 +136,14 @@ export function binding(deps: FlowDeps, talk: Talk): Binding {
         await talk.inChannel(channel, fill(texts.BIND_ALREADY, { directory: inNotice(directory) }));
         return;
       }
-      // A list can be old: unlike a typed `!bind`, a pick never ends work in flight either.
+      // A list can be old: unlike a typed `/bind`, a pick never ends work in flight either.
       if (!(await sessions.bind(channel, directory))) {
         await talk.inChannel(channel, texts.BIND_BUSY);
         return;
       }
       await announce(channel, directory);
       // The list is a message of the channel, not a thread's request: withdrawn through the
-      // channel, as `!resume` does.
+      // channel, as `/resume` does.
       if (!talk.stopped) await chat.channel(channel).withdraw(pick.list);
     },
   };

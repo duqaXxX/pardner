@@ -259,7 +259,7 @@ test("a process lost while the session is idle changes nothing in the thread", a
   assert.equal(h.clients.length, 2);
 });
 
-// `!stop` ends like any other end, and a restart with queued messages says so once.
+// `/stop` ends like any other end, and a restart with queued messages says so once.
 
 test("stop ends the stream, shows the checkmark, and the footer follows", async (t) => {
   const h = harness(

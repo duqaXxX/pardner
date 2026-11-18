@@ -1,7 +1,7 @@
 /**
  * The owner is told of the end of a session's work once, whichever way it ends: a change of the
  * root's status from working or waiting to done or error (`endsWork`), and never one his own act
- * made (`!stop`, a hold he cancelled). Seen here as the channel's line the memory chat moves
+ * made (`/stop`, a hold he cancelled). Seen here as the channel's line the memory chat moves
  * for a `notify` status.
  */
 import assert from "node:assert/strict";
@@ -84,7 +84,7 @@ test("a failed turn tells the owner it failed", async (t) => {
   assert.deepEqual(notified(h), ["error"]);
 });
 
-test("!stop tells the owner nothing: he has just given it", async (t) => {
+test("/stop tells the owner nothing: he has just given it", async (t) => {
   const turn = [canUseToolCall("Bash", { command: "rm -rf build" }), ...sdkMessages("interrupt")];
   const h = memoryHarnessFor(t, {}, { rootStatus: true })({ turns: [turn] });
   const session = h.session();
@@ -122,9 +122,9 @@ test("a hold the owner cancels restores the status he was told of, telling him n
 
 // The stop of work left running in the background closes the agent's process, whose tasks end
 // with it: that end is the owner's stop too (seen live on 2026-10-25, a `✅ Done:` push after
-// `!stop`).
+// `/stop`).
 for (const recording of ["session-state-agent", "session-state-shell"]) {
-  test(`!stop of work left in the background tells the owner nothing [${recording}]`, async (t) => {
+  test(`/stop of work left in the background tells the owner nothing [${recording}]`, async (t) => {
     const items = sdkMessages(recording);
     const first = items.findIndex(isResult);
     const h = memoryHarnessFor(t, {}, { rootStatus: true })({ turns: [items.slice(0, first + 1)] });

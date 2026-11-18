@@ -1,5 +1,5 @@
 /**
- * `!open` below a folder the owner trusted: the repositories inside it are the owner's to trust
+ * `/open` below a folder the owner trusted: the repositories inside it are the owner's to trust
  * one by one, and git runs only in those. The lookup is Claude Code's own record of trust
  * (`trustedRepository`); the listings and the changed files are the core's. A repository inside
  * the folder carries a `clean` filter in its config, which git runs when it reads a changed

@@ -130,12 +130,12 @@ export interface FooterFields {
   readonly weekLimit: UsageLimit | null;
   /** What names the account the agent is logged in to (an email); null when not known. */
   readonly account: string | null;
-  /** The account's plan, which `!status` shows beside it; null when not known. */
+  /** The account's plan, which `/status` shows beside it; null when not known. */
   readonly accountPlan: string | null;
   /**
    * The work the footer closes, from the prompt that began it to the moment the session ended
    * everything, background reports included; `doneAt` is epoch milliseconds. Null when not known
-   * (`!status`); every footer a session draws has it.
+   * (`/status`); every footer a session draws has it.
    */
   readonly work: { readonly durationMs: number; readonly doneAt: number } | null;
 }
@@ -573,27 +573,27 @@ export interface SetupRequest {
   readonly selection: SetupSelection;
 }
 
-/** A shell command the owner sent (`!!`), run in `folder` once confirmed. */
+/** A shell command the owner sent (`!`), run in `folder` once confirmed. */
 export interface ShellRequest {
   readonly type: "shell";
   readonly requestId: string;
   /** As typed, line breaks kept. */
   readonly command: string;
-  /** The session's folder, as `!status` names it. */
+  /** The session's folder, as `/status` names it. */
   readonly folder: string;
 }
 
 /**
  * The session is open in a terminal on the host. `open`: the terminal is idle, and the owner's
  * message is sent here only if confirmed, since that terminal will not see it. `busy`: the
- * terminal runs a turn, and the message waits for its end (a cancel only). `move`: `!terminal`
+ * terminal runs a turn, and the message waits for its end (a cancel only). `move`: `/terminal`
  * would stop what still runs here (`running`, in the core's words), confirmed or cancelled.
  */
 export interface TerminalRequest {
   readonly type: "terminal";
   readonly requestId: string;
   /**
-   * `open`: a terminal holds the session; `busy`: it runs a turn; `move`: `!terminal` would stop
+   * `open`: a terminal holds the session; `busy`: it runs a turn; `move`: `/terminal` would stop
    * what runs here; `background`: a terminal wrote while work runs here, which sending stops.
    */
   readonly state: "open" | "busy" | "move" | "background";
@@ -687,7 +687,7 @@ export interface DiffRow {
   readonly large?: boolean;
 }
 
-/** A prompt of a session the owner can go back to (`!rewind`): the id it was sent under and its text. */
+/** A prompt of a session the owner can go back to (`/rewind`): the id it was sent under and its text. */
 export interface RewindRow {
   readonly id: string;
   readonly text: string;
@@ -696,7 +696,7 @@ export interface RewindRow {
 /** A list a word posts in a session's thread (`ThreadChat.offer`), each row with a control of its own. */
 export type ThreadList =
   /**
-   * The changed files of a session (`!diff`), one view of them: `view` is the id of the view
+   * The changed files of a session (`/diff`), one view of them: `view` is the id of the view
    * shown, one of `views` (a list of one or more, the first being the files as they are now).
    * Each row has a control that shares that file's diff. `session` is the session the list was
    * made for, which a pick hands back. The provider decides how many rows it draws and how it
@@ -712,7 +712,7 @@ export type ThreadList =
       readonly shown?: { readonly path: string; readonly text: string };
     }
   /**
-   * The prompts of a session (`!rewind`), newest first, one to pick. The provider decides how many
+   * The prompts of a session (`/rewind`), newest first, one to pick. The provider decides how many
    * it draws and how it says that more exist. `session` is the session the list was made for,
    * which a pick hands back.
    */
@@ -722,7 +722,7 @@ export type ThreadList =
       readonly points: readonly RewindRow[];
     }
   /**
-   * What can be done at `point` (`!rewind`): a control for each action offered, and one for
+   * What can be done at `point` (`/rewind`): a control for each action offered, and one for
    * Never mind. `files` is set when the code can be restored there, with what that changes;
    * `conversation` when the conversation can be cut there. Restore code and conversation is
    * offered when both are.
@@ -738,7 +738,7 @@ export type ThreadList =
       } | null;
       readonly conversation: boolean;
     }
-  /** The suggested next prompt (`!next`), to send or leave: a pick carries `session` and `id`, never the text. */
+  /** The suggested next prompt (`/next`), to send or leave: a pick carries `session` and `id`, never the text. */
   | {
       readonly type: "suggestion";
       readonly session: string;
@@ -860,7 +860,7 @@ export interface CommandSuggestion {
   readonly typed: string;
   /** The message that typed it. */
   readonly message: MessageId;
-  /** `!` alone: every command is listed. */
+  /** `/` alone: every command is listed. */
   readonly all: boolean;
   readonly candidates: readonly CommandCandidate[];
 }
@@ -868,7 +868,7 @@ export interface CommandSuggestion {
 /** One command a suggestion offers. */
 export interface CommandCandidate {
   readonly name: string;
-  /** `!name hint`, plain text. */
+  /** `/name hint`, plain text. */
   readonly usage: string;
   /** One short line, plain text. */
   readonly description: string;
@@ -923,8 +923,8 @@ export interface ChatInbound {
   /**
    * The owner wrote `message`. Order: a provider calls `message` and `stop` for the messages and
    * stops of one channel, whatever thread they are in, in the order the owner sent them; a
-   * `!stop` typed in a message is a message. A stop of a thread acts on the messages of that
-   * thread handed over before it that have not reached the agent, a top-level `!stop` on those of
+   * `/stop` typed in a message is a message. A stop of a thread acts on the messages of that
+   * thread handed over before it that have not reached the agent, a top-level `/stop` on those of
    * the channel. A message a provider hands over later than it was sent (a clip waiting for its
    * transcript) is the stated exception.
    */
@@ -957,7 +957,7 @@ export interface ChatInbound {
    */
   rootGone(ref: ThreadRef): Promise<void>;
   /**
-   * The owner used a control of the chat to stop the session of `ref`, as `!stop` typed there
+   * The owner used a control of the chat to stop the session of `ref`, as `/stop` typed there
    * does. True when something was stopped (a hold cancelled or a message not yet sent alone
    * counts). The provider checks the owner, the core does not. Called in the order described at
    * `message`.
@@ -1028,7 +1028,7 @@ export interface ChatProvider {
   /** The chat's index of the sessions. A chat with none leaves it out, and nothing asks for one. */
   readonly index?: SessionIndex;
   /**
-   * `!open` typed in a session's thread: offers the files of `folder`, or shares the one
+   * `/open` typed in a session's thread: offers the files of `folder`, or shares the one
    * `target` names, into the thread. Present with `fileUpload`.
    */
   openFile?(ref: ThreadRef, folder: string, target: string): Promise<void>;
@@ -1038,13 +1038,13 @@ export interface ChatProvider {
    */
   readonly fileLimit?: number;
   /**
-   * `!tag` and `!untag` typed in a session's thread: shows `tag` on the thread where the owner
+   * `/tag` and `/untag` typed in a session's thread: shows `tag` on the thread where the owner
    * looks at the channel; null takes it away. Rejects with a `ChatError` when the chat refused.
    * Present with `threadTags`.
    */
   tagThread?(ref: ThreadRef, tag: string | null): Promise<void>;
   /**
-   * `!pin` and `!unpin` typed in a session's thread: keeps the thread at hand in its channel, or
+   * `/pin` and `/unpin` typed in a session's thread: keeps the thread at hand in its channel, or
    * stops, whoever pinned it. Asking for what already holds is no failure. Rejects with a
    * `ChatError` when the chat refused. Present with `threadPins`.
    */
@@ -1063,7 +1063,7 @@ export interface ChatProvider {
     keep?: (text: string) => void | Promise<void>,
   ): Promise<void>;
   /**
-   * `!delete-thread` typed in an idle session's thread, or in a thread with no session (the core
+   * `/delete-thread` typed in an idle session's thread, or in a thread with no session (the core
    * checks the channel is bound and no delete runs; the provider decides whether such a thread is
    * the daemon's, and refuses otherwise): asks the owner alone to confirm, and on
    * their yes deletes the thread's messages and forgets the thread, as the chat's index deletes
@@ -1072,13 +1072,13 @@ export interface ChatProvider {
    */
   deleteThread?(ref: ThreadRef): Promise<void>;
   /**
-   * `!clean-channel` typed in a channel: asks the owner alone to confirm, and on their yes deletes
+   * `/clean-channel` typed in a channel: asks the owner alone to confirm, and on their yes deletes
    * its threads not in use or kept by the owner, and what sits outside them; the sessions stay. A no
    * leaves everything as it was. Resolves once the question is shown. Present with `channelClean`.
    */
   cleanChannel?(channel: string): Promise<void>;
   /**
-   * A `!word` that is no command of the daemon's or the session's, typed in `ref`: shows the
+   * A `/word` that is no command of the daemon's or the session's, typed in `ref`: shows the
    * owner alone, in the thread, a field holding exactly `typed` and the commands it could mean,
    * each a control that puts its `text` in the field. What the owner sends from the field is
    * handed to `ChatInbound.message` as a message of the thread with the id `message`, the typed

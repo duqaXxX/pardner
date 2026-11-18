@@ -8,7 +8,7 @@ import {
   helpText,
   hostOnly,
   notOfferedAnswer,
-  parseBang,
+  parseCommand,
   rankCandidates,
   refusedInThread,
   WORD,
@@ -65,110 +65,116 @@ function invalidOf(word: string): Command {
 }
 
 const parseCases: [string, Command | null][] = [
-  ["!help", { kind: "help", query: "" }],
-  ["!help Comp", { kind: "help", query: "comp" }],
-  ["!bind ~/code/app", { kind: "bind", path: "~/code/app" }],
-  ["!bind  /a b", { kind: "bind", path: "/a b" }],
-  ["!bind", { kind: "bind", path: "" }], // alone: the folders a session can start in
-  ["!bypass on", { kind: "bypass", on: true }],
-  ["!bypass OFF", { kind: "bypass", on: false }],
-  ["!plan", { kind: "plan", on: true }],
-  ["!plan on", { kind: "plan", on: true }],
-  ["!PLAN off", { kind: "plan", on: false }],
-  ["!open", { kind: "open", target: "" }], // alone: the picker
-  ["!OPEN  setup ", { kind: "open", target: "setup" }],
-  ["!open docs/my file.md", { kind: "open", target: "docs/my file.md" }],
-  ["!pardner", { kind: "pardner", action: "show" }],
-  ["!PARDNER  update ", { kind: "pardner", action: "update" }],
-  ["!pardner restart", { kind: "pardner", action: "restart" }],
-  ["!pardner\nrestart", { kind: "pardner", action: "restart" }],
-  ["!pardner upgrade", invalidOf("pardner")], // anything else after the word is a mistake
-  ["!pardner update now", invalidOf("pardner")],
-  ["!tag devops", { kind: "tag", name: "devops" }],
-  ["!TAG  Release-2.1_b ", { kind: "tag", name: "Release-2.1_b" }], // the name is kept as typed
-  ["!tag\nràpido", { kind: "tag", name: "ràpido" }],
-  ["!tag", invalidOf("tag")],
-  ["!tag two words", invalidOf("tag")],
-  ["!tag [x]", invalidOf("tag")],
-  ["!tag ".concat("a".repeat(41)), invalidOf("tag")],
-  ["!tag ".concat("a".repeat(40)), { kind: "tag", name: "a".repeat(40) }],
-  ["!untag", { kind: "untag" }],
-  ["!UNTAG ", { kind: "untag" }],
+  ["/help", { kind: "help", query: "" }],
+  ["/help Comp", { kind: "help", query: "comp" }],
+  ["/bind ~/code/app", { kind: "bind", path: "~/code/app" }],
+  ["/bind  /a b", { kind: "bind", path: "/a b" }],
+  ["/bind", { kind: "bind", path: "" }], // alone: the folders a session can start in
+  ["/bypass on", { kind: "bypass", on: true }],
+  ["/bypass OFF", { kind: "bypass", on: false }],
+  ["/plan", { kind: "plan", on: true }],
+  ["/plan on", { kind: "plan", on: true }],
+  ["/PLAN off", { kind: "plan", on: false }],
+  ["/open", { kind: "open", target: "" }], // alone: the picker
+  ["/OPEN  setup ", { kind: "open", target: "setup" }],
+  ["/open docs/my file.md", { kind: "open", target: "docs/my file.md" }],
+  ["/pardner", { kind: "pardner", action: "show" }],
+  ["/PARDNER  update ", { kind: "pardner", action: "update" }],
+  ["/pardner restart", { kind: "pardner", action: "restart" }],
+  ["/pardner\nrestart", { kind: "pardner", action: "restart" }],
+  ["/pardner upgrade", invalidOf("pardner")], // anything else after the word is a mistake
+  ["/pardner update now", invalidOf("pardner")],
+  ["/tag devops", { kind: "tag", name: "devops" }],
+  ["/TAG  Release-2.1_b ", { kind: "tag", name: "Release-2.1_b" }], // the name is kept as typed
+  ["/tag\nràpido", { kind: "tag", name: "ràpido" }],
+  ["/tag", invalidOf("tag")],
+  ["/tag two words", invalidOf("tag")],
+  ["/tag [x]", invalidOf("tag")],
+  ["/tag ".concat("a".repeat(41)), invalidOf("tag")],
+  ["/tag ".concat("a".repeat(40)), { kind: "tag", name: "a".repeat(40) }],
+  ["/untag", { kind: "untag" }],
+  ["/UNTAG ", { kind: "untag" }],
   // A thread has one tag, so a name after the word says nothing more: never sent to the agent.
-  ["!untag devops", { kind: "untag" }],
-  ["!pin", { kind: "pin" }],
-  ["!PIN ", { kind: "pin" }],
-  ["!pin now", invalidOf("pin")],
-  ["!unpin", { kind: "unpin" }],
-  ["!unpin devops", invalidOf("unpin")],
-  ["!delete-thread", { kind: "delete-thread" }],
-  ["!DELETE-THREAD ", { kind: "delete-thread" }],
+  ["/untag devops", { kind: "untag" }],
+  ["/pin", { kind: "pin" }],
+  ["/PIN ", { kind: "pin" }],
+  ["/pin now", invalidOf("pin")],
+  ["/unpin", { kind: "unpin" }],
+  ["/unpin devops", invalidOf("unpin")],
+  ["/delete-thread", { kind: "delete-thread" }],
+  ["/DELETE-THREAD ", { kind: "delete-thread" }],
   // Anything after the word is a mistake: the help shows how it is written, nothing is deleted.
-  ["!delete-thread now", invalidOf("delete-thread")],
-  ["!clean-channel", { kind: "clean-channel" }],
-  ["!CLEAN-CHANNEL ", { kind: "clean-channel" }],
-  ["!clean-channel now", invalidOf("clean-channel")],
-  ["!delete", { kind: "passthrough", text: "delete" }],
-  ["!bypass", invalidOf("bypass")],
-  ["!bypass maybe", invalidOf("bypass")],
-  ["!plan maybe", { kind: "plan", on: null }], // a request after the word is not taken
-  ["!plan\nPrepare a plan", { kind: "plan", on: null }],
-  ["!status", { kind: "status" }],
-  ["  !stop", { kind: "stop" }],
-  ["!compact", { kind: "passthrough", text: "compact" }],
-  ["!status now", { kind: "passthrough", text: "status now" }],
-  ["!important: read this", { kind: "passthrough", text: "important: read this" }],
+  ["/delete-thread now", invalidOf("delete-thread")],
+  ["/clean-channel", { kind: "clean-channel" }],
+  ["/CLEAN-CHANNEL ", { kind: "clean-channel" }],
+  ["/clean-channel now", invalidOf("clean-channel")],
+  ["/delete", { kind: "passthrough", text: "delete" }],
+  ["/bypass", invalidOf("bypass")],
+  ["/bypass maybe", invalidOf("bypass")],
+  ["/plan maybe", { kind: "plan", on: null }], // a request after the word is not taken
+  ["/plan\nPrepare a plan", { kind: "plan", on: null }],
+  ["/status", { kind: "status" }],
+  ["  /stop", { kind: "stop" }],
+  ["/compact", { kind: "passthrough", text: "compact" }],
+  ["/status now", { kind: "passthrough", text: "status now" }],
+  ["/important: read this", { kind: "passthrough", text: "important: read this" }],
   ["hello", null],
-  ["!", null],
-  ["! compact", null],
-  ["!compact\nnotes", { kind: "passthrough", text: "compact notes" }], // the word ends at a line break too
-  ["!stop\n", { kind: "stop" }],
-  ["!model  opus ", { kind: "passthrough", text: "model opus" }],
-  ["!!ls -la", { kind: "shell", command: "ls -la" }],
-  ["!! git status ", { kind: "shell", command: "git status" }],
+  ["/", null],
+  ["/ compact", null],
+  ["! compact", { kind: "shell", command: "compact" }], // a space after `!` is allowed, as `!! compact` was
+  ["! ls", { kind: "shell", command: "ls" }],
+  ["/compact\nnotes", { kind: "passthrough", text: "compact notes" }], // the word ends at a line break too
+  ["/stop\n", { kind: "stop" }],
+  ["/model  opus ", { kind: "passthrough", text: "model opus" }],
+  ["!ls -la", { kind: "shell", command: "ls -la" }],
+  ["!git status ", { kind: "shell", command: "git status" }],
+  ["!compact", { kind: "shell", command: "compact" }], // the shell's, never the agent's /compact
   // The command is the shell's: kept as typed, case and line breaks included.
-  ["!!LS\n| wc -l", { kind: "shell", command: "LS\n| wc -l" }],
-  ["!!", { kind: "invalid", word: null, rule: null }],
-  ["!! ", { kind: "invalid", word: null, rule: null }],
+  ["!LS\n| wc -l", { kind: "shell", command: "LS\n| wc -l" }],
+  ["!", { kind: "invalid", word: null, rule: null }],
+  ["! ", { kind: "invalid", word: null, rule: null }],
+  ["\\/goal x", null], // anything before the prefix sends it as text
+  ["\\!ls", null],
+  ["/ x", null],
 ];
 
 for (const [text, expected] of parseCases) {
-  test(`parse bang [${JSON.stringify(text)}]`, () => {
-    assert.deepEqual(parseBang(text), expected);
+  test(`parse [${JSON.stringify(text)}]`, () => {
+    assert.deepEqual(parseCommand(text), expected);
   });
 }
 
 test("help lists the daemon words and every session command", () => {
   const commands = recordedCommands();
   const text = helpOf(commands);
-  for (const word of ["!help", "!status", "!stop", "!bind", "!bypass", "!open"]) {
+  for (const word of ["/help", "/status", "/stop", "/bind", "/bypass", "/open"]) {
     assert.ok(text.includes(`\`${word}`), word);
   }
-  assert.ok(commands.every((c) => text.includes(`\`!${c.name}`)));
+  assert.ok(commands.every((c) => text.includes(`\`/${c.name}`)));
 });
 
 test("help leaves out the words the agent or the chat cannot serve", () => {
   const all = helpText(null, "", (text) => text, PLAIN_NAMES);
   const fewer = helpText(null, "", (text) => text, PLAIN_NAMES, true, new Set(["bypass", "open"]));
-  assert.ok(all.includes("`!bypass on|off`") && all.includes("`!open [file]`"));
-  assert.ok(!fewer.includes("`!bypass on|off`") && !fewer.includes("`!open [file]`"));
+  assert.ok(all.includes("`/bypass on|off`") && all.includes("`/open [file]`"));
+  assert.ok(!fewer.includes("`/bypass on|off`") && !fewer.includes("`/open [file]`"));
   // Every other line is there, as written.
   assert.deepEqual(
-    all.split("\n").filter((line) => !line.startsWith("`!bypass") && !line.startsWith("`!open")),
+    all.split("\n").filter((line) => !line.startsWith("`/bypass") && !line.startsWith("`/open")),
     fewer.split("\n"),
   );
 });
 
-test("help speaks of trust in the !bind line only for an agent that keeps a record of it", () => {
+test("help speaks of trust in the /bind line only for an agent that keeps a record of it", () => {
   const bindLine = (text: string): string =>
-    text.split("\n").find((line) => line.startsWith("`!bind")) ?? "";
+    text.split("\n").find((line) => line.startsWith("`/bind")) ?? "";
   const trusting = helpText(null, "", (text) => text, PLAIN_NAMES);
   const open = helpText(null, "", (text) => text, PLAIN_NAMES, true, new Set(), false);
   assert.ok(bindLine(trusting).includes("trusts"));
   assert.ok(bindLine(open) !== "" && !bindLine(open).includes("trust"));
   assert.deepEqual(
-    trusting.split("\n").filter((line) => !line.startsWith("`!bind")),
-    open.split("\n").filter((line) => !line.startsWith("`!bind")),
+    trusting.split("\n").filter((line) => !line.startsWith("`/bind")),
+    open.split("\n").filter((line) => !line.startsWith("`/bind")),
   );
 });
 
@@ -179,15 +185,15 @@ test("help says how a command is told from a text", () => {
     assert.equal(helpOf(listed).split("\n")[1], texts.HELP_RULE);
     assert.ok(!helpOf(listed, "status").includes(texts.HELP_RULE)); // a search lists matches only
   }
-  assert.ok(texts.HELP_RULE.includes("`\\!goal`"));
+  assert.ok(texts.HELP_RULE.includes("`\\/goal`"));
 });
 
 test("help leaves out the new-session word which a thread refuses", () => {
   // a session's commands are listed inside its thread only, where the agent's new-session word
   // is refused. The agent's own list may carry it.
   const commands = [command("restart", "Start over"), command("echo", "Say it back")];
-  assert.ok(!helpOf(commands).includes("`!restart"));
-  assert.ok(helpOf(commands).includes("`!echo"));
+  assert.ok(!helpOf(commands).includes("`/restart"));
+  assert.ok(helpOf(commands).includes("`/echo"));
 });
 
 test("a thread refuses the new-session word before the session lists it", () => {
@@ -210,7 +216,7 @@ test("a thread refuses an alias of the new-session word the session adds", () =>
 
 test("help before binding says where the commands come from", () => {
   const text = helpOf(null);
-  assert.ok(text.includes("`!bind") && !text.includes("`!compact"));
+  assert.ok(text.includes("`/bind") && !text.includes("`/compact"));
 });
 
 test("help filters by name or description", () => {
@@ -219,9 +225,9 @@ test("help filters by name or description", () => {
     command("model", "Set the model", { argumentHint: "[model]" }),
   ];
   const text = helpOf(commands, "CONTEXT");
-  assert.ok(text.includes("`!compact`") && !text.includes("`!model"));
-  assert.ok(!text.includes("`!status`")); // daemon words are filtered too
-  assert.ok(helpOf(commands, "stop").includes("`!stop`"));
+  assert.ok(text.includes("`/compact`") && !text.includes("`/model"));
+  assert.ok(!text.includes("`/status`")); // daemon words are filtered too
+  assert.ok(helpOf(commands, "stop").includes("`/stop`"));
 });
 
 test("help says when nothing matches", () => {
@@ -230,7 +236,7 @@ test("help says when nothing matches", () => {
 });
 
 test("the guide and the help explain every word of the daemon", () => {
-  // A word added without its line in the guide and in !help fails here, so neither goes stale.
+  // A word added without its line in the guide and in /help fails here, so neither goes stale.
   const words: string[] = Object.values(WORD);
   for (const expected of [
     "help",
@@ -255,37 +261,43 @@ test("the guide and the help explain every word of the daemon", () => {
     assert.ok(words.includes(expected), expected);
   }
   // A WORD the parser does not answer would document a word that reaches Claude instead.
-  for (const word of words) assert.notEqual(parseBang(`!${word}`)?.kind, "passthrough", word);
+  for (const word of words)
+    assert.notEqual(
+      parseCommand(word === WORD.shell ? "!ls" : `/${word}`)?.kind,
+      "passthrough",
+      word,
+    );
   const guide = guideText(PLAIN_NAMES, EVERYTHING_OFFERED);
   const helpLines = texts.HELP_WORDS.map((line) => texts.named(line, PLAIN_NAMES)).join("\n");
   for (const word of words) {
-    assert.ok(guide.includes(`\`!${word}`), word);
-    assert.ok(helpLines.includes(`\`!${word}`), word);
+    const typed = word === WORD.shell ? word : `/${word}`;
+    assert.ok(guide.includes(`\`${typed}`), word);
+    assert.ok(helpLines.includes(`\`${typed}`), word);
   }
 });
 
 test("diff parses alone and refuses a request after it", () => {
-  assert.deepEqual(parseBang("!diff"), { kind: "diff" });
-  assert.deepEqual(parseBang("!DIFF"), { kind: "diff" });
-  assert.deepEqual(parseBang("!diff src/a.ts"), invalidOf("diff"));
+  assert.deepEqual(parseCommand("/diff"), { kind: "diff" });
+  assert.deepEqual(parseCommand("/DIFF"), { kind: "diff" });
+  assert.deepEqual(parseCommand("/diff src/a.ts"), invalidOf("diff"));
 });
 
 test("rewind parses alone and refuses a request after it", () => {
-  assert.deepEqual(parseBang("!rewind"), { kind: "rewind" });
-  assert.deepEqual(parseBang("!REWIND"), { kind: "rewind" });
-  assert.deepEqual(parseBang("!rewind 3"), invalidOf("rewind"));
-  assert.deepEqual(parseBang("!next"), { kind: "next" });
-  assert.deepEqual(parseBang("!NEXT"), { kind: "next" });
-  assert.deepEqual(parseBang("!next now"), invalidOf("next"));
+  assert.deepEqual(parseCommand("/rewind"), { kind: "rewind" });
+  assert.deepEqual(parseCommand("/REWIND"), { kind: "rewind" });
+  assert.deepEqual(parseCommand("/rewind 3"), invalidOf("rewind"));
+  assert.deepEqual(parseCommand("/next"), { kind: "next" });
+  assert.deepEqual(parseCommand("/NEXT"), { kind: "next" });
+  assert.deepEqual(parseCommand("/next now"), invalidOf("next"));
 });
 
 test("guide parses", () => {
-  assert.deepEqual(parseBang("!guide"), { kind: "guide" });
-  assert.deepEqual(parseBang("!GUIDE"), { kind: "guide" });
+  assert.deepEqual(parseCommand("/guide"), { kind: "guide" });
+  assert.deepEqual(parseCommand("/GUIDE"), { kind: "guide" });
 });
 
 test("the help titles are bold in a markdown block", () => {
-  // `!help` goes out as a markdown block, where bold is **text** and *text* is italic
+  // `/help` goes out as a markdown block, where bold is **text** and *text* is italic
   // (markdown block reference, read 2026-09-25).
   const text = helpOf([], "");
   assert.ok(text.startsWith("**pardner**") && text.includes(`**${PLAIN_NAMES.agent}**`));
@@ -300,24 +312,24 @@ const DOCTOR =
 test("a description cannot leave formatting open", () => {
   const commands = [command("doctor", DOCTOR), command("model", "*x_")];
   const lines = helpOf(commands).split("\n");
-  const doctor = lines.find((line) => line.startsWith("`!doctor`")) as string;
-  const unescaped = doctor.slice("`!doctor`".length).match(/(?<!\\)[`*_]/g) ?? [];
+  const doctor = lines.find((line) => line.startsWith("`/doctor`")) as string;
+  const unescaped = doctor.slice("`/doctor`".length).match(/(?<!\\)[`*_]/g) ?? [];
   assert.deepEqual(unescaped, []); // shown as the terminal's menu shows it: plain text
   assert.equal(
-    lines.find((line) => line.startsWith("`!model`")),
-    "`!model` \\*x\\_",
+    lines.find((line) => line.startsWith("`/model`")),
+    "`/model` \\*x\\_",
   );
 });
 
 test("the filter reads the description as written", () => {
   const commands = [command("remote", "run a_b")];
-  assert.ok(helpOf(commands, "a_b").includes("`!remote`"));
+  assert.ok(helpOf(commands, "a_b").includes("`/remote`"));
 });
 
 test("a hint with a backtick cannot break the line", () => {
   // A code span cannot hold a backtick: such a usage is shown escaped, as plain text.
   const text = helpOf([command("x", "d", { argumentHint: "[`file`]" })]);
-  assert.ok(text.split("\n").includes("!x \\[\\`file\\`\\] d"));
+  assert.ok(text.split("\n").includes("/x \\[\\`file\\`\\] d"));
 });
 
 test("a description is cut by code points, never inside an emoji", () => {
@@ -343,7 +355,7 @@ test("an agent with no commands of its own has none listed, refused or run on th
   // The daemon's own words and the rule that tells them from a text, and nothing of the agent's.
   assert.ok(help.includes(texts.HELP_OWN) && help.includes(texts.HELP_RULE));
   assert.ok(!help.includes(texts.named(texts.HELP_AGENT, PLAIN_NAMES)));
-  assert.ok(listed.every((entry) => !help.includes(`!${entry.name}`)));
+  assert.ok(listed.every((entry) => !help.includes(`/${entry.name}`)));
   assert.ok(
     !helpText(null, "", markdownEscape, PLAIN_NAMES, false).includes(
       texts.named(texts.HELP_UNBOUND, PLAIN_NAMES),
@@ -434,16 +446,16 @@ test("the host-only texts and the login failure name the agent's own commands", 
 
 test("the guide names the agent's own new-session commands, and leaves the sentence out with none", () => {
   const guide = guideText(PLAIN_NAMES, EVERYTHING_OFFERED);
-  assert.ok(guide.includes("`!restart` is refused inside a thread"));
-  assert.ok(!guide.includes("!clear"));
+  assert.ok(guide.includes("`/restart` is refused inside a thread"));
+  assert.ok(!guide.includes("/clear"));
   const several = guideText({ ...PLAIN_NAMES, newSession: ["a", "b", "c"] }, EVERYTHING_OFFERED);
-  assert.ok(several.includes("`!a` (`!b`, `!c`) is refused inside a thread"));
+  assert.ok(several.includes("`/a` (`/b`, `/c`) is refused inside a thread"));
   const none = guideText({ ...PLAIN_NAMES, newSession: [] }, EVERYTHING_OFFERED);
   assert.ok(!none.includes("refused inside a thread"));
   assert.ok(none.includes("filters the list;"));
 });
 
-// Candidates for a `!word` that is no command.
+// Candidates for a `/word` that is no command.
 
 function poolOf(commands: readonly CommandInfo[], rest = "") {
   return commandPool(commands, rest, PLAIN_NAMES);
@@ -460,7 +472,7 @@ const OFFERED = [
 test("the pool holds the daemon's words first, then the session's commands by name", () => {
   const pool = poolOf(OFFERED);
   const daemon = pool.filter((c) => c.group === "daemon").map((c) => c.name);
-  // What a thread takes: `!bind`, `!resume`, `!pardner` and `!clean-channel` are refused there, and `!!` is no
+  // What a thread takes: `/bind`, `/resume`, `/pardner` and `/clean-channel` are refused there, and `!` is no
   // name a mistyped word could mean.
   const taken = Object.values(WORD).filter(
     (w) => !["bind", "resume", "pardner", "clean-channel", WORD.shell].includes(w),
@@ -479,14 +491,14 @@ test("the pool holds the daemon's words first, then the session's commands by na
 test("a candidate carries its usage, one line of description and the text a pick types", () => {
   const pool = poolOf(OFFERED, "opus");
   const model = pool.find((c) => c.name === "model");
-  assert.equal(model?.usage, "!model [name]");
+  assert.equal(model?.usage, "/model [name]");
   assert.equal(model?.description, "Switch the model");
-  assert.equal(model?.text, "!model opus");
+  assert.equal(model?.text, "/model opus");
   const bypass = pool.find((c) => c.name === "bypass");
-  assert.equal(bypass?.usage, "!bypass on|off");
-  assert.equal(bypass?.text, "!bypass opus");
+  assert.equal(bypass?.usage, "/bypass on|off");
+  assert.equal(bypass?.text, "/bypass opus");
   assert.ok(!bypass?.description.includes(";"));
-  assert.equal(poolOf(OFFERED).find((c) => c.name === "goal")?.text, "!goal");
+  assert.equal(poolOf(OFFERED).find((c) => c.name === "goal")?.text, "/goal");
 });
 
 test("a word the chat or the agent cannot serve is not a candidate", () => {
@@ -547,10 +559,10 @@ test("an empty word ranks nothing: the caller lists the pool", () => {
 
 test("a word whose usage takes no argument is offered bare, one that takes some keeps them", () => {
   const pool = poolOf(OFFERED, "now");
-  assert.equal(pool.find((c) => c.name === "stop")?.text, "!stop");
-  assert.equal(pool.find((c) => c.name === "guide")?.text, "!guide");
-  assert.equal(pool.find((c) => c.name === "tag")?.text, "!tag now");
-  assert.equal(pool.find((c) => c.name === "goal")?.text, "!goal now");
+  assert.equal(pool.find((c) => c.name === "stop")?.text, "/stop");
+  assert.equal(pool.find((c) => c.name === "guide")?.text, "/guide");
+  assert.equal(pool.find((c) => c.name === "tag")?.text, "/tag now");
+  assert.equal(pool.find((c) => c.name === "goal")?.text, "/goal now");
 });
 
 test("a name far in length from the word is never measured", () => {
@@ -562,47 +574,47 @@ test("a name far in length from the word is never measured", () => {
 
 // A name, an id or a path is read from the message without any formatting; content is not.
 test("a name, an id or a path is read from the bare text", () => {
-  assert.deepEqual(parseBang("!tag `CVE-0000-00000`", "!tag CVE-0000-00000"), {
+  assert.deepEqual(parseCommand("/tag `CVE-0000-00000`", "/tag CVE-0000-00000"), {
     kind: "tag",
     name: "CVE-0000-00000",
   });
-  assert.deepEqual(parseBang("!resume *abc*", "!resume abc"), { kind: "resume", target: "abc" });
-  assert.deepEqual(parseBang("!open `src/a.ts`", "!open src/a.ts"), {
+  assert.deepEqual(parseCommand("/resume *abc*", "/resume abc"), { kind: "resume", target: "abc" });
+  assert.deepEqual(parseCommand("/open `src/a.ts`", "/open src/a.ts"), {
     kind: "open",
     target: "src/a.ts",
   });
-  assert.deepEqual(parseBang("!bind `sub`", "!bind sub"), { kind: "bind", path: "sub" });
-  assert.deepEqual(parseBang("!bypass `on`", "!bypass on"), { kind: "bypass", on: true });
-  assert.deepEqual(parseBang("!help `tag`", "!help tag"), { kind: "help", query: "tag" });
+  assert.deepEqual(parseCommand("/bind `sub`", "/bind sub"), { kind: "bind", path: "sub" });
+  assert.deepEqual(parseCommand("/bypass `on`", "/bypass on"), { kind: "bypass", on: true });
+  assert.deepEqual(parseCommand("/help `tag`", "/help tag"), { kind: "help", query: "tag" });
 });
 
 test("a prompt keeps the formatting it was typed with", () => {
-  assert.deepEqual(parseBang("!fork run `make test`", "!fork run make test"), {
+  assert.deepEqual(parseCommand("/fork run `make test`", "/fork run make test"), {
     kind: "fork",
     prompt: "run `make test`",
   });
-  assert.deepEqual(parseBang("!model `opus`", "!model opus"), {
+  assert.deepEqual(parseCommand("/model `opus`", "/model opus"), {
     kind: "passthrough",
     text: "model `opus`",
   });
 });
 
 test("a bare text of another word leaves the argument as typed", () => {
-  assert.deepEqual(parseBang("!tag `x`", "hello"), invalidOf("tag"));
-  assert.deepEqual(parseBang("!tag `x`", "!pin x"), invalidOf("tag"));
+  assert.deepEqual(parseCommand("/tag `x`", "hello"), invalidOf("tag"));
+  assert.deepEqual(parseCommand("/tag `x`", "/pin x"), invalidOf("tag"));
 });
 
-test("a word's own help line is the line !help lists for it", () => {
+test("a word's own help line is the line /help lists for it", () => {
   const line = wordHelpLine("tag", PLAIN_NAMES) ?? "";
-  assert.ok(line.startsWith("`!tag <name>` "), line);
+  assert.ok(line.startsWith("`/tag <name>` "), line);
   assert.equal(line.includes("\n"), false);
-  assert.ok(wordHelpLine("pin", PLAIN_NAMES)?.startsWith("`!pin` "));
+  assert.ok(wordHelpLine("pin", PLAIN_NAMES)?.startsWith("`/pin` "));
   assert.equal(wordHelpLine("nope", PLAIN_NAMES), null);
 });
 
 test("a bare text that falls back to the typed one leaves the argument as typed", () => {
-  assert.deepEqual(parseBang("!open __init__.py"), { kind: "open", target: "__init__.py" });
-  assert.deepEqual(parseBang("!bind work/_old_/x"), { kind: "bind", path: "work/_old_/x" });
-  assert.deepEqual(parseBang("!tag *x*"), invalidOf("tag"));
-  assert.deepEqual(parseBang("!tag", "!tag"), invalidOf("tag"));
+  assert.deepEqual(parseCommand("/open __init__.py"), { kind: "open", target: "__init__.py" });
+  assert.deepEqual(parseCommand("/bind work/_old_/x"), { kind: "bind", path: "work/_old_/x" });
+  assert.deepEqual(parseCommand("/tag *x*"), invalidOf("tag"));
+  assert.deepEqual(parseCommand("/tag", "/tag"), invalidOf("tag"));
 });

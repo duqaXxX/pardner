@@ -1,5 +1,5 @@
 /**
- * `!diff` through the message flow: the files a session's repository changed since HEAD, listed in
+ * `/diff` through the message flow: the files a session's repository changed since HEAD, listed in
  * the thread with a control per file, and the file's diff shared when the control is used. The
  * repository is a real temporary one, reached through an agent that keeps a record of trust.
  */
@@ -42,11 +42,11 @@ function listOf(world: MessagesWorld, ref: ThreadRef) {
   return { ...open, list: list as Extract<typeof list, { type: "diff" }> };
 }
 
-test("!diff lists the changed files of the repository with their counts", async (t) => {
+test("/diff lists the changed files of the repository with their counts", async (t) => {
   const { world, repo, ref } = await repositoryWorld(t);
   writeFileSync(join(repo, "src.txt"), "one\nthree\nfour\n");
   writeFileSync(join(repo, "fresh.txt"), "a\nb\n");
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
 
   const open = listOf(world, ref);
@@ -65,7 +65,7 @@ test("a file's control shares its unified diff as <name>.diff", async (t) => {
   mkdirSync(join(repo, "dir"));
   writeFileSync(join(repo, "dir", "new.txt"), "x\n");
   writeFileSync(join(repo, "src.txt"), "one\nthree\n");
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
   const { message } = listOf(world, ref);
 
@@ -94,7 +94,7 @@ test("a folder that is not a repository is refused", async (t) => {
   mkdirSync(plain);
   world.state.bind(world.channel, plain);
   const ref = await world.opened("the first task");
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
   assert.equal(world.shown(ref).at(-1), texts.DIFF_NOT_A_REPOSITORY);
   assert.deepEqual(world.chat.threadLists(), []);
@@ -103,7 +103,7 @@ test("a folder that is not a repository is refused", async (t) => {
 test("a repository the owner has not trusted is refused with the line that asks for the trust", async (t) => {
   const { world, repo, ref } = await repositoryWorld(t, false);
   writeFileSync(join(repo, "src.txt"), "changed\n");
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
   const line = world.shown(ref).at(-1) ?? "";
   assert.ok(line.includes("has not trusted this repository"), line);
@@ -113,7 +113,7 @@ test("a repository the owner has not trusted is refused with the line that asks 
 
 test("a clean tree has nothing to list", async (t) => {
   const { world, ref } = await repositoryWorld(t);
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
   assert.equal(world.shown(ref).at(-1), texts.DIFF_CLEAN);
   assert.deepEqual(world.chat.threadLists(), []);
@@ -121,16 +121,16 @@ test("a clean tree has nothing to list", async (t) => {
 
 test("typed in the channel the word is refused", async (t) => {
   const { world } = await repositoryWorld(t);
-  await world.says("!diff");
+  await world.says("/diff");
   await world.settle();
   assert.ok(world.inChannel().includes(texts.DIFF_TOP_LEVEL));
 });
 
 test("a word with text after it shows the help", async (t) => {
   const { world, ref } = await repositoryWorld(t);
-  await world.says("!diff src.txt", ref.thread);
+  await world.says("/diff src.txt", ref.thread);
   await world.settle();
-  assert.ok(world.shown(ref).some((line) => line.includes("`!diff`")));
+  assert.ok(world.shown(ref).some((line) => line.includes("`/diff`")));
   assert.deepEqual(world.chat.threadLists(), []);
 });
 
@@ -142,33 +142,33 @@ test("a chat without lists and files does not offer the word", async (t) => {
   world.state.bind(world.channel, repo);
   const ref = await world.opened("the first task");
   writeFileSync(join(repo, "README"), "changed\n");
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
-  assert.ok(world.shown(ref).at(-1)?.includes("`!diff` is not offered here"));
-  await world.says("!help", ref.thread);
+  assert.ok(world.shown(ref).at(-1)?.includes("`/diff` is not offered here"));
+  await world.says("/help", ref.thread);
   await world.settle();
-  assert.doesNotMatch(world.shown(ref).join("\n"), /^`!diff` the files/m);
+  assert.doesNotMatch(world.shown(ref).join("\n"), /^`\/diff` the files/m);
 });
 
-test("!help lists the word where it is offered", async (t) => {
+test("/help lists the word where it is offered", async (t) => {
   const { world, ref } = await repositoryWorld(t);
-  await world.says("!help", ref.thread);
+  await world.says("/help", ref.thread);
   await world.settle();
-  assert.match(world.shown(ref).join("\n"), /^`!diff` the files/m);
+  assert.match(world.shown(ref).join("\n"), /^`\/diff` the files/m);
 });
 
 test("an agent with no record of trust does not offer the word", async (t) => {
   const world = await MessagesWorld.make(t, { diff: true });
   const ref = await world.opened("the first task");
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
-  assert.ok(world.shown(ref).at(-1)?.includes("`!diff` is not offered here"));
+  assert.ok(world.shown(ref).at(-1)?.includes("`/diff` is not offered here"));
 });
 
 test("a list made for another session is refused", async (t) => {
   const { world, repo, ref } = await repositoryWorld(t);
   writeFileSync(join(repo, "src.txt"), "changed\n");
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
   const { message } = listOf(world, ref);
   world.state.setSession(ref.channel, ref.thread, "another-session");
@@ -182,7 +182,7 @@ test("a list made for another session is refused", async (t) => {
 test("a file committed since the list was drawn is told as unchanged", async (t) => {
   const { world, repo, ref } = await repositoryWorld(t);
   writeFileSync(join(repo, "src.txt"), "changed\n");
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
   const { message } = listOf(world, ref);
   commitAll(repo, "later");
@@ -196,7 +196,7 @@ test("a file committed since the list was drawn is told as unchanged", async (t)
 test("a binary file is listed and its control tells there is no text diff", async (t) => {
   const { world, repo, ref } = await repositoryWorld(t);
   writeFileSync(join(repo, "blob.bin"), Buffer.from([0, 1, 2, 0]));
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
   const { message, list } = listOf(world, ref);
   assert.deepEqual(
@@ -211,7 +211,7 @@ test("a binary file is listed and its control tells there is no text diff", asyn
 test("a pick from someone else reaches nothing", async (t) => {
   const { world, repo, ref } = await repositoryWorld(t);
   writeFileSync(join(repo, "src.txt"), "changed\n");
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
   const { message } = listOf(world, ref);
   assert.equal(await world.chat.as("bob").picksFile(message, "src.txt"), false);
@@ -223,7 +223,7 @@ test("a path outside the repository shares nothing", async (t) => {
   const { world, repo, ref } = await repositoryWorld(t);
   writeFileSync(join(repo, "src.txt"), "changed\n");
   writeFileSync(join(world.folder, "outside.txt"), "secret\n");
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
   const { message, list } = listOf(world, ref);
   // The control's value is untrusted: the core reads what the repository says about the path.
@@ -266,7 +266,7 @@ test("once turns edited files, a selector offers a view per turn with only that 
   await world.settle();
   writeFileSync(a, "one\n2\n");
 
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
   const open = listOf(world, ref);
   assert.deepEqual(
@@ -308,7 +308,7 @@ test("a turn's edit outside the repository is not listed", async (t) => {
   await world.says("edit elsewhere", ref.thread);
   await world.settle();
   writeFileSync(join(repo, "src.txt"), "changed\n");
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
   assert.deepEqual(
     listOf(world, ref).list.views.map((view) => view.label),
@@ -322,7 +322,7 @@ test("after a restart the turns are gone and a pick of their view says so", asyn
   await world.says("edit", ref.thread);
   await world.settle();
   writeFileSync(join(repo, "src.txt"), "one\nTWO\n");
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
   const open = listOf(world, ref);
   const turn = open.list.views[1];
@@ -338,7 +338,7 @@ test("a path the list never held, a directory or the whole tree, shares nothing"
   mkdirSync(join(repo, "dir"));
   writeFileSync(join(repo, "dir", "a.txt"), "x\n");
   writeFileSync(join(repo, "src.txt"), "changed\n");
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
   const listed = listOf(world, ref);
   for (const path of [".", "dir", "dir/", "*.txt", ":/"]) {
@@ -361,7 +361,7 @@ test("a diff over what the chat takes as one file is told and not shared", async
   world.state.bind(world.channel, repo);
   const ref = await world.opened("the first task");
   writeFileSync(join(repo, "src.txt"), "a long line of text\n".repeat(100));
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
   await world.chat.as("alice").picksFile(listOf(world, ref).message, "src.txt");
   await world.settle();
@@ -384,7 +384,7 @@ async function shownWorld(
   writeFileSync(join(built.repo, "small.txt"), "a\n");
   writeFileSync(join(built.repo, "big.txt"), "a long line of text\n".repeat(100));
   writeFileSync(join(built.repo, "huge.txt"), "another long line\n".repeat(100));
-  await built.world.says("!diff", built.ref.thread);
+  await built.world.says("/diff", built.ref.thread);
   await built.world.settle();
   return { ...built, message: listOf(built.world, built.ref).message };
 }
@@ -620,7 +620,7 @@ test("a pick in a view that no longer exists tells so once", async (t) => {
   await world.says("edit", ref.thread);
   await world.settle();
   writeFileSync(join(repo, "src.txt"), "one\nTWO\n");
-  await world.says("!diff", ref.thread);
+  await world.says("/diff", ref.thread);
   await world.settle();
   const open = listOf(world, ref);
   const turn = open.list.views[1];

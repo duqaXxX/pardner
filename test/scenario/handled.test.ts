@@ -25,7 +25,7 @@ test("a prompt is handled when its turn ends, a queued one when its own turn end
   const thread = setup.ref.thread;
   await world.settle();
   assert.deepEqual(events, [], "message() has resolved and the turn is held: not handled");
-  await world.owner.says(world.channel, "!status", { thread, handled: mark("word") });
+  await world.owner.says(world.channel, "/status", { thread, handled: mark("word") });
   await world.settle();
   assert.deepEqual(events, ["word"], "a word is handled once it is answered");
   await world.owner.says(world.channel, "second", { thread, handled: mark("second") });
@@ -37,7 +37,7 @@ test("a prompt is handled when its turn ends, a queued one when its own turn end
   await world.finish();
 });
 
-test("a reply is opened for the owner's message its turn answers, a `!!command` included", async (t) => {
+test("a reply is opened for the owner's message its turn answers, a `!command` included", async (t) => {
   const world = World.make(t, { shell: true });
   await world.start();
   const opened: (string | undefined)[] = [];
@@ -55,7 +55,7 @@ test("a reply is opened for the owner's message its turn answers, a `!!command` 
   world.script(say("one"));
   const thread = await world.open("first");
   await world.ended(thread);
-  const sending = world.owner.says(world.channel, "!!echo hi", { thread });
+  const sending = world.owner.says(world.channel, "!echo hi", { thread });
   const asked = await world.request("shell", thread);
   world.script(say("two"));
   await world.owner.answers(asked.requestId, { type: "shell", run: true });
@@ -67,9 +67,9 @@ test("a reply is opened for the owner's message its turn answers, a `!!command` 
   await world.finish();
 });
 
-test("a turn keeps the message its reply is for, so a reply opened again has it; a `!!command` turn has its own", () => {
+test("a turn keeps the message its reply is for, so a reply opened again has it; a `!command` turn has its own", () => {
   const sink = {} as never;
   assert.equal(new Turn("p", sink, null, null, "m-1").replyFor, "m-1");
-  assert.equal(new Turn("!!ls", sink, "ls", null, null, "m-2").replyFor, "m-2");
+  assert.equal(new Turn("!ls", sink, "ls", null, null, "m-2").replyFor, "m-2");
   assert.equal(new Turn("p", sink).replyFor, null);
 });

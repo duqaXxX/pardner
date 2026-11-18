@@ -1,5 +1,5 @@
 /**
- * Step 11 of the scenario the memory chat carries: `!diff` in a session's thread. The channel's
+ * Step 11 of the scenario the memory chat carries: `/diff` in a session's thread. The channel's
  * folder is a real git repository the plain agent trusts; the owner lists what changed, shares one
  * file's diff, and a repository the agent does not trust is refused.
  */
@@ -25,12 +25,12 @@ async function session(world: World): Promise<string> {
   return thread;
 }
 
-test("!diff lists the changed files and a control shares one file's diff", async (t) => {
+test("/diff lists the changed files and a control shares one file's diff", async (t) => {
   const world = World.make(t, { diff: { trusted: true } });
   await world.start();
   const thread = await session(world);
 
-  await world.owner.says(world.channel, "!diff", { thread });
+  await world.owner.says(world.channel, "/diff", { thread });
   const [list] = world.chat.threadLists();
   assert.ok(list, "a list is open in the thread");
   assert.equal(list.list.type, "diff");
@@ -46,12 +46,12 @@ test("!diff lists the changed files and a control shares one file's diff", async
   await world.finish();
 });
 
-test("!diff in a repository the agent has not trusted is refused with the trust line", async (t) => {
+test("/diff in a repository the agent has not trusted is refused with the trust line", async (t) => {
   const world = World.make(t, { diff: { trusted: false } });
   await world.start();
   const thread = await session(world);
 
-  await world.owner.says(world.channel, "!diff", { thread });
+  await world.owner.says(world.channel, "/diff", { thread });
   const told = world.shown(thread).at(-1) ?? "";
   assert.ok(told.includes("has not trusted this repository"), told);
   assert.ok(told.includes(`trust ${world.folder}`) || told.includes(world.folder), told);
@@ -59,10 +59,10 @@ test("!diff in a repository the agent has not trusted is refused with the trust 
   await world.finish();
 });
 
-test("!diff typed in the channel is refused there", async (t) => {
+test("/diff typed in the channel is refused there", async (t) => {
   const world = World.make(t, { diff: { trusted: true } });
   await world.start();
-  await world.owner.says(world.channel, "!diff");
+  await world.owner.says(world.channel, "/diff");
   assert.ok(world.chat.texts(world.channel).includes(texts.DIFF_TOP_LEVEL));
   await world.finish();
 });

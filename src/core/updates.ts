@@ -300,7 +300,7 @@ export class Updates {
     if (latest === null || !this.canUpdate || latest === told) return null;
     if (this.#phase.kind === "installing" || this.#phase.kind === "restarting") return null;
     // Asked last: it runs the service manager. A daemon no service runs cannot update, as a copy
-    // that updates outside the chat cannot (`!pardner` says why).
+    // that updates outside the chat cannot (`/pardner` says why).
     return this.host.supervised() ? latest : null;
   }
 

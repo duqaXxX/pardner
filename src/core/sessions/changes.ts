@@ -1,6 +1,6 @@
 /**
  * The files each turn of a session edited, as the agent reports them call by call
- * (`SessionEvent.call_ended.fileChange`): what `!diff` shows for a turn. Kept in memory for the
+ * (`SessionEvent.call_ended.fileChange`): what `/diff` shows for a turn. Kept in memory for the
  * process that runs: a restart, an idle close and a turn typed in a terminal leave no record.
  */
 import type { FileChange } from "../../agent/seam.ts";

@@ -1,5 +1,5 @@
 /**
- * `!bind` as a flow of the core, over the memory chat: a typed path, the list of folders and a
+ * `/bind` as a flow of the core, over the memory chat: a typed path, the list of folders and a
  * pick from it. What the owner reads is the texts of the core with the memory chat's names.
  */
 import assert from "node:assert/strict";

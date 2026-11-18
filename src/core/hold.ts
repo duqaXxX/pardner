@@ -5,10 +5,10 @@
  * `Another session is working in this folder: <link>. Send anyway?`, with two buttons,
  * `Send anyway` and `Don't send`, which the code calls Continue and Cancel.
  * The session setup (`setup.ts`) is another: model, effort and bypass, then Start. The third is
- * the confirmation of a shell command the owner sent (`!!`): Run or Cancel.
+ * the confirmation of a shell command the owner sent (`!`): Run or Cancel.
  *
- * Kept in memory only, like `Approvals`: a hold never outlives the process (`!stop`, a top-level
- * `!stop` of its channel, and a drain all cancel one exactly as Cancel does), so nothing here
+ * Kept in memory only, like `Approvals`: a hold never outlives the process (`/stop`, a top-level
+ * `/stop` of its channel, and a drain all cancel one exactly as Cancel does), so nothing here
  * needs to survive a restart. A thread has at most one open at a time, whichever kind.
  */
 import { randomBytes } from "node:crypto";
@@ -28,7 +28,7 @@ export type HoldKind = "hold" | "setup" | "shell" | "terminal";
 export interface Pending {
   readonly channelId: string;
   readonly threadId: string;
-  /** What the owner chose, or null when the question was cancelled (Cancel, `!stop`, a drain). */
+  /** What the owner chose, or null when the question was cancelled (Cancel, `/stop`, a drain). */
   readonly answer: Promise<HoldAnswer | null>;
   /** Whether `answer` is settled. */
   decided: boolean;
@@ -129,7 +129,7 @@ export class Holds {
 
   /**
    * Record the message that shows a hold, so it can be removed once decided; false when the hold
-   * was decided before its message was known (a click or `!stop` while posting).
+   * was decided before its message was known (a click or `/stop` while posting).
    */
   posted(holdId: string, messageId: string): boolean {
     const entry = this.entries.get(holdId);
@@ -140,7 +140,7 @@ export class Holds {
 
   /**
    * Cancel the hold open in this thread, if any: the same outcome as the owner clicking Cancel
-   * (`!stop`, a top-level `!stop` of its channel, a drain). One already answered but still being
+   * (`/stop`, a top-level `/stop` of its channel, a drain). One already answered but still being
    * applied is flagged `cancelled` instead: its asker sends nothing. With `gone` the pending is
    * also marked `gone` (the thread's first message was deleted).
    */

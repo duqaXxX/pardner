@@ -4,7 +4,7 @@
  *
  * Two questions a new release raises about commands:
  *
- * - which commands are new, or gone: a new one is typed in the chat as `!name` from the day the SDK is
+ * - which commands are new, or gone: a new one is typed in the chat as `/name` from the day the SDK is
  *   pinned, so somebody has to see what it does there; `changes` compares the list a session is
  *   offered with `test/fixtures/sdk/server-info.json`, the list recorded when the fixtures were;
  * - whether a command the limits page calls not offered still is: `notOffered` reads the page's
@@ -90,7 +90,7 @@ const NO_ANSWERS: RequestHandler = {
 
 /**
  * The commands a session with no settings is offered on the installed release, from the
- * back end's own `info()`: the daemon's `!help` and its passthrough read them there.
+ * back end's own `info()`: the daemon's `/help` and its passthrough read them there.
  */
 export async function offeredNow(): Promise<Set<string>> {
   const root = await mkdtemp(join(tmpdir(), "pardner-probe-commands-"));
@@ -130,7 +130,7 @@ export function report(found: Changes, cli: string): string {
   if (found.new.length > 0) {
     lines.push(
       "",
-      "  New, typed in the chat as `!name` once this release is pinned. Try each in a thread",
+      "  New, typed in the chat as `/name` once this release is pinned. Try each in a thread",
       "  and decide what the chat shows for it:",
       ...found.new.map((name) => `  [ ] /${name}`),
     );

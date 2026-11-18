@@ -321,7 +321,7 @@ test("a thread whose first message the chat no longer has is forgotten", async (
   assert.notEqual(state.thread(CHANNEL, THREAD), null);
   const text = log.lines.join("\n");
   assert.ok(text.includes(GONE_ROOT) && text.includes(CHANNEL));
-  // Its session is listed again by !resume: no thread holds it any more.
+  // Its session is listed again by /resume: no thread holds it any more.
   assert.equal(state.holder(SECOND_SESSION), null);
   assert.notEqual(state.holder(SESSION), null);
 });

@@ -29,7 +29,7 @@ const notSent = (lines: readonly string[]) =>
   lines.filter((line) => line === texts.NOT_SENT).length;
 
 test(
-  "a prompt reading its files, then !stop: Not sent., nothing submitted, no Nothing is running",
+  "a prompt reading its files, then /stop: Not sent., nothing submitted, no Nothing is running",
   LIMIT,
   async (t) => {
     const world = await MessagesWorld.make(t);
@@ -37,7 +37,7 @@ test(
     const done = new AsyncEvent();
     const sending = world.send({ ref, id: "m-2", text: "second", ...slowPrompt("second", done) });
     await world.settle();
-    await world.says("!stop", ref.thread);
+    await world.says("/stop", ref.thread);
     done.set();
     await sending;
     await world.settle();
@@ -65,13 +65,13 @@ test("ChatInbound.stop drops the prompt on its way too, and answers true", LIMIT
   assert.deepEqual(await world.prompts(), ["first"]);
 });
 
-test("a top-level !stop drops the prompts of every thread of the channel", LIMIT, async (t) => {
+test("a top-level /stop drops the prompts of every thread of the channel", LIMIT, async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
   const done = new AsyncEvent();
   const sending = world.send({ ref, id: "m-2", text: "second", ...slowPrompt("second", done) });
   await world.settle();
-  await world.says("!stop");
+  await world.says("/stop");
   done.set();
   await sending;
   assert.equal(notSent(world.shown(ref)), 1);
@@ -90,7 +90,7 @@ test(
     const a = world.send({ ref, id: "m-2", text: "a", ...slowPrompt("a", first) });
     const b = world.send({ ref, id: "m-3", text: "b", ...slowPrompt("b", second) });
     await world.settle();
-    await world.says("!stop", ref.thread);
+    await world.says("/stop", ref.thread);
     await world.settle();
     // The second said so while the first still reads its files.
     assert.equal(notSent(world.shown(ref)), 1);
@@ -119,7 +119,7 @@ test("a stop during the connect of a new thread's setup opens no form", LIMIT, a
   const [thread] = world.state.threads();
   assert.ok(thread);
   const ref = { channel: thread[0], thread: thread[1] };
-  await world.says("!stop", ref.thread);
+  await world.says("/stop", ref.thread);
   agent.gate.set();
   await sending;
   await world.settle();
@@ -129,7 +129,7 @@ test("a stop during the connect of a new thread's setup opens no form", LIMIT, a
 });
 
 test(
-  "a !stop in a new thread whose prompt waits to start says nothing but Not sent.",
+  "a /stop in a new thread whose prompt waits to start says nothing but Not sent.",
   LIMIT,
   async (t) => {
     const world = await MessagesWorld.make(t);
@@ -141,7 +141,7 @@ test(
     };
     const sending = world.send({ ref, id: ref.thread, topLevel: true, text: "hello" });
     await world.settle();
-    await world.send({ ref, id: "m-stop", text: "!stop" });
+    await world.send({ ref, id: "m-stop", text: "/stop" });
     release.set();
     await sending;
     await world.settle();
@@ -151,16 +151,16 @@ test(
   },
 );
 
-test("!fork waiting on a busy original is cancelled by a stop of the thread", LIMIT, async (t) => {
+test("/fork waiting on a busy original is cancelled by a stop of the thread", LIMIT, async (t) => {
   const agent = new PlainAgent();
   const world = await MessagesWorld.make(t, { agent });
   const origin = await world.opened("the first task");
   agent.next(say("Working"), hold());
   await world.says("a long job", origin.thread);
   await world.settle();
-  const forking = world.says("!fork", origin.thread);
+  const forking = world.says("/fork", origin.thread);
   await world.settle();
-  await world.says("!stop", origin.thread);
+  await world.says("/stop", origin.thread);
   await forking;
   await world.settle();
   assert.equal(world.state.threads().length, 1, "no copy");
@@ -180,7 +180,7 @@ test(
     };
     const sending = world.send({ ref, id: ref.thread, topLevel: true, text: "hello" });
     await world.settle();
-    await world.send({ ref, id: "m-stop", text: "!stop" });
+    await world.send({ ref, id: "m-stop", text: "/stop" });
     release.set();
     await sending;
     await world.settle();
@@ -207,7 +207,7 @@ function stopWhen<T extends object>(
   (target as Record<keyof T, unknown>)[method] = (...args: unknown[]) => {
     if (!fired) {
       fired = true;
-      void world.send({ ref, id: "m-stop", text: "!stop" });
+      void world.send({ ref, id: "m-stop", text: "/stop" });
     }
     return original(...args);
   };
@@ -273,16 +273,16 @@ test(
 );
 
 test(
-  "a !!command waiting behind a prompt is dropped by a stop before its confirmation is asked",
+  "a !command waiting behind a prompt is dropped by a stop before its confirmation is asked",
   LIMIT,
   async (t) => {
     const world = await MessagesWorld.make(t, { agent: new PlainAgent({ shell: {} }) });
     const ref = await world.opened();
     const done = new AsyncEvent();
     const a = world.send({ ref, id: "m-2", text: "a", ...slowPrompt("a", done) });
-    const b = world.send({ ref, id: "m-3", text: "!!ls" });
+    const b = world.send({ ref, id: "m-3", text: "!ls" });
     await world.settle();
-    await world.says("!stop", ref.thread);
+    await world.says("/stop", ref.thread);
     done.set();
     await Promise.all([a, b]);
     await world.settle();
@@ -328,7 +328,7 @@ test("without a stop, Send here sends the prompt", LIMIT, async (t) => {
 });
 
 test(
-  "a !!command stopped while starts are refused says Not sent. once and no refusal",
+  "a !command stopped while starts are refused says Not sent. once and no refusal",
   LIMIT,
   async (t) => {
     const world = await MessagesWorld.make(t, { agent: new PlainAgent({ shell: {} }) });
@@ -336,8 +336,8 @@ test(
     Object.defineProperty(world.sessions, "draining", { get: () => true });
     // Sent in one tick: the command holds the line and its ticket, then the stop aborts it before
     // the command's first check runs.
-    const sending = world.send({ ref, id: "m-2", text: "!!ls" });
-    await world.send({ ref, id: "m-stop", text: "!stop" });
+    const sending = world.send({ ref, id: "m-2", text: "!ls" });
+    await world.send({ ref, id: "m-stop", text: "/stop" });
     await sending;
     await world.settle();
     assert.equal(notSent(world.shown(ref)), 1);
@@ -356,16 +356,16 @@ class SlowFork extends PlainAgent {
 }
 
 test(
-  "a top-level !stop while the fork is made drops the copy's prompt with Not sent. once",
+  "a top-level /stop while the fork is made drops the copy's prompt with Not sent. once",
   LIMIT,
   async (t) => {
     const agent = new SlowFork();
     const world = await MessagesWorld.make(t, { agent });
     const origin = await world.opened("the first task");
-    const forking = world.says("!fork look into it", origin.thread);
+    const forking = world.says("/fork look into it", origin.thread);
     await world.settle();
     assert.equal(world.state.threads().length, 1, "the copy is not made yet");
-    await world.says("!stop");
+    await world.says("/stop");
     agent.gate.set();
     await forking;
     await world.settle();
@@ -384,9 +384,9 @@ test(
     const agent = new SlowFork();
     const world = await MessagesWorld.make(t, { agent });
     const origin = await world.opened("the first task");
-    const forking = world.says("!fork look into it", origin.thread);
+    const forking = world.says("/fork look into it", origin.thread);
     await world.settle();
-    await world.says("!stop", origin.thread);
+    await world.says("/stop", origin.thread);
     agent.gate.set();
     await forking;
     await world.settle();
@@ -403,14 +403,14 @@ class FailingFork extends PlainAgent {
 }
 
 test(
-  "a fork that fails leaves no ticket behind: a later top-level !stop answers",
+  "a fork that fails leaves no ticket behind: a later top-level /stop answers",
   LIMIT,
   async (t) => {
     const world = await MessagesWorld.make(t, { agent: new FailingFork() });
     const origin = await world.opened("the first task");
-    await world.says("!fork look into it", origin.thread);
+    await world.says("/fork look into it", origin.thread);
     await world.settle();
-    await world.says("!stop");
+    await world.says("/stop");
     await world.settle();
     assert.equal(world.inChannel().at(-1), texts.NOTHING_TO_STOP);
   },
@@ -420,23 +420,23 @@ test("a fork refused for an old folder leaves no ticket behind", LIMIT, async (t
   const world = await MessagesWorld.make(t);
   const origin = await world.opened("the first task");
   world.state.bind(world.channel, join(world.folder, "elsewhere"));
-  await world.says("!fork look into it", origin.thread);
+  await world.says("/fork look into it", origin.thread);
   await world.settle();
-  await world.says("!stop");
+  await world.says("/stop");
   await world.settle();
   assert.equal(world.inChannel().at(-1), texts.NOTHING_TO_STOP);
 });
 
 test(
-  "a fork with no prompt holds no ticket: a top-level !stop during it answers as if none",
+  "a fork with no prompt holds no ticket: a top-level /stop during it answers as if none",
   LIMIT,
   async (t) => {
     const agent = new SlowFork();
     const world = await MessagesWorld.make(t, { agent });
     const origin = await world.opened("the first task");
-    const forking = world.says("!fork", origin.thread);
+    const forking = world.says("/fork", origin.thread);
     await world.settle();
-    await world.says("!stop");
+    await world.says("/stop");
     await world.settle();
     assert.equal(world.inChannel().at(-1), texts.NOTHING_TO_STOP);
     agent.gate.set();
@@ -458,10 +458,10 @@ test(
         const copied = await resume(channel, thread, id);
         void (viaInbound
           ? world.inbound.stop({ channel, thread })
-          : world.send({ ref: { channel, thread }, id: "m-stop", text: "!stop" }));
+          : world.send({ ref: { channel, thread }, id: "m-stop", text: "/stop" }));
         return copied;
       };
-      await world.says("!fork look into it", origin.thread);
+      await world.says("/fork look into it", origin.thread);
       await world.settle();
       const copy = world.state.threads().find(([, thread]) => thread !== origin.thread);
       assert.ok(copy);
@@ -492,10 +492,10 @@ test(
         const ref = { channel, thread };
         await (viaInbound
           ? world.inbound.stop(ref)
-          : world.send({ ref, id: "m-stop", text: "!stop" }));
+          : world.send({ ref, id: "m-stop", text: "/stop" }));
         return null;
       };
-      await world.says("!fork do X", origin.thread);
+      await world.says("/fork do X", origin.thread);
       await world.settle();
       const all = [...world.shown(origin), ...world.shown(copyOf(world, origin))];
       assert.equal(notSent(all), 1, `inbound ${viaInbound}`);
@@ -513,12 +513,12 @@ test(
     const resume = world.sessions.resume.bind(world.sessions);
     world.sessions.resume = async (channel, thread, id) => {
       const copied = await resume(channel, thread, id);
-      await world.send({ ref: { channel, thread }, id: "m-stop-2", text: "!stop" });
+      await world.send({ ref: { channel, thread }, id: "m-stop-2", text: "/stop" });
       return copied;
     };
-    const forking = world.says("!fork fix the bug", origin.thread);
+    const forking = world.says("/fork fix the bug", origin.thread);
     await world.settle();
-    await world.says("!stop");
+    await world.says("/stop");
     agent.gate.set();
     await forking;
     await world.settle();
@@ -530,9 +530,9 @@ test("a fork whose prompt a channel stop dropped does not say it is running", LI
   const agent = new SlowFork();
   const world = await MessagesWorld.make(t, { agent });
   const origin = await world.opened("the first task");
-  const forking = world.says("!fork fix the bug", origin.thread);
+  const forking = world.says("/fork fix the bug", origin.thread);
   await world.settle();
-  await world.says("!stop");
+  await world.says("/stop");
   agent.gate.set();
   await forking;
   await world.settle();

@@ -1,5 +1,5 @@
 /**
- * `!terminal` while a `!!` command runs: the command is stopped with the move, and no process
+ * `/terminal` while a `!` command runs: the command is stopped with the move, and no process
  * of the daemon's takes the session back when it ends (found by review, 2026-10-27).
  */
 import assert from "node:assert/strict";
@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { say } from "../support/plain-agent.ts";
 import { World } from "./world.ts";
 
-test("!terminal while a !! command runs leaves no daemon process on the session", async (t) => {
+test("/terminal while a ! command runs leaves no daemon process on the session", async (t) => {
   const world = World.make(t, { shell: true });
   await world.start();
   world.script(say("Hello."));
@@ -15,13 +15,13 @@ test("!terminal while a !! command runs leaves no daemon process on the session"
   await world.ended(thread);
   const startsBefore = world.entry.built.flatMap((a) => a.sessions).length;
 
-  const sending = world.owner.says(world.channel, "!!sleep 2; echo done", { thread });
+  const sending = world.owner.says(world.channel, "!sleep 2; echo done", { thread });
   const asked = await world.request("shell", thread);
   world.script(say("Saw the shell output."));
   await world.owner.answers(asked.requestId, { type: "shell", run: true });
   await sending;
   await new Promise((r) => setTimeout(r, 300)); // the command is running now
-  await world.owner.says(world.channel, "!terminal", { thread });
+  await world.owner.says(world.channel, "/terminal", { thread });
   await new Promise((r) => setTimeout(r, 300));
   const afterMove = world.shown(thread).slice();
   const processesAtMove = world.entry.built.flatMap((a) => a.sessions);

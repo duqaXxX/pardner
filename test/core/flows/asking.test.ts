@@ -37,7 +37,7 @@ const PLAIN_NAMES = {
   author: "Plain",
   cli: "plain",
   chat: "Memory chat",
-  examples: "`!echo hello`, `!count one two`",
+  examples: "`/echo hello`, `/count one two`",
   login: "signin",
   logout: "signout",
   newSession: ["restart"],

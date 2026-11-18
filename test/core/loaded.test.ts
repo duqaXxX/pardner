@@ -1,4 +1,4 @@
-/** `!memory` and `!skills` as text (`loaded.ts`): paths shown short, sizes, one-line descriptions. */
+/** `/memory` and `/skills` as text (`loaded.ts`): paths shown short, sizes, one-line descriptions. */
 import assert from "node:assert/strict";
 import { join, sep } from "node:path";
 import { test } from "node:test";

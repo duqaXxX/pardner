@@ -87,7 +87,7 @@ test("a message with files waits for start too", LIMIT, async (t) => {
 
 test("a top level passthrough waits for start too", LIMIT, async (t) => {
   const { world } = await worldOf(t);
-  const { ref, sending } = await waiting(world, "!echo hello");
+  const { ref, sending } = await waiting(world, "/echo hello");
   assert.deepEqual(await world.prompts(), []);
   await world.start(ref);
   await sending;
@@ -96,8 +96,8 @@ test("a top level passthrough waits for start too", LIMIT, async (t) => {
 
 test("daemon words and thread replies show no setup", LIMIT, async (t) => {
   const { world } = await worldOf(t);
-  await world.says("!status");
-  await world.says("!help");
+  await world.says("/status");
+  await world.says("/help");
   assert.deepEqual(world.open("setup"), []);
   const { ref, sending } = await waiting(world, "hi");
   await world.start(ref);
@@ -310,7 +310,7 @@ async function assertCancelled(world: HoldWorld, ref: { channel: string; thread:
 test("stop in the thread cancels a waiting setup", LIMIT, async (t) => {
   const { world } = await worldOf(t);
   const { ref, sending } = await waiting(world);
-  await world.says("!stop", ref.thread);
+  await world.says("/stop", ref.thread);
   await world.settle();
   assert.ok(world.shown(ref).includes(texts.NOT_SENT)); // told before the message is waited for
   await sending;
@@ -321,7 +321,7 @@ test("stop in the thread cancels a waiting setup", LIMIT, async (t) => {
 test("a top level stop cancels a waiting setup", LIMIT, async (t) => {
   const { world } = await worldOf(t);
   const { ref, sending } = await waiting(world);
-  await world.says("!stop");
+  await world.says("/stop");
   await world.settle();
   assert.ok(world.shown(ref).includes(texts.NOT_SENT)); // told before the message is waited for
   await sending;
@@ -369,9 +369,9 @@ for (const live of [false, true]) {
   test(`stop while start settles cancels${how}`, LIMIT, async (t) => {
     const { world, agent } = await worldOf(t, live);
     const { ref, gate } = await startedAndHeld(world, agent, live);
-    await world.says("!stop", ref.thread);
+    await world.says("/stop", ref.thread);
     await world.settle();
-    assert.ok(world.shown(ref).includes("!stop")); // the thread's view shows what was typed
+    assert.ok(world.shown(ref).includes("/stop")); // the thread's view shows what was typed
     assert.ok(!world.shown(ref).includes(texts.NOTHING_TO_STOP_THREAD));
     await assertCancelledWhileSettling(world, ref, gate);
   });
@@ -379,7 +379,7 @@ for (const live of [false, true]) {
   test(`a channel stop while start settles cancels${how}`, LIMIT, async (t) => {
     const { world, agent } = await worldOf(t, live);
     const { ref, gate } = await startedAndHeld(world, agent, live);
-    await world.says("!stop");
+    await world.says("/stop");
     await world.settle();
     assert.ok(world.chat.texts(world.channel).includes("hello")); // the channel's view shows its threads
     assert.ok(!world.chat.texts(world.channel).includes(texts.NOTHING_TO_STOP));
@@ -427,7 +427,7 @@ for (const live of [false, true]) {
     async (t) => {
       const { world, agent } = await worldOf(t, live);
       const { ref, gate } = await startedAndHeld(world, agent, live);
-      await world.says("!stop", ref.thread);
+      await world.says("/stop", ref.thread);
       await assertCancelledWhileSettling(world, ref, gate);
       delete agent.gates.start;
       delete agent.gates.setEffort;
@@ -509,7 +509,7 @@ test("bypass typed while start is applied wins over the box", LIMIT, async (t) =
   const { ref, sending } = await waiting(world);
   await world.start(ref, { model: "big" }); // bypass unticked
   await world.settle();
-  const typing = world.says("!bypass on", ref.thread);
+  const typing = world.says("/bypass on", ref.thread);
   await world.settle();
   assert.ok(!world.shown(ref).includes(texts.BYPASS_ON_THREAD)); // nothing is said before it holds
   gate.set();
@@ -528,7 +528,7 @@ test("bypass typed while start is applied wins over the box", LIMIT, async (t) =
 
 test("stop while the model command runs interrupts it and cancels", LIMIT, async (t) => {
   const { world, agent } = await worldOf(t);
-  // The agent's own model command is a turn no reply shows, so no busy turn tells `!stop` that
+  // The agent's own model command is a turn no reply shows, so no busy turn tells `/stop` that
   // anything runs: the stop of a Start being applied reaches the session on its own.
   const gate = new AsyncEvent();
   agent.gates.setModel = gate;
@@ -536,7 +536,7 @@ test("stop while the model command runs interrupts it and cancels", LIMIT, async
   const { ref, sending } = await waiting(world);
   await world.start(ref, { model: "big" });
   await world.settle();
-  await world.says("!stop", ref.thread);
+  await world.says("/stop", ref.thread);
   await world.settle();
   assert.equal(agent.recorded.at(-1)?.interrupts, 1);
   gate.set();
@@ -560,7 +560,7 @@ test("a reply after a cancelled hold asks the setup again", LIMIT, async (t) => 
   const again = world.says("again", ref.thread);
   await world.asked("setup", ref);
   assertAFreshSetup(world, agent, ref);
-  await world.says("!stop", ref.thread); // the neighbour still works: Start would ask the hold again
+  await world.says("/stop", ref.thread); // the neighbour still works: Start would ask the hold again
   await again;
 });
 
@@ -602,7 +602,7 @@ test("stop while the summary waits to be written cancels", LIMIT, async (t) => {
   void world.start(ref);
   await world.settle();
   assert.deepEqual(await world.prompts(), []); // Start is still being settled: the summary waits
-  await world.says("!stop", ref.thread);
+  await world.says("/stop", ref.thread);
   await world.settle();
   assert.ok(!world.shown(ref).includes(texts.NOTHING_TO_STOP_THREAD));
   gate.set();

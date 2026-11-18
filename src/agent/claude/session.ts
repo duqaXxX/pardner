@@ -139,7 +139,7 @@ export interface SessionConfig extends StartOptions {
   readonly chrome: boolean;
   /**
    * A session the daemon starts for itself (the usage probe), not for a thread: it is not given
-   * the permission to bypass that a thread's `!bypass on` needs, and it keeps the SDK's own
+   * the permission to bypass that a thread's `/bypass on` needs, and it keeps the SDK's own
    * defaults.
    */
   readonly bare?: boolean;
@@ -253,7 +253,7 @@ const SESSION_SIGNALS: Readonly<Record<string, string>> = {
 };
 
 // What the daemon's reading of the transcript stands on (`transcript.ts`); the session's alone, so
-// a `claude` the owner runs with `!!` is his own, as in a terminal.
+// a `claude` the owner runs with `!` is his own, as in a terminal.
 // - The name Claude Code writes on each line, which tells the session's own lines from a
 //   terminal's: the SDK's default, which it applies only when the environment it is given has
 //   none (`sdk.mjs` 0.3.312), and the daemon's own may carry an editor's.
@@ -414,10 +414,10 @@ export class ClaudeSession implements AgentSession {
       ...(bare && { persistSession: false }),
       ...(server !== undefined && { mcpServers: { [DAEMON_SERVER]: server } }),
       ...(!bare && {
-        // A checkpoint of the files at each prompt, which `!rewind` puts back (a session started
+        // A checkpoint of the files at each prompt, which `/rewind` puts back (a session started
         // without it has none to restore). Every session of a thread is started with it.
         enableFileCheckpointing: true,
-        // The agent's guess at the next prompt after each turn, which `!next` offers (#151). The
+        // The agent's guess at the next prompt after each turn, which `/next` offers (#151). The
         // owner's `promptSuggestionEnabled: false` setting still switches it off.
         promptSuggestions: true,
         allowDangerouslySkipPermissions: true,

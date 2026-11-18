@@ -1,5 +1,5 @@
 /**
- * Step 12 of the scenario the memory chat carries: `!rewind` in a session's thread. The owner
+ * Step 12 of the scenario the memory chat carries: `/rewind` in a session's thread. The owner
  * lists the prompts, picks the first, restores the conversation and the code, and the replies he
  * went back over stay in the thread folded.
  */
@@ -9,7 +9,7 @@ import * as texts from "../../src/core/texts.ts";
 import { say } from "../support/plain-agent.ts";
 import { World } from "./world.ts";
 
-test("!rewind goes back to the first prompt: code and conversation, the replies folded", async (t) => {
+test("/rewind goes back to the first prompt: code and conversation, the replies folded", async (t) => {
   const world = World.make(t, { rewind: true });
   await world.start();
   world.store.writeFile(world.folder, "notes.txt", "one");
@@ -21,7 +21,7 @@ test("!rewind goes back to the first prompt: code and conversation, the replies 
   await world.owner.says(world.channel, "change it", { thread });
   await world.ended(thread, 2);
 
-  await world.owner.says(world.channel, "!rewind", { thread });
+  await world.owner.says(world.channel, "/rewind", { thread });
   const [points] = world.chat.threadLists();
   assert.equal(points?.list.type, "rewind-points");
   assert.ok(points);
@@ -55,13 +55,13 @@ test("!rewind goes back to the first prompt: code and conversation, the replies 
   await world.finish();
 });
 
-test("!rewind in a world whose agent cannot go back is not offered", async (t) => {
+test("/rewind in a world whose agent cannot go back is not offered", async (t) => {
   const world = World.make(t);
   await world.start();
   world.script(say("Hello."));
   const thread = await world.open("hello");
   await world.ended(thread);
-  await world.owner.says(world.channel, "!rewind", { thread });
+  await world.owner.says(world.channel, "/rewind", { thread });
   assert.deepEqual(world.chat.threadLists(), []);
   await world.finish();
 });

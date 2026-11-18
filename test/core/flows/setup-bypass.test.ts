@@ -1,6 +1,6 @@
 /**
  * The bypass of a session's setup over the memory chat: the box ticked or unticked at Start, what
- * `!bypass` does before and after it, and the folder whose own settings start the agent in bypass
+ * `/bypass` does before and after it, and the folder whose own settings start the agent in bypass
  * (`native`), where an unticked box is an explicit off that outlives a rebuilt session, a lost
  * process and a restart. The agent is the plain one with models and the modes of `ModeAgent`.
  */
@@ -41,7 +41,7 @@ const selectionOf = (request: unknown) => (request as SetupRequest).selection;
 const summaryEnds = (world: HoldWorld, ref: ThreadRef, ending: string) =>
   world.shown(ref).some((line) => line.startsWith("Model:") && line.endsWith(ending));
 
-for (const word of ["!bypass on", "!bypass off"]) {
+for (const word of ["/bypass on", "/bypass off"]) {
   test(`bypass typed while the setup waits points at the setup [${word}]`, LIMIT, async (t) => {
     const { world, agent } = await worldOf(t);
     const { ref, sending } = await waiting(world);
@@ -64,7 +64,7 @@ for (const word of ["!bypass on", "!bypass off"]) {
 
 // The folder's own bypass makes the session run in bypass before any Start: the word is refused
 // all the same, since the box is what sets it.
-for (const word of ["!bypass on", "!bypass off"]) {
+for (const word of ["/bypass on", "/bypass off"]) {
   test(
     `bypass typed while the setup waits in a native bypass folder is refused [${word}]`,
     LIMIT,
@@ -80,12 +80,12 @@ for (const word of ["!bypass on", "!bypass off"]) {
   );
 }
 
-test("bang bypass off in an auto mode thread returns to auto mode", LIMIT, async (t) => {
+test("/bypass off in an auto mode thread returns to auto mode", LIMIT, async (t) => {
   // An owner whose own settings start the agent in its automatic mode.
   const { world, agent } = await worldOf(t, AUTO_MODE, true);
   const ref = await world.opened("hi");
-  await world.says("!bypass on", ref.thread);
-  await world.says("!bypass off", ref.thread);
+  await world.says("/bypass on", ref.thread);
+  await world.says("/bypass off", ref.thread);
   assert.deepEqual(agent.recorded[0]?.modes, [BYPASS_MODE, AUTO_MODE]);
   assert.ok(world.shown(ref).includes(texts.BYPASS_ON_THREAD));
   assert.ok(world.shown(ref).includes(named(texts.BYPASS_OFF_THREAD, PLAIN_NAMES)));
@@ -107,7 +107,7 @@ test("a native bypass folder starts the box ticked", LIMIT, async (t) => {
 test("unticking in a native bypass folder turns bypass off", LIMIT, async (t) => {
   const { world, agent } = await worldOf(t, BYPASS_MODE);
   const { ref, sending } = await waiting(world);
-  await world.start(ref); // unticked: an explicit off, as `!bypass off`
+  await world.start(ref); // unticked: an explicit off, as `/bypass off`
   await sending;
   await world.settle();
   assert.equal(world.session(ref).bypass, false);
@@ -137,7 +137,7 @@ test("a connect racing start does not record bypass as off", LIMIT, async (t) =>
   world.state.setBypass(ref.channel, ref.thread, true); // what a restart left
   const gate = new AsyncEvent();
   agent.gates.setPermissionMode = gate;
-  const status = world.says("!status", ref.thread);
+  const status = world.says("/status", ref.thread);
   await world.settle();
   assert.deepEqual(agent.recorded.at(-1)?.modes, [BYPASS_MODE]); // connect blocked mid-switch
   const click = world.start(ref); // bypass off
@@ -156,7 +156,7 @@ test("a native bypass folder asks again with the box ticked after a stop", LIMIT
   const { ref } = await waiting(world);
   void world.start(ref); // unticked: native mode moves to default
   await world.settle();
-  await world.says("!stop", ref.thread);
+  await world.says("/stop", ref.thread);
   gate.set();
   await world.settle();
   delete world.hooks.rewriteGate;
@@ -203,12 +203,12 @@ test("an unticked off survives a lost client", LIMIT, async (t) => {
   assert.equal(session.bypass, false);
 });
 
-test("bang bypass off in a native folder survives a restart", LIMIT, async (t) => {
+test("/bypass off in a native folder survives a restart", LIMIT, async (t) => {
   const { world, agent } = await worldOf(t);
   const ref = await ranInANativeBypassFolder(world, agent, false);
   const session = world.session(ref);
   assert.equal(session.bypass, true);
-  await world.says("!bypass off", ref.thread);
+  await world.says("/bypass off", ref.thread);
   assert.equal(agent.recorded.at(-1)?.modes.at(-1), DEFAULT_MODE);
   await session.close(); // the restart: a new object from state.json
   await world.says("second", ref.thread);
@@ -220,7 +220,7 @@ test("bang bypass off in a native folder survives a restart", LIMIT, async (t) =
 test("a thread that never chose keeps the folders own bypass", LIMIT, async (t) => {
   const { world, agent } = await worldOf(t);
   const ref = await ranInANativeBypassFolder(world, agent, false); // Start pressed with the box ticked
-  await world.says("!bypass off", ref.thread);
+  await world.says("/bypass off", ref.thread);
   world.state.setBypass(ref.channel, ref.thread, null); // never chosen
   const session = world.session(ref);
   await (session as unknown as Internals).dropClient();
@@ -232,12 +232,12 @@ test("a thread that never chose keeps the folders own bypass", LIMIT, async (t) 
 test("the channel status row reads the effective bypass", LIMIT, async (t) => {
   const { world, agent } = await worldOf(t);
   const ref = await ranInANativeBypassFolder(world, agent);
-  await world.says("!status");
+  await world.says("/status");
   assert.ok(
     !(world.chat.texts(world.channel).at(-1) as string).includes(texts.STATUS_CHANNEL_BYPASS),
   );
   world.state.setBypass(ref.channel, ref.thread, null); // never chosen: the folder's bypass runs
-  await world.says("!status");
+  await world.says("/status");
   assert.ok(
     (world.chat.texts(world.channel).at(-1) as string).includes(texts.STATUS_CHANNEL_BYPASS),
   );

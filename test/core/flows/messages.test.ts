@@ -84,17 +84,17 @@ test("a reply in a thread that holds no session is told so, and sent nowhere", a
 test("a message the chat marks literal is a prompt, whatever its first characters", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = world.chat.openThread(world.channel); // the root exists: a form can be asked under it
-  const sending = world.send({ ref, id: ref.thread, topLevel: true, text: "!stop", literal: true });
+  const sending = world.send({ ref, id: ref.thread, topLevel: true, text: "/stop", literal: true });
   const open = await world.asked("setup");
   await world.start(open.ref);
   await sending;
-  assert.deepEqual(await world.prompts(), ["!stop"]);
+  assert.deepEqual(await world.prompts(), ["/stop"]);
 });
 
 test("a word is read in the plain text when the typed text carries marks", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = { channel: world.channel, thread: "root-2" };
-  await world.send({ ref, id: "root-2", topLevel: true, text: "`!status`", plain: "!status" });
+  await world.send({ ref, id: "root-2", topLevel: true, text: "`/status`", plain: "/status" });
   const header = fill(texts.STATUS_CHANNEL_HEADER, { directory: world.folder });
   assert.ok(
     world.inChannel().some((line) => line.startsWith(header)),
@@ -108,46 +108,46 @@ test("a word is read in the plain text when the typed text carries marks", async
 test("a command the agent offers is sent as its slash command", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
-  await world.says("!echo hello there", ref.thread);
+  await world.says("/echo hello there", ref.thread);
   assert.equal((await world.prompts()).at(-1), ":echo hello there");
 });
 
 test("a command typed in code formatting runs as the command, its arguments as sent", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
-  await world.send({ ref, id: "m-1", text: "`!echo` hello", plain: "!echo hello" });
+  await world.send({ ref, id: "m-1", text: "`/echo` hello", plain: "/echo hello" });
   await world.send({
     ref,
     id: "m-2",
-    text: "`!echo` keep `the plan`",
-    plain: "!echo keep `the plan`",
+    text: "`/echo` keep `the plan`",
+    plain: "/echo keep `the plan`",
   });
   assert.deepEqual((await world.prompts()).slice(-2), [":echo hello", ":echo keep `the plan`"]);
 });
 
-test("anything before the bang keeps a formatted message a prompt", async (t) => {
+test("anything before the prefix keeps a formatted message a prompt", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
   // The escape of the setup doc: the text opens with a mark, the plain text with the backslash.
-  await world.send({ ref, id: "m-1", text: "`\\!stop`", plain: "\\!stop" });
-  assert.deepEqual((await world.prompts()).at(-1), "`\\!stop`");
+  await world.send({ ref, id: "m-1", text: "`\\/stop`", plain: "\\/stop" });
+  assert.deepEqual((await world.prompts()).at(-1), "`\\/stop`");
   assert.equal(world.shown(ref).includes(texts.STOPPED_THREAD), false);
 });
 
 test("a command the agent does not offer is sent as typed", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
-  await world.says("!nothing here", ref.thread);
-  assert.equal((await world.prompts()).at(-1), "!nothing here");
+  await world.says("/nothing here", ref.thread);
+  assert.equal((await world.prompts()).at(-1), "/nothing here");
 });
 
 test("a command that is only run on the host is answered, not sent", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
-  await world.says("!signin", ref.thread);
+  await world.says("/signin", ref.thread);
   assert.equal(world.shown(ref).at(-1), named(texts.LOGIN_ON_HOST, PLAIN_NAMES));
   assert.deepEqual(await world.prompts(), ["first"]);
-  await world.says("!signout");
+  await world.says("/signout");
   assert.equal(world.inChannel().at(-1), named(texts.LOGOUT_ON_HOST, PLAIN_NAMES));
   assert.deepEqual(await world.prompts(), ["first"], "no session started either");
 });
@@ -156,7 +156,7 @@ test("a command the agent's terminal has and a session does not offer is answere
   // no turn is spent on a command the session would refuse.
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
-  await world.says("!undo the last edit", ref.thread);
+  await world.says("/undo the last edit", ref.thread);
   const answer = world.shown(ref).at(-1) ?? "";
   assert.ok(
     answer.startsWith(fill(named(texts.NOT_OFFERED, PLAIN_NAMES), { command: "undo" })),
@@ -166,52 +166,52 @@ test("a command the agent's terminal has and a session does not offer is answere
     answer.includes("Ask the plain agent to put it back.") && answer.includes("docs/limits.md"),
     answer,
   );
-  await world.says("!Panel", ref.thread);
-  assert.ok(world.shown(ref).at(-1)?.includes("`!panel`"));
+  await world.says("/Panel", ref.thread);
+  assert.ok(world.shown(ref).at(-1)?.includes("`/panel`"));
   assert.deepEqual(await world.prompts(), ["first"]);
-  await world.says("!undo");
-  assert.ok(world.inChannel().at(-1)?.includes("`!undo`"));
+  await world.says("/undo");
+  assert.ok(world.inChannel().at(-1)?.includes("`/undo`"));
   assert.deepEqual(await world.prompts(), ["first"], "no session started either");
 });
 
 test("a command the session's own list offers is sent, though the agent's words say otherwise", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
-  await world.says("!count one two", ref.thread);
+  await world.says("/count one two", ref.thread);
   assert.equal((await world.prompts()).at(-1), ":count one two");
 });
 
-test("an agent with no commands of its own gets every !text as text", async (t) => {
+test("an agent with no commands of its own gets every /text as text", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new NoCommands() });
   const ref = await world.opened();
-  await world.says("!login", ref.thread);
-  await world.says("!clear", ref.thread);
-  await world.says("!undo", ref.thread);
-  assert.deepEqual(await world.prompts(), ["first", "!login", "!clear", "!undo"]);
+  await world.says("/login", ref.thread);
+  await world.says("/clear", ref.thread);
+  await world.says("/undo", ref.thread);
+  assert.deepEqual(await world.prompts(), ["first", "/login", "/clear", "/undo"]);
   assert.ok(!world.shown(ref).includes(texts.CLEAR_IN_THREAD));
 });
 
-test("a !text the agent does not offer is sent with its whole content, not its text alone", async (t) => {
+test("a /text the agent does not offer is sent with its whole content, not its text alone", async (t) => {
   // A chat's content can hold more than its text: what a pasted block adds (#273).
   const world = await MessagesWorld.make(t, { agent: new NoCommands() });
   const ref = await world.opened();
   await world.send({
     ref,
     id: "msg-pasted",
-    text: "!important: why does row 2 differ?",
+    text: "/important: why does row 2 differ?",
     content: async () =>
-      "!important: why does row 2 differ?\n\n| a | b |\n| --- | --- |\n| 1 | 2 |",
+      "/important: why does row 2 differ?\n\n| a | b |\n| --- | --- |\n| 1 | 2 |",
   });
   assert.deepEqual(await world.prompts(), [
     "first",
-    "!important: why does row 2 differ?\n\n| a | b |\n| --- | --- |\n| 1 | 2 |",
+    "/important: why does row 2 differ?\n\n| a | b |\n| --- | --- |\n| 1 | 2 |",
   ]);
 });
 
 test("a command that starts a new session is refused inside a thread", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
-  for (const word of ["!restart", "!RESTART now"]) await world.says(word, ref.thread);
+  for (const word of ["/restart", "/RESTART now"]) await world.says(word, ref.thread);
   assert.deepEqual(world.shown(ref).filter((line) => line === texts.CLEAR_IN_THREAD).length, 2);
   assert.deepEqual(
     tells(world, ref).filter(([text]) => text === texts.CLEAR_IN_THREAD),
@@ -226,10 +226,10 @@ test("a command that starts a new session is refused inside a thread", async (t)
 test("another agent's login and new-session names reach the plain agent as any other text", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
-  await world.says("!clear", ref.thread);
-  await world.says("!login", ref.thread);
-  await world.says("!logout", ref.thread);
-  assert.deepEqual(await world.prompts(), ["first", "!clear", "!login", "!logout"]);
+  await world.says("/clear", ref.thread);
+  await world.says("/login", ref.thread);
+  await world.says("/logout", ref.thread);
+  assert.deepEqual(await world.prompts(), ["first", "/clear", "/login", "/logout"]);
   assert.ok(!world.shown(ref).includes(texts.CLEAR_IN_THREAD));
   assert.ok(!world.shown(ref).includes(named(texts.LOGIN_ON_HOST, PLAIN_NAMES)));
 });
@@ -526,12 +526,12 @@ test("a reply in a thread whose session is being deleted starts nothing, and a f
 
 test("the word that starts a new session is no word of a thread at the top level: it opens a session like any text", async (t) => {
   const world = await MessagesWorld.make(t);
-  const sending = world.says("!restart");
+  const sending = world.says("/restart");
   const { ref } = await world.asked("setup");
   await world.start(ref);
   await sending;
   await world.settle();
-  assert.deepEqual(await world.prompts(), ["!restart"]);
+  assert.deepEqual(await world.prompts(), ["/restart"]);
   assert.ok(!world.shown(ref).includes(texts.CLEAR_IN_THREAD));
 });
 
@@ -550,18 +550,18 @@ test("a word typed in the channel whose failure is told in the channel and canno
   t.mock.method(logger, "error", () => {});
   const world = await MessagesWorld.make(t, { agent: new Unreadable() });
   world.faults.channelNotice = true;
-  const sent = await world.says("!resume");
+  const sent = await world.says("/resume");
   await world.settle();
   // The word is shown, and nothing else: no failure line under it, none in the channel.
-  assert.deepEqual(world.shown(sent.ref), ["!resume"]);
-  assert.deepEqual(world.inChannel(), ["!resume"]);
+  assert.deepEqual(world.shown(sent.ref), ["/resume"]);
+  assert.deepEqual(world.inChannel(), ["/resume"]);
   assert.ok(warnings.some((line) => line.includes("could not report a failure")));
 });
 
 test("the word's failure is told in the channel when the chat takes it", async (t) => {
   t.mock.method(logger, "error", () => {});
   const world = await MessagesWorld.make(t, { agent: new Unreadable() });
-  const sent = await world.says("!resume");
+  const sent = await world.says("/resume");
   assert.deepEqual(world.inChannel().slice(-1), [
     fill(named(texts.ERROR_REPLY, PLAIN_NAMES), { error: "PermissionError" }),
   ]);
@@ -649,7 +649,7 @@ test("a bind while the files of a message download never moves the thread alread
   await world.settle();
   const opened = world.state.thread(ref.channel, ref.thread)?.directory;
   assert.equal(opened, world.folder);
-  await world.says("!bind docs");
+  await world.says("/bind docs");
   assert.equal(world.state.channel(world.channel)?.directory, docs);
   slow.set();
   const setup = await world.asked("setup");
@@ -668,7 +668,7 @@ test("a prompt while the daemon stops is refused with the restart line alone, an
   assert.equal(world.shown(sent.ref).at(-1), texts.RESTARTING);
   assert.deepEqual(tells(world, sent.ref), [[texts.RESTARTING, {}]]);
   assert.deepEqual(await world.prompts(), []);
-  await world.says("!stop");
+  await world.says("/stop");
   assert.equal(world.inChannel().at(-1), texts.NOTHING_TO_STOP);
 });
 
@@ -699,7 +699,7 @@ test("a channel status during a stop counts the other channels' waits without na
   const cut = new AbortController();
   const drain = world.sessions.drain(cut.signal);
   await world.settle();
-  await world.says("!status");
+  await world.says("/status");
   cut.abort();
   await drain;
   const link = fill(texts.STATUS_CHANNEL_LINK_FALLBACK, { thread_ts: here.thread });

@@ -302,7 +302,7 @@ test("the back end runs the list for its login, and continues a cut turn with th
 });
 
 test("what the agent wrote before any typed prompt is the turn going on, shown first", () => {
-  // As `getSessionMessages` returned it after `!terminal` cut a turn and the terminal took it
+  // As `getSessionMessages` returned it after `/terminal` cut a turn and the terminal took it
   // up by itself (Claude Code 2.1.311, 2026-10-27): its `isMeta` prompt is left out.
   const turns = turnsOf([
     user("u1", [{ type: "tool_result", tool_use_id: "t1", content: "Exit code 137" }]),
@@ -327,7 +327,7 @@ test("what the agent wrote before any typed prompt is the turn going on, shown f
 
 test("an interruption in the terminal is no prompt: it ends the turn it interrupts", () => {
   // As `getSessionMessages` returned it on 2026-10-28 (Claude Code 2.1.311): the owner stopped
-  // the command the terminal ran again after `!terminal`, and Claude Code wrote its marker as a
+  // the command the terminal ran again after `/terminal`, and Claude Code wrote its marker as a
   // user text after the refused call's result.
   const interrupted = turnsOf([
     user("u1", [{ type: "tool_result", tool_use_id: "t1", content: "Exit code 137" }]),

@@ -1,4 +1,4 @@
-/** The agent's last guess at the next prompt, per thread (`!next`): memory only, apart from the session. */
+/** The agent's last guess at the next prompt, per thread (`/next`): memory only, apart from the session. */
 import { randomUUID } from "node:crypto";
 import type { ThreadRef } from "../chat/seam.ts";
 

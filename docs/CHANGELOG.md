@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+
+- Commands are typed as in the terminal. A pardner word starts with `/` (`/status`, `/bind <folder>`,
+  `/stop`), where it started with `!`. Any other `/name args` is still a command of the agent, and in a
+  chat that suggests commands `/` alone lists them. A shell command starts with `!` (`!ls` or `! ls`),
+  where it started with `!!`. A `/` followed by a space is plain text, and so is a message with
+  anything but a space before the prefix (`\/goal`, `\!ls`). `!` alone is refused as a shell command
+  with nothing after it.
+
 ## [0.15.0] - 2026-11-18
 
 The first version published on npm as `pardner`.

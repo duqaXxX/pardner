@@ -1196,7 +1196,7 @@ export function judgeNotOffered(answered: ReadonlyMap<string, string>): Observat
   return observation(true, offered.length === 0, detail);
 }
 
-/** Sends every command the limits page lists as not offered, as the daemon sends a `!name`. */
+/** Sends every command the limits page lists as not offered, as the daemon sends a `/name`. */
 async function commandsNotOffered(s: Stage): Promise<Seen> {
   const answered = new Map<string, string>();
   for (const name of notOffered()) {

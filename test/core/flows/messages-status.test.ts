@@ -1,6 +1,6 @@
 /**
- * `!status`, typed in the channel: its folder, then one line per live session. And the
- * thread's own `!status`, which is the session's.
+ * `/status`, typed in the channel: its folder, then one line per live session. And the
+ * thread's own `/status`, which is the session's.
  */
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
@@ -48,14 +48,14 @@ test("a channel bound to no folder says where sessions start", async (t) => {
     ref: { channel: free, thread: "root-1" },
     id: "root-1",
     topLevel: true,
-    text: "!status",
+    text: "/status",
   });
   assert.deepEqual(world.chat.texts(free), [fill(texts.UNBOUND_ANY, { root: world.folder })]);
 });
 
 test("a channel with no live session says so after its folder", async (t) => {
   const world = await MessagesWorld.make(t);
-  await world.says("!status");
+  await world.says("/status");
   assert.equal(
     world.inChannel().at(-1),
     [header(world.folder), texts.STATUS_CHANNEL_EMPTY].join("\n"),
@@ -68,7 +68,7 @@ test("an idle session is named by its title and the time of its last message", a
   const [stored] = (world.agent as PlainAgent).store.list(world.folder);
   assert.ok(stored);
   world.now = stored.lastModified / 1000 + 7_200;
-  await world.says("!status");
+  await world.says("/status");
   const row = fill(texts.STATUS_CHANNEL_ROW, {
     link: linkTo(ref.thread),
     activity: `${texts.STATUS_CHANNEL_IDLE}${fill(texts.STATUS_CHANNEL_SINCE, { ago: "2h ago" })}`,
@@ -86,7 +86,7 @@ test("a chat that marks roots leads each row with the mark in place of the word"
   (world.agent as PlainAgent).next(hold());
   await world.says("a long job", busy.thread);
   await world.settle();
-  await world.says("!status");
+  await world.says("/status");
   const rows = (world.inChannel().at(-1)?.split("\n") ?? []).slice(1);
   const rowOf = (thread: string) => rows.find((row) => row.includes(linkTo(thread))) ?? "";
   assert.ok(rowOf(done.thread).startsWith(`<done> ${linkTo(done.thread)}`), rowOf(done.thread));
@@ -111,7 +111,7 @@ test("a busy session and one that waits for the owner are told apart", async (t)
   await world.chat.as(OWNER).answers(asked.requestId, { type: "hold", send: true });
   await sending;
   await world.asked("permission", waiting);
-  await world.says("!status");
+  await world.says("/status");
   const lines = world.inChannel().at(-1)?.split("\n") ?? [];
   assert.equal(lines[0], header(world.folder));
   const rows = lines.slice(1).toSorted();
@@ -133,11 +133,11 @@ test("a busy session and one that waits for the owner are told apart", async (t)
 test("a row says bypass, and the folder of a thread the channel left behind", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new WithBypass() });
   const ref = await world.opened("one");
-  await world.says("!bypass on", ref.thread);
+  await world.says("/bypass on", ref.thread);
   const docs = join(world.folder, "docs");
   mkdirSync(docs);
   world.state.bind(world.channel, docs);
-  await world.says("!status");
+  await world.says("/status");
   const lines = world.inChannel().at(-1)?.split("\n") ?? [];
   assert.equal(lines[0], header(docs));
   const idle = `${texts.STATUS_CHANNEL_IDLE}${fill(texts.STATUS_CHANNEL_SINCE, { ago: "just now" })}`;
@@ -152,9 +152,9 @@ test("a row says bypass, and the folder of a thread the channel left behind", as
 test("a row says plan in place of bypass while the session plans", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new WithPlan() });
   const ref = await world.opened("one");
-  await world.says("!bypass on", ref.thread);
-  await world.says("!plan", ref.thread);
-  await world.says("!status");
+  await world.says("/bypass on", ref.thread);
+  await world.says("/plan", ref.thread);
+  await world.says("/status");
   const row = world.inChannel().at(-1)?.split("\n")[1] ?? "";
   assert.ok(row.includes(texts.STATUS_CHANNEL_PLAN), row);
   assert.ok(!row.includes(texts.STATUS_CHANNEL_BYPASS), row);
@@ -166,7 +166,7 @@ test("a title the agent cannot list leaves the row with no time", async (t) => {
   t.mock.method(world.sessions, "sessionsIn", async () => {
     throw new Error("unreadable");
   });
-  await world.says("!status");
+  await world.says("/status");
   assert.equal(
     world.inChannel().at(-1),
     [
@@ -188,7 +188,7 @@ test("a stop that waits for a thread is named in a notice of its own", async (t)
   const cut = new AbortController();
   const drain = world.sessions.drain(cut.signal);
   await world.settle();
-  await world.says("!status");
+  await world.says("/status");
   const notice = world.inChannel().at(-1) ?? "";
   assert.ok(notice.startsWith(texts.RESTART_WAITS_HEADER), notice);
   assert.ok(notice.includes(linkTo(ref.thread)));
@@ -197,16 +197,16 @@ test("a stop that waits for a thread is named in a notice of its own", async (t)
   await drain;
 });
 
-test("!status in a thread is the session's own, for the owner alone", async (t) => {
+test("/status in a thread is the session's own, for the owner alone", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened("one");
   const session = world.sessions.get(ref.channel, ref.thread);
   assert.ok(session !== null);
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   assert.equal(world.shown(ref).at(-1), await session.status());
 });
 
-test("a thread's !status names the repositories below its folder that still need trust", async (t) => {
+test("a thread's /status names the repositories below its folder that still need trust", async (t) => {
   // the footer of such a thread shows no git changes for them.
   const agent = new WithFolderTrust();
   const world = await MessagesWorld.make(t, { agent });
@@ -223,7 +223,7 @@ test("a thread's !status names the repositories below its folder that still need
   assert.ok(!(await session.status()).includes(lines[at] ?? ""), "trusted since: not named");
 });
 
-test("the footer and !status say git is not trusted for a repository the agent does not cover", async (t) => {
+test("the footer and /status say git is not trusted for a repository the agent does not cover", async (t) => {
   const agent = new WithFolderTrust();
   const world = await MessagesWorld.make(t, { agent });
   mkdirSync(join(world.folder, ".git"), { recursive: true });
@@ -236,7 +236,7 @@ test("the footer and !status say git is not trusted for a repository the agent d
   assert.ok(!(await session.status()).includes("not trusted"), "trusted since: normal again");
 });
 
-test("!status names the repository that makes the mark, with the line that asks for the trust", async (t) => {
+test("/status names the repository that makes the mark, with the line that asks for the trust", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new WithFolderTrust() });
   mkdirSync(join(world.folder, ".git"), { recursive: true });
   const ref = await world.opened("one");
@@ -248,7 +248,7 @@ test("!status names the repository that makes the mark, with the line that asks 
   assert.equal(lines[at + 1], `\`cd ${shellQuote(world.folder)} && plain\``);
 });
 
-test("a trust lookup that fails leaves the footer and !status fields, with no mark", async (t) => {
+test("a trust lookup that fails leaves the footer and /status fields, with no mark", async (t) => {
   const agent = new WithFolderTrust();
   agent.untrustedRepository = async () => {
     throw new Error("lookup failed");
@@ -272,7 +272,7 @@ test("a trust lookup that fails leaves the footer and !status fields, with no ma
   );
 });
 
-test("!status names no repository from an earlier footer when this call read none", async (t) => {
+test("/status names no repository from an earlier footer when this call read none", async (t) => {
   const agent = new WithFolderTrust();
   const world = await MessagesWorld.make(t, { agent });
   mkdirSync(join(world.folder, ".git"), { recursive: true });
@@ -338,7 +338,7 @@ test("a restart leaves every thread with a session listed, by how its last turn 
     restartOf: first,
   });
   assert.deepEqual(world.sessions.sessionsOf(world.channel), []);
-  await world.says("!status");
+  await world.says("/status");
   const lines = world.inChannel().at(-1)?.split("\n") ?? [];
   assert.equal(lines[0], header(world.folder));
   const rowOf = (thread: string) => lines.find((line) => line.includes(linkTo(thread))) ?? "";
@@ -357,7 +357,7 @@ test("past ten threads the answer lists the newest and counts the others", async
     opened.push(await world.opened(`job ${n}`));
     world.now += 60; // each a minute after the one before
   }
-  await world.says("!status");
+  await world.says("/status");
   const lines = world.inChannel().at(-1)?.split("\n") ?? [];
   assert.equal(lines.length, 1 + STATUS_ROWS + 1);
   assert.equal(lines.at(-1), fill(texts.STATUS_CHANNEL_MORE, { count: 2 }));
@@ -367,7 +367,7 @@ test("past ten threads the answer lists the newest and counts the others", async
   }
 });
 
-test("a thread's !status gives the line that continues the session in a terminal", async (t) => {
+test("a thread's /status gives the line that continues the session in a terminal", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened("one");
   const session = world.sessions.get(ref.channel, ref.thread);
@@ -376,7 +376,7 @@ test("a thread's !status gives the line that continues the session in a terminal
   assert.ok(status.includes(`plain --resume`), status);
 });
 
-test("for an agent with no terminal the thread's !status shows no such line", async (t) => {
+test("for an agent with no terminal the thread's /status shows no such line", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new PlainAgent({ noTerminal: true }) });
   const ref = await world.opened("one");
   const session = world.sessions.get(ref.channel, ref.thread);
@@ -389,10 +389,10 @@ test("for an agent with no terminal the thread's !status shows no such line", as
   );
 });
 
-test("!terminal for an agent with no terminal says there is none", async (t) => {
+test("/terminal for an agent with no terminal says there is none", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new PlainAgent({ noTerminal: true }) });
   const ref = await world.opened("one");
-  await world.says("!terminal", ref.thread);
+  await world.says("/terminal", ref.thread);
   assert.equal(world.shown(ref).at(-1), texts.named(texts.TERMINAL_UNAVAILABLE, PLAIN_NAMES));
 });
 
@@ -413,7 +413,7 @@ test("an idle session is dated by its last message, not by its file, and only th
   world.now = file.lastModified / 1000;
   agent.lastMessage = (world.now - 16 * 60) * 1000;
   agent.dated.length = 0;
-  await world.says("!status");
+  await world.says("/status");
   const idle = `${texts.STATUS_CHANNEL_IDLE}${fill(texts.STATUS_CHANNEL_SINCE, { ago: "16m ago" })}`;
   assert.deepEqual(world.inChannel().at(-1)?.split("\n"), [
     header(world.folder),
@@ -432,7 +432,7 @@ test("a row's link carries the title as written, brackets and marks included", a
   const links = linksOn(world, t);
   const ref = await world.opened(title);
   const escaped = t.mock.method(world.provider, "escape");
-  await world.says("!status");
+  await world.says("/status");
   assert.deepEqual(links, [[ref, title, "notice"]]);
   // The label is written for a notice: the title is read as the chat's notice markup says.
   const marks = escaped.mock.calls
@@ -449,7 +449,7 @@ test("a session whose titles cannot be listed is linked as a session, with no ti
   t.mock.method(world.sessions, "sessionsIn", async () => {
     throw new Error("unreadable");
   });
-  await world.says("!status");
+  await world.says("/status");
   assert.deepEqual(links, [[ref, texts.STATUS_CHANNEL_SESSION, "notice"]]);
   assert.equal(
     world.inChannel().at(-1)?.split("\n")[1],
@@ -469,7 +469,7 @@ test("a session with only a background task running is working, not idle", async
   // drive the agent that makes `runningKinds` say so.
   assert.equal(session.busy, false);
   t.mock.getter(session, "runningKinds", () => "1 task");
-  await world.says("!status");
+  await world.says("/status");
   const row = world.inChannel().at(-1)?.split("\n")[1] ?? "";
   assert.ok(row.startsWith(linkTo(ref.thread)), row);
   assert.ok(row.includes(texts.STATUS_CHANNEL_BUSY), row);
@@ -482,7 +482,7 @@ test("a channel status with no stop under way says nothing of a restart", async 
   (world.agent as PlainAgent).next(hold());
   await world.says("a long job", ref.thread);
   await world.settle();
-  await world.says("!status");
+  await world.says("/status");
   // The status itself was answered: its header and the row of the working thread.
   assert.ok(world.inChannel().some((text) => text.startsWith(header(world.folder))));
   assert.ok(world.inChannel().some((text) => text.includes(linkTo(ref.thread))));

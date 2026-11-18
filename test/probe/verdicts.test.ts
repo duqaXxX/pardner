@@ -25,9 +25,9 @@ import {
 import { tempDirSync } from "../support/temp.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..");
-const GESTURE = claim("P1", "gesture", "a gesture", "src/core/commands.ts#parseBang", "how");
-const OTHER = claim("P2", "gesture", "another gesture", "src/core/commands.ts#parseBang", "how");
-const MODEL = claim("P3", "model", "a model claim", "src/core/commands.ts#parseBang", "how");
+const GESTURE = claim("P1", "gesture", "a gesture", "src/core/commands.ts#parseCommand", "how");
+const OTHER = claim("P2", "gesture", "another gesture", "src/core/commands.ts#parseCommand", "how");
+const MODEL = claim("P3", "model", "a model claim", "src/core/commands.ts#parseCommand", "how");
 
 function holds(subject: typeof GESTURE, seen: Facts): Result {
   return evaluate(subject, observation(true, true, "", seen));
@@ -72,7 +72,7 @@ test("a BROKEN claim is no longer supported and an UNPROVEN one is not proven", 
 });
 
 test("a limit claim that fell is newly supported and asks for the page to change", () => {
-  const limit = claim("L1", "limit", "a limit", "src/core/commands.ts#parseBang", "how");
+  const limit = claim("L1", "limit", "a limit", "src/core/commands.ts#parseCommand", "how");
   const verdicts = classify(
     [
       evaluate(limit, observation(true, false, "gone")),
@@ -122,7 +122,14 @@ test("claim ids sort P before L and by number in the observations file", () => {
 });
 
 test("a retired claim stays retired", () => {
-  const retired = claim("P4", "gesture", "t", "src/core/commands.ts#parseBang", "how", "measured");
+  const retired = claim(
+    "P4",
+    "gesture",
+    "t",
+    "src/core/commands.ts#parseCommand",
+    "how",
+    "measured",
+  );
   assert.equal(classify([evaluate(retired, null)], null)[0]?.case, "retired");
 });
 
@@ -145,8 +152,14 @@ test("an empty record added or removed shows as a difference", () => {
 });
 
 test("the report lists changed first, then unsupported, unproven, no baseline, unchanged", () => {
-  const third = claim("P5", "gesture", "fifth gesture", "src/core/commands.ts#parseBang", "how");
-  const fourth = claim("P6", "gesture", "sixth gesture", "src/core/commands.ts#parseBang", "how");
+  const third = claim("P5", "gesture", "fifth gesture", "src/core/commands.ts#parseCommand", "how");
+  const fourth = claim(
+    "P6",
+    "gesture",
+    "sixth gesture",
+    "src/core/commands.ts#parseCommand",
+    "how",
+  );
   const results = [
     holds(GESTURE, { a: 1 }),
     evaluate(OTHER, observation(true, false, "no more")),

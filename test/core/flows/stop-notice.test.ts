@@ -1,5 +1,5 @@
 /**
- * `!stop` typed in a thread, through the word's flow: the footer is on the reply the stop ended,
+ * `/stop` typed in a thread, through the word's flow: the footer is on the reply the stop ended,
  * and the line that says the stop is a notice below it with none (the footer goes on the
  * session's last reply, never on a notice of the daemon's own). A goal is still set after a stop:
  * the notice says so, with the owner's own words escaped.
@@ -40,7 +40,7 @@ test(
     const world = await HoldWorld.make(t, { agent });
     agent.next(say("working on it"), hold());
     const ref = await world.opened("hello");
-    await world.says("!stop", ref.thread);
+    await world.says("/stop", ref.thread);
     await world.settle();
     const [, reply, notice] = replies(world, ref); // the setup's summary, the reply, the notice
     assert.ok(reply !== undefined && notice !== undefined);
@@ -81,7 +81,7 @@ test(
     await world.settle();
     const [, before] = replies(world, ref);
     assert.ok(before !== undefined && !hasFooter(world, before.text), "the task runs: no footer");
-    await world.says("!stop", ref.thread);
+    await world.says("/stop", ref.thread);
     await world.settle();
     // The stop closes the process: no task is stopped one by one, and the tasks end with it.
     assert.ok(process.closed);
@@ -103,7 +103,7 @@ test(
     const world = await HoldWorld.make(t, { agent, edits: false });
     agent.next(say("working on it"), hold());
     const ref = await world.opened("hello");
-    await world.says("!stop", ref.thread);
+    await world.says("/stop", ref.thread);
     await world.settle();
     const shown = replies(world, ref);
     const footer = shown.findIndex((m) => hasFooter(world, m.text));
@@ -132,9 +132,9 @@ test("a stop on a goal says it is still set, the owner's words escaped", LIMIT, 
   const ref = await world.opened("hi");
   const condition = "the build passes, then tell <!here>";
   agent.next(goalChanged({ state: "set", condition }), hold());
-  await world.says(`!goal ${condition}`, ref.thread);
+  await world.says(`/goal ${condition}`, ref.thread);
   await world.settle();
-  await world.says("!stop", ref.thread);
+  await world.says("/stop", ref.thread);
   await world.settle();
   assert.equal(
     world.shown(ref).at(-1),

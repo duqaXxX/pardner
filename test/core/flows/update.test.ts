@@ -1,5 +1,5 @@
 /**
- * `!pardner` and the update from the chat as a flow of the core: the word and its
+ * `/pardner` and the update from the chat as a flow of the core: the word and its
  * answers, the offer and the click that installs, the line told once per version, and the block on
  * new agent processes while an install runs. The core runs over the memory chat, the plain agent
  * and a host whose answers a test sets (`FakeUpdatesHost`): no npm and no service is touched.
@@ -43,9 +43,9 @@ function theOffer(world: MessagesWorld) {
   return list;
 }
 
-/** The owner types `!pardner update` and presses the offer's control. */
+/** The owner types `/pardner update` and presses the offer's control. */
 async function offered(world: MessagesWorld) {
-  await world.says("!pardner update");
+  await world.says("/pardner update");
   const list = theOffer(world);
   return list;
 }
@@ -59,64 +59,64 @@ function pickOf(
 
 // ---- the word
 
-test("without a way to update, `!pardner` is a mistyped word", async (t) => {
+test("without a way to update, `/pardner` is a mistyped word", async (t) => {
   const world = await MessagesWorld.make(t);
-  await world.says("!pardner");
+  await world.says("/pardner");
   const answer = world.inChannel().at(-1) ?? "";
-  assert.ok(answer.includes("`!guide`"), "the full list of the words");
-  assert.ok(!answer.includes("!pardner"), "which does not offer it");
+  assert.ok(answer.includes("`/guide`"), "the full list of the words");
+  assert.ok(!answer.includes("/pardner"), "which does not offer it");
 });
 
-test("`!pardner` says the version that runs, the latest and when it was checked", async (t) => {
+test("`/pardner` says the version that runs, the latest and when it was checked", async (t) => {
   const { world } = await updating(t);
-  await world.says("!pardner");
+  await world.says("/pardner");
   assert.equal(
     world.inChannel().at(-1),
-    `pardner 0.3.0 · latest 0.3.1, checked ${clock(world.now)} · \`!pardner update\` installs it`,
+    `pardner 0.3.0 · latest 0.3.1, checked ${clock(world.now)} · \`/pardner update\` installs it`,
   );
 });
 
-test("`!pardner` on the latest version says so", async (t) => {
+test("`/pardner` on the latest version says so", async (t) => {
   const host = new FakeUpdatesHost();
   host.newest = { version: "0.3.0" };
   const { world } = await updating(t, host);
-  await world.says("!pardner");
+  await world.says("/pardner");
   assert.equal(
     world.inChannel().at(-1),
     `pardner 0.3.0 · the latest version, checked ${clock(world.now)}`,
   );
 });
 
-test("`!pardner` says when npm could not be asked", async (t) => {
+test("`/pardner` says when npm could not be asked", async (t) => {
   const host = new FakeUpdatesHost();
   host.newest = { failure: { kind: "network" } };
   const { world } = await updating(t, host);
-  await world.says("!pardner");
+  await world.says("/pardner");
   assert.equal(
     world.inChannel().at(-1),
     `pardner 0.3.0 · latest version unknown: npm could not reach the registry at ${clock(world.now)}`,
   );
 });
 
-test("`!pardner` words another failure of npm as the terminal does", async (t) => {
+test("`/pardner` words another failure of npm as the terminal does", async (t) => {
   const host = new FakeUpdatesHost();
   host.newest = { failure: { kind: "other", status: 3 } };
   const { world } = await updating(t, host);
-  await world.says("!pardner");
+  await world.says("/pardner");
   assert.match(
     world.inChannel().at(-1) ?? "",
     /latest version unknown: npm ended with status 3 at /,
   );
   host.newest = { failure: { kind: "permission", path: null } };
   await world.updates?.check();
-  await world.says("!pardner");
+  await world.says("/pardner");
   assert.match(world.inChannel().at(-1) ?? "", /unknown: npm may not read what it needs at /);
 });
 
-test("`!pardner` checks once if no check ran, and not again", async (t) => {
+test("`/pardner` checks once if no check ran, and not again", async (t) => {
   const { world, host } = await updating(t);
-  await world.says("!pardner");
-  await world.says("!pardner");
+  await world.says("/pardner");
+  await world.says("/pardner");
   assert.equal(host.calls.filter((call) => call === "latest").length, 1);
 });
 
@@ -133,15 +133,15 @@ for (const [name, refusal, reason] of [
     "its version 0.3.0 is not published on npm",
   ],
 ] as const) {
-  test(`${name}: \`!pardner\` says the copy updates outside the chat`, async (t) => {
+  test(`${name}: \`/pardner\` says the copy updates outside the chat`, async (t) => {
     const host = new FakeUpdatesHost();
     host.copy = { refusal };
     const { world } = await updating(t, host);
-    await world.says("!pardner");
+    await world.says("/pardner");
     const answer = world.inChannel().at(-1) ?? "";
     assert.ok(answer.includes(`This copy updates outside Memory chat: ${reason}.`), answer);
     // and the offer is not made, nor the click taken
-    await world.says("!pardner update");
+    await world.says("/pardner update");
     assert.equal(world.chat.lists().length, 0);
     assert.equal(world.inChannel().at(-1), `This copy updates outside Memory chat: ${reason}.`);
   });
@@ -151,32 +151,32 @@ test("a daemon that no service runs says so beside the versions", async (t) => {
   const host = new FakeUpdatesHost();
   host.service = false;
   const { world } = await updating(t, host);
-  await world.says("!pardner");
+  await world.says("/pardner");
   assert.ok(
     (world.inChannel().at(-1) ?? "").endsWith(
       "\npardner is not running as a service. `pardner service install` in a terminal makes it " +
         "one; then it can update and restart from Memory chat.",
     ),
   );
-  await world.says("!pardner update");
+  await world.says("/pardner update");
   assert.equal(world.chat.lists().length, 0, "no offer a click could not honour");
   assert.equal(world.inChannel().at(-1), named(texts.UPDATE_NOT_A_SERVICE, PLAIN_NAMES));
 });
 
-test("`!pardner` inside a session's thread answers there, for the owner alone", async (t) => {
+test("`/pardner` inside a session's thread answers there, for the owner alone", async (t) => {
   const { world } = await updating(t);
   const ref = await world.opened();
   const before = world.inChannel().length;
-  await world.says("!pardner", ref.thread);
+  await world.says("/pardner", ref.thread);
   assert.ok((world.shown(ref).at(-1) ?? "").startsWith("pardner 0.3.0 · latest 0.3.1"));
   assert.equal(world.inChannel().length, before, "nothing in the channel");
 });
 
 for (const action of ["update", "restart"] as const) {
-  test(`\`!pardner ${action}\` inside a thread is refused: the offer lives in the channel`, async (t) => {
+  test(`\`/pardner ${action}\` inside a thread is refused: the offer lives in the channel`, async (t) => {
     const { world, host } = await updating(t);
     const ref = await world.opened();
-    await world.says(`!pardner ${action}`, ref.thread);
+    await world.says(`/pardner ${action}`, ref.thread);
     assert.equal(
       world.shown(ref).at(-1),
       fill(texts.WORD_IN_THREAD, { word: `pardner ${action}` }),
@@ -185,10 +185,10 @@ for (const action of ["update", "restart"] as const) {
     assert.ok(!host.calls.includes("restart"));
   });
 
-  test(`\`!pardner ${action}\` inside a thread that holds no session is refused too`, async (t) => {
+  test(`\`/pardner ${action}\` inside a thread that holds no session is refused too`, async (t) => {
     const { world } = await updating(t);
     const ref = world.chat.openThread(world.channel);
-    await world.says(`!pardner ${action}`, ref.thread);
+    await world.says(`/pardner ${action}`, ref.thread);
     assert.equal(
       world.shown(ref).at(-1),
       fill(texts.WORD_IN_THREAD, { word: `pardner ${action}` }),
@@ -198,22 +198,22 @@ for (const action of ["update", "restart"] as const) {
 
 test("anything else after the word gets the list of words", async (t) => {
   const { world } = await updating(t);
-  await world.says("!pardner upgrade");
+  await world.says("/pardner upgrade");
   const answer = world.inChannel().at(-1) ?? "";
-  assert.ok(answer.includes("`!pardner [update|restart]`"));
+  assert.ok(answer.includes("`/pardner [update|restart]`"));
 });
 
-test("`!help` lists the word, and the guide describes it", async (t) => {
+test("`/help` lists the word, and the guide describes it", async (t) => {
   const { world } = await updating(t);
-  await world.says("!help");
-  assert.ok((world.inChannel().at(-1) ?? "").includes("`!pardner [update|restart]`"));
-  await world.says("!guide");
+  await world.says("/help");
+  assert.ok((world.inChannel().at(-1) ?? "").includes("`/pardner [update|restart]`"));
+  await world.says("/guide");
   assert.ok((world.inChannel().at(-1) ?? "").includes("**Updates**"));
 });
 
 // ---- `update`: the offer
 
-test("`!pardner update` offers the latest version with the changelog and the sharing instances", async (t) => {
+test("`/pardner update` offers the latest version with the changelog and the sharing instances", async (t) => {
   const host = new FakeUpdatesHost();
   host.others = [null, "work2"];
   const { world } = await updating(t, host);
@@ -229,33 +229,33 @@ test("`!pardner update` offers the latest version with the changelog and the sha
   assert.equal(list.channel, world.channel);
 });
 
-test("`!pardner update` asks the registry again", async (t) => {
+test("`/pardner update` asks the registry again", async (t) => {
   const { world, host } = await updating(t);
-  await world.says("!pardner");
-  await world.says("!pardner update");
+  await world.says("/pardner");
+  await world.says("/pardner update");
   assert.equal(host.calls.filter((call) => call === "latest").length, 2);
 });
 
-test("`!pardner update` on the latest version offers nothing", async (t) => {
+test("`/pardner update` on the latest version offers nothing", async (t) => {
   const host = new FakeUpdatesHost();
   host.newest = { version: "0.3.0" };
   const { world } = await updating(t, host);
-  await world.says("!pardner update");
+  await world.says("/pardner update");
   assert.equal(world.chat.lists().length, 0);
   assert.equal(world.inChannel().at(-1), "pardner 0.3.0 is already the latest version.");
 });
 
-test("`!pardner update` says when the registry could not be reached, and tries again next time", async (t) => {
+test("`/pardner update` says when the registry could not be reached, and tries again next time", async (t) => {
   const host = new FakeUpdatesHost();
   host.newest = { failure: { kind: "network" } };
   const { world } = await updating(t, host);
-  await world.says("!pardner update");
+  await world.says("/pardner update");
   assert.equal(
     world.inChannel().at(-1),
-    "The latest version is unknown: npm could not reach the registry. `!pardner update` tries again.",
+    "The latest version is unknown: npm could not reach the registry. `/pardner update` tries again.",
   );
   host.newest = { version: VERSION };
-  await world.says("!pardner update");
+  await world.says("/pardner update");
   assert.equal(world.chat.lists().length, 1);
 });
 
@@ -374,7 +374,7 @@ test("a click on a daemon that is already stopping installs nothing", async (t) 
   await world.chat.as(OWNER).picks(list.message, VERSION);
   assert.equal(
     world.inChannel().at(-1),
-    "pardner is stopping or restarting: if it is restarting, send `!pardner update` again once it is back.",
+    "pardner is stopping or restarting: if it is restarting, send `/pardner update` again once it is back.",
   );
   assert.deepEqual(host.installs, []);
   assert.ok(!host.calls.includes("lock"));
@@ -394,7 +394,7 @@ test("a stop that cancels the install before npm starts leaves a click installin
   assert.deepEqual(host.installs, [], "npm was not started");
   assert.equal(
     world.inChannel().at(-1),
-    "pardner is stopping or restarting: if it is restarting, send `!pardner update` again once it is back.",
+    "pardner is stopping or restarting: if it is restarting, send `/pardner update` again once it is back.",
   );
   assert.equal(updates.phase.kind, "idle", "the claim is let go");
   assert.equal(world.sessions.startsBlocked, false);
@@ -426,7 +426,7 @@ test("a drain does not wait for a click that is still asking whether the copy up
   assert.deepEqual(host.installs, []);
   assert.equal(
     world.inChannel().at(-1),
-    "pardner is stopping or restarting: if it is restarting, send `!pardner update` again once it is back.",
+    "pardner is stopping or restarting: if it is restarting, send `/pardner update` again once it is back.",
   );
   assert.equal(updates.phase.kind, "idle");
   assert.equal(
@@ -473,11 +473,11 @@ test("a click when the copy stopped being the updatable one says why, with no co
   assert.equal(world.updates?.line(), null, "the page draws no line for it");
 });
 
-test("`!pardner update` while another process replaces the copy makes no offer and says so", async (t) => {
+test("`/pardner update` while another process replaces the copy makes no offer and says so", async (t) => {
   const host = new FakeUpdatesHost();
   host.copy = { swapping: true };
   const { world } = await updating(t, host);
-  await world.says("!pardner update");
+  await world.says("/pardner update");
   assert.equal(world.inChannel().at(-1), "An update of pardner is already under way.");
   assert.equal(world.chat.lists().length, 0);
 });
@@ -502,7 +502,7 @@ test("a click when npm cannot prove the copy says the latest version is unknown"
   await world.chat.as(OWNER).picks(list.message, VERSION);
   assert.equal(
     world.inChannel().at(-1),
-    "The latest version is unknown: npm could not reach the registry. `!pardner update` tries again.",
+    "The latest version is unknown: npm could not reach the registry. `/pardner update` tries again.",
   );
   assert.deepEqual(host.installs, []);
 });
@@ -523,7 +523,7 @@ test("a click when the copy already holds the version tells to restart instead",
   await world.chat.as(OWNER).picks(list.message, VERSION);
   assert.equal(
     world.inChannel().at(-1),
-    "The copy already holds 0.3.1; pardner runs 0.3.0 until it restarts: `!pardner restart`.",
+    "The copy already holds 0.3.1; pardner runs 0.3.0 until it restarts: `/pardner restart`.",
   );
   assert.deepEqual(host.installs, []);
   assert.equal(world.updates?.line()?.failure !== null, true, "the page says it too");
@@ -542,7 +542,7 @@ test("a newer version that came out since the offer is named, and the click inst
   await world.settle();
   assert.equal(
     world.inChannel().at(-1),
-    "Installing pardner 0.3.1… 0.3.2 came out since this message: `!pardner update` installs it after the restart.",
+    "Installing pardner 0.3.1… 0.3.2 came out since this message: `/pardner update` installs it after the restart.",
   );
   release();
   await clicking;
@@ -563,7 +563,7 @@ const FAILURES = [
   [
     "a registry that cannot be reached",
     { kind: "failed", failure: { kind: "network" } },
-    "The update failed: npm could not reach the registry. pardner keeps running 0.3.0; `!pardner update` tries again.",
+    "The update failed: npm could not reach the registry. pardner keeps running 0.3.0; `/pardner update` tries again.",
   ],
   [
     "another npm failure",
@@ -618,10 +618,10 @@ test("an install that cannot run at all is a failed install", async (t) => {
 test("a failed update may be tried again", async (t) => {
   const { world, host } = await updating(t);
   host.outcome = { kind: "failed", failure: { kind: "network" } };
-  await world.says("!pardner update");
+  await world.says("/pardner update");
   await world.chat.as(OWNER).picks(theOffer(world).message, VERSION);
   host.outcome = { kind: "installed", version: VERSION };
-  await world.says("!pardner update");
+  await world.says("/pardner update");
   await world.chat.as(OWNER).picks(theOffer(world).message, VERSION);
   assert.equal(host.installs.length, 2);
   assert.equal(host.calls.filter((call) => call === "restart").length, 1);
@@ -659,7 +659,7 @@ test("a failed click on the page leaves the sentence on the line and writes nowh
   assert.equal(updates.line()?.phase, "failed");
   assert.equal(
     updates.line()?.failure,
-    "The update failed: npm could not reach the registry. pardner keeps running 0.3.0; `!pardner update` tries again.",
+    "The update failed: npm could not reach the registry. pardner keeps running 0.3.0; `/pardner update` tries again.",
   );
   assert.equal(world.inChannel().length, 0);
 });
@@ -725,9 +725,9 @@ test("while an install runs a word that would start the agent is refused", async
   });
   const clicking = world.chat.as(OWNER).picks(list.message, VERSION);
   await world.settle();
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   assert.equal(world.shown(ref).at(-1), texts.RESTARTING);
-  await world.says("!help", ref.thread);
+  await world.says("/help", ref.thread);
   assert.equal(world.shown(ref).at(-1), texts.RESTARTING);
   await world.says("a prompt", ref.thread);
   assert.equal(world.shown(ref).at(-1), texts.RESTARTING);
@@ -772,9 +772,9 @@ test("once the install succeeded no process starts before the exit", async (t) =
 
 // ---- `restart`
 
-test("`!pardner restart` says so and asks the daemon to stop once running turns finish", async (t) => {
+test("`/pardner restart` says so and asks the daemon to stop once running turns finish", async (t) => {
   const { world, host } = await updating(t);
-  await world.says("!pardner restart");
+  await world.says("/pardner restart");
   assert.equal(world.inChannel().at(-1), "Restarting pardner once running turns finish.");
   assert.deepEqual(
     host.calls.filter((call) => call === "restart"),
@@ -782,16 +782,16 @@ test("`!pardner restart` says so and asks the daemon to stop once running turns 
   );
 });
 
-test("`!pardner restart` on a daemon no service runs does not stop it", async (t) => {
+test("`/pardner restart` on a daemon no service runs does not stop it", async (t) => {
   const host = new FakeUpdatesHost();
   host.service = false;
   const { world } = await updating(t, host);
-  await world.says("!pardner restart");
+  await world.says("/pardner restart");
   assert.equal(world.inChannel().at(-1), named(texts.UPDATE_NOT_A_SERVICE, PLAIN_NAMES));
   assert.ok(!host.calls.includes("restart"));
 });
 
-test("`!pardner restart` during an install does not cut it", async (t) => {
+test("`/pardner restart` during an install does not cut it", async (t) => {
   const { world, host } = await updating(t);
   const list = await offered(world);
   let release: () => void = () => {};
@@ -800,28 +800,28 @@ test("`!pardner restart` during an install does not cut it", async (t) => {
   });
   const clicking = world.chat.as(OWNER).picks(list.message, VERSION);
   await world.settle();
-  await world.says("!pardner restart");
+  await world.says("/pardner restart");
   assert.equal(world.inChannel().at(-1), "An update to 0.3.1 is already under way.");
   assert.ok(!host.calls.includes("restart"));
   release();
   await clicking;
 });
 
-test("`!pardner restart` while another process updates restarts nothing and says so", async (t) => {
+test("`/pardner restart` while another process updates restarts nothing and says so", async (t) => {
   const { world, host } = await updating(t);
   host.updating = true;
-  await world.says("!pardner restart");
+  await world.says("/pardner restart");
   assert.equal(world.inChannel().at(-1), "An update of pardner is already under way.");
   assert.ok(!host.calls.includes("restart"));
   host.updating = false;
-  await world.says("!pardner restart");
+  await world.says("/pardner restart");
   assert.equal(world.inChannel().at(-1), "Restarting pardner once running turns finish.");
 });
 
-test("`!pardner restart` on a daemon that is stopping says it is restarting", async (t) => {
+test("`/pardner restart` on a daemon that is stopping says it is restarting", async (t) => {
   const { world, host } = await updating(t);
   await world.sessions.drain(AbortSignal.abort());
-  await world.says("!pardner restart");
+  await world.says("/pardner restart");
   assert.equal(world.inChannel().at(-1), texts.RESTARTING);
   assert.ok(!host.calls.includes("restart"));
 });
@@ -829,7 +829,7 @@ test("`!pardner restart` on a daemon that is stopping says it is restarting", as
 // ---- the line told once per version
 
 const AVAILABLE =
-  "pardner 0.3.1 is available (this copy runs 0.3.0) · `!pardner update` installs it";
+  "pardner 0.3.1 is available (this copy runs 0.3.0) · `/pardner update` installs it";
 
 /** Whether `ref` shows a line that tells of a version. */
 function told(world: MessagesWorld, ref: Parameters<MessagesWorld["shown"]>[0]): boolean {
@@ -842,7 +842,7 @@ test("the owner's first message after the daemon learned of a version is told, o
   const first = await world.opened("hello");
   assert.equal(world.state.updateNotice, VERSION);
   await world.says("hello again", first.thread);
-  const other = await world.says("!help");
+  const other = await world.says("/help");
   assert.equal(world.inChannel().filter((line) => line === AVAILABLE).length, 1);
   assert.equal(told(world, first), false, "nor in the thread");
   assert.equal(told(world, other.ref), false, "nor under a message of another thread");
@@ -877,7 +877,7 @@ test("the message is handled as it was, whether the owner was told or not", asyn
 test("a restart of the daemon does not tell him of the same version again", async (t) => {
   const first = await updating(t);
   await first.updates.check();
-  await first.world.says("!help");
+  await first.world.says("/help");
   assert.ok(first.world.inChannel().includes(AVAILABLE));
   assert.equal(first.world.state.updateNotice, VERSION);
   const again = await MessagesWorld.make(t, {
@@ -888,22 +888,22 @@ test("a restart of the daemon does not tell him of the same version again", asyn
   await again.updates?.check();
   // The chat is the same one: the line of the first run is still in the channel.
   const before = again.inChannel().filter((line) => line === AVAILABLE).length;
-  await again.says("!help");
+  await again.says("/help");
   assert.equal(again.inChannel().filter((line) => line === AVAILABLE).length, before);
 });
 
 test("a version newer still is told once more", async (t) => {
   const { world, host, updates } = await updating(t);
   await updates.check();
-  await world.says("!help");
+  await world.says("/help");
   host.newest = { version: "0.3.2" };
   await updates.check();
-  await world.says("!help");
+  await world.says("/help");
   assert.ok(
     world
       .inChannel()
       .includes(
-        "pardner 0.3.2 is available (this copy runs 0.3.0) · `!pardner update` installs it",
+        "pardner 0.3.2 is available (this copy runs 0.3.0) · `/pardner update` installs it",
       ),
   );
   assert.equal(world.state.updateNotice, "0.3.2");
@@ -912,24 +912,24 @@ test("a version newer still is told once more", async (t) => {
 test("nobody is told when the daemon is up to date, has not checked, or cannot update", async (t) => {
   const host = new FakeUpdatesHost();
   const { world, updates } = await updating(t, host);
-  assert.equal(told(world, (await world.says("!help")).ref), false, "before any check");
+  assert.equal(told(world, (await world.says("/help")).ref), false, "before any check");
   host.newest = { version: "0.3.0" };
   await updates.check();
-  assert.equal(told(world, (await world.says("!help")).ref), false, "up to date");
+  assert.equal(told(world, (await world.says("/help")).ref), false, "up to date");
   host.newest = { version: VERSION };
   host.copy = { refusal: { kind: "not-global", folder: "/elsewhere" } };
   await updates.check();
-  assert.equal(told(world, (await world.says("!help")).ref), false, "a copy that updates outside");
+  assert.equal(told(world, (await world.says("/help")).ref), false, "a copy that updates outside");
   assert.equal(world.state.updateNotice, null, "nothing was recorded");
 });
 
 test("asking about pardner is being told: the line is not added to its answer", async (t) => {
   const { world, updates } = await updating(t);
   await updates.check();
-  const asked = await world.says("!pardner");
+  const asked = await world.says("/pardner");
   assert.equal(told(world, asked.ref), false);
   assert.equal(world.state.updateNotice, VERSION);
-  assert.equal(told(world, (await world.says("!help")).ref), false);
+  assert.equal(told(world, (await world.says("/help")).ref), false);
 });
 
 test("a state that cannot be written does not hold the message back", async (t) => {
@@ -1007,10 +1007,10 @@ function readNotice(world: MessagesWorld) {
   return file.restart_notice ?? null;
 }
 
-test("`!pardner restart` records its message in state.json before it asks the stop", async (t) => {
+test("`/pardner restart` records its message in state.json before it asks the stop", async (t) => {
   const { world, host } = await updating(t);
   const seen = recordedAtRestart(world, host);
-  await world.says("!pardner restart");
+  await world.says("/pardner restart");
   const message = world.chat
     .messages(world.channel)
     .find((m) => m.text === texts.UPDATE_RESTART)?.id;
@@ -1020,9 +1020,9 @@ test("`!pardner restart` records its message in state.json before it asks the st
   assert.deepEqual(world.state.restartNotice, expected);
 });
 
-test("two `!pardner restart` at once: one line, one record, one stop; the second is told it is restarting", async (t) => {
+test("two `/pardner restart` at once: one line, one record, one stop; the second is told it is restarting", async (t) => {
   const { world, host } = await updating(t);
-  await Promise.all([world.says("!pardner restart"), world.says("!pardner restart")]);
+  await Promise.all([world.says("/pardner restart"), world.says("/pardner restart")]);
   const shown = world.chat.messages(world.channel).map((m) => m.text);
   assert.equal(shown.filter((text) => text === texts.UPDATE_RESTART).length, 1);
   assert.equal(shown.filter((text) => text === texts.RESTARTING).length, 1);
@@ -1037,10 +1037,10 @@ test("a restart that was refused does not keep the next one from going ahead", a
   const host = new FakeUpdatesHost();
   host.updating = true;
   const { world } = await updating(t, host);
-  await world.says("!pardner restart");
+  await world.says("/pardner restart");
   assert.ok(!host.calls.includes("restart"));
   host.updating = false;
-  await world.says("!pardner restart");
+  await world.says("/pardner restart");
   assert.ok(host.calls.includes("restart"));
 });
 
@@ -1084,7 +1084,7 @@ test("a chat that cannot name the message leaves nothing recorded, and the resta
     "notice",
     async () => null,
   );
-  await world.says("!pardner restart");
+  await world.says("/pardner restart");
   assert.equal(world.state.restartNotice, null);
   assert.ok(host.calls.includes("restart"));
 });
@@ -1094,7 +1094,7 @@ test("a state that cannot be written does not hold the restart back", async (t) 
   t.mock.method(StateStore.prototype, "setRestartNotice", () => {
     throw new Error("disk full");
   });
-  await world.says("!pardner restart");
+  await world.says("/pardner restart");
   assert.ok(host.calls.includes("restart"));
 });
 
@@ -1126,12 +1126,12 @@ test("a restart refused (not a service, another update, a stop under way) record
   const host = new FakeUpdatesHost();
   host.service = false;
   const { world } = await updating(t, host);
-  await world.says("!pardner restart");
+  await world.says("/pardner restart");
   host.service = true;
   host.updating = true;
-  await world.says("!pardner restart");
+  await world.says("/pardner restart");
   host.updating = false;
   await world.sessions.drain(AbortSignal.abort());
-  await world.says("!pardner restart");
+  await world.says("/pardner restart");
   assert.equal(world.state.restartNotice, null);
 });

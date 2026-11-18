@@ -1,5 +1,5 @@
 /**
- * The footer's values as `!status` lists them (`formatStatusFields`): the order they follow, and
+ * The footer's values as `/status` lists them (`formatStatusFields`): the order they follow, and
  * a limit's reset as the time to it from the clock given. The footer's own line, its markup and
  * its separators, are the chat's.
  */

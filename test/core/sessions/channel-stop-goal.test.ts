@@ -1,4 +1,4 @@
-// A channel `!stop` drops the goal once the messages sent before it have run (#251; design
+// A channel `/stop` drops the goal once the messages sent before it have run (#251; design
 // `2026-11-10-251-goal-drop-after-queued-design.md`): a debt raised at the stop's start, paid when
 // the session is idle, which no prompt passes.
 import assert from "node:assert/strict";
@@ -66,7 +66,7 @@ async function busyChannelStop(t: Parameters<typeof AskingWorld.make>[0]) {
   return { agent, world, ref, session };
 }
 
-test("a channel !stop answers at once and clears the goal after the queued turn", async (t) => {
+test("a channel /stop answers at once and clears the goal after the queued turn", async (t) => {
   const { agent, world, ref, session } = await busyChannelStop(t);
   assert.equal(await world.sessions.stopChannel(ref.channel), true);
   assert.deepEqual(agent.clearedAt, [], "no command into a turn that runs");
@@ -103,7 +103,7 @@ test("a message written while the stop still awaits its stops waits for the clea
   await until("idle", () => !session.busy);
 });
 
-test("a channel !stop on an idle session clears the goal before the answer", async (t) => {
+test("a channel /stop on an idle session clears the goal before the answer", async (t) => {
   const agent = new Goals({ promptDuringTurn: true });
   const world = await AskingWorld.make(t, { agent });
   const { ref, session } = world.thread();
@@ -178,16 +178,14 @@ async function commandAfterQueued(t: Parameters<typeof AskingWorld.make>[0], she
   else await until("the command is sent", () => sent(agent).length === 3);
 }
 
-test(
-  "a !!command taken during the queued turn waits for the turn the clear met",
-  POSIX_SHELL,
-  (t) => commandAfterQueued(t, true),
+test("a !command taken during the queued turn waits for the turn the clear met", POSIX_SHELL, (t) =>
+  commandAfterQueued(t, true),
 );
 
 test("an agent command taken during the queued turn waits for the turn the clear met", (t) =>
   commandAfterQueued(t, false));
 
-test("a channel !stop that closes the process for background tasks does not hang the next message", async (t) => {
+test("a channel /stop that closes the process for background tasks does not hang the next message", async (t) => {
   const agent = new Goals({ promptDuringTurn: true });
   const world = await AskingWorld.make(t, { agent });
   const { ref, session } = world.thread();

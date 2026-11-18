@@ -1,5 +1,5 @@
 /**
- * `!pardner` and the update of pardner from the chat: the word that shows the
+ * `/pardner` and the update of pardner from the chat: the word that shows the
  * version that runs and the latest, `update` that offers the latest and `restart`; the click that
  * installs it, from the offer in a channel or from the chat's own page; and the line the owner is
  * told once per version, under his first message after the daemon learned of it.
@@ -12,7 +12,7 @@
 import type { InboundMessage, ListPick } from "../../chat/seam.ts";
 import { isNewer, isVersion } from "../../semver.ts";
 import { errorName } from "../../values.ts";
-import { parseBang } from "../commands.ts";
+import { parseCommand } from "../commands.ts";
 import type {
   InstallOutcome,
   NotUpdatable,
@@ -120,7 +120,7 @@ export function updating(deps: FlowDeps, updates: Updates, talk: Talk): PardnerF
     }
   };
 
-  /** A `!pardner restart` is being answered or has asked the stop. */
+  /** A `/pardner restart` is being answered or has asked the stop. */
   let restartAsked = false;
 
   /** `install` that never throws: a host that fails to run npm at all is an install that failed. */
@@ -332,7 +332,7 @@ export function updating(deps: FlowDeps, updates: Updates, talk: Talk): PardnerF
         await talk.inChannel(channel, texts.RESTARTING);
         return;
       }
-      // (sync) Claimed before the first await: a second `!pardner restart` (a double send, an
+      // (sync) Claimed before the first await: a second `/pardner restart` (a double send, an
       // event delivered twice) finds it, so the stop is asked and recorded once.
       restartAsked = true;
       let asked = false;
@@ -371,7 +371,7 @@ export function updating(deps: FlowDeps, updates: Updates, talk: Talk): PardnerF
       // Asking about pardner is being told; the line would repeat the answer.
       const typed = message.literal
         ? null
-        : (parseBang(message.text, message.bare) ?? parseBang(message.plain, message.bare));
+        : (parseCommand(message.text, message.bare) ?? parseCommand(message.plain, message.bare));
       if (typed?.kind === "pardner") return;
       const text = fill(texts.UPDATE_NOTICE, { latest: version, installed: updates.installed });
       // A message of the channel opens a thread that has no reply yet, and a chat may show a

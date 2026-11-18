@@ -1,5 +1,5 @@
 /**
- * `!diff`: the files a session's repository has changed since HEAD, as the terminal's `/diff`
+ * `/diff`: the files a session's repository has changed since HEAD, as the terminal's `/diff`
  * lists them (its `Current` view), each with a control that shares that file's unified diff into
  * the thread. The core decides what is listed and what a pick does; the chat draws the list and
  * shares the bytes (`ThreadChat.offer`, `ThreadChat.share`).
@@ -75,7 +75,7 @@ export function diffFlow(deps: FlowDeps, talk: Talk): DiffFlow {
     return { refusal: fill(named(texts.DIFF_UNTRUSTED, names), { command }) };
   }
 
-  /** The session's thread, with the two members `!diff` needs, or null when the chat lacks them. */
+  /** The session's thread, with the two members `/diff` needs, or null when the chat lacks them. */
   function chatOf(ref: ThreadRef) {
     const thread = talk.thread(ref);
     const { offer, share, fitsList, unshare } = thread;
@@ -365,7 +365,7 @@ export function diffFlow(deps: FlowDeps, talk: Talk): DiffFlow {
     const entry = entries.get(key) ?? { file: null, drawn: true };
     entries.set(key, entry);
     const stored = state.thread(ref.channel, ref.thread);
-    // A list made for a session the thread no longer holds (a `!stop` and a new start can
+    // A list made for a session the thread no longer holds (a `/stop` and a new start can
     // replace it) is refused: its rows name files of another conversation's turns.
     if (stored === null || stored.sessionId !== pick.session) {
       await release(ref, entry);

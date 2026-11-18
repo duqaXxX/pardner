@@ -7,7 +7,7 @@
  * patterns (code.claude.com/docs/en/settings-reference, read 2026-10-05). Everywhere else the
  * folder is walked: regular files only, no symlinked folder entered, no `.git` entered.
  *
- * Every git command of `!open` (here and in `changed.ts`) is plumbing or `status` under
+ * Every git command of `/open` (here and in `changed.ts`) is plumbing or `status` under
  * `--no-optional-locks`, because `git diff` refreshes and rewrites the index under `index.lock`
  * (see `changesOf` in the footer), and a lock left by a killed command would stop the owner's own
  * `git add` and commit. Measured on git 2.54.0 (2026-10-05, and 2026-10-06 for the reflog
@@ -101,7 +101,7 @@ export function scoped(strip: string): string[] {
   return strip ? ["--", strip] : [];
 }
 
-/** The folders under `folder`, as `!bind` lists them, that hold a `.git` entry. */
+/** The folders under `folder`, as `/bind` lists them, that hold a `.git` entry. */
 async function repositoryFolders(folder: string): Promise<string[]> {
   let below: string[];
   try {
@@ -127,7 +127,7 @@ async function repositoryFolders(folder: string): Promise<string[]> {
 /**
  * The repositories the daemon's git may run in for a session started in `folder`: the one holding
  * the folder when `lookup` finds it usable, else the usable ones found at most two levels below
- * it (the depth `!bind` lists folders to), none of them inside another.
+ * it (the depth `/bind` lists folders to), none of them inside another.
  */
 export async function repositoriesOf(
   folder: string,
@@ -240,7 +240,7 @@ export interface FolderFilesOptions {
 }
 
 /**
- * The files `!open` can name under `folder`, as paths from it: from git inside a repository of
+ * The files `/open` can name under `folder`, as paths from it: from git inside a repository of
  * `repositories`, the folder's own disk anywhere else. Within `budget` seconds: what is found by
  * then is returned, a repository whose listing is not done adding nothing. The flag says nothing
  * was left out: no walk or git listing ran out of time or failed.
@@ -300,7 +300,7 @@ export interface Listing {
  * What a search for `words` found: the files that exist, at most the limit asked, ranked; `count`
  * is how many there are (the matches by name once the check stopped at the limit); `complete` is
  * false when the listing it came from was cut or failed. A search over an incomplete listing says
- * so to the owner: `!open <words>` answers `OPEN_NO_MATCH_PARTIAL` instead of "no match", posts the
+ * so to the owner: `/open <words>` answers `OPEN_NO_MATCH_PARTIAL` instead of "no match", posts the
  * matches with `OPEN_PARTIAL` instead of opening a single match on its own, and the chat adds the
  * same line under its rows.
  */

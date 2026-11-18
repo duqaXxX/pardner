@@ -338,7 +338,7 @@ test("a turn that races a plain close while its sink is made gets session closed
 });
 
 test("a direct sessiongone call leaves no idle timer task", async (t) => {
-  // `!status` (or `!bypass`) can hit SessionGone with no worker ever created: the idle-close
+  // `/status` (or `/bypass`) can hit SessionGone with no worker ever created: the idle-close
   // timer armed when the session was handed out must not be left running past the close.
   const h = memoryHarnessFor(t)({ startError: gone() });
   const session = h.session(); // touched on hand-out: its idle-close timer is armed already
@@ -351,7 +351,7 @@ test("a direct sessiongone call leaves no idle timer task", async (t) => {
 });
 
 test("a direct gone call rescues the worker s taken turn", async (t) => {
-  // A direct call (`!status`) found the session gone while the worker, having taken a turn,
+  // A direct call (`/status`) found the session gone while the worker, having taken a turn,
   // waited on the same connect lock: cancelling the worker (to end it) lost that turn:
   // cancelled in its wait, it never reached its own catch, so the taken turn was never failed
   // and the reply stayed "writing" forever.
@@ -2555,7 +2555,7 @@ test("bypass from the folder s own settings shows and turns off", async (t) => {
   assert.equal(lastFooter(h)?.bypass, false);
 });
 
-test("!plan off in a folder whose settings start in plan returns to the default mode", async (t) => {
+test("/plan off in a folder whose settings start in plan returns to the default mode", async (t) => {
   const info = infoOf({ commands: [], current_permission_mode: "plan" });
   const h = memoryHarnessFor(t)({ turns: [sdkMessages("tools")], info });
   const session = h.session();
@@ -2623,7 +2623,7 @@ test("a thread claude code started in auto mode says so in status only", async (
   const session = h.session();
   await (await session.submit("list the files")).done.wait();
   assert.deepEqual(h.clients[0]?.modes, []); // the daemon set no mode of its own
-  // The footer marks bypass alone: with it off, the mode is on `!status`.
+  // The footer marks bypass alone: with it off, the mode is on `/status`.
   await h.idle(); // the footer is drawn once the session has ended
   const footer = lastFooter(h);
   assert.ok(footer !== undefined && !footer.bypass && !footer.planning);
@@ -2829,7 +2829,7 @@ test("a tool s hook moves the branch when no stop hook runs", async (t) => {
 
 test("the footer leaves out the branch of a repository not trusted", async (t) => {
   // The session went into a repo the owner never trusted in Claude Code: no git runs there,
-  // and neither the footer nor `!status` says anything in its place.
+  // and neither the footer nor `/status` says anything in its place.
   const make = memoryHarnessFor(t);
   const repo = repoUnder(make.tmpPath);
   const moved = { ...(sdkJson("stop-hook") as JsonObject), cwd: repo };
@@ -2988,7 +2988,7 @@ test("status during a turn shows the model and the context", async (t) => {
 });
 
 test("status shows a running task beside the list the waiting reply holds", async (t) => {
-  // The reply waits for the task and shows it as the list; `!status` says it in its own words.
+  // The reply waits for the task and shows it as the list; `/status` says it in its own words.
   const [first] = splitBackground();
   const h = memoryHarnessFor(t)({ turns: [first] });
   const session = h.session();
@@ -3564,7 +3564,7 @@ test("a stop waits only a while for a notification that never comes", async (t) 
 
 test("a stop does not wait for a task its running turn starts afterwards", async (t) => {
   // A session that ran `launchctl kill TERM` then waited in the background for the new process
-  // held the restart until `!stop` or the limit (three times on 2026-09-30). The
+  // held the restart until `/stop` or the limit (three times on 2026-09-30). The
   // signal names no sender; the one that ordered it has a turn running when it arrives.
   const [first] = splitBackground();
   const [before, after] = splitAtTaskStart(first);
@@ -3588,7 +3588,7 @@ test("a stop does not wait for a task its running turn starts afterwards", async
   const stored = thread(h);
   assert.ok(stored.openReplies.length === 0 && stored.status === null);
   // Its turn ended well: the task the shutdown ends is its own wait, not work cut short (decided
-  // 2026-10-01: ✅, as `!stop` showed before this change).
+  // 2026-10-01: ✅, as `/stop` showed before this change).
   assert.equal(statuses(h).at(-1), "done");
   assert.ok(!statuses(h).includes("error"));
 });
@@ -3614,7 +3614,7 @@ test("a stop still waits for a task the running turn started before it", async (
   await drain.promise;
 });
 
-test("a stop held by a background task says so and bang stop ends it", async (t) => {
+test("a stop held by a background task says so and `/stop` ends it", async (t) => {
   // A task that never ends (a watcher) held a restart for the whole limit (2026-09-27).
   const [first] = splitBackground();
   const h = memoryHarnessFor(t, {}, { activityLine: true })({ turns: [first] });
@@ -3692,7 +3692,7 @@ test("a stop whose interrupt is refused still stops the background tasks", async
 });
 
 test("a stop of a background task ends the reply like any other end", async (t) => {
-  // `!stop` (S2): the task's own end lets the reply's stream stop, as a normal end does, and the
+  // `/stop` (S2): the task's own end lets the reply's stream stop, as a normal end does, and the
   // stop has ended the session: the footer follows by an edit. Nothing is posted, and the ✅ is
   // the stop's own.
   const [first] = splitBackground();
@@ -3710,7 +3710,7 @@ test("a stop of a background task ends the reply like any other end", async (t) 
 });
 
 test("a stopped report turn ends like any other end", async (t) => {
-  // A report turn `!stop` cuts short ends like a stopped owner turn does: its reply, at rest
+  // A report turn `/stop` cuts short ends like a stopped owner turn does: its reply, at rest
   // since the first turn ended, ends with the footer under its ending, once.
   const [first, notice, injected] = splitBackground();
   const partial = injected.filter((item) => !isResult(item));
@@ -3733,7 +3733,7 @@ test("a stopped report turn ends like any other end", async (t) => {
   assert.equal(footers(h).filter(Boolean).length, 1);
 });
 
-test("the next prompt after bang stop does not wait for a report", async (t) => {
+test("the next prompt after `/stop` does not wait for a report", async (t) => {
   // Measured 2026-09-27 on Claude Code 2.1.283: the stopped task's notification stays queued
   // and no turn reports it; the owner's next prompt waited INJECTED_TURN_WAIT (30 s). Since
   // then the stop closes the process, and the prompt goes to the one that resumes it.
@@ -3799,7 +3799,7 @@ test("a stop after a task's own end and before its notification closes the proce
 
 test("a report turn that starts while a stop waits to close the process is interrupted", async (t) => {
   // the reader goes on while `endWithProcess` waits for the lock (held here as a
-  // `!status` read would hold it). A turn that starts then is a running turn: the stop
+  // `/status` read would hold it). A turn that starts then is a running turn: the stop
   // interrupts it, and the thread is not left with a turn no process will end.
   const [first, notice, injected] = splitBackground();
   const partial = injected.filter((item) => !isResult(item));
@@ -3825,7 +3825,7 @@ test("a report turn that starts while a stop waits to close the process is inter
   assert.deepEqual(h.clients[0]?.queries, ["start it", "next"]);
 });
 
-test("the next prompt after bang stop of a running turn does not wait for a report", async (t) => {
+test("the next prompt after `/stop` of a running turn does not wait for a report", async (t) => {
   // Measured 2026-09-27 on Claude Code 2.1.283: the task a stop ended with `stopTask` leaves its
   // notification queued and no turn reports it; the next prompt waited INJECTED_TURN_WAIT. A stop
   // that finds a turn running still ends its tasks that way, and still waits for no report.
@@ -3891,7 +3891,7 @@ function finishing(call: Promise<unknown>): { readonly done: () => boolean } {
 }
 
 test("a close while a word starts the client leaves no process", async (t) => {
-  // `!help` or `!status` starts the client in its own task, outside the prompt queue; the
+  // `/help` or `/status` starts the client in its own task, outside the prompt queue; the
   // trigger for a concurrent close is now closeAll at shutdown (and, later, an idle close).
   const gate = new AsyncEvent();
   const h = memoryHarnessFor(t)({ startGate: gate });
@@ -4029,7 +4029,7 @@ test("setting effort back to auto stores the default", async (t) => {
 });
 
 test("the footer shows a stored effort at once after a reconnect", async (t) => {
-  // A stored `!effort` is sent to Claude Code on every reconnect; the footer must not show
+  // A stored `/effort` is sent to Claude Code on every reconnect; the footer must not show
   // "unknown" for the level the daemon itself just asked for, before any turn reports another.
   const h = memoryHarnessFor(t)({});
   h.session();
@@ -4055,7 +4055,7 @@ test("a goal set before an idle close is still known to the session that replace
   const set = event({ type: "goal_changed", goal: { state: "set", condition } });
   const h = memoryHarnessFor(t)({ turns: [[set, ...sdkMessages("tools")]] });
   const session = h.session();
-  await (await session.submit("!goal the files a1.txt to a20.txt exist")).done.wait();
+  await (await session.submit("/goal the files a1.txt to a20.txt exist")).done.wait();
   assert.equal(session.goal, condition);
   await idleDelayPasses(h, session);
   await h.until(() => session.closed);
@@ -4330,7 +4330,7 @@ test("submit on a closed session raises session closed", async (t) => {
 });
 
 test("ensure connected arms the idle close too", async (t) => {
-  // A daemon word (`!status`, `!help`, `!bypass`) connects with no turn ever submitted.
+  // A daemon word (`/status`, `/help`, `/bypass`) connects with no turn ever submitted.
   const h = memoryHarnessFor(t)({});
   const session = h.session();
   await session.ensureConnected();
@@ -4840,7 +4840,7 @@ test("work drain path leaves hourglass", async (t) => {
 });
 
 test("close leaves no list when an owner message sits below the reply that held it", async (t) => {
-  // `!status` under the reply that holds the list: the owner's message seals the holder, and
+  // `/status` under the reply that holds the list: the owner's message seals the holder, and
   // taking the list off it must still be written before the process ends.
   const [first] = splitBackground();
   const h = memoryHarnessFor(t)({ turns: [first, sdkMessages("tools")] });

@@ -1,7 +1,7 @@
 /**
  * Step 9 of the scenario the memory chat carries: the update of pardner from the chat, through the real `run`. The machine is `FakeMachine`: npm answers from fields and writes
  * the installed version into a copy in the test's folder, a service manager reports pids and
- * counts restarts. The owner types `!pardner update`, presses the offer's control, the install
+ * counts restarts. The owner types `/pardner update`, presses the offer's control, the install
  * runs while a turn goes on, and the daemon stops by itself once the turn ends: `run` returns 0
  * and the service (here: nothing) would start it again.
  */
@@ -56,7 +56,7 @@ test("the check at start and the click: install while a turn goes on, then the s
   const thread = await world.open("first");
   await world.until(() => world.shown(thread).length === 3, "the reply under way");
 
-  await world.owner.says(world.channel, "!pardner update");
+  await world.owner.says(world.channel, "/pardner update");
   await world.settle();
   const [list] = world.chat.lists();
   assert.ok(list, "the offer is posted");
@@ -104,7 +104,7 @@ test("a daemon its service does not run is not offered an update", async (t) => 
   service.pid = process.pid + 1; // the service runs another process
   world.machine.services.set("", service);
   await world.start();
-  await world.owner.says(world.channel, "!pardner update");
+  await world.owner.says(world.channel, "/pardner update");
   await world.settle();
   assert.deepEqual(world.chat.lists(), []);
   assert.ok(world.chat.texts(world.channel).at(-1)?.includes("not running as a service"));
@@ -115,7 +115,7 @@ test("a daemon with no service manager at all is not offered one either", async 
   const world = World.make(t);
   world.machine.newest = NEWER;
   await world.start();
-  await world.owner.says(world.channel, "!pardner update");
+  await world.owner.says(world.channel, "/pardner update");
   await world.settle();
   assert.deepEqual(world.chat.lists(), []);
   await world.finish();
@@ -147,7 +147,7 @@ test("an install that leaves another version changes nothing and the daemon keep
   world.machine.leaves = "0.0.1";
   supervised(world);
   await world.start();
-  await world.owner.says(world.channel, "!pardner update");
+  await world.owner.says(world.channel, "/pardner update");
   await world.settle();
   const [list] = world.chat.lists();
   assert.ok(list);
@@ -182,11 +182,11 @@ function clock(seconds: number): string {
   return new Date(seconds * 1000).toTimeString().slice(0, 5);
 }
 
-test("`!pardner restart`: the next start rewrites the line, in place and once", async (t) => {
+test("`/pardner restart`: the next start rewrites the line, in place and once", async (t) => {
   const world = World.make(t);
   supervised(world);
   await world.start();
-  await world.owner.says(world.channel, "!pardner restart");
+  await world.owner.says(world.channel, "/pardner restart");
   await world.settle();
   assert.deepEqual(world.chat.texts(world.channel).slice(-1), [texts.UPDATE_RESTART]);
   const [line] = world.chat.messages(world.channel).slice(-1);
@@ -236,7 +236,7 @@ test("a restart typed as the chat connects keeps its line and its record", async
             return typeof member === "function" ? member.bind(target) : member;
           return async (...args: Parameters<ChatProvider["start"]>) => {
             await target.start(...args);
-            await world.owner.says(world.channel, "!pardner restart");
+            await world.owner.says(world.channel, "/pardner restart");
           };
         },
       });
@@ -261,7 +261,7 @@ test("an update from the offer that the next start does not run says it did not 
   world.machine.newest = NEWER;
   supervised(world);
   await world.start();
-  await world.owner.says(world.channel, "!pardner update");
+  await world.owner.says(world.channel, "/pardner update");
   await world.settle();
   const [list] = world.chat.lists();
   assert.ok(list);

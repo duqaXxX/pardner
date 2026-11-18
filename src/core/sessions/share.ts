@@ -1,6 +1,6 @@
 /**
  * The model's request to share a file of the session's folder into its thread (`DaemonActions.share`):
- * the same rule as `!open`, answered as a line for the model instead of a message to the owner.
+ * the same rule as `/open`, answered as a line for the model instead of a message to the owner.
  */
 
 import { basename, isAbsolute, sep } from "node:path";
@@ -60,7 +60,7 @@ export async function shareFile(
   if (content.length === 0) return fill(SHARE_EMPTY, { path });
   if (signal.aborted) return stopped;
   // From the real folder, never the absolute path the model may have sent; with `/` on every
-  // system, as `!open` titles it.
+  // system, as `/open` titles it.
   const inside = relativeTo(await realpathLoose(folder), await realpathLoose(target));
   const title = titleOf(inside === null ? path : inside.split(sep).join("/"));
   try {

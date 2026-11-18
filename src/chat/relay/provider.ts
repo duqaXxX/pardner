@@ -254,7 +254,7 @@ export class RelayProvider implements ChatProvider {
       },
       say: text("say"),
       tell: text("tell"),
-      offer: async () => {}, // `!bind` alone offers folders: the owner types the folder (section 5)
+      offer: async () => {}, // `/bind` alone offers folders: the owner types the folder (section 5)
       withdraw: async () => false,
       rewrite: async () => {},
     };

@@ -151,7 +151,7 @@ test("the trust record is read again only when it changes", async () => {
   trust(home, [folder]);
   const parses = countRecordParses();
   assert.ok((await workspaceTrusted(folder, home)) && (await workspaceTrusted(folder, home)));
-  assert.equal(parses(), 1); // a `!bind` list checks many folders against one record
+  assert.equal(parses(), 1); // a `/bind` list checks many folders against one record
   // The one case that goes from trusted to revoked: a verdict kept past a change of the record
   // would start a session in a folder the owner no longer trusts.
   trust(home, [folder], false);
@@ -512,7 +512,7 @@ const NO_PATH: [string, (folder: string) => void][] = [
 
 for (const [id, plant] of NO_PATH) {
   test(`metadata that names no path leaves the folder untrusted [${id}]`, POSIX, async () => {
-    // One such folder under the allowed root must not take the whole `!bind` list down with it.
+    // One such folder under the allowed root must not take the whole `/bind` list down with it.
     const app = makeApp();
     const folder = join(app, "..", "planted");
     mkdirSync(folder);
@@ -652,7 +652,7 @@ for (const depth of [1, 2]) {
 }
 
 test("a repository is still to trust until its key is trusted, and a plain folder is none", async () => {
-  // what `!bind` and `!status` name, so that the owner trusts it in the terminal.
+  // what `/bind` and `/status` name, so that the owner trusts it in the terminal.
   const repo = gitInit(join(tmp, "work", "app"));
   const found = await untrustedRepository(join(repo), home);
   assert.ok(found !== null && found.key === realpathSync(repo));

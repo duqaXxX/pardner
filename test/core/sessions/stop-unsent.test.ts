@@ -83,7 +83,7 @@ test("a turn taken while the process starts is dropped: null, the note, the root
   assert.equal(session.idle, true, "the session can close for idle");
 });
 
-test("a !!command taken while the process starts never runs", async (t) => {
+test("a !command taken while the process starts never runs", async (t) => {
   const agent = new GatedAgent({ shell: {} });
   agent.gate = new AsyncEvent();
   const world = await AskingWorld.make(t, { agent });
@@ -104,7 +104,7 @@ test("a !!command taken while the process starts never runs", async (t) => {
 const POSIX_ONLY = { skip: process.platform === "win32" && "a real Bash", timeout: 20_000 };
 
 test(
-  "a !!command that ran and waits to be sent is shown with the stop, never sent",
+  "a !command that ran and waits to be sent is shown with the stop, never sent",
   POSIX_ONLY,
   async (t) => {
     const agent = new GatedAgent({ shell: {} });

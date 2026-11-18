@@ -100,7 +100,7 @@ export function loadedContext(usage: unknown): LoadedContext {
   };
 }
 
-/** A session the SDK lists, as a row of `!resume`. */
+/** A session the SDK lists, as a row of `/resume`. */
 export function listedSession(session: SDKSessionInfo): ListedSession {
   return {
     id: session.sessionId,

@@ -50,7 +50,7 @@ export interface FlowDeps {
   readonly names: Names;
   /** The folder sessions may start under. */
   readonly allowedRoot: string;
-  /** The instance lets `!!` run the owner's shell commands (`PARDNER_SHELL`). */
+  /** The instance lets `!` run the owner's shell commands (`PARDNER_SHELL`). */
   readonly shellCommands: boolean;
   /**
    * Aborts when the daemon stops. A flow still in flight then does nothing at its next step: the
@@ -61,7 +61,7 @@ export interface FlowDeps {
   readonly now: () => number;
   /** The waits of a flow that looks again after a while; the system's when absent. */
   readonly clock?: Clock;
-  /** The update of the daemon; absent when the host gave it no way to update itself (`!pardner`). */
+  /** The update of the daemon; absent when the host gave it no way to update itself (`/pardner`). */
   readonly updates?: Updates;
 }
 
@@ -107,7 +107,7 @@ export class Talk {
   }
 
   /**
-   * A reference the owner reads (`!help`, `!guide`, `!status`), at full size: in the thread, or
+   * A reference the owner reads (`/help`, `/guide`, `/status`), at full size: in the thread, or
    * in the channel when `thread` is null.
    */
   async say(
@@ -272,7 +272,7 @@ export class Talk {
       lines.push(fill(texts.RESTART_WAITS_ELSEWHERE, { count: every.length - named_.length }));
     }
     if (every.some(([, hold]) => hold !== texts.RESTART_HOLD_REPORT)) {
-      // A thread that only waits for a task's report ends by itself: `!stop` stops nothing
+      // A thread that only waits for a task's report ends by itself: `/stop` stops nothing
       // there, so the line is left out when no other thread holds the stop.
       lines.push(texts.RESTART_WAIT_STOP);
     }
@@ -281,7 +281,7 @@ export class Talk {
 
   /**
    * Tell the owner their message was not taken because the daemon is stopping, and which
-   * threads the stop waits for: only they can answer or `!stop` those.
+   * threads the stop waits for: only they can answer or `/stop` those.
    */
   async refuseRestarting(ref: ThreadRef): Promise<void> {
     const waits = await this.restartWaits();

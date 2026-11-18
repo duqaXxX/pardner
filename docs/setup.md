@@ -246,9 +246,9 @@ The `RELAY_*` variables are the relay chat's; the others belong to the daemon.
 | `RELAY_ADDRESS` | the relay's address as `host:port` |
 | `RELAY_KEY` | the relay's public key, 130 hex digits |
 | `RELAY_OWNER` | your person id, 64 hex digits; the setup pairs the bot with it and prints the string your device adds |
-| `ALLOWED_ROOT` | the directory `!bind` accepts paths under, for example `~/code` |
+| `ALLOWED_ROOT` | the directory `/bind` accepts paths under, for example `~/code` |
 | `PARDNER_AGENT` | optional: the agent pardner drives; `claude` when absent, the only one this release has |
-| `PARDNER_SHELL` | optional: `on` or `off`, whether `!!<command>` runs your shell commands; `on` when absent |
+| `PARDNER_SHELL` | optional: `on` or `off`, whether `!<command>` runs your shell commands; `on` when absent |
 
 `PARDNER_AGENT` can be set or left out: a file without it works as one with `claude`. A value
 pardner does not know stops the start, and the message lists the valid ones. A variable that
@@ -286,12 +286,12 @@ the value comes from pardner's own environment and not from `.env`, the name is 
 file leaves it out, the variable in pardner's own environment applies, and when that is absent
 too, Claude Code's usual `~/.claude` and `~/.claude.json`.
 
-`PARDNER_SHELL=off` turns `!!<command>` off for the instance: the word then answers ``Shell
-commands are turned off for this instance (`PARDNER_SHELL`).`` and `!help` and `!guide` leave it
+`PARDNER_SHELL=off` turns `!<command>` off for the instance: the word then answers ``Shell
+commands are turned off for this instance (`PARDNER_SHELL`).`` and `/help` and `/guide` leave it
 out. Any value other than `on` or `off`, in any case, stops the start with `PARDNER_SHELL must
 be on or off; it is "<value>"`, so a mistyped `off` never leaves the commands on.
 
-`ALLOWED_ROOT` guards against a typo such as `!bind /`. It is not a security boundary:
+`ALLOWED_ROOT` guards against a typo such as `/bind /`. It is not a security boundary:
 Claude Code can read and run outside its working directory once you approve it.
 
 How the file is read:
@@ -488,11 +488,11 @@ What a restart waits for, and what each way of stopping does, is under
 
 ### Bind a folder and send the first message
 
-8. A channel is bound to a project folder with `!bind <folder>`, given relative to
-   `ALLOWED_ROOT` (`!bind my-project`) and trusted in step 5. The folder must already exist
+8. A channel is bound to a project folder with `/bind <folder>`, given relative to
+   `ALLOWED_ROOT` (`/bind my-project`) and trusted in step 5. The folder must already exist
    under `ALLOWED_ROOT`: for one that does not, the answer starts with the path you typed and
    says why (`does not exist`, `is a file, not a folder`, `is outside`). For one that does, the
-   answer starts `Bound this channel to`. A message sent before any `!bind` starts nothing and is
+   answer starts `Bound this channel to`. A message sent before any `/bind` starts nothing and is
    answered `This channel is not bound to a folder yet`.
 
 The relay chat is in development and no app reads its messages yet, so the first message cannot be
@@ -510,7 +510,7 @@ The bot obeys one person, and the rest of this list protects what that person ow
 - A relay that was put back from an older copy, or that is at fault, stops the bot from dialing
   (see [relay-provider.md](relay-provider.md)): recreate the relay, move the instance's `.env`
   away and run setup again.
-- `!!<command>` runs a shell command on this Mac from the chat, after you confirm, outside
+- `!<command>` runs a shell command on this Mac from the chat, after you confirm, outside
   Claude Code's permission rules and its sandbox, as the terminal's `!` does. The confirmation
   passes the same owner check as the message, so it guards against your own mistakes and not
   against someone holding your device. `PARDNER_SHELL=off` turns it off for the instance.
@@ -519,7 +519,7 @@ The bot obeys one person, and the rest of this list protects what that person ow
 - With Chrome enabled by default in Claude Code, a session from the chat acts in your browser with
   your sign-ins, and a thread in bypass may do so without asking. Leave it off in `/chrome` if
   you do not want that reachable from the chat.
-- The footer, `!status`, `!open` and `!diff` run git only in a repository you trusted in Claude Code by
+- The footer, `/status`, `/open` and `/diff` run git only in a repository you trusted in Claude Code by
   itself, since a repository's config can name filters git would run outside the approval prompt.
   Accept the dialog only for a repository whose config you know ([How trust applies to
   git](#how-trust-applies-to-git)).
@@ -731,7 +731,7 @@ That instance then reads the settings of `~/.claude-work`, not those of `~/.clau
 `CLAUDE.md`, skills, hooks, MCP servers and permission rules are the other folder's, and have to
 be set there. Its sessions are written there as well, so in a terminal `claude --resume <id>`
 finds them only with the same variable: `CLAUDE_CONFIG_DIR=~/.claude-work claude --resume <id>`.
-The command `!status` prints carries it: `cd <folder> && CLAUDE_CONFIG_DIR=<folder of the login>
+The command `/status` prints carries it: `cd <folder> && CLAUDE_CONFIG_DIR=<folder of the login>
 claude --resume <session id>`, the login's folder quoted for the shell as the
 project folder is. The default instance, and any instance whose `.env` does not set it, keep using
 `~/.claude`, and its line is the one shown in "Continuing a session in the terminal".
@@ -758,7 +758,7 @@ it was.
 ### Instances that share a login and a folder
 
 Two instances that use the same Claude Code login and are bound to the same folder list each
-other's sessions in `!resume`, since Claude Code keeps the sessions of a folder in one place.
+other's sessions in `/resume`, since Claude Code keeps the sessions of a folder in one place.
 Resuming a session that another process has open gives two branches of one transcript, as it does
 with two terminals. Keep the instances' folders apart, or resume only sessions of the instance you
 are in.
@@ -767,7 +767,7 @@ are in.
 
 A message the owner sends in a bound channel opens a new thread and starts a session there; a
 reply inside that thread continues the same session, even days later. Each thread keeps the folder
-it was opened in: `!bind` only changes where the *next* thread starts. A thread's Claude Code
+it was opened in: `/bind` only changes where the *next* thread starts. A thread's Claude Code
 process closes on its own after an hour with nothing to do; the next message sent to it resumes
 the session, as `claude --resume <id>` would. How a message reaches the daemon, and how the chat
 shows a reply, are the chat's own: the relay chat's are in
@@ -778,18 +778,18 @@ shows a reply, are the chat's own: the relay chat's are in
 A thread's session and the terminal share one session id, so you can move between them and back
 as often as you like:
 
-1. In the thread, `!status` gives the command that opens the session in the terminal. During a
-   turn, `!terminal` gives it too, and takes the running turn with it.
+1. In the thread, `/status` gives the command that opens the session in the terminal. During a
+   turn, `/terminal` gives it too, and takes the running turn with it.
 2. In the terminal, run it and work there. When you are done, type `/exit`.
 3. Back in the thread, write as usual. What you did in the terminal shows first, then the reply,
    which knows it.
 
-A session you started in the terminal comes to the chat the other way, with `!resume` in the channel.
+A session you started in the terminal comes to the chat the other way, with `/resume` in the channel.
 
 Claude Code leaves a session created through the Agent SDK out of the terminal's session picker
 and out of `claude --continue`; it resumes one only by its id
 ([sessions reference](https://code.claude.com/docs/en/sessions)). Every session started from
-the chat is such a session. `!status`, typed in the session's thread, shows the command to run:
+the chat is such a session. `/status`, typed in the session's thread, shows the command to run:
 
 ```
 Terminal: `cd <folder> && claude --resume <session id>`
@@ -810,10 +810,10 @@ processes hold it open (`claude agents --json`, run with the instance's `CLAUDE_
 - A terminal open and idle: pardner asks once per terminal process (the answer is kept in `state.json`, so a restart of pardner or an idle close does not ask again; the next answer replaces it, a new session id clears it, and it goes with the thread), `⚠️ This session is also open in a
   terminal. If you send this here, that terminal will not see it: before writing there, close it
   and run <command> again.`, with a choice to send here or to cancel. The question becomes `Sent here.`
-  or `Not sent.` A `!stop` sent while either is shown removes it.
+  or `Not sent.` A `/stop` sent while either is shown removes it.
 - The turns the terminal wrote since the thread's last message come first, one message each:
   `🖥 In the terminal:`, your prompt as a quote, then Claude's last reply of that turn. A turn
-  `!terminal` moved, which the terminal went on with by itself, comes first as
+  `/terminal` moved, which the terminal went on with by itself, comes first as
   `🖥 In the terminal, the turn went on:` with its last reply, or as
   `🖥 In the terminal, the turn went on, and you interrupted it.` when you stopped it there. The
   session's process is then started again, so that it reads them.
@@ -833,7 +833,7 @@ A terminal left open does not read what you write in the chat: close it and run 
 before writing there. `/resume <session id>` inside it does not reload a session started from
 the chat, which the picker does not list.
 
-`!terminal`, sent in the thread, moves the session to the terminal and answers with the command:
+`/terminal`, sent in the thread, moves the session to the terminal and answers with the command:
 
 - During a turn, the turn is cut there without an interrupt and continues in the terminal by
   itself: the command adds `CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1`, the command that was running
@@ -841,12 +841,12 @@ the chat, which the picker does not list.
   again, and the reply ends with `Moved to the terminal, which continues this turn.`
 - With no turn running, the thread's process is closed and the answer is `Continue in the
   terminal with:` and the plain command.
-- Background work running in the thread stops with the process, so `!terminal` first asks
+- Background work running in the thread stops with the process, so `/terminal` first asks
   `⚠️ Moving to the terminal stops what still runs here: <tasks>.` with a choice to stop them and move, or to cancel (`Not moved.`). Opened in the terminal, the session then says
   `Background shell command didn't finish before the previous session ended`: Claude Code's own
   line, since a background command does not move from one process to another.
 
-While a turn or background work runs, `!status` says under the command that writing in the
+While a turn or background work runs, `/status` says under the command that writing in the
 terminal now splits the session.
 
 The line shows as soon as the thread has a session id, which Claude Code reports when the first
@@ -856,7 +856,7 @@ folder (Claude Code 2.1.223 or later); the `cd` makes it work in the thread's fo
 
 ### Copying a session into a new thread
 
-`!fork <prompt>`, sent in a thread, copies its session into a new thread of the same channel, as
+`/fork <prompt>`, sent in a thread, copies its session into a new thread of the same channel, as
 the terminal's `/fork` copies a session into a new one: the copy holds the whole conversation,
 runs the same model, effort and bypass, and starts on the prompt, while the thread you sent it
 from goes on as it was. Use it when a session finds a problem that is not its task.
@@ -868,79 +868,83 @@ from goes on as it was. Use it when a session finds a problem that is not its ta
   as a quote and the start of the final reply, each cut at 300 characters, with the rest left in
   the original's thread, and `(stopped)` under a turn you interrupted. Commands such as `/model` are not turns and are skipped. Nothing is posted when the original has no turn yet or its record cannot
   be read.
-- With no prompt, `!fork` opens the new thread and the copy waits for your first message there. No
-  process runs for it until then, and its first message in the thread names it: the `!resume` list
-  shows that message, not the original's title with `(fork)` after it. A command, a `!!command` or a
+- With no prompt, `/fork` opens the new thread and the copy waits for your first message there. No
+  process runs for it until then, and its first message in the thread names it: the `/resume` list
+  shows that message, not the original's title with `(fork)` after it. A command, a `!command` or a
   message with only files does not name it; the first message with text after them does. The
   thread's first message shows no status until the copy's first turn. When the original has no
   title, the link back reads `the original thread`.
 - Sent while a turn runs, it waits for the turn to end, so the copy holds the whole conversation.
-- A thread that works in an earlier folder of the channel, after a `!bind` to another, cannot be
+- A thread that works in an earlier folder of the channel, after a `/bind` to another, cannot be
   forked: the copy's thread would start in the channel's folder, where the session does not exist.
 - Sent while pardner waits to restart, it is refused, and nothing is copied.
 - The copy is told it was forked from a session that still runs, and can message it, as the
   terminal's copy is; a command the original left running in the background stays the
   original's, and the copy is not told it stopped. The original is not told of the copy.
 - The new thread asks no setup: it starts from the copy's settings. It is a thread like any other
-  afterwards, in `!status`.
+  afterwards, in `/status`.
 - The copy works in the same folder as the original. The terminal's `/fork` tells its copy to make
   a worktree of its own before editing; a copy made here gets no such instruction
   ([limits.md](limits.md)).
-- `!resume` lists the copy among the folder's sessions, under its prompt or first message as a
+- `/resume` lists the copy among the folder's sessions, under its prompt or first message as a
   title, or the original's title with `(fork)` after it for a copy no message has named yet.
 
 ### Commands
 
-A message is a command when its first character is `!`, however it is formatted: inline code, a
-code block, bold, italic and strikethrough are read through, so a word pasted from a place that
-showed it as code still acts. The word ends at the first space or line break, and what follows
-is sent as you wrote it. To send Claude a text that starts with `!`, put any character before it:
-`\!goal`, `"!goal"`. A message that starts with a command you only meant to quote runs that
-command: `!stop` or `!bypass on` alone in inline code acts as the word. Inside a quote or a list
-a `!` is never a command.
+A message is a command when its first character is `/`, and a shell command when it is `!`. In a
+chat that reports a message's plain text beside what was typed, inline code, a code block, bold,
+italic and strikethrough are read through, so a word pasted from a place that showed it as code
+still acts; the relay chat reports none, so there a formatted word is plain text. The word ends at
+the first space or line break, and what follows is sent as you wrote it. To send Claude a text
+that starts with `/` or `!`, put any character other than a space or a line break before it:
+`\/goal`, `"/goal"`, `\!ls`. A `/` followed by a space is plain text; a `!` followed by one is
+still a shell command (`! ls`). In a chat that reads through formatting, a message that starts
+with a command you only meant to quote runs that command: `/stop` or `/bypass on` alone in inline
+code acts as the word. Inside a quote or a list
+a `/` or `!` is never a command.
 
-An argument that is a name, an id, a path or a keyword (`!tag`, `!resume`, `!open`, `!bind`,
-`!help`, `!bypass`, `!plan`, `!pardner`) is read without inline code marks, so
-`` !tag `CVE-0000-00000` `` tags the thread as `!tag CVE-0000-00000` does. Bold, italic and
+An argument that is a name, an id, a path or a keyword (`/tag`, `/resume`, `/open`, `/bind`,
+`/help`, `/bypass`, `/plan`, `/pardner`) is read without inline code marks, so
+`` /tag `CVE-0000-00000` `` tags the thread as `/tag CVE-0000-00000` does. Bold, italic and
 strikethrough are not removed there, since their marks may be characters of a name. An argument that is
-text for Claude (the prompt of `!fork`, and any other `!name args` command) is sent as you wrote
-it, code spans included. A word typed with arguments it refuses (a tag that breaks the rule, `!diff
-now`, `!bypass maybe`) answers with its own line of the list and the rule it broke, instead of the
+text for Claude (the prompt of `/fork`, and any other `/name args` command) is sent as you wrote
+it, code spans included. A word typed with arguments it refuses (a tag that breaks the rule, `/diff
+now`, `/bypass maybe`) answers with its own line of the list and the rule it broke, instead of the
 whole list; a word that this instance does not offer still gets the whole list.
 
 | Word | At the top level | Inside a session's thread |
 |---|---|---|
-| `!guide` | Explains in a few lines how pardner works | Same |
-| `!bind` | Lists the folders you can bind | Refused |
-| `!bind <folder>` | Binds the channel to a folder under `ALLOWED_ROOT` | Refused |
-| `!bypass on` / `off` | Refused | Switches that session's bypass |
-| `!plan` / `!plan off` | Refused | Switches that session to plan mode and back |
-| `!status` | The channel's directory and its threads that hold a session | That session's details |
-| `!stop` | Stops every running session of the channel | Stops that session |
-| `!memory` | Refused | The memory files that session loaded, with their sizes |
-| `!skills` | Refused | The skills that session can use, with what each does |
-| `!terminal` | Refused | Moves that session to a terminal, a running turn with it, and gives the command to run there |
-| `!fork [prompt]` | Refused | Copies that session into a new thread of the channel, which starts on the prompt or waits for your first message there |
-| `!help [text]` | Lists pardner's own words | Lists them and the session's commands |
-| `!open` | Refused | Offers the recent changed files and a search; `!open <path or words>` shares that file into the thread |
-| `!diff` | Refused | Lists the files that differ from HEAD in the session's git repository |
-| `!rewind` | Refused | Lists the session's prompts, to go back to one: restores its code, its conversation or both |
-| `!next` | Refused | Shows the prompt Claude Code suggests after a turn, to send or cancel |
-| `!tag <name>` | Refused | Tags the thread's first message and the session in Claude Code |
-| `!untag` | Refused | Takes the tag away |
-| `!pin` | Refused | Pins the thread's first message |
-| `!unpin` | Refused | Takes the pin away |
-| `!delete-thread` | Refused | Asks you to confirm, then deletes the thread |
-| `!clean-channel` | Asks you to confirm, then deletes the channel's threads and what sits outside them | Refused |
-| `!!<command>` | Refused | Asks you to confirm, runs the command in the session's folder, and Claude answers its output |
-| `!resume` | Lists the sessions you can resume | Refused |
-| `!resume <id or name>` | Resumes that session in a new thread | Refused |
-| `!pardner` | Shows the version, the latest one and the update state | Same |
-| `!pardner update` / `restart` | Offers an update, or restarts pardner | Refused |
-| `!clear` (or `!reset`, `!new`) | Opens a new session (harmless: nothing to clear yet) | Refused: `One thread is one session: send a new message in the channel to start a new one.` |
-| `!login`, `!logout` | Answered with how to do it on the host | Same |
-| any other `!name [args]` | Opens a session; runs `/name args` if the agent offers it, else sends the text as written. A command [limits.md](limits.md) lists as not offered is answered and opens no session | Runs `/name args` if the session offers it, else suggests the commands it could mean |
-| `!` alone | Opens a session, then sends `!` as written | Shows every command |
+| `/guide` | Explains in a few lines how pardner works | Same |
+| `/bind` | Lists the folders you can bind | Refused |
+| `/bind <folder>` | Binds the channel to a folder under `ALLOWED_ROOT` | Refused |
+| `/bypass on` / `off` | Refused | Switches that session's bypass |
+| `/plan` / `/plan off` | Refused | Switches that session to plan mode and back |
+| `/status` | The channel's directory and its threads that hold a session | That session's details |
+| `/stop` | Stops every running session of the channel | Stops that session |
+| `/memory` | Refused | The memory files that session loaded, with their sizes |
+| `/skills` | Refused | The skills that session can use, with what each does |
+| `/terminal` | Refused | Moves that session to a terminal, a running turn with it, and gives the command to run there |
+| `/fork [prompt]` | Refused | Copies that session into a new thread of the channel, which starts on the prompt or waits for your first message there |
+| `/help [text]` | Lists pardner's own words | Lists them and the session's commands |
+| `/open` | Refused | Offers the recent changed files and a search; `/open <path or words>` shares that file into the thread |
+| `/diff` | Refused | Lists the files that differ from HEAD in the session's git repository |
+| `/rewind` | Refused | Lists the session's prompts, to go back to one: restores its code, its conversation or both |
+| `/next` | Refused | Shows the prompt Claude Code suggests after a turn, to send or cancel |
+| `/tag <name>` | Refused | Tags the thread's first message and the session in Claude Code |
+| `/untag` | Refused | Takes the tag away |
+| `/pin` | Refused | Pins the thread's first message |
+| `/unpin` | Refused | Takes the pin away |
+| `/delete-thread` | Refused | Asks you to confirm, then deletes the thread |
+| `/clean-channel` | Asks you to confirm, then deletes the channel's threads and what sits outside them | Refused |
+| `!<command>` | Refused | Asks you to confirm, runs the command in the session's folder, and Claude answers its output |
+| `/resume` | Lists the sessions you can resume | Refused |
+| `/resume <id or name>` | Resumes that session in a new thread | Refused |
+| `/pardner` | Shows the version, the latest one and the update state | Same |
+| `/pardner update` / `restart` | Offers an update, or restarts pardner | Refused |
+| `/clear` (or `/reset`, `/new`) | Opens a new session (harmless: nothing to clear yet) | Refused: `One thread is one session: send a new message in the channel to start a new one.` |
+| `/login`, `/logout` | Answered with how to do it on the host | Same |
+| any other `/name [args]` | Opens a session; runs `/name args` if the agent offers it, else sends the text as written. A command [limits.md](limits.md) lists as not offered is answered and opens no session | Runs `/name args` if the session offers it, else suggests the commands it could mean |
+| `/` alone | Opens a session, then sends `/` as written | Shows every command |
 | a message | Opens a session and sends the message; the reply grows in the thread | Continues that session |
 
 A message you send while a turn runs goes to Claude Code at once, which takes it into the running
@@ -948,9 +952,9 @@ turn or runs it next.
 
 A word that depends on what the agent can do exists when the agent declares that capability, and
 the word's meaning is the agent's mapping. In this release the agent is the Claude Code module:
-`!bypass on` sets its `bypassPermissions` mode, `!plan` sets its plan mode, and the words `/effort`
-and `/advisor` are its commands, sent as `!effort` and `!advisor`. An agent without a mode that
-skips permission requests refuses `!bypass`, one without a plan mode refuses `!plan`, and a
+`/bypass on` sets its `bypassPermissions` mode, `/plan` sets its plan mode, and the words `/effort`
+and `/advisor` are its commands, sent as `/effort` and `/advisor`. An agent without a mode that
+skips permission requests refuses `/bypass`, one without a plan mode refuses `/plan`, and a
 command the agent does not list is not offered.
 
 #### Answers and limits of the words
@@ -960,70 +964,69 @@ needs a feature the chat lacks (sharing a file, a list with a control per row, t
 deleting a thread, cleaning a channel) is not offered on that chat: the relay chat has none of
 those features yet ([limits.md](limits.md)).
 
-- `!bind`: lists `ALLOWED_ROOT` itself (shown as `.`) and the folders up to two levels below it,
+- `/bind`: lists `ALLOWED_ROOT` itself (shown as `.`) and the folders up to two levels below it,
   never inside a git repository, that Claude Code trusts. At most 20 are shown, in path order;
   when there are more, the higher levels fill the list first. Refused inside a thread.
-- `!bind <folder>`: binds the channel to a folder under `ALLOWED_ROOT`, given relative to it
-  (`!bind my-project`); an absolute path inside it works too. A typed path may go deeper than the
-  two levels the list shows (`!bind clients/acme/api`). A new channel does nothing else until
+- `/bind <folder>`: binds the channel to a folder under `ALLOWED_ROOT`, given relative to it
+  (`/bind my-project`); an absolute path inside it works too. A typed path may go deeper than the
+  two levels the list shows (`/bind clients/acme/api`). A new channel does nothing else until
   bound. The answer names the folder each existing thread keeps working in, when it differs from
   the new one. Refused inside a thread.
-- `!bypass on` / `off`: switches that session to `bypassPermissions` and back, kept in
-  `state.json` per thread: an idle close and a restart of pardner keep it, `!resume` starts a
+- `/bypass on` / `off`: switches that session to `bypassPermissions` and back, kept in
+  `state.json` per thread: an idle close and a restart of pardner keep it, `/resume` starts a
   session with it off. Refused at the top level, since bypass belongs to one session.
-- `!plan` / `!plan off`: `!plan` switches that session to Claude Code's plan mode, where it
-  plans first and asks you to approve the plan before it acts; `!plan off` returns to the mode
+- `/plan` / `/plan off`: `/plan` switches that session to Claude Code's plan mode, where it
+  plans first and asks you to approve the plan before it acts; `/plan off` returns to the mode
   the thread would otherwise have. Refused at the top level.
-- `!status`: at the top level, the channel's directory and the threads that hold a session; in a
+- `/status`: at the top level, the channel's directory and the threads that hold a session; in a
   thread, that session's directory, session id, the command that continues it in the terminal,
   its title when Claude Code has one, its mode, then the footer's values one per line.
-- `!stop`: stops the running sessions of the channel at the top level, or that session in a
+- `/stop`: stops the running sessions of the channel at the top level, or that session in a
   thread, with their background tasks, and denies their pending approvals. A stop ends the turn,
-  not a goal set with `!goal`. It also drops the messages of the stopped sessions that have not
-  reached the agent: those still in the daemon's queue (a `!!command` waiting for the running
+  not a goal set with `/goal`. It also drops the messages of the stopped sessions that have not
+  reached the agent: those still in the daemon's queue (a `!command` waiting for the running
   turn, a message waiting for the agent's process to start). A message already sent to the agent
   is the agent's.
-- `!memory`, `!skills`: list what that session loaded, read only: the memory files with their
+- `/memory`, `/skills`: list what that session loaded, read only: the memory files with their
   sizes, as the terminal's `/context` gives them, and the skills it can use, as `/skills` does.
   Refused at the top level.
-- `!terminal`: moves the session to a terminal and gives the command to run there (see
+- `/terminal`: moves the session to a terminal and gives the command to run there (see
   [Continuing a session in the terminal](#continuing-a-session-in-the-terminal)).
-- `!fork [prompt]`: copies the session into a new thread (see
+- `/fork [prompt]`: copies the session into a new thread (see
   [Copying a session into a new thread](#copying-a-session-into-a-new-thread)).
-- `!help [text]`: says what makes a message a command, then lists pardner's own words; inside a
+- `/help [text]`: says what makes a message a command, then lists pardner's own words; inside a
   thread it also lists every command that session offers now, and with a text only the lines whose
   name or description contains it.
-- `!open`, `!diff`, `!rewind`, `!next`: the terminal's file picker, `/diff`, `/rewind` and the
+- `/open`, `/diff`, `/rewind`, `/next`: the terminal's file picker, `/diff`, `/rewind` and the
   suggested next prompt, inside a session's thread, offered when the chat can show them.
-- `!tag <name>`, `!untag`, `!pin`, `!unpin`, `!delete-thread`, `!clean-channel`: act on the
+- `/tag <name>`, `/untag`, `/pin`, `/unpin`, `/delete-thread`, `/clean-channel`: act on the
   thread's first message or on the channel's threads, and are offered when the chat supports
-  them. `!delete-thread` and `!clean-channel` ask before they delete.
-- `!!<command>`: the terminal's `!<command>`. It asks for confirmation with the whole command,
+  them. `/delete-thread` and `/clean-channel` ask before they delete.
+- `!<command>`: the terminal's `!<command>`. It asks for confirmation with the whole command,
   then runs it with Bash in the session's folder, with the environment Claude Code would give it,
   and Claude answers its output. Refused at the top level, and when `PARDNER_SHELL` is `off`.
-- `!resume`: lists the sessions of the channel's directory that no thread holds, terminal and
-  chat alike, and `!resume <id or name>` resumes one, by the first 8 characters of its id or longer
+- `/resume`: lists the sessions of the channel's directory that no thread holds, terminal and
+  chat alike, and `/resume <id or name>` resumes one, by the first 8 characters of its id or longer
   start, or by its name, in a new thread. One session never runs in two threads at once: a
   session open in another thread is refused with a link to that thread. Refused inside a thread.
-- `!pardner`: shows the version that runs, the latest npm published and when npm was last
+- `/pardner`: shows the version that runs, the latest npm published and when npm was last
   asked; `update` and `restart` are allowed at the top level only (see
   [Updating pardner](#updating-pardner)).
-- `!login`, `!logout`: never sent to Claude Code, and no session starts. The answer says to log in
+- `/login`, `/logout`: never sent to Claude Code, and no session starts. The answer says to log in
   or out on the host: on that machine, run `claude`, then `/login` or `/logout`. The login is
   never done from the chat.
-- any other `!name [args]`, and `!` alone: a name the session lists runs as `/name args`; any
+- any other `/name [args]`, and `/` alone: a name the session lists runs as `/name args`; any
   other word is not sent as a command: inside a thread the answer offers up to 5 commands it
   could mean, and at the top level the text opens a session as written.
 
-A command of Claude Code is typed `!compact`, not `/compact`: a chat may not pass a slash command
-on. A `!word` that is not a command the session offers is sent as a normal prompt, so
-`!important: …` reaches Claude as written. `!resume` stands in for Claude Code's own `/resume`,
-which an SDK session does not offer.
+A command of Claude Code is typed `/compact`, as in the terminal. A `/word` that is not a command the session offers is sent as a normal prompt, so
+`/important: …` reaches Claude as written. `/resume` is the daemon's own word, since Claude Code's `/resume`
+is not offered to an SDK session.
 
 A reply in a thread whose session no longer resumes (its transcript was deleted) is answered
 `This thread's session no longer exists: Claude Code deleted it or cannot find it. Send a new
 message in the channel to start one.` A reply in a thread that holds no session gets ``This
-thread holds no session. In the channel, send a new message to start one, or `!resume` to
+thread holds no session. In the channel, send a new message to start one, or `/resume` to
 continue an earlier one.``, except a word, which acts as if typed at the top level.
 
 ## Updating pardner
@@ -1035,20 +1038,20 @@ happens when you ask for it.
 ### From the chat
 
 pardner asks your npm (`npm view`, so your registry, proxy and credentials apply) for the latest
-version when it starts and every 6 hours. `!pardner` names the version that runs, the latest one
+version when it starts and every 6 hours. `/pardner` names the version that runs, the latest one
 and the time of the check.
 
-`!pardner update`, typed in a channel, offers the update: `Update pardner <installed> →
+`/pardner update`, typed in a channel, offers the update: `Update pardner <installed> →
 <latest>`, with the wait for running turns and the other instances that restart with this one. Once
 you accept, it installs exactly the version the offer shows, even if a newer one came out since,
 and then:
 
 1. The offer reads `Installing pardner <latest>…`. Sessions already running go on. A message
-   that needs a new Claude Code process (a new thread, a session to reconnect, `!status`, the usage
+   that needs a new Claude Code process (a new thread, a session to reconnect, `/status`, the usage
    probe) is answered `pardner is updating, stopping or restarting; unless it is stopping, send this again in a moment.`
    for the install's few seconds, and nothing changes. Every other daemon on
    the machine answers the same while the install runs (it asks the update lock, below), and
-   refuses `!pardner restart` with `An update of pardner is already under way.`; so does a
+   refuses `/pardner restart` with `An update of pardner is already under way.`; so does a
    daemon while `pardner update` runs in a terminal.
 2. pardner reads the copy's `package.json` again. When it holds the version asked, the offer
    reads `Installed pardner <latest>. Restarting once running turns finish.`
@@ -1067,11 +1070,11 @@ Once the new daemon is connected it rewrites the offer in place when the chat ca
 `Updated to pardner <latest>.` when the version that runs is the one asked, and `pardner
 restarted on <installed>, not on <asked>: the update did not take.` when it is not.
 
-`!pardner restart` restarts the same way without installing, and its `Restarting pardner once
+`/pardner restart` restarts the same way without installing, and its `Restarting pardner once
 running turns finish.` becomes `pardner restarted at <HH:MM>.` when the daemon is back. A restart
 asked from a terminal, a `SIGTERM` from the service manager and the other instances an update
-restarts leave nothing to rewrite. `!pardner update` and `!pardner restart` typed inside a
-thread are refused (`!pardner update works in the channel, not inside a thread.`); `!pardner`
+restarts leave nothing to rewrite. `/pardner update` and `/pardner restart` typed inside a
+thread are refused (`/pardner update works in the channel, not inside a thread.`); `/pardner`
 alone answers there.
 
 ### Which copy updates
@@ -1080,7 +1083,7 @@ Only the copy that `npm install -g` would replace: the package folder `$(npm roo
 reached by its real path, not through a link, at a version npm publishes. A clone run from its
 checkout, a copy installed with `npm link`, a build installed into another prefix (the
 [development copy](#a-development-copy-beside-the-release)) and an unpublished version are never
-updated from the chat or by `pardner update`. For them `!pardner` says so and why
+updated from the chat or by `pardner update`. For them `/pardner` says so and why
 (`This copy updates outside the chat: <reason>.`).
 
 From the chat, the daemon must also run as a service (`pardner service install`, Part 4): it stops to
@@ -1098,11 +1101,11 @@ copy is not touched.
 ### When npm fails
 
 Nothing changes and the old version keeps running. The offer becomes the sentence of the failure
-(`!pardner update` makes a new one):
+(`/pardner update` makes a new one):
 
 | What happened | What it says |
 |---|---|
-| npm could not reach the registry | ``The update failed: npm could not reach the registry. pardner keeps running <installed>; `!pardner update` tries again.`` |
+| npm could not reach the registry | ``The update failed: npm could not reach the registry. pardner keeps running <installed>; `/pardner update` tries again.`` |
 | npm may not write to the prefix | `The update failed: npm may not write to <folder>. pardner keeps running <installed>. npm's message is in the log, <log>.` |
 | npm ended with another status | `The update failed: npm ended with status <code>. pardner keeps running <installed>. npm's message is in the log, <log>.` |
 | npm ended well but the copy holds another version, or none that can be read | pardner does not restart and names the command that puts back the version that runs, `npm install -g pardner@<installed>` |
@@ -1203,12 +1206,12 @@ of the Node executable in System Settings, if you gave it one.
 |---|---|
 | `Claude Code is not logged in on the host` | Claude Code on the machine is logged out: run `claude`, then `/login` |
 | `This thread's session no longer exists: Claude Code deleted it or cannot find it. Send a new message in the channel to start one.` | The stored session id can no longer be resumed (its transcript was deleted); send a new message in the channel to start one |
-| ``This thread holds no session. In the channel, send a new message to start one, or `!resume` to continue an earlier one.`` | The thread holds no session (a word's own thread, or one with no entry in `state.json`); send a new message in the channel to start one, send `!resume` there to continue a session Claude Code still has, or type a word, which works as if typed there |
-| ``This thread already holds a session: send `!resume` again in the channel to pick another.`` | A `!resume <id or name>` or a choice in the `!resume` list was sent to a thread that already has a session; a new `!resume` in the channel gives a thread of its own |
-| `This session is already open in another thread: <link>.` | A `!resume <id or name>` or a choice in the `!resume` list named a session already open in some other thread; follow the link and send the message there instead |
-| `Claude Code has not been trusted in ...`, after a message or a `!bind` | Open `claude` in that folder (the repository root) in the terminal, accept the trust dialog, and send the message again. For a worktree whose folder was moved by hand, run `git worktree repair` in it |
+| ``This thread holds no session. In the channel, send a new message to start one, or `/resume` to continue an earlier one.`` | The thread holds no session (a word's own thread, or one with no entry in `state.json`); send a new message in the channel to start one, send `/resume` there to continue a session Claude Code still has, or type a word, which works as if typed there |
+| ``This thread already holds a session: send `/resume` again in the channel to pick another.`` | A `/resume <id or name>` or a choice in the `/resume` list was sent to a thread that already has a session; a new `/resume` in the channel gives a thread of its own |
+| `This session is already open in another thread: <link>.` | A `/resume <id or name>` or a choice in the `/resume` list named a session already open in some other thread; follow the link and send the message there instead |
+| `Claude Code has not been trusted in ...`, after a message or a `/bind` | Open `claude` in that folder (the repository root) in the terminal, accept the trust dialog, and send the message again. For a worktree whose folder was moved by hand, run `git worktree repair` in it |
 | The terminal shows the trust dialog in a folder you already use from the chat, or the chat asks for approvals the folder's allow rules cover | The folder is outside a repository and only a parent folder is trusted, which Claude Code does not count for the `permissions.allow` rules and `additionalDirectories` of the folder's `.claude/settings.json`. Accept the dialog in that folder: it lists them |
-| `The directory ... no longer exists` | The thread's directory was moved or deleted: restore it to keep using this thread, or, in the channel, bind another folder with `!bind <path>` and send a new message to start a session there |
+| `The directory ... no longer exists` | The thread's directory was moved or deleted: restore it to keep using this thread, or, in the channel, bind another folder with `/bind <path>` and send a new message to start a session there |
 | `macOS does not let pardner read ...` | The directory is in a folder macOS protects: see Part 4, "Folders macOS protects" |
 | `pardner needs Node 26.5.1 or later and this is Node ...` in the log, or on the terminal | The Node that runs pardner is older than 26.5.1; the process ends with status 1. Install a newer Node, beside yours if you want ([A Node of its own](#a-node-of-its-own)), and run `pardner` again. The LaunchAgent names the Node executable in its plist: change it there too |
 | `ALLOWED_ROOT must be an absolute path, or one starting with ~/; it is "..."` | `ALLOWED_ROOT` in `.env` is a relative path, which would be read from the folder the process starts in. Write the whole path, or start it with `~/` |
@@ -1217,7 +1220,7 @@ of the Node executable in System Settings, if you gave it one.
 | `RELAY_OWNER is not the one the bot was paired with: move the instance's .env away, then run setup again` in the log (the same for `RELAY_KEY`) | The `.env` no longer matches the pairing the bot holds. Move the instance's `.env` away and run `pardner setup` again |
 | `the relay must be recreated: it was put back from an older copy or is at fault, and the bot dials it no more` in the log | The relay holds a state older than the one the bot has seen, or a fault: the bot never dials it again. Recreate the relay, move the instance's `.env` away and run setup again ([relay-provider.md](relay-provider.md)) |
 | `RELAY_ADDRESS: write the address as host:port, for example 127.0.0.1:4433.` in the log | `RELAY_ADDRESS` in `.env` is not `host:port` with a port from 1 to 65535 |
-| The daemon is down and you need a session's id, which `!status` shows | The id is the name of the session's file, in the folder under `~/.claude/projects/` (or under the instance's `CLAUDE_CONFIG_DIR`) named after the project's path. Continue it in the terminal as in [Continuing a session in the terminal](#continuing-a-session-in-the-terminal) |
+| The daemon is down and you need a session's id, which `/status` shows | The id is the name of the session's file, in the folder under `~/.claude/projects/` (or under the instance's `CLAUDE_CONFIG_DIR`) named after the project's path. Continue it in the terminal as in [Continuing a session in the terminal](#continuing-a-session-in-the-terminal) |
 
 ## Reference
 
@@ -1228,7 +1231,7 @@ Detail that the install sequence links to, kept out of its way.
 | File | Written by | Holds |
 |---|---|---|
 | `.env` | you | the relay's values and the settings of Part 2 |
-| `state.json` | pardner | the names of the agent and the chat that wrote it; for each channel, its directory; for each of its threads, the folder it was opened in, its Claude Code session id, its bypass choice, the `/effort` level, the status of its root message, the ids and kinds of the replies and requests a crash repair needs, and the text the root message had before pardner replaced it with the session's title (`root_prompt`, the only message content in the file), and for a thread `!fork` opened, the session it copies and when (`fork_of`; for a copy made with no prompt, `ran` and `named` while false: whether a turn has started in it and whether its first message has named it), and for a rewind no message has followed yet, the prompt it cut at and the agent's token for it (`pending_cut`: two ids), and the terminals you chose **Send here** for (`terminals_allowed`: one id of a process and its start time each, replaced at the next answer, cleared when the thread's session id changes); at the top of the file, `update_notice` and `restart_notice`. The fields one by one and how they are written are in [State and the single-instance lock](architecture.md#state-and-the-single-instance-lock) |
+| `state.json` | pardner | the names of the agent and the chat that wrote it; for each channel, its directory; for each of its threads, the folder it was opened in, its Claude Code session id, its bypass choice, the `/effort` level, the status of its root message, the ids and kinds of the replies and requests a crash repair needs, and the text the root message had before pardner replaced it with the session's title (`root_prompt`, the only message content in the file), and for a thread `/fork` opened, the session it copies and when (`fork_of`; for a copy made with no prompt, `ran` and `named` while false: whether a turn has started in it and whether its first message has named it), and for a rewind no message has followed yet, the prompt it cut at and the agent's token for it (`pending_cut`: two ids), and the terminals you chose **Send here** for (`terminals_allowed`: one id of a process and its start time each, replaced at the next answer, cleared when the thread's session id changes); at the top of the file, `update_notice` and `restart_notice`. The fields one by one and how they are written are in [State and the single-instance lock](architecture.md#state-and-the-single-instance-lock) |
 
 `state.json` looks like this; you never need to edit it:
 
@@ -1260,13 +1263,13 @@ which Claude reports each one. Then it exits, and `KeepAlive` starts it again. M
 message gets `pardner is updating, stopping or restarting; unless it is stopping, send this again in a moment.`, a queued one ends with
 the same request. Under that sentence the refusal lists each thread the restart still waits for,
 with a link to it and what holds it there (a turn, an approval or a question waiting for you,
-background tasks), so you know where to answer or send `!stop`; `!status` typed in a channel
+background tasks), so you know where to answer or send `/stop`; `/status` typed in a channel
 lists that channel's threads the same way and counts those of other channels without naming
 them, since its answer is a post every member of the channel reads. An approval or a question Claude asks meanwhile stays open and can be answered, so
-a session that restarts the daemon can still finish its turn. The daemon's `!words` keep working:
-`!stop` ends a long turn so the restart goes on. A thread left with only background tasks says so
-when the chat can show an activity line (`Stop or restart waits for 1 shell · !stop ends it now`), since
-pardner cannot tell whether a task such as a dev server ever ends; `!stop` there stops
+a session that restarts the daemon can still finish its turn. The daemon's `/words` keep working:
+`/stop` ends a long turn so the restart goes on. A thread left with only background tasks says so
+when the chat can show an activity line (`Stop or restart waits for 1 shell · /stop ends it now`), since
+pardner cannot tell whether a task such as a dev server ever ends; `/stop` there stops
 them and the restart goes on. A restart posts nothing in a thread that has nothing running, bypass on or not, since
 bypass outlives it. The signal does not say who sent it, and a session that sends it
 has a turn running at that moment: for every session with a turn running when the signal arrives,
@@ -1300,7 +1303,7 @@ the terminal's `/model` picker the same way. Rows naming an alias (`opus`, `sonn
 follow the newest version of that model.
 
 When Claude Code is logged out, a message in the chat replies with a note asking you to run `claude`
-and `/login` on the machine; the login is never done from the chat. `!login` and `!logout` typed in
+and `/login` on the machine; the login is never done from the chat. `/login` and `/logout` typed in
 the chat get the same pointer to the machine and are never sent to Claude Code.
 
 If you turn on Claude Code's Bash sandbox, do it in your own settings, where it applies to the
@@ -1327,23 +1330,23 @@ uses.
 ### How trust applies to git
 
 A worktree is covered by its main checkout while git registers it there: after moving a
-worktree's folder by hand, run `git worktree repair` in it. The footer and `!status` show the
-branch and the uncommitted lines, `!open` lists the changed files and `!diff` their diffs, only where git may run: in
+worktree's folder by hand, run `git worktree repair` in it. The footer and `/status` show the
+branch and the uncommitted lines, `/open` lists the changed files and `/diff` their diffs, only where git may run: in
 a repository you trusted in Claude Code. A trusted folder does not stand for a repository inside
 it. A bound folder that is not a repository itself and holds one a level or two below it shows
 them for that repository once you open `claude` in it and accept the trust dialog. Without that
-trust the footer says `git: not trusted` in place of the branch and the lines, and `!status` shows
+trust the footer says `git: not trusted` in place of the branch and the lines, and `/status` shows
 `Git: not trusted` and names the repository with the line that asks for the trust. Nothing is posted
 in the thread for it. This also covers a folder that becomes a repository mid-session (after `git init`) when
 Claude Code trusted it only through a parent folder: a folder trusted at its own path becomes a trusted
 repository and shows its branch at once. Once you open `claude` in the folder and accept the trust dialog,
-the next footer shows the branch again with no restart. `!open` lists no changed files there, `!diff` is refused, and
+the next footer shows the branch again with no restart. `/open` lists no changed files there, `/diff` is refused, and
 its search reads that repository from disk, the files its `.gitignore` names included.
 
-The answer to `!bind`, and `!status` inside a thread, name the repositories one or two levels
+The answer to `/bind`, and `/status` inside a thread, name the repositories one or two levels
 below the folder that have no trust of their own yet, at most ten, each with the line to run in
 the terminal: `cd <repository> && claude`, with `CLAUDE_CONFIG_DIR` before `claude` for an
-instance with its own login. Accepting the dialog there gives the trust, and the next `!status`
+instance with its own login. Accepting the dialog there gives the trust, and the next `/status`
 no longer names that repository. Read a repository's `.claude/` settings and hooks before you
 accept: they run without asking once it is trusted. A bound folder inside a repository you
 trusted names none.
@@ -1355,5 +1358,5 @@ session pointer and bypass switch, and gets this message once, posted top-level,
 
 > pardner now runs one Claude Code session per thread. Send a new message in the channel
 > to start a session; reply in its thread to continue it. The session this channel had is still
-> in the folder: !resume brings it into a thread. Bypass is now set per session: send !bypass on
+> in the folder: /resume brings it into a thread. Bypass is now set per session: send /bypass on
 > inside a thread.

@@ -1,5 +1,5 @@
 /**
- * A shell command the owner sends with `!!`, run as the terminal's `!` runs one: with Bash, in
+ * A shell command the owner sends with `!`, run as the terminal's `!` runs one: with Bash, in
  * the session's folder, nothing on its input. Its output is cut for the session as Claude Code
  * cuts a failed Bash call's (tools reference, "Output limits", read 2026-10-24): a head and a tail.
  */
@@ -23,7 +23,7 @@ export interface ShellOptions {
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly timeoutMs: number;
   readonly clock: Clock;
-  /** The owner's `!stop`: the command ends as `stopped`. */
+  /** The owner's `/stop`: the command ends as `stopped`. */
   readonly signal?: AbortSignal;
 }
 

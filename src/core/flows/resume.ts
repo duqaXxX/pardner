@@ -1,5 +1,5 @@
 /**
- * `!resume`, typed or picked from the list of sessions: which stored session a thread
+ * `/resume`, typed or picked from the list of sessions: which stored session a thread
  * continues. The core decides which sessions the list holds, which one a typed name means and
  * what follows a pick; the chat draws the list.
  */
@@ -14,7 +14,7 @@ import type { ResumeFlow } from "./contract.ts";
 import { type FlowDeps, isCancelled, logger, type Talk } from "./talk.ts";
 
 /**
- * The fewest characters of a session's id that `!resume` reads as an id and not as a name: what
+ * The fewest characters of a session's id that `/resume` reads as an id and not as a name: what
  * a list shows of each row, so that a short title such as "add" is not read as one.
  */
 export const ID_PREFIX_MIN = 8;
@@ -24,7 +24,7 @@ const HOLDER_LABEL = "Session";
 const THIS_THREAD = "this thread";
 
 /**
- * The sessions `!resume <target>` names: those whose id is `target` or starts with it, when it
+ * The sessions `/resume <target>` names: those whose id is `target` or starts with it, when it
  * is at least `ID_PREFIX_MIN` characters long, else those whose title (set with a rename or
  * generated, the agent's `customTitle`) is `target`.
  */
@@ -35,7 +35,7 @@ export function matching(sessions: readonly ListedSession[], target: string): Li
   return byId.length > 0 ? byId : sessions.filter((s) => s.customTitle === target);
 }
 
-/** A session picked from the list, and what follows `!resume`. */
+/** A session picked from the list, and what follows `/resume`. */
 export interface Resuming extends ResumeFlow {
   /** The pick of a session from a list `word()` posted. */
   picked(pick: Extract<ListPick, { type: "session" }>): Promise<void>;

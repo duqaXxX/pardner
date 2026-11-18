@@ -21,7 +21,7 @@ async function held(r: Rig, onBound?: () => void) {
   const device = owner(r);
   const stop = () => first.kill("SIGINT");
   try {
-    await device.says(`!bind ${w.folder("work")}`);
+    await device.says(`/bind ${w.folder("work")}`);
     await until(
       async () => (await device.bodies(1)).length > 0,
       `the bind to be said: ${first.err()}`,

@@ -1,5 +1,5 @@
 /**
- * `!fork` shows the original's last turn first in the copy's thread (#141): the owner's prompt
+ * `/fork` shows the original's last turn first in the copy's thread (#141): the owner's prompt
  * as a quote and the start of the final reply; nothing when the agent cannot read it.
  */
 import assert from "node:assert/strict";
@@ -32,14 +32,14 @@ async function forked(
 
 const LAST: ForeignTurn = { prompt: "add rate limiting", reply: "Added a token bucket." };
 
-for (const word of ["!fork", "!fork keep going"]) {
+for (const word of ["/fork", "/fork keep going"]) {
   test(`${word} shows the original's last turn first in the copy's thread`, async (t) => {
     const lines = await forked(t, new PlainAgent({ terminal: true }), LAST, word);
     const shown = lines.find((line) => line.startsWith("Last in the original:"));
     assert.ok(shown, JSON.stringify(lines));
     assert.equal(shown, "Last in the original:\n\n> add rate limiting\n\nAdded a token bucket.");
     assert.ok(!shown.includes(texts.FORK_LAST_TURN_MORE.trim()), "a short reply is whole");
-    if (word !== "!fork")
+    if (word !== "/fork")
       assert.ok(lines.indexOf(shown) < lines.findIndex((line) => line.includes("Working.")));
   });
 }
@@ -50,7 +50,7 @@ test("a long reply is cut and says the rest is in the original", async (t) => {
     t,
     new PlainAgent({ terminal: true }),
     { prompt: "p", reply },
-    "!fork",
+    "/fork",
   );
   const shown = lines.find((line) => line.startsWith("Last in the original:")) ?? "";
   assert.ok(shown.includes("…") && shown.includes("(open the original for more)"), shown);
@@ -58,7 +58,7 @@ test("a long reply is cut and says the rest is in the original", async (t) => {
 });
 
 test("nothing is posted when the original has no turn", async (t) => {
-  const lines = await forked(t, new PlainAgent({ terminal: true }), null, "!fork");
+  const lines = await forked(t, new PlainAgent({ terminal: true }), null, "/fork");
   assert.ok(!lines.some((line) => line.includes("Last in the original")));
 });
 
@@ -67,7 +67,7 @@ test("nothing is posted, and the fork goes on, when the agent cannot read it", a
     t,
     new PlainAgent({ terminal: true }),
     new Error("unreadable"),
-    "!fork x",
+    "/fork x",
   );
   assert.ok(!lines.some((line) => line.includes("Last in the original")));
   assert.ok(lines.some((line) => line.includes("Working.")));
@@ -79,13 +79,13 @@ test("an agent without foreignTurns is not asked", async (t) => {
   }
   const agent = new Without({ terminal: true });
   agent.capabilities = { ...agent.capabilities, foreignTurns: false };
-  const lines = await forked(t, agent, LAST, "!fork");
+  const lines = await forked(t, agent, LAST, "/fork");
   assert.ok(!lines.some((line) => line.includes("Last in the original")));
 });
 
 test("a turn the owner interrupted is marked stopped", async (t) => {
   const last: ForeignTurn = { prompt: "run it", reply: "Started", interrupted: true };
-  const lines = await forked(t, new PlainAgent({ terminal: true }), last, "!fork");
+  const lines = await forked(t, new PlainAgent({ terminal: true }), last, "/fork");
   const shown = lines.find((line) => line.startsWith("Last in the original:"));
   assert.equal(shown, "Last in the original:\n\n> run it\n\nStarted\n\n(stopped)");
 });
@@ -100,7 +100,7 @@ test("the copy is read, not the original", async (t) => {
     session === id
       ? { prompt: "original moved on", reply: "later" }
       : { prompt: "as copied", reply: "then" };
-  await world.says("!fork", origin.thread);
+  await world.says("/fork", origin.thread);
   await world.settle();
   const other = world.state.threads().find(([, thread]) => thread !== origin.thread);
   assert.ok(other);

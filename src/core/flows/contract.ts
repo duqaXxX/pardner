@@ -54,7 +54,7 @@ export interface TerminalFlow {
    */
   beforeSending(ref: ThreadRef, session: ThreadSession, signal?: AbortSignal): Promise<boolean>;
   /**
-   * `!terminal`: moves `session` to a terminal, confirmed first when it would stop background
+   * `/terminal`: moves `session` to a terminal, confirmed first when it would stop background
    * work, and tells the owner the line to run there.
    */
   move(ref: ThreadRef, session: ThreadSession): Promise<void>;
@@ -71,19 +71,19 @@ export interface AnswersFlow {
   ): Promise<boolean>;
 }
 
-/** `!resume`. */
+/** `/resume`. */
 export interface ResumeFlow {
   /**
-   * `!resume` typed in a channel; `ref` is the thread of the owner's word. With no `target` it
+   * `/resume` typed in a channel; `ref` is the thread of the owner's word. With no `target` it
    * offers the folder's sessions; with one it resumes the session it names into that thread.
    */
   word(ref: ThreadRef, target: string): Promise<void>;
 }
 
-/** `!fork`. */
+/** `/fork`. */
 export interface ForkFlow {
   /**
-   * `!fork` typed in the thread of `session` as the owner's `message`: once no turn runs there,
+   * `/fork` typed in the thread of `session` as the owner's `message`: once no turn runs there,
    * copies the session into a new thread of the channel, which inherits its effort and bypass and
    * starts on `prompt` (empty: it waits for the owner's first message), and tells this thread.
    * A stop of this thread that comes before the copy is made (`ticket` aborts) cancels it, and
@@ -98,10 +98,10 @@ export interface ForkFlow {
   ): Promise<void>;
 }
 
-/** `!diff`. */
+/** `/diff`. */
 export interface DiffFlow {
   /**
-   * `!diff` typed in the thread of `session`: lists the files of its repository that differ from
+   * `/diff` typed in the thread of `session`: lists the files of its repository that differ from
    * HEAD, with a control per file and a selector of views, or tells the owner why it cannot.
    */
   word(ref: ThreadRef, session: ThreadSession): Promise<void>;
@@ -112,10 +112,10 @@ export interface DiffFlow {
   picked(pick: Extract<ListPick, { type: "diff-file" | "diff-view" }>): Promise<void>;
 }
 
-/** `!rewind`. */
+/** `/rewind`. */
 export interface RewindFlow {
   /**
-   * `!rewind` typed in the thread of `session`: lists its prompts, newest first, or tells the
+   * `/rewind` typed in the thread of `session`: lists its prompts, newest first, or tells the
    * owner why it cannot (a session that has not started, one that works, no prompt yet).
    */
   word(ref: ThreadRef, session: ThreadSession): Promise<void>;
@@ -127,21 +127,21 @@ export interface RewindFlow {
   picked(pick: Extract<ListPick, { type: "rewind-point" | "rewind-action" }>): Promise<void>;
 }
 
-/** `!bind`. */
+/** `/bind`. */
 export interface BindFlow {
-  /** `!bind <folder>` typed in a channel. */
+  /** `/bind <folder>` typed in a channel. */
   to(channel: string, path: string): Promise<void>;
-  /** `!bind` alone: the folders a session can start in, offered as a list. */
+  /** `/bind` alone: the folders a session can start in, offered as a list. */
   list(channel: string): Promise<void>;
 }
 
-/** `!pardner`, the update from the chat, and the line told once per version. */
+/** `/pardner`, the update from the chat, and the line told once per version. */
 export interface PardnerFlow {
-  /** `!pardner`: the version that runs and the latest, as a reference. */
+  /** `/pardner`: the version that runs and the latest, as a reference. */
   show(): Promise<string>;
-  /** `!pardner update` typed in a channel: the offer of the latest version, or why there is none. */
+  /** `/pardner update` typed in a channel: the offer of the latest version, or why there is none. */
   update(channel: string): Promise<void>;
-  /** `!pardner restart` typed in a channel. */
+  /** `/pardner restart` typed in a channel. */
   restart(channel: string): Promise<void>;
   /** The owner pressed the control that installs a version, on an offer or on the chat's own page. */
   picked(pick: Extract<ListPick, { type: "update" }>): Promise<void>;
@@ -159,9 +159,9 @@ export interface PicksFlow {
   picked(pick: Extract<ListPick, { type: "folder" | "session" }>): Promise<void>;
 }
 
-/** `!next`. */
+/** `/next`. */
 export interface NextFlow {
-  /** `!next` typed in the thread of `session`: offers the held suggestion, or says there is none. */
+  /** `/next` typed in the thread of `session`: offers the held suggestion, or says there is none. */
   word(ref: ThreadRef, session: ThreadSession): Promise<void>;
   /** Cancel removes the offer; Send sends the held text as a typed prompt if the ids match, else says so. */
   picked(pick: Extract<ListPick, { type: "suggestion" }>): Promise<void>;
@@ -183,6 +183,6 @@ export interface OtherFlows {
   readonly bind: BindFlow;
   readonly diff: DiffFlow;
   readonly rewind: RewindFlow;
-  /** Absent in a daemon built without a way to update itself: `!pardner` is then not offered. */
+  /** Absent in a daemon built without a way to update itself: `/pardner` is then not offered. */
   readonly pardner?: PardnerFlow;
 }

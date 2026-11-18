@@ -90,7 +90,7 @@ export interface ThreadState {
   readonly directory: string;
   readonly sessionId: string | null;
   // The owner's last word on bypass, kept across restarts (a restart is the daemon's doing, not
-  // the owner's): true after `!bypass on` or a ticked setup, false after `!bypass off` or an
+  // the owner's): true after `/bypass on` or a ticked setup, false after `/bypass off` or an
   // unticked one, null when never chosen, which leaves the agent's own mode alone. On disk,
   // `bypass` holds `true` on or `false` not on, and an explicit off adds `bypass_off: true`,
   // written for that alone: `bypass: false` alone is also what "never chosen" writes, so only the
@@ -118,16 +118,16 @@ export interface ThreadState {
   // root shows the error, and repair still owes the thread its notice.
   readonly ended: SessionStatus | null;
   // The root's text as the chat showed it before the daemon replaced the root with the session's
-  // title (`ChatProvider.titleThread`), kept so that `!status` can still show it: the one piece of
+  // title (`ChatProvider.titleThread`), kept so that `/status` can still show it: the one piece of
   // message content `state.json` holds, since the daemon deleted it from the chat. Null until the
   // root is titled; a file without it reads as none, as for `ended`.
   readonly rootPrompt: string | null;
-  // For a thread `!fork` opened: the session its own is a copy of and when the copy was made,
+  // For a thread `/fork` opened: the session its own is a copy of and when the copy was made,
   // passed at every start of the copy, as the terminal passes it to every launch of its own: a
   // start without it tells the copy that the original's background commands stopped. Ids and a
   // time, never content; null for any other thread, and in a file without it.
   readonly forkOf: ForkSource | null;
-  // For a bare `!fork` copy (`fork_of.ran`, `fork_of.named`; each written only while false, absent
+  // For a bare `/fork` copy (`fork_of.ran`, `fork_of.named`; each written only while false, absent
   // means true): whether any turn has started in it, and whether it has its name from the first
   // prompt with text. Booleans, never content.
   readonly forkRan: boolean;
@@ -616,7 +616,7 @@ export class StateStore {
   }
 
   /**
-   * Record that a thread's session is a copy of `source` (`!fork`); a no-op for an unknown thread.
+   * Record that a thread's session is a copy of `source` (`/fork`); a no-op for an unknown thread.
    * `bare`: no prompt came with the fork, so the copy has not run and is not named yet.
    */
   setForkOf(channelId: string, threadId: string, source: ForkSource, bare = false): void {

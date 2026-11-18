@@ -1,5 +1,5 @@
 /**
- * The live sessions, one per open thread, and what spans them: `!bind`, `!resume`, a thread's
+ * The live sessions, one per open thread, and what spans them: `/bind`, `/resume`, a thread's
  * release for its delete, and the drain of a stop. How its waits are made is the header of
  * `session.ts`.
  */
@@ -21,7 +21,7 @@ function keyOf(channelId: string, threadId: string): string {
   return `${channelId}\n${threadId}`;
 }
 
-/** What `!rewind` remembers of a thread whose session object is gone, and the thread it is for. */
+/** What `/rewind` remembers of a thread whose session object is gone, and the thread it is for. */
 interface Kept {
   readonly ref: ThreadRef;
   readonly memory: RewindMemory;
@@ -36,7 +36,7 @@ export class SessionManager {
   // close and the resume that follows, and says nothing of it until its next check, so the
   // object built next is handed it.
   private readonly goals = new Map<string, string>();
-  /** What `!rewind` remembers of a thread whose session object was dropped, until it is rebuilt. */
+  /** What `/rewind` remembers of a thread whose session object was dropped, until it is rebuilt. */
   private readonly rewinds = new Map<string, Kept>();
   /** The threads being deleted (`release`): no session is handed out or built in one. */
   private readonly heldThreads = new Set<string>();
@@ -72,7 +72,7 @@ export class SessionManager {
   /**
    * The repository holding `directory` when the daemon's git may run in it: the trusted
    * half of the footer's own lookup (`verdictBy`, built on `repositoryBy`), so what runs git for
-   * `!open` is what runs it for the footer.
+   * `/open` is what runs it for the footer.
    */
   repository(directory: string): Promise<Repository | null> {
     return repositoryBy(this.deps.agent)(directory);
@@ -380,7 +380,7 @@ export class SessionManager {
   }
 
   /**
-   * `!resume`: opens a thread at `threadId` (the `!resume` message's own ts) in the channel's
+   * `/resume`: opens a thread at `threadId` (the `/resume` message's own ts) in the channel's
    * folder, already on `sessionId`. Null when the channel is unbound; `SessionClosed` once a
    * stop closed the sessions.
    */
@@ -469,7 +469,7 @@ export class SessionManager {
    * (`ThreadSession.restartReady`). Queued turns end at once, asking to be sent
    * again. An approval or a question stays open: the chat's connection lives until the drain
    * ends, so the owner can still answer it. A hold does not: it asks about a session the
-   * restart is about to touch, so it is cancelled here exactly as `!stop` would (its own waiter
+   * restart is about to touch, so it is cancelled here exactly as `/stop` would (its own waiter
    * tells the owner `Not sent.`).
    */
   async drain(cutShort: AbortSignal): Promise<void> {

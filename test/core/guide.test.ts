@@ -14,56 +14,56 @@ const FULL_GUIDE = [
   "This channel runs Plain on your Mac, in one folder, and answers you alone. One Memory chat thread is one Plain session: a top-level message starts a new one, and a reply inside its thread continues it, even days later.",
   "",
   "**Get started**",
-  "1. `!bind` lists the folders Plain trusts, with a Bind button each; `!bind <folder>` binds one by its path relative to your allowed root: `!bind my-project`. Plain must trust that folder first: open `plain` there once in the terminal and accept. `!bind` works only as a top-level message in the channel.",
+  "1. `/bind` lists the folders Plain trusts, with a Bind button each; `/bind <folder>` binds one by its path relative to your allowed root: `/bind my-project`. Plain must trust that folder first: open `plain` there once in the terminal and accept. `/bind` works only as a top-level message in the channel.",
   "2. Write a message in the channel: it opens a session, and its reply appears in a thread of its own, growing as Plain works, with a line for each tool it uses. Reply inside that thread to continue the same session.",
-  "3. Before that first message is sent, the thread asks for the **Model**, the **Effort** (`Default` leaves Plain's own choice) and **Bypass permissions**; **Start** sends your message with those choices, and `!stop` cancels it instead.",
+  "3. Before that first message is sent, the thread asks for the **Model**, the **Effort** (`Default` leaves Plain's own choice) and **Bypass permissions**; **Start** sends your message with those choices, and `/stop` cancels it instead.",
   "",
   "**Commands**",
-  "Plain's commands start with `!` instead of `/`: `!echo hello`, `!count one two`. They run inside a session's thread, where `!help` lists every command that session offers, and `!help <text>` filters the list; typed in the channel, `!help` lists pardner's own words instead. `!restart` is refused inside a thread (one thread is one session): start a fresh session with a new top-level message instead.",
+  "Plain's commands start with `/`, as in the terminal: `/echo hello`, `/count one two`. They run inside a session's thread, where `/help` lists every command that session offers, and `/help <text>` filters the list; typed in the channel, `/help` lists pardner's own words instead. `/restart` is refused inside a thread (one thread is one session): start a fresh session with a new top-level message instead.",
   "",
   "**Approvals and questions**",
   "When Plain asks permission, the request shows what will run, with **Approve** and **Deny**; a very long one shows its start and its end and says how much it leaves out. A question from Plain comes with **Answer**, which opens a short form, and **Skip**.",
   "",
   "**Sessions**",
-  "`!status` typed in the channel lists the folder and every session still live, each linked to its thread; inside a thread it shows that session's directory, mode and the footer's values. `!stop` typed in the channel stops every running session and its background tasks; inside a thread it stops only that one. `!resume`, typed in the channel only, lists this folder's twenty newest sessions, from the terminal too, each with the start of its id and a **Resume** button; `!resume <id>` (that start is enough), or `!resume <title>` for a session that has one, resumes it in the thread of your `!resume` message. Inside a thread, `!memory` lists the memory files its session loaded and `!skills` the skills it can use, read only. Inside a thread, `!fork <prompt>` copies its session into a new thread of the channel, which starts on the prompt while this one goes on, as the terminal's `/fork` does. To continue a session in the terminal, run the `Terminal:` command `!status` shows in its thread, or send `!terminal` there, which moves a running turn too. Write from one side at a time: a terminal left open does not see what you write here, and is reopened before you write there again.",
+  "`/status` typed in the channel lists the folder and every session still live, each linked to its thread; inside a thread it shows that session's directory, mode and the footer's values. `/stop` typed in the channel stops every running session and its background tasks; inside a thread it stops only that one. `/resume`, typed in the channel only, lists this folder's twenty newest sessions, from the terminal too, each with the start of its id and a **Resume** button; `/resume <id>` (that start is enough), or `/resume <title>` for a session that has one, resumes it in the thread of your `/resume` message. Inside a thread, `/memory` lists the memory files its session loaded and `/skills` the skills it can use, read only. Inside a thread, `/fork <prompt>` copies its session into a new thread of the channel, which starts on the prompt while this one goes on, as the terminal's `/fork` does. To continue a session in the terminal, run the `Terminal:` command `/status` shows in its thread, or send `/terminal` there, which moves a running turn too. Write from one side at a time: a terminal left open does not see what you write here, and is reopened before you write there again.",
   "",
   "**Files**",
-  "`!open`, sent inside a session's thread, offers the files changed in that session and a search over the folder's files; choosing one shares it into the thread, where Memory chat opens it in its file viewer, with Markdown rendered. `!open <path>` opens that file, and `!open <words>` the file whose path contains them, or lists the files that do. The search reads the folder from disk and leaves out what `.gitignore` excludes inside a git repository. A file over 1 MB is not opened.",
+  "`/open`, sent inside a session's thread, offers the files changed in that session and a search over the folder's files; choosing one shares it into the thread, where Memory chat opens it in its file viewer, with Markdown rendered. `/open <path>` opens that file, and `/open <words>` the file whose path contains them, or lists the files that do. The search reads the folder from disk and leaves out what `.gitignore` excludes inside a git repository. A file over 1 MB is not opened.",
   "",
   "**Changes**",
-  "`!diff`, sent inside a session's thread, lists the files that differ from HEAD in its git repository, untracked ones included, with the lines added and removed; **Diff** on a row shares that file's diff into the thread, where Memory chat opens it in its file viewer. Once the session has edited files, a selector also shows the edits of one turn. It works in a repository you trusted.",
+  "`/diff`, sent inside a session's thread, lists the files that differ from HEAD in its git repository, untracked ones included, with the lines added and removed; **Diff** on a row shares that file's diff into the thread, where Memory chat opens it in its file viewer. Once the session has edited files, a selector also shows the edits of one turn. It works in a repository you trusted.",
   "",
   "**Going back**",
-  "`!rewind`, sent inside a session's thread, lists the session's prompts. Pick one to restore the code to how it was when you sent it, the conversation to before it, or both; the replies you went back over stay in the thread, folded under **Removed by rewind**, and the prompt is posted again to send. It waits until nothing runs.",
+  "`/rewind`, sent inside a session's thread, lists the session's prompts. Pick one to restore the code to how it was when you sent it, the conversation to before it, or both; the replies you went back over stay in the thread, folded under **Removed by rewind**, and the prompt is posted again to send. It waits until nothing runs.",
   "",
   "**Next prompt**",
-  "`!next`, sent inside a session's thread, shows the prompt Plain suggests after a turn, with **Send** and **Cancel**: **Send** sends those words as your own prompt. The suggestion is forgotten when you send a prompt, a `!!` command or a command for Plain, when a turn starts, or when the session closes.",
+  "`/next`, sent inside a session's thread, shows the prompt Plain suggests after a turn, with **Send** and **Cancel**: **Send** sends those words as your own prompt. The suggestion is forgotten when you send a prompt, a `!command` or a command for Plain, when a turn starts, or when the session closes.",
   "",
   "**Bypass**",
-  "`!bypass on`, sent inside a session's thread, lets Plain run every tool without asking in that session, until `!bypass off`; a restart of pardner keeps it. The footer shows ⚡ bypass while it is on.",
+  "`/bypass on`, sent inside a session's thread, lets Plain run every tool without asking in that session, until `/bypass off`; a restart of pardner keeps it. The footer shows ⚡ bypass while it is on.",
   "",
   "**Plan mode**",
-  "`!plan`, sent inside a session's thread, makes Plain plan before it acts: it proposes a plan and asks you to approve it. `!plan off` leaves plan mode, and so does `!bypass on` or `!bypass off`. It belongs to the running session: a restart of pardner or an idle close puts the session back in its normal mode.",
+  "`/plan`, sent inside a session's thread, makes Plain plan before it acts: it proposes a plan and asks you to approve it. `/plan off` leaves plan mode, and so does `/bypass on` or `/bypass off`. It belongs to the running session: a restart of pardner or an idle close puts the session back in its normal mode.",
   "",
   "**Tags**",
-  "`!tag <name>`, sent inside a session's thread, marks it: Memory chat shows `[name]` at the start of the thread's first message, and where Plain can tag a session it gets the same tag. The name is 1 to 40 letters, digits, `.`, `_` or `-`; a new `!tag` replaces the old one. `!untag` takes the tag away. A thread whose session has not started yet is marked in Memory chat alone.",
+  "`/tag <name>`, sent inside a session's thread, marks it: Memory chat shows `[name]` at the start of the thread's first message, and where Plain can tag a session it gets the same tag. The name is 1 to 40 letters, digits, `.`, `_` or `-`; a new `/tag` replaces the old one. `/untag` takes the tag away. A thread whose session has not started yet is marked in Memory chat alone.",
   "",
   "**Pins**",
-  "`!pin`, sent inside a session's thread, pins its first message in Memory chat, which keeps the thread at hand. `!unpin` takes the pin away, however it was made. A tag and a pin are independent.",
+  "`/pin`, sent inside a session's thread, pins its first message in Memory chat, which keeps the thread at hand. `/unpin` takes the pin away, however it was made. A tag and a pin are independent.",
   "",
   "**Shell commands**",
-  "`!!command`, sent inside a session's thread, is the terminal's `!command`: pardner shows it with **Run** and **Cancel**, then runs it with Bash in the session's folder and shows its output; Plain gets the command and its output, and answers. `!stop` stops a command that runs.",
+  "`!command`, sent inside a session's thread, is the terminal's `!command`: pardner shows it with **Run** and **Cancel**, then runs it with Bash in the session's folder and shows its output; Plain gets the command and its output, and answers. `/stop` stops a command that runs.",
   "",
   "**Deleting a thread**",
-  "`!delete-thread`, sent inside a session's thread, asks you to confirm, then deletes every message of the thread from Memory chat, yours and the bot's. The session stays in Plain: `!resume` lists it again. A thread that is working or waiting for you is not deleted: `!stop` it first.",
+  "`/delete-thread`, sent inside a session's thread, asks you to confirm, then deletes every message of the thread from Memory chat, yours and the bot's. The session stays in Plain: `/resume` lists it again. A thread that is working or waiting for you is not deleted: `/stop` it first.",
   "",
   "**Cleaning a channel**",
-  "`!clean-channel`, sent in the channel, says how many threads would go and stay and asks you to confirm, then deletes them from Memory chat with what sits outside them. The sessions stay in Plain: `!resume` lists them again.",
+  "`/clean-channel`, sent in the channel, says how many threads would go and stay and asks you to confirm, then deletes them from Memory chat with what sits outside them. The sessions stay in Plain: `/resume` lists them again.",
   "",
   "**Updates**",
-  "`!pardner` shows the version that runs and the latest one. `!pardner update`, typed in the channel, offers the latest version with a button that installs it: running turns finish first, then pardner restarts on the new version. `!pardner restart` restarts it without installing anything. Both work only while pardner runs as a service.",
+  "`/pardner` shows the version that runs and the latest one. `/pardner update`, typed in the channel, offers the latest version with a button that installs it: running turns finish first, then pardner restarts on the new version. `/pardner restart` restarts it without installing anything. Both work only while pardner runs as a service.",
   "",
-  "`!guide` shows this text again.",
+  "`/guide` shows this text again.",
 ].join("\n");
 
 const EVERYTHING = EVERYTHING_OFFERED;
@@ -90,26 +90,26 @@ function line(startsWith: string): string {
   return found;
 }
 
-const STEP_ONE = line("1. `!bind`");
+const STEP_ONE = line("1. `/bind`");
 const STEP_THREE = line("3. Before that first message");
 const COMMANDS = ["**Commands**", line("Plain's commands start")];
 const APPROVALS = line("When Plain asks permission");
-const SESSIONS = line("`!status` typed in the channel");
-const FILES = ["**Files**", line("`!open`, sent inside")];
-const CHANGES = ["**Changes**", line("`!diff`, sent inside")];
-const REWIND = ["**Going back**", line("`!rewind`, sent inside")];
-const NEXT = ["**Next prompt**", line("`!next`, sent inside")];
-const BYPASS = ["**Bypass**", line("`!bypass on`")];
-const PLAN = ["**Plan mode**", line("`!plan`, sent inside")];
-const TAGS = ["**Tags**", line("`!tag <name>`, sent inside")];
-const PINS = ["**Pins**", line("`!pin`, sent inside")];
-const DELETE = ["**Deleting a thread**", line("`!delete-thread`, sent inside")];
-const SHELL = ["**Shell commands**", line("`!!command`, sent inside")];
+const SESSIONS = line("`/status` typed in the channel");
+const FILES = ["**Files**", line("`/open`, sent inside")];
+const CHANGES = ["**Changes**", line("`/diff`, sent inside")];
+const REWIND = ["**Going back**", line("`/rewind`, sent inside")];
+const NEXT = ["**Next prompt**", line("`/next`, sent inside")];
+const BYPASS = ["**Bypass**", line("`/bypass on`")];
+const PLAN = ["**Plan mode**", line("`/plan`, sent inside")];
+const TAGS = ["**Tags**", line("`/tag <name>`, sent inside")];
+const PINS = ["**Pins**", line("`/pin`, sent inside")];
+const DELETE = ["**Deleting a thread**", line("`/delete-thread`, sent inside")];
+const SHELL = ["**Shell commands**", line("`!command`, sent inside")];
 
 const EFFORT = "the **Effort** (`Default` leaves Plain's own choice)";
 const STEP_THREE_HEAD = "3. Before that first message is sent, the thread asks for ";
 const STEP_THREE_TAIL =
-  "; **Start** sends your message with those choices, and `!stop` cancels it instead.";
+  "; **Start** sends your message with those choices, and `/stop` cancels it instead.";
 
 test("with everything offered the guide is the one the owner reads today", () => {
   assert.equal(guideText(MEMORY_NAMES, EVERYTHING), FULL_GUIDE);
@@ -127,14 +127,14 @@ test("the guide never has two blank lines in a row, whatever is left out", () =>
   const nothing = Object.fromEntries(Object.keys(EVERYTHING).map((key) => [key, false]));
   const bare = guideText(MEMORY_NAMES, nothing as unknown as GuideOffer);
   assert.ok(!bare.includes("\n\n\n"));
-  assert.ok(bare.startsWith("**pardner**\n") && bare.endsWith("`!guide` shows this text again."));
+  assert.ok(bare.startsWith("**pardner**\n") && bare.endsWith("`/guide` shows this text again."));
 });
 
 test("without folderTrust the first step names no trust", () => {
   const { removed, added } = difference(linesOf({ folderTrust: false }));
   assert.deepEqual(removed, [STEP_ONE]);
   assert.deepEqual(added, [
-    "1. `!bind` lists the folders under your allowed root, with a Bind button each; `!bind <folder>` binds one by its path relative to your allowed root: `!bind my-project`. `!bind` works only as a top-level message in the channel.",
+    "1. `/bind` lists the folders under your allowed root, with a Bind button each; `/bind <folder>` binds one by its path relative to your allowed root: `/bind my-project`. `/bind` works only as a top-level message in the channel.",
   ]);
 });
 
@@ -188,31 +188,31 @@ test("without backgroundTasks the stop sentence names no background task", () =>
   assert.deepEqual(added, [SESSIONS.replace(" and its background tasks", "")]);
 });
 
-test("without sessionListing the Sessions section says nothing of !resume", () => {
+test("without sessionListing the Sessions section says nothing of /resume", () => {
   const { removed, added } = difference(linesOf({ sessionListing: false }));
   assert.deepEqual(removed, [SESSIONS]);
-  const from = SESSIONS.indexOf(" `!resume`, typed in the channel only");
-  const to = SESSIONS.indexOf(" Inside a thread, `!memory`");
+  const from = SESSIONS.indexOf(" `/resume`, typed in the channel only");
+  const to = SESSIONS.indexOf(" Inside a thread, `/memory`");
   assert.ok(from > 0 && to > from);
   assert.deepEqual(added, [SESSIONS.slice(0, from) + SESSIONS.slice(to)]);
   assert.ok(
-    added[0]?.includes("inside a thread it stops only that one. Inside a thread, `!memory`"),
+    added[0]?.includes("inside a thread it stops only that one. Inside a thread, `/memory`"),
   );
 });
 
-test("without loadedContext the Sessions section says nothing of !memory and !skills", () => {
+test("without loadedContext the Sessions section says nothing of /memory and /skills", () => {
   const { removed, added } = difference(linesOf({ loadedContext: false }));
   assert.deepEqual(removed, [SESSIONS]);
-  const from = SESSIONS.indexOf(" Inside a thread, `!memory`");
-  const to = SESSIONS.indexOf(" Inside a thread, `!fork");
+  const from = SESSIONS.indexOf(" Inside a thread, `/memory`");
+  const to = SESSIONS.indexOf(" Inside a thread, `/fork");
   assert.ok(from > 0 && to > from);
   assert.deepEqual(added, [SESSIONS.slice(0, from) + SESSIONS.slice(to)]);
 });
 
-test("without forks the Sessions section says nothing of !fork", () => {
+test("without forks the Sessions section says nothing of /fork", () => {
   const { removed, added } = difference(linesOf({ forks: false }));
   assert.deepEqual(removed, [SESSIONS]);
-  const from = SESSIONS.indexOf(" Inside a thread, `!fork");
+  const from = SESSIONS.indexOf(" Inside a thread, `/fork");
   const to = SESSIONS.indexOf(" To continue a session in the terminal");
   assert.ok(from > 0 && to > from);
   assert.deepEqual(added, [SESSIONS.slice(0, from) + SESSIONS.slice(to)]);
@@ -220,7 +220,7 @@ test("without forks the Sessions section says nothing of !fork", () => {
 
 test("without updates the Updates section is gone", () => {
   const { removed, added } = difference(linesOf({ updates: false }));
-  assert.deepEqual(removed, ["**Updates**", line("`!pardner` shows the version that runs")]);
+  assert.deepEqual(removed, ["**Updates**", line("`/pardner` shows the version that runs")]);
   assert.deepEqual(added, []);
 });
 
@@ -270,7 +270,7 @@ test("without channelClean the Cleaning a channel section is gone", () => {
   const { removed, added } = difference(linesOf({ channelClean: false }));
   assert.deepEqual(removed, [
     "**Cleaning a channel**",
-    line("`!clean-channel`, sent in the channel"),
+    line("`/clean-channel`, sent in the channel"),
   ]);
   assert.deepEqual(added, []);
 });

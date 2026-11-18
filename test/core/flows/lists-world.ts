@@ -274,7 +274,7 @@ export class ListsWorld {
     return world;
   }
 
-  /** The channel bound to `folder`, as an earlier `!bind` left it. */
+  /** The channel bound to `folder`, as an earlier `/bind` left it. */
   async bound(folder: string): Promise<void> {
     await this.sessions.bind(this.channel, folder);
   }
@@ -295,7 +295,7 @@ export class ListsWorld {
   }
 
   /** The owner's top-level word in the channel: the thread its answer lives in. */
-  async word(text = "!resume"): Promise<ThreadRef> {
+  async word(text = "/resume"): Promise<ThreadRef> {
     return (await this.chat.as(OWNER).says(this.channel, text)).ref;
   }
 

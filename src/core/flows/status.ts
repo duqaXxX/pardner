@@ -1,5 +1,5 @@
 /**
- * `!status` typed in the channel: its folder, then one line per thread of the channel that holds
+ * `/status` typed in the channel: its folder, then one line per thread of the channel that holds
  * a session, live or not, and what a stop waits for when one is under way. The answer is a
  * notice, small like the rest of the daemon's own lines (the owner, 2026-10-19: the marks read
  * too large at full size).
@@ -20,7 +20,7 @@ import { type FlowDeps, isCancelled, logger, type Talk } from "./talk.ts";
  */
 export const STATUS_ROWS = 10;
 
-/** How long ago, in one unit, as a channel's `!status` says it of a session at rest. */
+/** How long ago, in one unit, as a channel's `/status` says it of a session at rest. */
 export function ago(seconds: number): string {
   const whole = Math.trunc(seconds);
   if (whole < 60) return "just now";
@@ -34,7 +34,7 @@ function outcome(status: SessionStatus | null | undefined): SessionStatus | null
   return status === "done" || status === "error" ? status : null;
 }
 
-/** The answer to `!status` typed in `channel`. */
+/** The answer to `/status` typed in `channel`. */
 export type ChannelStatus = (channel: string) => Promise<void>;
 
 /** One thread the answer may show: what is kept of it, and its session when that is live. */

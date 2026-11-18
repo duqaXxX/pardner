@@ -73,7 +73,7 @@ export function terminalFlow(deps: FlowDeps, talk: Talk): TerminalFlow {
 
   /**
    * Wait for the end of the turn a terminal runs, the question showing it with a Cancel; true
-   * once it ended, false when the owner cancelled (or a `!stop`, a drain).
+   * once it ended, false when the owner cancelled (or a `/stop`, a drain).
    */
   async function waitForTurn(
     ref: ThreadRef,
@@ -114,7 +114,7 @@ export function terminalFlow(deps: FlowDeps, talk: Talk): TerminalFlow {
     }
   }
 
-  /** The line that opens the session in the terminal, as `!status` gives it, or `template`. */
+  /** The line that opens the session in the terminal, as `/status` gives it, or `template`. */
   function commandLine(session: ThreadSession, template: string): string {
     return fill(template, {
       directory: shellQuote(session.directory),
@@ -220,7 +220,7 @@ export function terminalFlow(deps: FlowDeps, talk: Talk): TerminalFlow {
       break;
     }
     // What the terminal wrote is resumed into only once the process here is closed, which the
-    // work it runs would not survive: the owner chooses, as for `!terminal`. Looked at again
+    // work it runs would not survive: the owner chooses, as for `/terminal`. Looked at again
     // after a stop, since that turn may have started more work. Read only while
     // work runs: a plain message takes no extra step on its way.
     while (session.stillRunning !== "") {

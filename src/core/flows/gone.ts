@@ -26,7 +26,7 @@ export function rootGone(deps: FlowDeps, talk: Talk): RootGone {
 
   return async (ref) => {
     const { channel, thread } = ref;
-    // Held by a delete already under way (`!delete-thread`, or a delete the chat's index offers): that delete
+    // Held by a delete already under way (`/delete-thread`, or a delete the chat's index offers): that delete
     // removes the entry itself, and the event is its own deletion coming back. The hold is its
     // to free, never this call's.
     if (sessions.held(channel, thread)) return;

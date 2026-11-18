@@ -17,8 +17,8 @@ sessions. A vulnerability goes to the **Security** tab, never to an issue (see
    fails on a name a doc cites that the source no longer defines (`sinks.ReplySink`,
    `ThreadSession.mode`), and on a variable or a word that
    [docs/setup.md](docs/setup.md) does not name.
-4. A new `!word` of the daemon is a member of the `Word` union of `src/core/commands.ts` with its
-   entry in `WORD`, and needs a line in the `!guide` text (the `GUIDE_` parts of `src/core/texts.ts`, which
+4. A new `/word` of the daemon is a member of the `Word` union of `src/core/commands.ts` with its
+   entry in `WORD`, and needs a line in the `/guide` text (the `GUIDE_` parts of `src/core/texts.ts`, which
    `src/core/guide.ts` assembles) and in `texts.HELP_WORDS`: `test/core/commands.test.ts` fails until both explain it. Change the guide
    whenever a behaviour it describes changes. The word also needs a row in the Commands table of
    [README.md](README.md), which `test/docs.test.ts` checks against `WORD`.
@@ -227,7 +227,7 @@ claim in `probe/claims.ts` ends in one of five outcomes:
 | RETIRED | Claude Code no longer offers the event |
 | FELL | a limit claim only: the probe caused the event and the limit of `docs/limits.md` was gone |
 
-A **gesture** claim is one the probe causes itself (a prompt, `!stop`, a resume). A **model**
+A **gesture** claim is one the probe causes itself (a prompt, `/stop`, a resume). A **model**
 claim needs Claude to act (call Bash, read a file), so when it fails it is UNPROVEN, never
 BROKEN: Claude may simply have chosen otherwise. A **limit** claim holds while a limit of the Agent
 SDK section of [docs/limits.md](docs/limits.md) holds (a command still not offered, a tool still
@@ -327,7 +327,7 @@ that the pinned `sdk.d.ts` does not define and on a `/command` that neither
 
 The probe also compares the commands a session is offered on the release with the list recorded
 in `test/fixtures/sdk/server-info.json`, and prints the ones that are new or gone after the
-claims. A new command is typed in the chat as `!name` from the day the release is pinned: try it in
+claims. A new command is typed in the chat as `/name` from the day the release is pinned: try it in
 a thread, decide what the chat shows for it, then record the list again. The comparison stops no
 certificate. `node probe/main.ts --commands` runs it alone, with no token spent.
 

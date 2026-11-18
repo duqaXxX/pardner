@@ -2034,7 +2034,7 @@ test("a subagent's words are a card of the daemon's, closed on its title and ope
 });
 
 test("an ending that stops the calls draws a call still running as stopped (#10)", async () => {
-  // `!terminal` cuts a turn by closing its process: the call that ran is not ended well.
+  // `/terminal` cuts a turn by closing its process: the call that ran is not ended well.
   const foreground = recordedEvents("foreground");
   const started = foreground.findIndex((event) => event.type === "call_started");
   const running = foreground.slice(0, started + 1);

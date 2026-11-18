@@ -687,7 +687,7 @@ test("clear repair keeps what an unlanded answer still needs", () => {
 });
 
 test("an explicit off is kept apart from never chosen", () => {
-  // `bypass` keeps its old meaning (`true` on, `false` not on); an explicit off (`!bypass off`
+  // `bypass` keeps its old meaning (`true` on, `false` not on); an explicit off (`/bypass off`
   // or an unticked Start) adds `bypass_off: true`, which must survive a restart. The two keys are
   // never both set, and clearing to unset removes `bypass_off`.
   const dir = scratch();

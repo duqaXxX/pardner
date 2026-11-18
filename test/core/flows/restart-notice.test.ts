@@ -142,7 +142,7 @@ test("a restart asked while the rewrite is in flight keeps its own record", asyn
     }),
   } as unknown as ChatProvider;
   const rewriting = rewriteRestartNotice(slow, world.state, taken, RUNNING, world.now);
-  // The owner types `!pardner restart` meanwhile: its line is posted and recorded.
+  // The owner types `/pardner restart` meanwhile: its line is posted and recorded.
   const second = await restarting(world, null);
   release();
   await rewriting;
@@ -157,7 +157,7 @@ test("a restart asked while the rewrite is in flight keeps its own record", asyn
 test("a record written after the start took its notice is not rewritten", async (t) => {
   const world = await MessagesWorld.make(t);
   const taken = world.state.restartNotice; // nothing recorded yet: the start takes none
-  const message = await restarting(world, null); // `!pardner restart`, typed as the chat connects
+  const message = await restarting(world, null); // `/pardner restart`, typed as the chat connects
   await rewriteRestartNotice(world.provider, world.state, taken, RUNNING, world.now);
   assert.equal(shownOf(world, message)?.text, texts.UPDATE_RESTART, "still says what it says");
   assert.deepEqual(world.state.restartNotice, {

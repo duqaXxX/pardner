@@ -95,16 +95,16 @@ test("a message whose submit lands after the first refusal closed the session is
 
 test("a word that connects ends on the refusal and the thread stays", async (t) => {
   const { world, ref, id } = await refused(t);
-  await say(world, "!status", ref);
-  await say(world, "!fork look", ref);
+  await say(world, "/status", ref);
+  await say(world, "/fork look", ref);
   assert.equal(kept(world, ref), id);
   assert.equal(world.state.threads().length, 1, "no thread was opened for a copy");
 });
 
-test("!bypass on a refused session says session gone, starts no new session and keeps the entry", async (t) => {
+test("/bypass on a refused session says session gone, starts no new session and keeps the entry", async (t) => {
   const { world, ref, id } = await refused(t, new WithBypass());
   const started = (world.agent as PlainAgent).starts.length;
-  await say(world, "!bypass on", ref);
+  await say(world, "/bypass on", ref);
   assert.equal(world.shown(ref).at(-1), GONE);
   assert.equal(kept(world, ref), id);
   assert.equal(world.state.thread(ref.channel, ref.thread)?.bypass === true, false);
@@ -112,10 +112,10 @@ test("!bypass on a refused session says session gone, starts no new session and 
   assert.equal((world.agent as PlainAgent).sessions.length, 1, "no new session ran");
 });
 
-test("!tag on a refused session tags the root and tells the agent failed", async (t) => {
+test("/tag on a refused session tags the root and tells the agent failed", async (t) => {
   const agent = new WithSessionTags(true);
   const { world, ref } = await refused(t, agent);
-  await say(world, "!tag devops", ref);
+  await say(world, "/tag devops", ref);
   assert.deepEqual(world.tagCalls, [[ref, "devops"]]);
   assert.equal(world.shown(ref).at(-1), named(texts.TAG_AGENT_FAILED, PLAIN_NAMES));
 });

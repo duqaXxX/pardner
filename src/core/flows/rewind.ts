@@ -1,5 +1,5 @@
 /**
- * `!rewind`: go back to an earlier prompt of a session, as the terminal's `/rewind` lets you. The
+ * `/rewind`: go back to an earlier prompt of a session, as the terminal's `/rewind` lets you. The
  * core decides what is listed and what each action does; the chat draws the lists
  * (`ThreadChat.offer`) and folds the messages of the replies that were gone back over
  * (`ThreadChat.fold`).
@@ -33,7 +33,7 @@ export function rewindFlow(deps: FlowDeps, talk: Talk): RewindFlow {
   const { agent, chat, sessions, state, names } = deps;
   const capabilities = agent.capabilities;
 
-  /** The thread's members `!rewind` needs, or null when the chat lacks the lists. */
+  /** The thread's members `/rewind` needs, or null when the chat lacks the lists. */
   function chatOf(ref: ThreadRef) {
     const thread = talk.thread(ref);
     const { offer } = thread;
@@ -178,7 +178,7 @@ export function rewindFlow(deps: FlowDeps, talk: Talk): RewindFlow {
     return true;
   }
 
-  /** The prompts a `!rewind` may go back to: those before a cut that waits for a prompt. */
+  /** The prompts a `/rewind` may go back to: those before a cut that waits for a prompt. */
   function reachable(
     points: readonly RewindPoint[],
     session: ThreadSession,
@@ -198,7 +198,7 @@ export function rewindFlow(deps: FlowDeps, talk: Talk): RewindFlow {
   async function picked(pick: Picked): Promise<void> {
     const { ref } = pick;
     const stored = state.thread(ref.channel, ref.thread);
-    // A list made for a session the thread no longer holds (a `!stop` and a new start can replace
+    // A list made for a session the thread no longer holds (a `/stop` and a new start can replace
     // it) names prompts of another conversation.
     if (stored === null || stored.sessionId !== pick.session) {
       await talk.tell(ref, texts.REWIND_STALE);

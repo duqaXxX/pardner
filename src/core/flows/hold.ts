@@ -32,7 +32,7 @@ export function holdFlow(deps: FlowDeps, talk: Talk): HoldFlow {
 
   /**
    * Post `Another session is working in this folder: <link>. Send anyway?` and wait for the
-   * owner's answer, cancelled the same way by `!stop` (in this thread or the whole channel) or
+   * owner's answer, cancelled the same way by `/stop` (in this thread or the whole channel) or
    * a drain. True to send the message on; false when it was not, either way telling the owner
    * `Not sent.` already.
    */
@@ -43,7 +43,7 @@ export function holdFlow(deps: FlowDeps, talk: Talk): HoldFlow {
     signal?: AbortSignal,
   ): Promise<boolean> {
     const otherRef = { channel: other.channelId, thread: other.threadId };
-    // Labelled with the busy session's title, as `!status` names it; `Session` while it has none.
+    // Labelled with the busy session's title, as `/status` names it; `Session` while it has none.
     const title = oneLine(await titleOf(other), TITLE_LIMIT);
     const label = deps.chat.escape(title, "notice") || texts.STATUS_CHANNEL_SESSION;
     const link = await talk.noticeLink(otherRef, label);

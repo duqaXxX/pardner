@@ -1,5 +1,5 @@
 /**
- * The scheduled jobs of a session (a loop): how a cron reads to the owner, what `!status` lists,
+ * The scheduled jobs of a session (a loop): how a cron reads to the owner, what `/status` lists,
  * and the idle close that waits for them. The jobs reach the session through the Claude back
  * end's Stop hook, as `stop-hook-session-crons.json` carries them (written to `sdk.d.ts` 0.3.304,
  * after the sequence measured on CLI 2.1.302, 2026-10-19).
@@ -100,7 +100,7 @@ async function withLoop(
   return [h, session];
 }
 
-test("the session keeps the jobs the agent lists, and !status names them", async (t) => {
+test("the session keeps the jobs the agent lists, and /status names them", async (t) => {
   const [, session] = await withLoop(t);
   assert.deepEqual(session.scheduledJobs, [
     { id: "a1b2c3d4", schedule: "*/1 * * * *", recurring: true, prompt: "check the build" },
@@ -109,7 +109,7 @@ test("the session keeps the jobs the agent lists, and !status names them", async
   assert.ok(status.includes("\nLoop `every minute`: check the build"), status);
 });
 
-test("a long prompt is shortened to one line in !status", async (t) => {
+test("a long prompt is shortened to one line in /status", async (t) => {
   const prompt = `check\n${"the build and the deploy ".repeat(10)}`;
   const h = memoryHarnessFor(t)({
     turns: [
@@ -127,7 +127,7 @@ test("a long prompt is shortened to one line in !status", async (t) => {
   assert.ok(line?.endsWith("…"), String(line));
 });
 
-test("an empty list from the agent removes the loop from !status", async (t) => {
+test("an empty list from the agent removes the loop from /status", async (t) => {
   const [, session] = await withLoop(t);
   await (await session.submit("stop the loop")).done.wait();
   assert.deepEqual(session.scheduledJobs, []);
@@ -324,7 +324,7 @@ test("a session that closes with a loop running says the loop is paused, and for
   assert.deepEqual(session.scheduledJobs, []);
 });
 
-test("a process that is lost while a loop runs pauses it and clears what !status lists", async (t) => {
+test("a process that is lost while a loop runs pauses it and clears what /status lists", async (t) => {
   const [h, session] = await withLoop(t);
   h.clients[0]?.inject(run([JOB]));
   await h.until(() => loopMessages(h).length === 1);

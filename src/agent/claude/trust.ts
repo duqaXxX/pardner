@@ -23,7 +23,7 @@
  * `hasTrustDialogAccepted` in those measurements; an interactive start that is not trusted writes
  * `false`.
  *
- * The daemon's own git (the footer, `!status`, `!open`) runs under the first rule alone: in a
+ * The daemon's own git (the footer, `/status`, `/open`) runs under the first rule alone: in a
  * repository whose key the owner trusted (`trustedRepository`).
  *
  * Which repository a folder belongs to is read from the filesystem and never asked of git there:
@@ -448,7 +448,7 @@ async function locateFolder(folder: string): Promise<Repository | null> {
   return { root, key: main ?? root, gitDir, insideGitDir: false };
 }
 
-// A `!bind` list checks many folders in a row: the record, several MB, is parsed again only once
+// A `/bind` list checks many folders in a row: the record, several MB, is parsed again only once
 // it has changed on disk. The promise is kept, not the result, so the checks of one list that
 // arrive while the first is still reading wait for it instead of parsing the record each.
 let reading: { key: string; trusted: Promise<ReadonlySet<string>> } | null = null;
@@ -572,7 +572,7 @@ async function isTrusted(path: string, home: string, configDir?: string): Promis
  * A trusted folder does not stand for a repository inside it: git runs the commands a
  * repository's own config names (a `clean` filter on `status` and `diff-files`), and a repository
  * can reach a trusted folder in an archive or a clone, with a config the owner never read. The
- * agent may `cd` into one, and `!open` looks for them below the session's folder. Nothing here
+ * agent may `cd` into one, and `/open` looks for them below the session's folder. Nothing here
  * runs git.
  */
 export async function trustedRepository(

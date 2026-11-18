@@ -2,7 +2,7 @@
  * The question that holds the owner's message: the same-folder hold, the session's setup and
  * the confirmation of a shell command.
  * It is shown through the chat seam, waits on a `Holds` entry that only the owner's answer, a
- * `!stop` or a drain settles, and ends with the message sent or not.
+ * `/stop` or a drain settles, and ends with the message sent or not.
  */
 import type { ModelInfo } from "../../agent/seam.ts";
 import {
@@ -37,7 +37,7 @@ export interface Question {
   /**
    * The line the question becomes once answered, sent or not, in place of being removed: an
    * edit, which notifies nobody. The owner is then not told `Not sent.` apart. A question a
-   * `!stop` or a drain removed is not rewritten.
+   * `/stop` or a drain removed is not rewritten.
    */
   readonly ends?: { readonly sent: string; readonly cancelled: string };
   /** The request in one line. */
@@ -54,10 +54,10 @@ export interface Question {
 
 /**
  * Put a question that holds the owner's message and wait for the answer: whatever the owner
- * answered, or null when it was cancelled (`!stop`, a drain) or never shown (`Not sent.` or the
+ * answered, or null when it was cancelled (`/stop`, a drain) or never shown (`Not sent.` or the
  * unposted notice, told already). `settle(answer, shownAt, pending)` applies an answer and
  * writes its summary while the thread still shows it waiting and the hold is still open, so a
- * `!stop` or drain meanwhile cancels (`Pending.cancelled`: nothing is sent, the message is
+ * `/stop` or drain meanwhile cancels (`Pending.cancelled`: nothing is sent, the message is
  * removed, `Not sent.`). When it throws, the message is removed, the hold ends as a cancel would
  * and the error goes on.
  */
@@ -112,7 +112,7 @@ export async function askOwner(
     await talk.tell(ref, named(texts.HOLD_UNPOSTED, deps.names));
     return null;
   }
-  // False when the answer came before `ask` returned (a fast answer, `!stop`, a drain): nobody
+  // False when the answer came before `ask` returned (a fast answer, `/stop`, a drain): nobody
   // knew the message then, so it is still ours to settle or remove, and `holdStart`/`holdEnd`
   // (and the waiting status they hold) never run for it.
   const waiting = holds.posted(holdId, shownAt);

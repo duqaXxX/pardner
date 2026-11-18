@@ -31,22 +31,22 @@ test("what a clip heard is a prompt, never a word of the daemon: speech does not
     ref,
     id: ref.thread,
     topLevel: true,
-    text: "!bypass on",
+    text: "/bypass on",
     literal: true,
   });
   const open = await world.asked("setup");
   await world.start(open.ref);
   await sending;
-  assert.deepEqual(await world.prompts(), ["!bypass on"]);
+  assert.deepEqual(await world.prompts(), ["/bypass on"]);
   assert.deepEqual(agent.modes, [], "no mode was changed");
   // The control: the same words typed as text in a session's thread are the daemon's.
   const thread = await world.opened("second");
-  await world.says("!bypass on", thread.thread);
+  await world.says("/bypass on", thread.thread);
   await world.settle();
   assert.deepEqual(agent.modes, ["unrestricted"], "typed, the word changes the mode");
   assert.deepEqual(
-    (await world.prompts()).filter((prompt) => prompt === "!bypass on"),
-    ["!bypass on"],
+    (await world.prompts()).filter((prompt) => prompt === "/bypass on"),
+    ["/bypass on"],
   );
 });
 
@@ -56,16 +56,16 @@ test("text typed with a clip comes before its transcript in one prompt, in a ses
   await world.send({
     ref,
     id: "msg-clip",
-    text: "!status",
+    text: "/status",
     literal: true,
-    content: async () => "!status\n\nWhat day is it today?",
+    content: async () => "/status\n\nWhat day is it today?",
   });
-  assert.deepEqual(await world.prompts(), ["first", "!status\n\nWhat day is it today?"]);
+  assert.deepEqual(await world.prompts(), ["first", "/status\n\nWhat day is it today?"]);
   await world.settle();
   const answers = () => world.shown(ref).filter((line) => line.startsWith("Directory:"));
   assert.deepEqual(answers(), [], "the word of the daemon did not run");
   // The control: typed as text, the same word is answered.
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   await world.settle();
   assert.equal(answers().length, 1);
 });

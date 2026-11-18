@@ -1,5 +1,5 @@
 /**
- * The usage limits of the account in `!status`: the share used, and the time to its reset when
+ * The usage limits of the account in `/status`: the share used, and the time to its reset when
  * the account says one. A time is read from the wall clock the sessions are given, in
  * milliseconds as the limits' reset times are. The footer of a reply hands the chat the same
  * figures, which draws them in its own words (the memory chat writes `session 3%`): that drawing is the

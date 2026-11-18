@@ -91,7 +91,7 @@ test("a second work after a footer starts its own count", async (t) => {
   assert.deepEqual(drawn(h), [work(0, START), work(0, START + 60 * MINUTE)]);
 });
 
-test("`!status` shows no duration", async (t) => {
+test("`/status` shows no duration", async (t) => {
   const h = memoryHarnessFor(t)({ turns: [sdkMessages("tools")] });
   const session = h.session();
   h.wall = START;

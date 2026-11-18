@@ -49,7 +49,7 @@ export const NAMES: Names = {
   author: "Plain",
   cli: "plain",
   chat: "Memory chat",
-  examples: "`!echo hello`, `!count one two`",
+  examples: "`/echo hello`, `/count one two`",
   login: "signin",
   logout: "signout",
   newSession: ["restart"],
@@ -235,7 +235,7 @@ export class World {
     });
     this.identityKeys = (options.identities ?? [MEMORY_IDENTITY]).length;
     this.channel = this.chat.openChannel("work");
-    // The channel is bound before the first start, as the owner's `!bind` of an earlier day left it.
+    // The channel is bound before the first start, as the owner's `/bind` of an earlier day left it.
     const state = new StateStore(join(this.config, "state.json"), {
       modules: { agent: AGENT_NAME, chat: CHAT_NAME },
     });

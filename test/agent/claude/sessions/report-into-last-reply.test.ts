@@ -51,7 +51,7 @@ test("with a message of the owner's below the last reply, the report opens a rep
   const session = h.session();
   await (await session.submit("start the agent")).done.wait();
   await (await session.submit("start the command")).done.wait();
-  // The owner's `!status` sits below both replies: neither is last.
+  // The owner's `/status` sits below both replies: neither is last.
   await session.status();
   h.clients[0]?.inject([...agentEnd, ...agentReport]);
   await h.until(() => h.replies().some(isReport));

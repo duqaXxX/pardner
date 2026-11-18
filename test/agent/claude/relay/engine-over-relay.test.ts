@@ -172,14 +172,14 @@ test(
 );
 
 test(
-  "!stop typed by alice during a turn withdraws the open request once, and both prompts are answered",
+  "/stop typed by alice during a turn withdraws the open request once, and both prompts are answered",
   DARWIN,
   async (t) => {
     const ask = canUseToolCall("Bash", { command: "rm -rf build" });
     const { w, h } = await started(t, [{ turns: [[ask, ...sdkMessages("interrupt")]] }]);
     await w.begin("clean");
     const asked = await request(w);
-    await w.prompt("!stop", w.thread);
+    await w.prompt("/stop", w.thread);
     await w.until((read) => answerOf(read, FIRST) !== undefined && read.edits.length === 1);
     const read = await w.read();
     assertConsistent(read, w.thread);

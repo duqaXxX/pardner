@@ -100,7 +100,7 @@ test(
     try {
       b.connection.start();
       await b.rested();
-      const first = await prompted(r, b, "!status");
+      const first = await prompted(r, b, "/status");
       first.message.handled?.();
       await b.until(async () => (await kind(r, 5)).length === 1);
       assert.equal(r.body((await kind(r, 5))[0] as never).markdown, "");

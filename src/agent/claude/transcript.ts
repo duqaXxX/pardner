@@ -8,7 +8,7 @@
  * #336). The SDK's `sessionStore` receives the same entries, and the SDK refuses it beside
  * `enableFileCheckpointing` ("file history backup blobs are written directly to local disk and
  * are not mirrored", code.claude.com/docs/en/agent-sdk/session-storage, read 2026-10-29), which
- * `!rewind` needs. The store is a mirror of this file, which "the subprocess always writes ... to
+ * `/rewind` needs. The store is a mirror of this file, which "the subprocess always writes ... to
  * local disk first", so the file is read instead.
  *
  * Claude Code writes the transcript through a queue it drains every 100 ms, and drains it before
