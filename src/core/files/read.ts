@@ -1,5 +1,5 @@
 /**
- * What `!open` may share: a path under the session's folder that is a regular file, read once and
+ * What `/open` may share: a path under the session's folder that is a regular file, read once and
  * handed to the chat as bytes. The path is untrusted (an option's value comes back from the chat),
  * so it is resolved with its links, held to the folder, and opened by a descriptor that refuses a
  * link.

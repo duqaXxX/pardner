@@ -198,13 +198,14 @@ function readmeSection(title: string): string {
   return match[1] ?? "";
 }
 
+// A table row of a word: `/word` (the word in group 1), or the shell's `!<command>` (group 2: `!`).
+const COMMAND_ROW = /^\| `(?:\/([\w-]+)|(!)<command>)/gm;
+
 test("the readme lists every word of the daemon and no other", () => {
   // A word added, renamed or removed without its row in the README's table fails here.
   const words = Object.values(WORD).sort();
   const rows = [
-    ...new Set(
-      [...readmeSection("Commands").matchAll(/^\| `!([\w-]+|!)/gm)].map((m) => m[1] ?? ""),
-    ),
+    ...new Set([...readmeSection("Commands").matchAll(COMMAND_ROW)].map((m) => m[1] ?? m[2] ?? "")),
   ].sort();
   assert.deepEqual(rows, words);
 });
@@ -483,9 +484,7 @@ test("the setup guide names every variable scope and word", () => {
     assert.ok(text.includes(`\`${name}\``), `docs/setup.md does not name ${name}`);
   }
   const rows = new Set(
-    [...(text.split("### Commands")[1] ?? "").matchAll(/^\| `!([\w-]+|!)/gm)].map(
-      (m) => m[1] ?? "",
-    ),
+    [...(text.split("### Commands")[1] ?? "").matchAll(COMMAND_ROW)].map((m) => m[1] ?? m[2] ?? ""),
   );
   const missing = Object.values(WORD).filter((word) => !rows.has(word));
   assert.deepEqual(missing, [], `docs/setup.md has no row for ${missing}`);
@@ -562,7 +561,7 @@ test("each chat module has its provider page, and architecture.md links to it", 
 });
 
 test("the commands the daemon answers as not offered are the ones the page lists so", () => {
-  // `!name` for one of them is answered by the daemon, so the two lists are one.
+  // `/name` for one of them is answered by the daemon, so the two lists are one.
   const listed = [CLAUDE_LIMITS, "Choices of pardner"].flatMap((heading) =>
     limitsRows(heading)
       .filter((row) => (row[2] ?? "").startsWith("Not offered"))

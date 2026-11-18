@@ -1,7 +1,7 @@
 /**
  * The session's title on its thread's root, over the memory chat: asked of the agent at the end of
  * each turn and handed to the chat when it is new, after the root's own words were kept in the
- * state. And `!status` in a thread, which shows the title and those words.
+ * state. And `/status` in a thread, which shows the title and those words.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -191,9 +191,9 @@ test("a refusal that cannot change is not retried at every turn, a transient one
   assert.equal(transient.titleRefusals, 2, "a transient refusal is retried at the next turn");
 });
 
-// --- !status in a thread
+// --- /status in a thread
 
-test("!status shows the title and the stored root as written, quoted line by line, last", async (t) => {
+test("/status shows the title and the stored root as written, quoted line by line, last", async (t) => {
   const agent = new WithSessionTitle();
   agent.title = "Fix *the* footer";
   const world = await MessagesWorld.make(t, {
@@ -202,7 +202,7 @@ test("!status shows the title and the stored root as written, quoted line by lin
     rootText: "# fix the *footer*\n\n- one",
   });
   const ref = await world.opened();
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   const status = world.shown(ref).at(-1) ?? "";
   assert.match(status, /^Title: Fix \*the\* footer$/m);
   // The chat's own markup, not escaped: its formatting shows.
@@ -211,20 +211,20 @@ test("!status shows the title and the stored root as written, quoted line by lin
   assert.ok(status.indexOf("Mode:") < status.indexOf("Prompt:"), "the quote is last");
 });
 
-test("!status leaves out the line it has no value for", async (t) => {
+test("/status leaves out the line it has no value for", async (t) => {
   const agent = new WithSessionTitle();
   // A root with only a file had no words: a title and an empty prompt, which is left out.
   agent.title = "Only a title";
   const world = await MessagesWorld.make(t, { agent, titles: true, rootText: "" });
   const ref = await world.opened();
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   const status = world.shown(ref).at(-1) ?? "";
   assert.ok(status.includes("Title: Only a title") && !status.includes("Prompt:"), status);
 
   // No title yet: nothing was replaced, so there is no prompt either.
   const untitled = await MessagesWorld.make(t, { agent: new WithSessionTitle(), titles: true });
   const open = await untitled.opened();
-  await untitled.says("!status", open.thread);
+  await untitled.says("/status", open.thread);
   const answer = untitled.shown(open).at(-1) ?? "";
   assert.ok(!answer.includes("Title:") && !answer.includes("Prompt:"), answer);
 
@@ -235,15 +235,15 @@ test("!status leaves out the line it has no value for", async (t) => {
   const thread = await broken.opened();
   broken.state.setRootPrompt(thread.channel, thread.thread, "kept words");
   failing.fails = true;
-  await broken.says("!status", thread.thread);
+  await broken.says("/status", thread.thread);
   const last = broken.shown(thread).at(-1) ?? "";
   assert.ok(!last.includes("Title:") && last.endsWith("Prompt:\n> kept words"), last);
 });
 
-test("!status of an agent with no titles shows no title line", async (t) => {
+test("/status of an agent with no titles shows no title line", async (t) => {
   const plain = await MessagesWorld.make(t);
   const ref = await plain.opened();
-  await plain.says("!status", ref.thread);
+  await plain.says("/status", ref.thread);
   const status = plain.shown(ref).at(-1) ?? "";
   assert.ok(
     status.includes("Directory:") && !status.includes("Title:") && !status.includes("Prompt:"),
@@ -255,7 +255,7 @@ test("a stored prompt of one very long line is wrapped, every piece quoted whole
   const ref = await world.opened();
   const long = `${"word ".repeat(6000)}end`;
   world.state.setRootPrompt(ref.channel, ref.thread, long);
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   const status = world.shown(ref).at(-1) ?? "";
   const quote = status.slice(status.indexOf("Prompt:\n") + "Prompt:\n".length).split("\n");
   assert.ok(quote.length >= 30, `${quote.length} pieces`);
@@ -263,7 +263,7 @@ test("a stored prompt of one very long line is wrapped, every piece quoted whole
   assert.equal(quote.map((line) => line.slice(2)).join(" "), long);
 });
 
-test("!status of a session closed while its title is read is not given", async (t) => {
+test("/status of a session closed while its title is read is not given", async (t) => {
   const agent = new WithSessionTitle();
   const world = await MessagesWorld.make(t, { agent });
   const ref = await world.opened();
@@ -388,7 +388,7 @@ test("after a stop a deletion is not said to wait for a turn", async (t) => {
   );
 });
 
-test("!status draws the stored words with the chat's control characters escaped and their marks live", async (t) => {
+test("/status draws the stored words with the chat's control characters escaped and their marks live", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new WithSessionTitle() });
   const ref = await world.opened();
   world.state.setRootPrompt(
@@ -396,7 +396,7 @@ test("!status draws the stored words with the chat's control characters escaped 
     ref.thread,
     "<b>bold</b> and <i>x</i>\nVec<String> & a>b with *bold* and `code`",
   );
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   const status = world.shown(ref).at(-1) ?? "";
   assert.ok(
     status.endsWith(
@@ -421,24 +421,24 @@ test("a concurrent delete's hold survives a rootGone that took none", async (t) 
   world.sessions.free(ref.channel, ref.thread);
 });
 
-test("a title written after the turn's end reaches the root at the next !status", async (t) => {
+test("a title written after the turn's end reaches the root at the next /status", async (t) => {
   const agent = new WithSessionTitle();
   const world = await MessagesWorld.make(t, { agent, titles: true });
   const ref = await world.opened();
   assert.deepEqual(world.titleCalls, []);
   // The agent writes its title a moment after the turn ended: no turn reads it again.
   agent.title = "Late title";
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   await world.settle();
   assert.deepEqual(world.titleCalls, [[ref, "Late title"]]);
 });
 
-test("!status shows a title on one line, as the root does", async (t) => {
+test("/status shows a title on one line, as the root does", async (t) => {
   const agent = new WithSessionTitle();
   agent.title = "Fix the\nfooter";
   const world = await MessagesWorld.make(t, { agent, titles: true });
   const ref = await world.opened();
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   const status = world.shown(ref).at(-1) ?? "";
   assert.match(status, /^Title: Fix the footer$/m);
 });

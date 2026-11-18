@@ -1,5 +1,5 @@
 /**
- * The port of the files flows: `!open`, which reads the repository that holds a thread's folder
+ * The port of the files flows: `/open`, which reads the repository that holds a thread's folder
  * and whether a thread is being deleted, and the channel's folder.
  */
 import type { SessionManager } from "../sessions/manager.ts";

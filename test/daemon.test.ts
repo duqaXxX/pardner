@@ -1384,13 +1384,13 @@ test("a stop after a failure that does not finish ends the process with 1", asyn
 });
 
 // C7: a signal's stop has a limit on a shutdown that makes no progress. A word of the daemon
-// (`!status`, the setup of a thread) starts the agent outside the worker, and
+// (`/status`, the setup of a thread) starts the agent outside the worker, and
 // `ThreadSession.close` waits for that start without a signal. The limit is
 // `SHUTDOWN_LIMIT_SECONDS` since the last step of the shutdown that completed, so a long shutdown
 // that goes on (many replies to end) is not cut. A stop that a failure asked for has one deadline,
 // at the failure, which a step does not move.
 
-/** A daemon with a thread whose `!status` started the agent and has not been answered. */
+/** A daemon with a thread whose `/status` started the agent and has not been answered. */
 async function holdingAStart(t: TestContext) {
   const starting = new AsyncEvent();
   const d = new Daemon(t, { scripts: [{ startGate: starting }] });
@@ -1402,7 +1402,7 @@ async function holdingAStart(t: TestContext) {
   d.backend.listed = [{ id: "some-id" } as never];
   const made = mainOf(d, new EventEmitter(), true);
   await d.connected.wait();
-  void d.says("!status", thread).catch(() => undefined);
+  void d.says("/status", thread).catch(() => undefined);
   await d.until(() => d.backend.sessions.length === 1);
   t.after(async () => {
     starting.set(); // a failed assertion must not leave the stop waiting on the start
@@ -1767,9 +1767,9 @@ function storedThread(d: Daemon): void {
 }
 
 for (const [text, signal] of [
-  ["!help", "SIGTERM"],
-  ["!bypass on", "SIGTERM"],
-  ["!status", "SIGTERM"],
+  ["/help", "SIGTERM"],
+  ["/bypass on", "SIGTERM"],
+  ["/status", "SIGTERM"],
   ["hello", "SIGINT"],
 ] as const) {
   test(`a listener still on the channel check does nothing once the daemon stopped [${text}]`, async (t) => {
@@ -1799,7 +1799,7 @@ for (const [text, signal] of [
     assert.deepEqual(d.backend.sessions, [], "an agent session was started after the stop");
     assert.equal(readFileSync(d.path, "utf8"), file, "state.json was written after the stop");
     assert.equal(d.chat.written(d.channel).length, shown, "the chat was written to after the stop");
-    // `statusMark` only words a line: the held `!status` asks for it, and writes nothing.
+    // `statusMark` only words a line: the held `/status` asks for it, and writes nothing.
     assert.deepEqual(
       d.chat
         .calls()

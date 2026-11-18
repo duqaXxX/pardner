@@ -1,5 +1,5 @@
 /**
- * What `!rewind` remembers of a thread: the messages of each prompt's replies, kept in memory.
+ * What `/rewind` remembers of a thread: the messages of each prompt's replies, kept in memory.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";

@@ -1,5 +1,5 @@
 /**
- * `!!command` passes the guards a typed prompt passes before it can wake its session (#240): the
+ * `!command` passes the guards a typed prompt passes before it can wake its session (#240): the
  * same-folder hold and the terminal that holds the session are asked before the command's own
  * confirmation, and a Cancel there runs nothing.
  */
@@ -18,14 +18,14 @@ function openTypes(world: MessagesWorld, thread: string): string[] {
     .map((open) => open.request.type);
 }
 
-test("!! beside a terminal that holds the session asks about the terminal first", async (t) => {
+test("! beside a terminal that holds the session asks about the terminal first", async (t) => {
   const agent = new PlainAgent({ terminal: true, shell: {} });
   const world = await MessagesWorld.make(t, { agent });
   const ref = await world.opened();
   const id = world.state.thread(ref.channel, ref.thread)?.sessionId;
   assert.ok(id);
   agent.holders.set(id, [{ id: "77", own: false, busy: false }]);
-  const sending = world.says("!!ls", ref.thread);
+  const sending = world.says("!ls", ref.thread);
   const terminal = await world.asked("terminal", ref);
   assert.deepEqual(openTypes(world, ref.thread), ["terminal"]);
   await world.chat.as(OWNER).answers(terminal.requestId, { type: "terminal", go: true });
@@ -37,7 +37,7 @@ test("!! beside a terminal that holds the session asks about the terminal first"
   assert.ok((await world.prompts()).some((told) => told.startsWith("ran ls (")));
 });
 
-test("!! with Cancel on the terminal question runs nothing", async (t) => {
+test("! with Cancel on the terminal question runs nothing", async (t) => {
   const agent = new PlainAgent({ terminal: true, shell: {} });
   const world = await MessagesWorld.make(t, { agent });
   const ref = await world.opened();
@@ -45,7 +45,7 @@ test("!! with Cancel on the terminal question runs nothing", async (t) => {
   assert.ok(id);
   agent.holders.set(id, [{ id: "77", own: false, busy: false }]);
   const before = (await world.prompts()).length;
-  const sending = world.says("!!ls", ref.thread);
+  const sending = world.says("!ls", ref.thread);
   const terminal = await world.asked("terminal", ref);
   await world.chat.as(OWNER).answers(terminal.requestId, { type: "terminal", go: false });
   await sending;
@@ -55,7 +55,7 @@ test("!! with Cancel on the terminal question runs nothing", async (t) => {
   assert.ok(world.shown(ref).includes(texts.NOT_SENT));
 });
 
-test("!! beside a busy session of the same folder asks the hold first", async (t) => {
+test("! beside a busy session of the same folder asks the hold first", async (t) => {
   const agent = new PlainAgent({ shell: {} });
   const world = await MessagesWorld.make(t, { agent });
   const ref = await world.opened("one");
@@ -63,7 +63,7 @@ test("!! beside a busy session of the same folder asks the hold first", async (t
   agent.next(hold());
   await world.says("a long job", neighbour.thread);
   await world.settle();
-  const sending = world.says("!!ls", ref.thread);
+  const sending = world.says("!ls", ref.thread);
   const asked = await world.asked("hold", ref);
   assert.deepEqual(openTypes(world, ref.thread), ["hold"]);
   await world.chat.as(OWNER).answers(asked.requestId, { type: "hold", send: true });
@@ -90,9 +90,9 @@ async function besideBusy(t: Parameters<typeof MessagesWorld.make>[0]) {
 const waiting = (world: MessagesWorld, ref: { channel: string; thread: string }) =>
   world.state.thread(ref.channel, ref.thread)?.status === "waiting";
 
-test("!! after Send anyway is not asked the hold again for the same busy session", async (t) => {
+test("! after Send anyway is not asked the hold again for the same busy session", async (t) => {
   const { agent, world, ref } = await besideBusy(t);
-  const sending = world.says("!!ls", ref.thread);
+  const sending = world.says("!ls", ref.thread);
   const asked = await world.asked("hold", ref);
   await world.chat.as(OWNER).answers(asked.requestId, { type: "hold", send: true });
   const shell = await world.asked("shell", ref);
@@ -104,10 +104,10 @@ test("!! after Send anyway is not asked the hold again for the same busy session
   assert.ok((await world.prompts()).some((told) => told.startsWith("ran ls (")));
 });
 
-test("!! with Cancel on the hold asks no Run and runs nothing", async (t) => {
+test("! with Cancel on the hold asks no Run and runs nothing", async (t) => {
   const { world, ref } = await besideBusy(t);
   const before = (await world.prompts()).length;
-  const sending = world.says("!!ls", ref.thread);
+  const sending = world.says("!ls", ref.thread);
   const asked = await world.asked("hold", ref);
   await world.chat.as(OWNER).answers(asked.requestId, { type: "hold", send: false });
   await sending;
@@ -117,10 +117,10 @@ test("!! with Cancel on the hold asks no Run and runs nothing", async (t) => {
   assert.equal(waiting(world, ref), false);
 });
 
-test("!! with Cancel on Run after Send anyway runs nothing and leaves no waiting mark", async (t) => {
+test("! with Cancel on Run after Send anyway runs nothing and leaves no waiting mark", async (t) => {
   const { world, ref } = await besideBusy(t);
   const before = (await world.prompts()).length;
-  const sending = world.says("!!ls", ref.thread);
+  const sending = world.says("!ls", ref.thread);
   const asked = await world.asked("hold", ref);
   await world.chat.as(OWNER).answers(asked.requestId, { type: "hold", send: true });
   const shell = await world.asked("shell", ref);
@@ -139,7 +139,7 @@ test("a terminal turn started while Run waits is waited out before the command g
   assert.ok(id);
   agent.holders.set(id, [{ id: "77", own: false, busy: false }]);
   const before = (await world.prompts()).length;
-  const sending = world.says("!!ls", ref.thread);
+  const sending = world.says("!ls", ref.thread);
   const terminal = await world.asked("terminal", ref);
   await world.chat.as(OWNER).answers(terminal.requestId, { type: "terminal", go: true });
   const shell = await world.asked("shell", ref);

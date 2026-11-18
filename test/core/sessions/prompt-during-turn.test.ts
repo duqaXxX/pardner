@@ -82,7 +82,7 @@ test("a prompt the turn does not reach gets its own turn", async (t) => {
   assert.ok(world.shown(ref).some((line) => line.includes("answer two")));
 });
 
-test("a !!command waits for the prompts sent before it", POSIX_SHELL, async (t) => {
+test("a !command waits for the prompts sent before it", POSIX_SHELL, async (t) => {
   const agent = new PlainAgent({ promptDuringTurn: true, shell: {} });
   const world = await AskingWorld.make(t, { agent });
   const { session } = world.thread();
@@ -98,7 +98,7 @@ test("a !!command waits for the prompts sent before it", POSIX_SHELL, async (t) 
   await until("the command ran", () => existsSync(marker));
 });
 
-test("!stop between a send and its turn: the turn that follows ends the root on done", async (t) => {
+test("/stop between a send and its turn: the turn that follows ends the root on done", async (t) => {
   const agent = new PlainAgent({ promptDuringTurn: true });
   const world = await AskingWorld.make(t, { agent });
   const { ref, session } = world.thread();
@@ -129,7 +129,7 @@ test("!stop between a send and its turn: the turn that follows ends the root on 
   assert.ok(!lines.some((line) => line.includes(texts.STOPPED)));
 });
 
-test("!stop whose interrupt missed a turn that began meanwhile leaves the root working", async (t) => {
+test("/stop whose interrupt missed a turn that began meanwhile leaves the root working", async (t) => {
   const agent = new PlainAgent({ promptDuringTurn: true });
   const world = await AskingWorld.make(t, { agent });
   const { ref, session } = world.thread();
@@ -179,7 +179,7 @@ class GoalsDuringTurn extends PlainAgent {
   }
 }
 
-test("a channel !stop between a send and its turn still drops the goal", async (t) => {
+test("a channel /stop between a send and its turn still drops the goal", async (t) => {
   const agent = new GoalsDuringTurn({ promptDuringTurn: true });
   const world = await AskingWorld.make(t, { agent });
   const { ref, session } = world.thread();
@@ -283,7 +283,7 @@ test("a command waiting behind a turn whose process dies goes to the new process
 });
 
 test(
-  "a send the agent refuses as closed leaves nothing sent: a !!command still runs",
+  "a send the agent refuses as closed leaves nothing sent: a !command still runs",
   POSIX_SHELL,
   async (t) => {
     const agent = new PlainAgent({ promptDuringTurn: true, shell: {} });
@@ -337,7 +337,7 @@ test("nothing is sent behind a command until its turn has ended", async (t) => {
   await until("idle", () => !session.busy);
 });
 
-test("a channel !stop during a turn with a prompt sent sends no goal command into its turn", async (t) => {
+test("a channel /stop during a turn with a prompt sent sends no goal command into its turn", async (t) => {
   const agent = new GoalsDuringTurn({ promptDuringTurn: true });
   const world = await AskingWorld.make(t, { agent });
   const { ref, session } = world.thread();
@@ -370,7 +370,7 @@ function statuses(session: object): [string | null, boolean][] {
   return seen;
 }
 
-/** Two prompts sent in the gap of a session that is idle, a `!stop` in it, the gate then opened. */
+/** Two prompts sent in the gap of a session that is idle, a `/stop` in it, the gate then opened. */
 async function twoInTheGap(
   t: Parameters<typeof AskingWorld.make>[0],
   leavesRest: boolean,
@@ -410,7 +410,7 @@ async function twoInTheGap(
   return { world, session, ref, open, agent };
 }
 
-test("!stop in the gap of two prompts: the cut leaves the second, which runs as its own turn", async (t) => {
+test("/stop in the gap of two prompts: the cut leaves the second, which runs as its own turn", async (t) => {
   const { world, session, ref, open } = await twoInTheGap(t, true);
   open();
   await until("idle", () => !session.busy);
@@ -422,7 +422,7 @@ test("!stop in the gap of two prompts: the cut leaves the second, which runs as 
   assert.equal(root(world, ref), "done");
 });
 
-test("!stop in the gap of two prompts: a cut that took both leaves nothing stuck in sent", async (t) => {
+test("/stop in the gap of two prompts: a cut that took both leaves nothing stuck in sent", async (t) => {
   const { world, session, ref, open } = await twoInTheGap(t, false);
   const seen = statuses(session);
   open();
@@ -438,7 +438,7 @@ test("!stop in the gap of two prompts: a cut that took both leaves nothing stuck
   assert.deepEqual(seen.at(-1), ["done", true], "the owner's stop ended the work: no push");
 });
 
-test("!stop in the gap of two prompts: a prompt the cut took is dropped even when a later turn runs at the wait's end", async (t) => {
+test("/stop in the gap of two prompts: a prompt the cut took is dropped even when a later turn runs at the wait's end", async (t) => {
   const agent = new PlainAgent({ promptDuringTurn: true });
   const world = await AskingWorld.make(t, { agent });
   const { ref, session } = world.thread();
@@ -488,7 +488,7 @@ test("!stop in the gap of two prompts: a prompt the cut took is dropped even whe
   assert.deepEqual(seen.at(-1), ["done", false]);
 });
 
-test("!stop in the gap of two prompts: a turn the agent starts behind the cut prompt tells the owner of its end", async (t) => {
+test("/stop in the gap of two prompts: a turn the agent starts behind the cut prompt tells the owner of its end", async (t) => {
   const { world, session, ref, open, agent } = await twoInTheGap(t, false);
   const seen = statuses(session);
   open();
@@ -515,7 +515,7 @@ test("!stop in the gap of two prompts: a turn the agent starts behind the cut pr
   assert.deepEqual(seen.at(-1), ["done", false]);
 });
 
-test("!stop in the gap of two prompts: an empty turn of the agent behind the cut prompt does not tell the owner", async (t) => {
+test("/stop in the gap of two prompts: an empty turn of the agent behind the cut prompt does not tell the owner", async (t) => {
   const { world, session, ref, open, agent } = await twoInTheGap(t, false);
   const seen = statuses(session);
   open();
@@ -541,12 +541,12 @@ test("!stop in the gap of two prompts: an empty turn of the agent behind the cut
   assert.deepEqual(seen.at(-1), ["done", true]);
 });
 
-test("!stop in the gap of two prompts: a hold cancelled behind the cut prompt does not tell the owner", async (t) => {
+test("/stop in the gap of two prompts: a hold cancelled behind the cut prompt does not tell the owner", async (t) => {
   const { world, session, ref, open } = await twoInTheGap(t, false);
   const seen = statuses(session);
   open();
   await settledTurn();
-  // A `!!command`'s confirmation, or a terminal's `Send here`, that the owner cancels.
+  // A `!command`'s confirmation, or a terminal's `Send here`, that the owner cancels.
   session.holdStart();
   await session.holdEnd({ continued: false });
   await settledTurn();
@@ -558,7 +558,7 @@ test("!stop in the gap of two prompts: a hold cancelled behind the cut prompt do
   assert.deepEqual(seen.at(-1), ["done", true]);
 });
 
-test("!stop in the gap of two prompts: a hold continued behind the cut prompt tells the owner once its work ends", async (t) => {
+test("/stop in the gap of two prompts: a hold continued behind the cut prompt tells the owner once its work ends", async (t) => {
   const { world, session, ref, open } = await twoInTheGap(t, false);
   const seen = statuses(session);
   open();
@@ -579,7 +579,7 @@ test("!stop in the gap of two prompts: a hold continued behind the cut prompt te
 const notSentOf = (text: string) => (line: string) =>
   /messages? w(as|ere) not sent because you stopped it/.test(line) && line.includes(`"${text}"`);
 
-test("!stop in the gap, an agent that says idle: the prompt the cut took is dropped at the idle, with no clock", async (t) => {
+test("/stop in the gap, an agent that says idle: the prompt the cut took is dropped at the idle, with no clock", async (t) => {
   const { world, session, ref, open } = await twoInTheGap(t, false, true);
   const seen = statuses(session);
   open();
@@ -590,7 +590,7 @@ test("!stop in the gap, an agent that says idle: the prompt the cut took is drop
   assert.deepEqual(seen.at(-1), ["done", true], "the owner's stop ended the work: no push");
 });
 
-test("!stop in the gap, an agent that says idle: a prompt the cut left runs and nothing is dropped", async (t) => {
+test("/stop in the gap, an agent that says idle: a prompt the cut left runs and nothing is dropped", async (t) => {
   const { world, session, ref, open } = await twoInTheGap(t, true, true);
   open();
   await until("idle", () => !session.busy);
@@ -600,7 +600,7 @@ test("!stop in the gap, an agent that says idle: a prompt the cut left runs and 
   assert.equal(root(world, ref), "done");
 });
 
-test("!stop in the gap, an agent that says idle: a prompt written after the stop is never dropped by an early idle", async (t) => {
+test("/stop in the gap, an agent that says idle: a prompt written after the stop is never dropped by an early idle", async (t) => {
   const agent = new PlainAgent({ promptDuringTurn: true, declaredState: true });
   const world = await AskingWorld.make(t, { agent });
   const { ref, session } = world.thread();
@@ -641,7 +641,7 @@ test("!stop in the gap, an agent that says idle: a prompt written after the stop
   assert.equal(root(world, ref), "done");
 });
 
-test("!stop in the gap, an agent that says idle: work that ran before the idle makes the end push", async (t) => {
+test("/stop in the gap, an agent that says idle: work that ran before the idle makes the end push", async (t) => {
   const { world, session, ref, open, agent } = await twoInTheGap(t, false, true);
   const plain = agent.sessions[0];
   assert.ok(plain);
@@ -670,7 +670,7 @@ test("!stop in the gap, an agent that says idle: work that ran before the idle m
   assert.deepEqual(seen.at(-1), ["done", false]);
 });
 
-test("!stop in the gap, an agent that says idle: an idle already said before the cut still ends the wait", async (t) => {
+test("/stop in the gap, an agent that says idle: an idle already said before the cut still ends the wait", async (t) => {
   const { world, session, ref, open, agent } = await twoInTheGap(t, false, true);
   const plain = agent.sessions[0];
   assert.ok(plain);
@@ -707,7 +707,7 @@ async function secondGap(t: Parameters<typeof AskingWorld.make>[0]) {
   return { ...made, plain, openSecond };
 }
 
-test("!stop twice in the gap before the idle: the second cut's prompt joins the first wait, once", async (t) => {
+test("/stop twice in the gap before the idle: the second cut's prompt joins the first wait, once", async (t) => {
   const { world, session, ref, plain, openSecond } = await secondGap(t);
   const seen = statuses(session);
   openSecond();
@@ -722,7 +722,7 @@ test("!stop twice in the gap before the idle: the second cut's prompt joins the 
   assert.deepEqual(seen.at(-1), ["done", false]);
 });
 
-test("!stop twice in the gap: an idle between the second stop and its cut leaves the second record for the cut", async (t) => {
+test("/stop twice in the gap: an idle between the second stop and its cut leaves the second record for the cut", async (t) => {
   const { world, session, ref, plain, openSecond } = await secondGap(t);
   plain.emit({ type: "state_changed", state: "idle" });
   await settledTurn();
@@ -747,7 +747,7 @@ const refusal = {
   retracted: false,
 } as const;
 
-test("!stop in the gap, an agent that says idle: a refusal in the wait opens no turn on the prompt in doubt", async (t) => {
+test("/stop in the gap, an agent that says idle: a refusal in the wait opens no turn on the prompt in doubt", async (t) => {
   const { world, session, ref, open, agent } = await twoInTheGap(t, false, true);
   const plain = agent.sessions[0];
   assert.ok(plain);
@@ -764,7 +764,7 @@ test("!stop in the gap, an agent that says idle: a refusal in the wait opens no 
   assert.equal(root(world, ref), "done");
 });
 
-test("!stop in the gap of two prompts: a refusal in the wait opens no turn on the prompt in doubt", async (t) => {
+test("/stop in the gap of two prompts: a refusal in the wait opens no turn on the prompt in doubt", async (t) => {
   const { world, session, ref, open, agent } = await twoInTheGap(t, false);
   open();
   await settledTurn();
@@ -777,7 +777,7 @@ test("!stop in the gap of two prompts: a refusal in the wait opens no turn on th
   assert.equal(root(world, ref), "done");
 });
 
-test("!stop in the gap, an agent that says idle: a turn the agent opens with a compaction in the wait is not the prompt in doubt", async (t) => {
+test("/stop in the gap, an agent that says idle: a turn the agent opens with a compaction in the wait is not the prompt in doubt", async (t) => {
   const { world, session, ref, open, agent } = await twoInTheGap(t, false, true);
   const plain = agent.sessions[0];
   assert.ok(plain);
@@ -810,7 +810,7 @@ test("!stop in the gap, an agent that says idle: a turn the agent opens with a c
   assert.equal(root(world, ref), "done");
 });
 
-test("!stop in the gap, an agent that says idle: a prompt in doubt whose turn compacts before its replay keeps that turn", async (t) => {
+test("/stop in the gap, an agent that says idle: a prompt in doubt whose turn compacts before its replay keeps that turn", async (t) => {
   const { world, session, ref, open, agent } = await twoInTheGap(t, false, true);
   const plain = agent.sessions[0];
   assert.ok(plain);
@@ -849,7 +849,7 @@ test("!stop in the gap, an agent that says idle: a prompt in doubt whose turn co
 
 for (const startedBy of ["agent", "owner"] as const) {
   for (const declaredState of [false, true]) {
-    test(`!stop in the gap: a worded turn in the wait whose end says ${startedBy} never takes the prompt in doubt (${declaredState ? "says idle" : "timer"})`, async (t) => {
+    test(`/stop in the gap: a worded turn in the wait whose end says ${startedBy} never takes the prompt in doubt (${declaredState ? "says idle" : "timer"})`, async (t) => {
       const { world, session, ref, open, agent } = await twoInTheGap(t, false, declaredState);
       const plain = agent.sessions[0];
       assert.ok(plain);
@@ -878,7 +878,7 @@ for (const startedBy of ["agent", "owner"] as const) {
   }
 }
 
-test("!stop twice in the gap: a second stop that cuts the prompt in doubt leaves the next prompt to run", async (t) => {
+test("/stop twice in the gap: a second stop that cuts the prompt in doubt leaves the next prompt to run", async (t) => {
   const { world, session, ref, open, agent } = await twoInTheGap(t, true, true);
   agent.next(say("fifth answer"));
   const plain = agent.sessions[0];
@@ -905,7 +905,7 @@ test("!stop twice in the gap: a second stop that cuts the prompt in doubt leaves
   assert.ok(!world.shown(ref).some(notSentOf("fifth")), "the prompt that ran is never told");
 });
 
-test("!stop twice in the gap: a turn the agent starts that ends with no step never takes the prompt in doubt", async (t) => {
+test("/stop twice in the gap: a turn the agent starts that ends with no step never takes the prompt in doubt", async (t) => {
   const { world, session, ref, open, agent } = await twoInTheGap(t, false, true);
   const plain = agent.sessions[0];
   assert.ok(plain);
@@ -934,7 +934,7 @@ test("!stop twice in the gap: a turn the agent starts that ends with no step nev
   assert.equal(world.shown(ref).filter(notSentOf("third")).length, 1, "told once");
 });
 
-test("!stop twice in the gap, then a prompt: a turn the agent starts with no step never tells that prompt not sent (#270)", async (t) => {
+test("/stop twice in the gap, then a prompt: a turn the agent starts with no step never tells that prompt not sent (#270)", async (t) => {
   const { world, session, ref, open, agent } = await twoInTheGap(t, false, true);
   const plain = agent.sessions[0];
   assert.ok(plain);
@@ -975,7 +975,7 @@ test("!stop twice in the gap, then a prompt: a turn the agent starts with no ste
   assert.ok(!world.shown(ref).some(notSentOf("fifth")), "the fifth ran: never told not sent");
 });
 
-test("!stop twice in the gap: a turn that names no prompt and ends with no step never takes the prompt in doubt", async (t) => {
+test("/stop twice in the gap: a turn that names no prompt and ends with no step never takes the prompt in doubt", async (t) => {
   const { world, session, ref, open, agent } = await twoInTheGap(t, false, true);
   const plain = agent.sessions[0];
   assert.ok(plain);
@@ -1006,7 +1006,7 @@ test("!stop twice in the gap: a turn that names no prompt and ends with no step 
   assert.ok(!told[0]?.includes("worked"), "not told on the run's reply");
 });
 
-test("!stop in the gap, an agent that says idle: a prompt replayed before the idle, whose turn opens after it, is not dropped", async (t) => {
+test("/stop in the gap, an agent that says idle: a prompt replayed before the idle, whose turn opens after it, is not dropped", async (t) => {
   const { world, session, ref, open, agent } = await twoInTheGap(t, false, true);
   const plain = agent.sessions[0];
   assert.ok(plain);
@@ -1049,7 +1049,7 @@ class Tasks extends PlainAgent {
 }
 
 /**
- * Two prompts wait in the gap after the first turn and a `!stop` cuts them, the second is left
+ * Two prompts wait in the gap after the first turn and a `/stop` cuts them, the second is left
  * in doubt. A turn of the agent's own then starts a background command (and a second one when
  * `alsoRunning`, which keeps that turn's reply open), the owner writes a fifth message, and the
  * first command ends while the send of the fifth is still going (it rejects): the end line is
@@ -1152,7 +1152,7 @@ async function endedBehindARejectedSend(
   return { world, session, ref, agent };
 }
 
-test("!stop in the gap: an end line kept behind a message the wait drops goes on the not-sent note once its reply is finished (#266)", async (t) => {
+test("/stop in the gap: an end line kept behind a message the wait drops goes on the not-sent note once its reply is finished (#266)", async (t) => {
   const { world, session, ref, agent } = await endedBehindARejectedSend(t);
   const shown = () => world.shown(ref);
   const mark = shown().findIndex((line) => line.includes("watch2"));
@@ -1174,7 +1174,7 @@ test("!stop in the gap: an end line kept behind a message the wait drops goes on
   assert.ok(!lines[0]?.startsWith("sixth answer"), "not in the next message's reply");
 });
 
-test("!stop in the gap: an end line kept behind a message the wait drops goes into its task's reply while that reply is open (#266)", async (t) => {
+test("/stop in the gap: an end line kept behind a message the wait drops goes into its task's reply while that reply is open (#266)", async (t) => {
   const { world, session, ref, agent } = await endedBehindARejectedSend(t, { alsoRunning: true });
   const shown = () => world.shown(ref);
   // watch3 still runs, so the own turn's reply is open: the line is written there by an edit.

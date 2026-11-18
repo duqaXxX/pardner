@@ -23,7 +23,7 @@ test(
     const device = owner(r);
     try {
       await until(() => d.err().includes("relay: ") || d.out() !== "" || true, "the daemon", 100);
-      await device.says(`!bind ${w.folder("work")}`);
+      await device.says(`/bind ${w.folder("work")}`);
       await until(
         async () => (await device.bodies(1)).length > 0,
         `the bind to be said: ${d.err()}`,
@@ -74,8 +74,8 @@ test(
     const one = owner(r);
     const two = owner(r, second.send);
     try {
-      await one.says(`!bind ${w.folder("one")}`);
-      await two.says(`!bind ${w.folder("two")}`);
+      await one.says(`/bind ${w.folder("one")}`);
+      await two.says(`/bind ${w.folder("two")}`);
       await until(
         async () => (await one.bodies(1)).length >= 2,
         `both binds to be said: ${d.err()}`,
@@ -107,7 +107,7 @@ async function queued(second: string, script: string[]) {
   const d = daemon(r, w, script);
   const device = owner(r);
   try {
-    await device.says(`!bind ${w.folder("work")}`);
+    await device.says(`/bind ${w.folder("work")}`);
     await until(async () => (await device.bodies(1)).length > 0, `the bind: ${d.err()}`);
     const a = await device.says("first");
     await until(
@@ -158,7 +158,7 @@ test(
   "a word queued between: the first reply's text is in the first answer and every part names an answer that exists",
   DARWIN,
   async () => {
-    const t = await queued("!status", ["ONE"]);
+    const t = await queued("/status", ["ONE"]);
     try {
       assert.ok(t.answers.find((x) => x.re === t.a.name)?.md.includes("ONE"));
       const answered = new Set(t.answers.map((x) => x.name));

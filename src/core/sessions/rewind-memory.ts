@@ -1,5 +1,5 @@
 /**
- * What `!rewind` remembers of a thread, in memory: which messages each prompt's replies wrote (the
+ * What `/rewind` remembers of a thread, in memory: which messages each prompt's replies wrote (the
  * messages a rewind folds), and the prompt a rewind cut the conversation at until a prompt is sent
  * after it. Of these only the cut is also stored (`pending_cut` in `state.json`, invariant 3): after
  * a restart of the daemon the replies of earlier turns are not known, and a rewind does not fold

@@ -1,9 +1,11 @@
 /**
- * Commands typed as messages: `!word`. A few words are pardner's own; any other
- * `!name args` is a Claude Code command, so a command a new Claude Code release adds works at once.
+ * Commands typed as messages: `/word`. A few words are pardner's own; any other
+ * `/name args` is a Claude Code command, so a command a new Claude Code release adds works at once.
+ * A message that starts with `!` is a shell command.
  *
- * `!` is the product's own prefix in every chat: it leaves the agent's own command prefix free
- * (`AgentWords.commandPrefix`) and works in a chat that never delivers a `/` message to a bot.
+ * Pardner types commands as the terminal does: `/` for a command, `!` for a shell command. The
+ * core holds the product's own prefix (`COMMAND_PREFIX`); the agent's prefix for the passthrough
+ * stays `AgentWords.commandPrefix`, so the core still knows no agent.
  */
 import type { CommandInfo } from "../agent/seam.ts";
 import type { CommandCandidate } from "../chat/seam.ts";
@@ -41,39 +43,39 @@ export interface Stop {
   readonly kind: "stop";
 }
 
-/** `!memory`: the memory files the thread's session loaded, as the terminal's `/memory` lists them. */
+/** `/memory`: the memory files the thread's session loaded, as the terminal's `/memory` lists them. */
 export interface Memory {
   readonly kind: "memory";
 }
 
-/** `!skills`: the skills the thread's session can use, as the terminal's `/skills` lists them. */
+/** `/skills`: the skills the thread's session can use, as the terminal's `/skills` lists them. */
 export interface Skills {
   readonly kind: "skills";
 }
 
-/** `!fork [prompt]`: a copy of the session in a new thread of the channel, as the terminal's `/fork`. */
+/** `/fork [prompt]`: a copy of the session in a new thread of the channel, as the terminal's `/fork`. */
 export interface Fork {
   readonly kind: "fork";
   /** What the copy starts on; empty when it waits for the owner's first message. */
   readonly prompt: string;
 }
 
-/** `!diff`: the files the session changed in its repository, each with a control that shares its diff. */
+/** `/diff`: the files the session changed in its repository, each with a control that shares its diff. */
 export interface Diff {
   readonly kind: "diff";
 }
 
-/** `!rewind`: the session's prompts in a list, to go back to one: its code, its conversation or both. */
+/** `/rewind`: the session's prompts in a list, to go back to one: its code, its conversation or both. */
 export interface Rewind {
   readonly kind: "rewind";
 }
 
-/** `!next`: the agent's suggested next prompt, offered to send. */
+/** `/next`: the agent's suggested next prompt, offered to send. */
 export interface Next {
   readonly kind: "next";
 }
 
-/** `!terminal`: the session moves to a terminal on the host, a running turn with it. */
+/** `/terminal`: the session moves to a terminal on the host, a running turn with it. */
 export interface Terminal {
   readonly kind: "terminal";
 }
@@ -120,7 +122,7 @@ export interface Guide {
   readonly kind: "guide";
 }
 
-/** `!!command`: the terminal's `!` bash mode, run by the daemon once the owner confirms it. */
+/** `!command`: the terminal's `!` bash mode, run by the daemon once the owner confirms it. */
 export interface Shell {
   readonly kind: "shell";
   /** As typed, line breaks kept; never empty. */
@@ -147,8 +149,8 @@ export interface Invalid {
 }
 
 // The daemon's own words, answered without Claude Code; a Passthrough goes to the session.
-// `WORD` names each one, and test/core/commands.test.ts checks that the guide (`!guide`) and
-// `!help` explain every one: a new word cannot ship without its line in both.
+// `WORD` names each one, and test/core/commands.test.ts checks that the guide (`/guide`) and
+// `/help` explain every one: a new word cannot ship without its line in both.
 export type Word =
   | Help
   | Guide
@@ -177,6 +179,12 @@ export type Word =
   | Invalid;
 export type Command = Word | Passthrough;
 
+/** The prefix of the daemon's words and of the agent's commands; a message starting with it is a command. */
+export const COMMAND_PREFIX = "/";
+
+/** The prefix of a shell command, as the terminal's bash mode. */
+export const SHELL_PREFIX = "!";
+
 /** The word each of the daemon's own commands is typed as; a new kind of `Word` fails to compile here. */
 export const WORD = {
   help: "help",
@@ -202,21 +210,21 @@ export const WORD = {
   "delete-thread": "delete-thread",
   "clean-channel": "clean-channel",
   pardner: "pardner",
-  // Typed `!!`: the `!` of the owner's words stands for the terminal's `/`, so `!!` stands for its `!`.
-  shell: "!",
+  // Typed `!command`: pardner types commands as the terminal does, and the terminal's `!` is its bash mode.
+  shell: SHELL_PREFIX,
 } as const satisfies Record<Exclude<Word["kind"], "invalid">, string>;
 
-// The most of a command's description `!help` shows on its line: the core's own choice since
-// `!help` listed the agent's commands, not a limit of any chat.
+// The most of a command's description `/help` shows on its line: the core's own choice since
+// `/help` listed the agent's commands, not a limit of any chat.
 export const DESCRIPTION_LIMIT = 100;
 
 /**
  * A thread's tag: 1 to 40 letters, digits, `.`, `_` or `-`, kept as typed. One rule for what
- * `!tag` accepts and for what a chat reads back as a tag.
+ * `/tag` accepts and for what a chat reads back as a tag.
  */
 export const TAG_NAME = /^[\p{L}\p{N}._-]{1,40}$/u;
 
-/** A mistyped `word` (typed in any case, as `parseBang` reads it), with the rule it broke. */
+/** A mistyped `word` (typed in any case, as `parseCommand` reads it), with the rule it broke. */
 function invalid(word: string, rule: string | null = texts.RULE_NO_ARGUMENT): Invalid {
   return { kind: "invalid", word: word.toLowerCase(), rule };
 }
@@ -228,19 +236,21 @@ const WORD_AND_REST = new RegExp(`^([^${PY_SPACE}]+)(?:[${PY_SPACE}]+([\\s\\S]*)
 const RUNS_OF_SPACE = new RegExp(`[${PY_SPACE}]+`);
 
 /**
- * Map a `!word` message to the daemon's own command or a Claude Code passthrough; null when the
+ * Map a `/word` message to the daemon's own command or a Claude Code passthrough; null when the
  * message is not a command at all.
  */
-export function parseBang(text: string, bare: string = text): Command | null {
+export function parseCommand(text: string, bare: string = text): Command | null {
   const stripped = strip(text);
-  if (!stripped.startsWith("!")) return null;
-  const body = stripped.slice(1);
-  if (body === "" || STARTS_WITH_SPACE.test(body)) return null;
-  if (body.startsWith("!")) {
-    const command = strip(body.slice(1));
+  if (stripped.startsWith(SHELL_PREFIX)) {
+    // Whitespace after the prefix is allowed, as the terminal's bash mode takes it; a bare `!` has
+    // no command.
+    const command = strip(stripped.slice(SHELL_PREFIX.length));
     if (command === "") return { kind: "invalid", word: null, rule: null };
     return { kind: "shell", command };
   }
+  if (!stripped.startsWith(COMMAND_PREFIX)) return null;
+  const body = stripped.slice(COMMAND_PREFIX.length);
+  if (body === "" || STARTS_WITH_SPACE.test(body)) return null;
   // The word ends at any whitespace: a line break after it (a code block that follows the
   // word, a second line) separates it from its arguments as a space does.
   const split = WORD_AND_REST.exec(body);
@@ -310,7 +320,7 @@ export function parseBang(text: string, bare: string = text): Command | null {
       // Alone, or with a name the rule refuses, it is mistyped: the help shows how it is written.
       return TAG_NAME.test(named) ? { kind: "tag", name: named } : invalid(word, texts.RULE_TAG);
     case "untag":
-      // A thread has one tag, so `!untag devops` means `!untag`: what follows the word says
+      // A thread has one tag, so `/untag devops` means `/untag`: what follows the word says
       // nothing more, and a word the owner typed must not reach the agent as a prompt.
       return { kind: "untag" };
     case "pin":
@@ -338,33 +348,38 @@ export function parseBang(text: string, bare: string = text): Command | null {
 }
 
 /**
- * What follows `word` in `bare`, when `bare` is a `!` message of the same word; null otherwise,
+ * What follows `word` in `bare`, when `bare` is a `/` message of the same word; null otherwise,
  * so the caller keeps the argument as typed.
  */
 function bareArgument(bare: string, word: string): string | null {
   const stripped = strip(bare);
-  if (!stripped.startsWith("!")) return null;
-  const split = WORD_AND_REST.exec(stripped.slice(1));
+  if (!stripped.startsWith(COMMAND_PREFIX)) return null;
+  const split = WORD_AND_REST.exec(stripped.slice(COMMAND_PREFIX.length));
   if (split?.[1]?.toLowerCase() !== word.toLowerCase()) return null;
   return strip(split[2] ?? "");
 }
 
 /**
- * The own help line of `word` (`!tag <name> ...`), the one `!help` lists for it; null for a word
- * with none. `folderTrust` picks the `!bind` line as `helpText` does.
+ * The own help line of `word` (`/tag <name> ...`), the one `/help` lists for it; null for a word
+ * with none. `folderTrust` picks the `/bind` line as `helpText` does.
  */
 export function wordHelpLine(word: string, names: texts.Names, folderTrust = true): string | null {
   const lines = (folderTrust ? texts.HELP_WORDS : texts.HELP_WORDS_ANY).map((line) =>
     texts.named(line, names),
   );
-  return (
-    lines.find((line) => line.startsWith(`\`!${word} `) || line.startsWith(`\`!${word}\``)) ?? null
-  );
+  return lines.find((line) => opensHelpLine(line, word)) ?? null;
 }
 
-/** Whether `text` is a `!` and nothing else: the owner asking for every command. */
-export function isBangAlone(text: string): boolean {
-  return strip(text) === "!";
+/** Whether a help line opens with the usage of `word`: the shell's line with `!`, any other with `/`. */
+function opensHelpLine(line: string, word: string): boolean {
+  if (word === WORD.shell) return line.startsWith(`\`${SHELL_PREFIX}`);
+  const open = `\`${COMMAND_PREFIX}${word}`;
+  return line.startsWith(`${open} `) || line.startsWith(`${open}\``);
+}
+
+/** Whether `text` is the command prefix and nothing else: the owner asking for every command. */
+export function isPrefixAlone(text: string): boolean {
+  return strip(text) === COMMAND_PREFIX;
 }
 
 /**
@@ -374,7 +389,7 @@ export function isBangAlone(text: string): boolean {
  * first. `escapeMarkdown` is the chat provider's escape for a markdown block; `names` fill the
  * texts that name the agent and the chat. An agent with no commands of its own
  * (`agentCommands` false) has none listed, and no line about where they are listed. An agent that
- * keeps no record of trust (`folderTrust` false) has a `!bind` line that speaks of none.
+ * keeps no record of trust (`folderTrust` false) has a `/bind` line that speaks of none.
  */
 export function helpText(
   commands: readonly CommandInfo[] | null,
@@ -388,9 +403,7 @@ export function helpText(
   const keep = (line: string): boolean => line.toLowerCase().includes(query.toLowerCase());
   // A word the agent or the chat cannot serve is not offered: its line is left out.
   const served = (line: string): boolean =>
-    ![...unserved].some(
-      (word) => line.startsWith(`\`!${word} `) || line.startsWith(`\`!${word}\``),
-    );
+    ![...unserved].some((word) => opensHelpLine(line, word));
   const own = (folderTrust ? texts.HELP_WORDS : texts.HELP_WORDS_ANY)
     .map((word) => texts.named(word, names))
     .filter(served)
@@ -495,7 +508,7 @@ export function oneLine(description: string): string {
 }
 
 /**
- * `!name hint` and the description as written, cut to one short line; not escaped. The
+ * `/name hint` and the description as written, cut to one short line; not escaped. The
  * description is third-party text, and a cut can fall inside its own code span: the caller
  * escapes it before showing it (`helpText`).
  */
@@ -503,7 +516,7 @@ export function commandParts(
   command: CommandInfo,
   escapeMarkdown: (text: string) => string,
 ): [usage: string, description: string] {
-  const plain = `!${command.name} ${command.argumentHint}`.replace(TRAILING, "");
+  const plain = `${COMMAND_PREFIX}${command.name} ${command.argumentHint}`.replace(TRAILING, "");
   // A code span cannot hold a backtick: such a usage is plain text, escaped.
   const usage = plain.includes("`") ? escapeMarkdown(plain) : `\`${plain}\``;
   const description = oneLine(command.description);
@@ -541,8 +554,8 @@ function distance(a: string, b: string): number {
   return row[right.length] as number;
 }
 
-// The daemon's words a session's thread refuses (`!bind`, `!resume`, and `!pardner update` or
-// `restart`, which are what `!pardner` is offered for): a suggestion made in a thread leaves
+// The daemon's words a session's thread refuses (`/bind`, `/resume`, and `/pardner update` or
+// `restart`, which are what `/pardner` is offered for): a suggestion made in a thread leaves
 // them out.
 const REFUSED_IN_THREAD: ReadonlySet<string> = new Set([
   WORD.bind,
@@ -552,7 +565,7 @@ const REFUSED_IN_THREAD: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The commands a typed `!word` could mean in a session's thread: the daemon's words that a thread
+ * The commands a typed `/word` could mean in a session's thread: the daemon's words that a thread
  * takes, then the session's commands (the names `refusedInThread` refuses left out), each as a
  * candidate whose pick puts `rest`, the arguments as typed, after its name; a word whose usage
  * takes no argument is offered bare. `unserved` and `folderTrust` are `helpText`'s. A command
@@ -568,16 +581,18 @@ export function commandPool(
   } = {},
 ): Candidate[] {
   const { unserved = new Set(), folderTrust = true } = options;
-  const text = (name: string): string => (rest === "" ? `!${name}` : `!${name} ${rest}`);
+  const text = (name: string): string =>
+    rest === "" ? `${COMMAND_PREFIX}${name}` : `${COMMAND_PREFIX}${name} ${rest}`;
   const daemon = (folderTrust ? texts.HELP_WORDS : texts.HELP_WORDS_ANY)
     .map((word) => texts.named(word, names))
     .flatMap((line): Candidate[] => {
       // A help line opens with its usage in backticks, then says what the word does.
       const usage = /^`([^`]+)`\s*([\s\S]*)$/.exec(line);
-      const name = usage?.[1]?.slice(1).split(" ", 1)[0];
+      const name = usage?.[1]?.slice(COMMAND_PREFIX.length).split(" ", 1)[0];
       if (usage === null || name === undefined) return [];
-      // `!!` is a syntax of its own, never what a mistyped `!word` meant.
-      if (unserved.has(name) || REFUSED_IN_THREAD.has(name) || name === WORD.shell) return [];
+      // `!command` is a syntax of its own, never what a mistyped `/word` meant.
+      if (usage[1]?.startsWith(SHELL_PREFIX)) return [];
+      if (unserved.has(name) || REFUSED_IN_THREAD.has(name)) return [];
       const bare = !(usage[1] as string).includes(" ");
       const described = (usage[2] as string).split(";", 1)[0] as string;
       return [
@@ -586,7 +601,7 @@ export function commandPool(
           usage: usage[1] as string,
           description: oneLine(described),
           group: "daemon",
-          text: bare ? `!${name}` : text(name),
+          text: bare ? `${COMMAND_PREFIX}${name}` : text(name),
           aliases: [],
         },
       ];
@@ -599,7 +614,7 @@ export function commandPool(
     .map(
       (c): Candidate => ({
         name: c.name,
-        usage: `!${c.name} ${c.argumentHint}`.replace(TRAILING, ""),
+        usage: `${COMMAND_PREFIX}${c.name} ${c.argumentHint}`.replace(TRAILING, ""),
         description: commandParts(c, (plain) => plain)[1],
         group: "agent",
         text: text(c.name),

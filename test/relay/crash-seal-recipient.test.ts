@@ -17,9 +17,9 @@ import { CONFIGS } from "../support/crash/replay.ts";
 import { recorded } from "../support/crash/workload.ts";
 import { DARWIN } from "./process-support.ts";
 
-const KEPT = "!seal.ok || !bounded(seq, seal.value)";
+const KEPT = "/seal.ok || /bounded(seq, seal.value)";
 const MUTANT =
-  "!seal.ok || !(seq.namesDevice(seal.value.maker) && seq.placed(seal.value.channel, seal.value.epoch))";
+  "/seal.ok || !(seq.namesDevice(seal.value.maker) && seq.placed(seal.value.channel, seal.value.epoch))";
 
 after(() => {
   for (const dir of kept) rmSync(dir, { recursive: true, force: true });

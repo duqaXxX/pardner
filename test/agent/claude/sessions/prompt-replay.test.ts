@@ -733,7 +733,7 @@ test("an agent-started turn guessed as the prompt's, prompt replayed inside, end
   assert.equal(session.busy, false);
 });
 
-test("a command waiting on an owed report, then !stop, starts no new process", async (t) => {
+test("a command waiting on an owed report, then /stop, starts no new process", async (t) => {
   const m = sdkMessages("prompt-replay-stop-queued");
   const first = m.findIndex((i) => isResult(i));
   const notified = m.findIndex((i) => isSystem(i, "task_notification"));

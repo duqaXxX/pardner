@@ -1,6 +1,6 @@
 /**
  * The prompts of the owner's that a provider handed over and that have not reached a session's
- * queue: a stop aborts them (`!stop`, the chat's Stop control), and each one that reads its
+ * queue: a stop aborts them (`/stop`, the chat's Stop control), and each one that reads its
  * ticket's signal drops itself with `Not sent.`. Memory only.
  */
 import type { ThreadRef } from "../../chat/seam.ts";
@@ -19,7 +19,7 @@ export class InFlight {
   /**
    * A ticket for a prompt of `ref`'s thread, taken synchronously when it is handed over.
    * `channelOnly` makes it answer to a stop of the channel and not to one of `ref`'s thread: the
-   * bridge of a `!fork` between the original's ticket and the copy's, which the original's own
+   * bridge of a `/fork` between the original's ticket and the copy's, which the original's own
    * stop must not drop. `link` is a signal whose abort aborts this ticket too: the copy's ticket
    * follows the bridge.
    */

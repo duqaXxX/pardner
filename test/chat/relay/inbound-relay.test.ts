@@ -13,12 +13,12 @@ test(
     try {
       b.connection.start();
       await b.rested();
-      await r.send({ to: r.botId, incarnation: incarnation(b) }, { text: "!bind /tmp/x" });
+      await r.send({ to: r.botId, incarnation: incarnation(b) }, { text: "/bind /tmp/x" });
       await b.until(() => b.messages.length === 1);
       await waiting();
       assert.deepEqual(
         [b.messages.length, b.messages[0]?.text, b.messages[0]?.topLevel],
-        [1, "!bind /tmp/x", true],
+        [1, "/bind /tmp/x", true],
       );
       const held = await r.held();
       assert.deepEqual(

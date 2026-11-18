@@ -97,7 +97,7 @@ export const PLAIN_TOOLS: ToolVocabulary = Object.freeze({
 export const PLAIN_WORDS: AgentWords = Object.freeze({
   author: "Plain",
   command: "plain",
-  examples: "`!echo hello`, `!count one two`",
+  examples: "`/echo hello`, `/count one two`",
   // Not the `/` of the one real agent: a core that assumed it would send `/echo` and read nothing.
   commandPrefix: ":",
   newSession: ["restart"],
@@ -1082,7 +1082,7 @@ export interface PlainAgentOptions {
   readonly daemonActions?: true;
   /** The agent declares `nextPrompts`; a turn's `suggest` step then reaches the core. */
   readonly suggestions?: true;
-  /** What each live session has loaded (`loadedContext`), as `!memory` and `!skills` list it. */
+  /** What each live session has loaded (`loadedContext`), as `/memory` and `/skills` list it. */
   readonly loaded?: LoadedContext;
   /** The agent lists these models (`models`, even an empty list), which a session takes with `setModel`. */
   readonly models?: readonly ModelInfo[];

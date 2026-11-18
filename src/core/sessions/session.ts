@@ -211,7 +211,7 @@ interface StatusChange {
   readonly signal?: AbortSignal;
   /** An answer never reached the chat: `state.json` keeps the status crash repair needs. */
   readonly unlanded?: boolean;
-  /** The owner's own act made the change (`!stop`, a hold he cancelled): he is not told of it. */
+  /** The owner's own act made the change (`/stop`, a hold he cancelled): he is not told of it. */
   readonly byOwner?: boolean;
 }
 
@@ -256,7 +256,7 @@ export class ThreadSession {
   private interrupting = false;
   /** Set once the turn `stop()` interrupted has closed its reply (`stopLanded`). */
   private stopTail: Event | null = null;
-  /** Stops the owner's shell command while it runs (`!stop`); null when none runs. */
+  /** Stops the owner's shell command while it runs (`/stop`); null when none runs. */
   private shellStop: AbortController | null = null;
   // True from an ❌ (`setStatus`) until new work starts (`submit`, `startTurn`), so a standing ❌ is
   // never mistaken for idle-and-done. What the chat shows cannot serve this alone: it only
@@ -294,10 +294,10 @@ export class ThreadSession {
    * to `endNotes` after that has no reply left to end, so `drop` posts it.
    */
   private endNotesRead = false;
-  /** The files each turn of this process edited, for `!diff`. */
+  /** The files each turn of this process edited, for `/diff`. */
   private readonly turnChanges = new TurnChanges();
   /**
-   * The messages of each prompt's replies and the cut a rewind made, for `!rewind`. Memory only,
+   * The messages of each prompt's replies and the cut a rewind made, for `/rewind`. Memory only,
    * handed on after a close as `goal` is (`SessionManager.session`).
    */
   rewinds = new RewindMemory();
@@ -305,7 +305,7 @@ export class ThreadSession {
   private rewinding = false;
   private sent: Turn[] = [];
   /**
-   * With an agent that says its state: the prompts in `sent` when a `!stop` took the gap branch.
+   * With an agent that says its state: the prompts in `sent` when a `/stop` took the gap branch.
    * Only these can have been cut with the turn; one written after the stop never is (#252).
    */
   private gapSent: Turn[] = [];
@@ -420,19 +420,19 @@ export class ThreadSession {
   // notification starts the turn that reports them. The CLI can suppress it (SDK
   // TaskUpdatedMessage docstring), so a stop waits for it only INJECTED_TURN_WAIT.
   private readonly unreported = new Map<string, number>();
-  // Tasks `!stop` ended. Claude Code starts no turn to report such a task: its notification
+  // Tasks `/stop` ended. Claude Code starts no turn to report such a task: its notification
   // stays queued (measured twice on 2026-09-27, Claude Code 2.1.283), so none is awaited.
   private readonly stopped = new Set<string>();
   // True from the start of a process that resumes a session until its first turn. Such a process
   // tells first of the tasks the session before it lost ("didn't finish before the previous
-  // session ended", measured 2026-10-18, Claude Code 2.1.302, as the cut of `!stop` or of a forced
+  // session ended", measured 2026-10-18, Claude Code 2.1.302, as the cut of `/stop` or of a forced
   // restart leaves them) and ends an empty turn; an event for a task this daemon never saw is
   // dropped then, so neither shows nor is awaited as a report.
   private resumedAtStart = false;
-  // The footer's model and context, read from the process `!stop` is about to close.
+  // The footer's model and context, read from the process `/stop` is about to close.
   private closingContext: ContextUsage | null = null;
-  // The last model and context share a live read gave (a footer or `!status`). A footer drawn
-  // with no process to ask (after a `!stop` whose own read did not answer) shows it; a process
+  // The last model and context share a live read gave (a footer or `/status`). A footer drawn
+  // with no process to ask (after a `/stop` whose own read did not answer) shows it; a process
   // that resumes the session replaces it with its first read. A model switch or a compaction
   // drops it, since its share no longer holds. Never shared with another session.
   private lastContext: ContextUsage | null = null;
@@ -450,7 +450,7 @@ export class ThreadSession {
   private readonly settled = new Event();
   // Set while no turn is active; `nameCopy` waits on it for a turn the agent opened.
   private readonly noTurn = new Event();
-  // Clear while a channel `!stop` owes the goal's drop (`oweGoalDrop`): no prompt reaches the
+  // Clear while a channel `/stop` owes the goal's drop (`oweGoalDrop`): no prompt reaches the
   // agent until `payGoal` has run, or a close has settled the debt (`settleGoalDebt`).
   private readonly goalCleared = new Event();
   private goalDrop: Task | null = null;
@@ -458,7 +458,7 @@ export class ThreadSession {
   // The prompts whose replay arrived with no turn running, in order: the turn that starts next
   // is the first one's own and takes the others in (`acknowledge`, `whoseTurn`).
   private announced: Turn[] = [];
-  // Set by a `!stop` that found prompts sent and no turn: the turn that starts next is not
+  // Set by a `/stop` that found prompts sent and no turn: the turn that starts next is not
   // covered by the stop's own status (`ActiveTurn.afterStop`).
   private stopInGap = false;
   // A report turn was awaited when a prompt's own turn started in its place: it is awaited
@@ -501,25 +501,25 @@ export class ThreadSession {
   /** The agent's own model list, for the setup. */
   models: ModelInfo[] = [];
   // The account the agent reported at its last connect, which a login switched meanwhile leaves
-  // behind: the footer and `!status` name it only while no usage limits name theirs.
+  // behind: the footer and `/status` name it only while no usage limits name theirs.
   private account: AgentAccount | null = null;
   // A prompt was ever queued on this object; with no stored session id it tells a thread that
   // never ran a turn from one whose first turn is still starting.
   private submitted = false;
   /** `applySetup` changed something that `forgetSetup` has not undone. */
   private setupApplied = false;
-  /** Held while Start is applied, so a `!bypass` typed meanwhile acts after it. */
+  /** Held while Start is applied, so a `/bypass` typed meanwhile acts after it. */
   private readonly setupLock = new Mutex();
   /** `applySetup` is running: a model command may be in flight in the agent. */
   private applying = false;
   // What the live client was started with or switched to: the effort, and whether it
   // effectively runs in bypass (the switch, or the folder's own settings starting it so).
   // `applySetup` compares the owner's choice with these, not with what was stored, which a
-  // restart or a `!bypass on` can have moved.
+  // restart or a `/bypass on` can have moved.
   private clientEffort: string | null = null;
   private clientBypass = false;
   nativeMode: string;
-  // The permission mode the client runs in now, for `!status`: what the connect left it in,
+  // The permission mode the client runs in now, for `/status`: what the connect left it in,
   // then whatever the agent reports (`dispatch`).
   mode: string;
   cliVersion: string | null = null;
@@ -548,7 +548,7 @@ export class ThreadSession {
   // Memory only, handed on after a close as `goal` is; after a restart nothing is known, and
   // the session resumes from the record, which holds whatever a terminal wrote.
   saved: SavedMessage | null = null;
-  // `!terminal` cut a turn here: what the terminal wrote before any typed prompt is that turn
+  // `/terminal` cut a turn here: what the terminal wrote before any typed prompt is that turn
   // going on, and only then is it shown as such (`takeForeignTurns`). Handed on after a close.
   movedMidTurn = false;
   // The jobs the agent last listed (`scheduled_jobs`) and when, on the clock of `deps.clock`.
@@ -574,7 +574,7 @@ export class ThreadSession {
   // Where the session works as its hooks last reported (`cwd` follows a `cd` and a worktree;
   // Stop and PostToolUse measured 2026-09-27 on 2.1.283); null until then: `directory`.
   workingDirectory: string | null = null;
-  /** The session's token count as the client's last result reported it, for `!status`. */
+  /** The session's token count as the client's last result reported it, for `/status`. */
   sessionTokens: number | null = null;
   /** Set when the daemon stops: the turns already sent finish, no other one starts. */
   draining = false;
@@ -603,7 +603,7 @@ export class ThreadSession {
   private readonly names: texts.Names;
   /** The agent's tools the terminal shows in words of its own. */
   private readonly previews: Previews;
-  /** The agent's last guess at the next prompt (`!next`): the manager's, or the session's own. */
+  /** The agent's last guess at the next prompt (`/next`): the manager's, or the session's own. */
   private readonly suggestions: Suggestions;
   // Tasks whose start the agent had no capability for, by the capability: their later events
   // are ignored with them.
@@ -648,7 +648,7 @@ export class ThreadSession {
     return { channel: this.channelId, thread: this.threadId };
   }
 
-  /** False for a bare `!fork` copy in which no turn of any kind has started (`fork_of.ran`). */
+  /** False for a bare `/fork` copy in which no turn of any kind has started (`fork_of.ran`). */
   private get forkRan(): boolean {
     return this.deps.state.thread(this.channelId, this.threadId)?.forkRan ?? true;
   }
@@ -778,7 +778,7 @@ export class ThreadSession {
    * agent declares as `permissionModes.bypass`; an agent may not restore it on resume (Claude
    * Code does not: "Resume and bypass" in `docs/architecture.md`).
    * Bypass and the effort level belong to the thread, not to the agent's session id, so a
-   * session `!resume` opens starts with both unset.
+   * session `/resume` opens starts with both unset.
    */
   get bypassChoice(): boolean | null {
     return this.deps.state.thread(this.channelId, this.threadId)?.bypass ?? null;
@@ -793,7 +793,7 @@ export class ThreadSession {
   }
 
   /**
-   * Whether this thread runs in bypass: the one answer the footer's ⚡, `!status`, the channel
+   * Whether this thread runs in bypass: the one answer the footer's ⚡, `/status`, the channel
    * list and the setup's checkbox read.
    */
   get bypass(): boolean {
@@ -864,7 +864,7 @@ export class ThreadSession {
 
   /**
    * The prompt a rewind cut the conversation at, while the agent has not yet kept the cut (no
-   * prompt was sent after it): the prompts from it on are gone for the agent, and `!rewind` lists
+   * prompt was sent after it): the prompts from it on are gone for the agent, and `/rewind` lists
    * none of them.
    */
   get pendingCut(): string | null {
@@ -883,7 +883,7 @@ export class ThreadSession {
    * declares no state shows the line for the owner's prompts alone. `Compacting conversation…`
    * while any turn compacts, in the terminal's words. The line never counts what
    * still runs: the list does. Nothing while an approval, a question or a hold
-   * waits on the owner, while `!stop` winds a turn down, and once the session is closed. A
+   * waits on the owner, while `/stop` winds a turn down, and once the session is closed. A
    * restart waiting on tasks says which.
    */
   private threadActivity(): Activity | null {
@@ -893,7 +893,7 @@ export class ThreadSession {
     const held = this.draining ? this.runningKindsOf({ awaitedOnly: true }) : "";
     if (held) {
       // A stop that only background tasks hold: said here whatever the list shows, since
-      // `!stop` is what ends the wait. It comes before the agent's own word, which says
+      // `/stop` is what ends the wait. It comes before the agent's own word, which says
       // `working` all through a subagent left in the background.
       return {
         kind: "restart-wait",
@@ -948,7 +948,7 @@ export class ThreadSession {
 
   /**
    * `1 shell · 2 agents`, the tasks that outlived their turn and still run; empty when none
-   * does. The channel-level `!status` shows this beside a session's own state.
+   * does. The channel-level `/status` shows this beside a session's own state.
    */
   get runningKinds(): string {
     return this.runningKindsOf();
@@ -958,7 +958,7 @@ export class ThreadSession {
    * The jobs the agent has scheduled and the session still believes in: its last list, unless
    * it is older than the agent keeps a job (`LOOPS_BELIEVED_SECONDS`). The list comes with the
    * `scheduled_jobs` event of an agent that declares `scheduledJobs`, is kept in memory only,
-   * and `!status` shows it.
+   * and `/status` shows it.
    */
   get scheduledJobs(): readonly ScheduledJob[] {
     const stale = this.deps.clock.time() - this.jobsListedAt >= LOOPS_BELIEVED_SECONDS;
@@ -1064,7 +1064,7 @@ export class ThreadSession {
 
   /**
    * Undo `holdStart`. `continued`: Continue was chosen, so the status is left alone (the
-   * `submit()` right after this returns reacts ⏳ on its own); otherwise (Cancel, `!stop`, a
+   * `submit()` right after this returns reacts ⏳ on its own); otherwise (Cancel, `/stop`, a
    * drain) the root reflects the session's live state now, not a snapshot from when the hold
    * started (a report turn during the hold can have changed it in the meantime).
    */
@@ -1351,7 +1351,7 @@ export class ThreadSession {
       this.idleTimerCheck(); // cancels any armed timer; closed now, so none rearms
       const worker = this.worker;
       if (worker !== null && worker.signal !== signal) {
-        // Called directly (`!status`, `!bypass`), not from this session's own worker: an
+        // Called directly (`/status`, `/bypass`), not from this session's own worker: an
         // idle worker left blocked on the queue (most likely on this very connect lock,
         // still held here) would never learn to stop otherwise. It is cancelled and awaited
         // first, and its taken turn (if any) rescued only once it is confirmed stopped:
@@ -1427,12 +1427,12 @@ export class ThreadSession {
     this.modelSwitched = null; // the new client starts from its own state
     this.sessionTokens = null; // counted by the client process, which starts at zero
     this.reader = new Task((reading) => this.read(client, reading));
-    this.idleTimerCheck(); // a daemon word (`!status`, say) connects with no turn
+    this.idleTimerCheck(); // a daemon word (`/status`, say) connects with no turn
     return client;
   }
 
   /**
-   * `!rewind`: the files as they were when the prompt `promptId` was sent, or with `preview` what
+   * `/rewind`: the files as they were when the prompt `promptId` was sent, or with `preview` what
    * restoring them would change. Starts the agent when it is not running.
    */
   async restoreFiles(promptId: string, preview: boolean): Promise<FilesRestore> {
@@ -1442,7 +1442,7 @@ export class ThreadSession {
   }
 
   /**
-   * `!rewind`: cuts the conversation at the prompt `promptId`, everything from it on gone for the
+   * `/rewind`: cuts the conversation at the prompt `promptId`, everything from it on gone for the
    * agent, the session id kept. `dropped` are the ids of the prompts the cut drops, the picked one
    * and every later one the agent lists: what is folded and forgotten is theirs, whether or not
    * the picked prompt was remembered. The agent process is closed and started again with the cut, so
@@ -1561,7 +1561,7 @@ export class ThreadSession {
   }
 
   /**
-   * The mode `!plan off` returns to: bypass when the thread's is on, else the mode the agent
+   * The mode `/plan off` returns to: bypass when the thread's is on, else the mode the agent
    * started in, and the default one when that was plan itself (the owner's settings start the
    * folder in plan: setting it again would leave plan mode running).
    */
@@ -1571,7 +1571,7 @@ export class ThreadSession {
   }
 
   /**
-   * `!plan` or `!plan off` typed in the thread: true once switched, false, changing nothing,
+   * `/plan` or `/plan off` typed in the thread: true once switched, false, changing nothing,
    * before Start. Off returns to the mode the thread would otherwise have (bypass when it is
    * on). Like `switchBypass`, it waits for a Start being applied.
    */
@@ -1591,7 +1591,7 @@ export class ThreadSession {
   }
 
   /**
-   * `!bypass on` or `off` typed in the thread: switch and store it, true; or false, changing
+   * `/bypass on` or `off` typed in the thread: switch and store it, true; or false, changing
    * nothing, before Start (`beforeStart`). A Start being applied is waited for, so the word,
    * typed after the click, is what holds; one that failed has undone itself by then, and the
    * word is refused.
@@ -1629,13 +1629,13 @@ export class ThreadSession {
   /**
    * Apply the owner's session setup before the first prompt. Start is authoritative: the
    * effort and the bypass switch are written from the choice whatever state.json held (a
-   * restart can have left either; `!bypass` is refused before Start), so what runs is what the
+   * restart can have left either; `/bypass` is refused before Start), so what runs is what the
    * summary line says. An effort the live client does not run at is set on it when the back end
    * can (`liveEffort`), and goes through a fresh client when it cannot (no prompt has been
    * sent, so no session is lost); then the model on the live client, then the permission mode:
    * when the choice differs from what the client effectively runs (the switch, or a folder
    * whose own settings start it in bypass), `setBypass` moves it. Unticking in such a folder is
-   * an explicit off with the semantics of `!bypass off`: the mode it returns to is the default
+   * an explicit off with the semantics of `/bypass off`: the mode it returns to is the default
    * one. Measured 2026-09-30 (CLI 2.1.285): a model set on the live session survives a resume
    * and leaves the owner's own default alone, so the daemon does not store the model. A failure
    * undoes what was applied (`forgetSetup`) and goes on. All of it under the setup lock, which
@@ -1800,8 +1800,8 @@ export class ThreadSession {
 
   /**
    * The owner chose to stop the background work so his message reaches what a terminal wrote:
-   * the work ends with the process, drawn as `!stop` draws it, and the next connect resumes the
-   * record. The ✅ is the owner's own act, as a `!stop`'s: the sweep after the ends would
+   * the work ends with the process, drawn as `/stop` draws it, and the next connect resumes the
+   * record. The ✅ is the owner's own act, as a `/stop`'s: the sweep after the ends would
    * otherwise tell him of an end he made. Nothing when a turn started here meanwhile: the
    * caller waits for its end and looks again.
    */
@@ -1815,7 +1815,7 @@ export class ThreadSession {
   }
 
   /**
-   * Under the `!status` line that opens the session in the terminal: what writing there now
+   * Under the `/status` line that opens the session in the terminal: what writing there now
    * would split, while a turn or background work runs here (two processes on one session
    * branch it, measured 2026-10-27).
    */
@@ -2012,8 +2012,8 @@ export class ThreadSession {
   }
 
   /**
-   * What the live session has loaded (`loadedContext`), for `!memory` and `!skills`; its process
-   * is started when it has none, as `!help` does for the commands. Called only with the
+   * What the live session has loaded (`loadedContext`), for `/memory` and `/skills`; its process
+   * is started when it has none, as `/help` does for the commands. Called only with the
    * capability; a session that declares it and lacks the member is an error, never an empty list.
    */
   async loaded(): Promise<LoadedContext> {
@@ -2028,11 +2028,11 @@ export class ThreadSession {
   }
 
   /**
-   * `!terminal`: close this session's process so a terminal takes the session up. A turn
+   * `/terminal`: close this session's process so a terminal takes the session up. A turn
    * running here is cut by the close without an interrupt, so the terminal continues it by
    * itself (the agent's `words.terminalContinue`); its reply ends with a line saying where it
    * went, and the messages queued behind it are not sent. Background work ends with the
-   * process, drawn as `!stop` draws it. The session keeps its thread, id, bypass and effort:
+   * process, drawn as `/stop` draws it. The session keeps its thread, id, bypass and effort:
    * the next message resumes it. `cut` when a turn was cut, `idle` otherwise.
    */
   async moveToTerminal(): Promise<"cut" | "idle"> {
@@ -2179,7 +2179,7 @@ export class ThreadSession {
       this.unreported.clear();
       for (const expiry of this.expiring) expiry.cancel();
       this.notificationWaits = false;
-      // The end these draw is the owner's `!stop`: he is not told of it.
+      // The end these draw is the owner's `/stop`: he is not told of it.
       if (this.injectedExpected) {
         this.expiry?.cancel();
         await this.reportNotComing(undefined, { byOwner: true });
@@ -2295,7 +2295,7 @@ export class ThreadSession {
 
   /**
    * The channel's directory, session and mode, then the footer's values one per line, or why
-   * the agent cannot start. Starts the client like `!help` does, since model and context come
+   * the agent cannot start. Starts the client like `/help` does, since model and context come
    * from it.
    */
   async status(): Promise<string> {
@@ -2422,7 +2422,7 @@ export class ThreadSession {
   }
 
   /**
-   * The agent's title for the session, or null when it has none or cannot be read: `!status` then
+   * The agent's title for the session, or null when it has none or cannot be read: `/status` then
    * leaves the line out and says nothing of it beyond a log line.
    */
   private async readTitle(sessionId: string): Promise<string | null> {
@@ -2476,7 +2476,7 @@ export class ThreadSession {
     const cutShort = !this.idle;
     // at the end of a stop, a session whose only unfinished work is a background
     // task the stop does not wait for (`mayHaveOrderedRestart`) ended its turn well; the task
-    // is most likely its own wait for the new process. ✅, as `!stop` would show.
+    // is most likely its own wait for the new process. ✅, as `/stop` would show.
     const onlySkipped = cutShort && this.draining && this.restartReady;
     // the one thing this close cut was the close of a reply whose turn had ended.
     // Its answer is whole: ✅, as that turn would have shown.
@@ -2649,7 +2649,7 @@ export class ThreadSession {
         {
           folder: this.directory,
           resume: sessionId,
-          // A copy `!fork` made is started as the terminal starts its copy, every time.
+          // A copy `/fork` made is started as the terminal starts its copy, every time.
           ...(forkOf != null && { forkOf }),
           model: null,
           // A model set by command survives a resume by itself (measured); the effort a command
@@ -2841,7 +2841,7 @@ export class ThreadSession {
         if (!atOnce && !this.settled.isSet) await this.settled.wait(signal);
         await this.nameCopy(client, turn, signal);
         // The agent runs a command after the turn, never folded into it, and its replay can come
-        // after its own text (measured 2026-11-09): it waits like a `!!`, and the checks below
+        // after its own text (measured 2026-11-09): it waits like a `!`, and the checks below
         // follow the wait.
         // A channel stop's goal is dropped before any prompt after it reaches the agent.
         await this.goalCleared.wait(signal);
@@ -3148,7 +3148,7 @@ export class ThreadSession {
       case "session_started":
         this.cliVersion = event.agentVersion;
         // Recorded as soon as the agent reports it, not only at the turn's end, so a
-        // still-running first turn is already this session id's holder and `!resume` cannot
+        // still-running first turn is already this session id's holder and `/resume` cannot
         // put a second process on the same transcript.
         if (event.sessionId !== null) {
           this.deps.state.setSession(this.channelId, this.threadId, event.sessionId);
@@ -3286,7 +3286,7 @@ export class ThreadSession {
       if (!owed && holder !== writing) {
         this.trackLanding(await holder.closeOut(signal), this.reply(holder));
         this.showThreadStatus(); // the task's end may change what the line says
-        // `!stop` already reacted ✅ itself; skipped so a stopped task's end does not show it
+        // `/stop` already reacted ✅ itself; skipped so a stopped task's end does not show it
         // a second time. The footer is the stop's end all the same.
         if (stopped) await this.showFooterIfEnded(signal);
         else await this.reactDoneIfIdle(signal);
@@ -3316,7 +3316,7 @@ export class ThreadSession {
         return;
       }
       // A task started by no call, while an owner prompt is sent and no report turn is
-      // expected, is that prompt's: a skill with `context: fork` typed as a command (`!review`
+      // expected, is that prompt's: a skill with `context: fork` typed as a command (`/review`
       // → `/review`) runs its agent before the turn's first message (recorded:
       // `skill-fork-command.jsonl`, CLI 2.1.283, the only recording with no call id). Its
       // turn starts now, so its line shows while it works.
@@ -3427,14 +3427,14 @@ export class ThreadSession {
             this.active = null;
             this.noTurn.set();
             this.compacting = false;
-            this.showThreadStatus(); // whichever way it ended, `!stop` included
+            this.showThreadStatus(); // whichever way it ended, `/stop` included
             // An end told after this turn had begun is reported in a turn to come, which
             // nothing waits for yet: the turn's start cancelled the wait.
             if (this.ended.length > 0) this.notified();
           }
         }
         // Checked only now, with the turn no longer active: `finish` alone still reads busy.
-        // `!stop` already reacted ✅ itself; the stop's end is the session's end all the same.
+        // `/stop` already reacted ✅ itself; the stop's end is the session's end all the same.
         // A run that took no prompt in changed no status of its own and owes no footer; one that
         // asked for an approval left the root at work, which its end settles.
         const ownerTurn = !active.run || active.taken.length > 0;
@@ -4032,7 +4032,7 @@ export class ThreadSession {
 
   /**
    * A turn has ended and its footer waits for background work: ask for the context usage now,
-   * while the process is alive and idle, and keep it for the footer a `!stop` draws after it
+   * while the process is alive and idle, and keep it for the footer a `/stop` draws after it
    * closed the process (a read made at the stop loses the race against the close, measured
    * 2026-10-18, Claude Code 2.1.302). One request per turn; it delays nothing, and a model
    * switch or a compaction that comes first voids it.
@@ -4259,7 +4259,7 @@ export class ThreadSession {
 
   /**
    * The session's view of the loop ends: the one message that says so, and the jobs and the
-   * count forgotten, so that `!status` and the idle close stop treating the loop as live. Three
+   * count forgotten, so that `/status` and the idle close stop treating the loop as live. Three
    * messages: paused when a believed job is recurring (Claude Code restores it on resume),
    * stopped-with-a-maybe when the believed jobs are all one-shot, and ended when none is
    * believed (deleted, or expired). Nothing when no job was believed and no run shown, and
@@ -4342,7 +4342,7 @@ export class ThreadSession {
       this.endedAhead.unshift(...unsaid);
     }
     // (sync) The turn is the active one before its first write: every `await` below yields, and
-    // a turn already out of `sent` and not yet active would read as idle to a drain, a `!stop`
+    // a turn already out of `sent` and not yet active would read as idle to a drain, a `/stop`
     // or a timer.
     const active: ActiveTurn = {
       turn,
@@ -4728,7 +4728,7 @@ export class ThreadSession {
   }
 
   /**
-   * Close the turn's reply and release it; true when `!stop` cut it short, which the caller
+   * Close the turn's reply and release it; true when `/stop` cut it short, which the caller
    * reads once the turn is no longer active (it still is, for `closeReply`'s own checks), to
    * skip the ✅, since `stop()` already showed its own.
    */
@@ -4750,7 +4750,7 @@ export class ThreadSession {
       if (result.sessionId) {
         this.deps.state.setSession(this.channelId, this.threadId, result.sessionId);
       }
-      // Kept for `!status`, even when this result reports none (`/usage`, `/clear`): the two
+      // Kept for `/status`, even when this result reports none (`/usage`, `/clear`): the two
       // lines never disagree.
       this.sessionTokens = sessionTokens(result.tokens);
       this.contextKept = false;
@@ -4776,8 +4776,8 @@ export class ThreadSession {
         if (handedOver) handed = card.takeOver();
         else await this.dateRun(card, stopped, signal);
       }
-      // `!stop` cut this turn short, the owner's own or a report's: its reply ends like any
-      // other, and never waits on a task it may still owe (`force`: `!stop` never does).
+      // `/stop` cut this turn short, the owner's own or a report's: its reply ends like any
+      // other, and never waits on a task it may still owe (`force`: `/stop` never does).
       await this.closeReply(active.renderer, { force: stopped, signal });
       if (handed !== null) {
         await this.answerTakenRun(
@@ -4835,7 +4835,7 @@ export class ThreadSession {
   }
 
   /**
-   * A `!stop` in the gap cut a turn the moment it began (`init`, then an error with no replay,
+   * A `/stop` in the gap cut a turn the moment it began (`init`, then an error with no replay,
    * measured 2026-11-09), and prompts sent behind it are still waiting: the agent either runs
    * each as a turn of its own (the terminal does, M3) or the cut took them with it, and nothing
    * tells the two apart at this end. Those that no turn has claimed after `INJECTED_TURN_WAIT`
@@ -5074,7 +5074,7 @@ export class ThreadSession {
       readonly error?: boolean;
       readonly more?: readonly Turn[];
       readonly because?: string;
-      /** The calls still running are drawn stopped: the owner cut them (`!terminal`). */
+      /** The calls still running are drawn stopped: the owner cut them (`/terminal`). */
       readonly callsStopped?: boolean;
     } = {},
   ): Promise<boolean> {
@@ -5215,7 +5215,7 @@ export class ThreadSession {
   }
 
   /**
-   * The advisor the agent's settings name now, read at every footer and `!status`: the owner may
+   * The advisor the agent's settings name now, read at every footer and `/status`: the owner may
    * set it in a terminal at any moment, and every running session follows. With no live process
    * to read through, or a failed read, the last one read.
    */
@@ -5233,8 +5233,8 @@ export class ThreadSession {
 
   /**
    * The footer's values from what the session knows now and `tokens`: the one source for both
-   * the footer and `!status`, so the two never disagree; with them, the repository the
-   * `git: not trusted` mark is for, which `!status` names.
+   * the footer and `/status`, so the two never disagree; with them, the repository the
+   * `git: not trusted` mark is for, which `/status` names.
    */
   private async footerData(
     tokens: number | null,
@@ -5469,7 +5469,7 @@ export class ThreadSession {
   /**
    * Runs the owner's shell command of `turn` in the session's folder. True when its run is to
    * be sent: what the thread shows of it waits on the turn (`Turn.head`) and the agent's prompt
-   * replaces the typed command. False when `!stop` stopped it: the reply says so and ends, and
+   * replaces the typed command. False when `/stop` stopped it: the reply says so and ends, and
    * the agent is told nothing, as a command stopped in the terminal leaves nothing behind.
    */
   private async runShell(turn: Turn, command: string, signal: AbortSignal): Promise<boolean> {

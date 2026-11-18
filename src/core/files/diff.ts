@@ -1,5 +1,5 @@
 /**
- * What `!diff` shows: the files that differ between the working tree and HEAD, untracked files
+ * What `/diff` shows: the files that differ between the working tree and HEAD, untracked files
  * that are not ignored included (the terminal's `Current` view), and one file's unified diff.
  *
  * Plumbing only, and never an external diff or a textconv: the index is not refreshed or written

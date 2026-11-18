@@ -63,7 +63,7 @@ export type AgentState = "working" | "waiting" | "idle";
 
 /**
  * What differs between back ends and the core adapts to. A capability is here because the core
- * reads it: without one the feature it names is not offered (`!help` and `!guide` leave it
+ * reads it: without one the feature it names is not offered (`/help` and `/guide` leave it
  * out), and the core never calls what serves it. What every back end does alike needs none.
  */
 export interface Capabilities {
@@ -108,7 +108,7 @@ export interface Capabilities {
   readonly declaredState: boolean;
   /**
    * The agent asks the owner questions (`RequestHandler.question`). The core offers nothing of
-   * its own for a question, so the only thing that reads this is `!guide`, which names the
+   * its own for a question, so the only thing that reads this is `/guide`, which names the
    * answer form when it is declared.
    */
   readonly questions: boolean;
@@ -164,7 +164,7 @@ export interface Capabilities {
   readonly scheduledJobs: boolean;
   /**
    * `AgentBackend.shell`: the session reads a shell command the owner ran, and its
-   * output, as the agent's terminal adds one (`!!command`). Without it the word is not offered.
+   * output, as the agent's terminal adds one (`!command`). Without it the word is not offered.
    */
   readonly shellCommands: boolean;
   /**
@@ -182,16 +182,16 @@ export interface Capabilities {
   readonly foreignTurns: boolean;
   /**
    * `AgentSession.advisor`: the agent can consult a second model during a turn, which the owner
-   * sets in the agent's own settings. Without it the footer and `!status` name no advisor.
+   * sets in the agent's own settings. Without it the footer and `/status` name no advisor.
    */
   readonly advisor: boolean;
   /**
    * The agent lists the memory files and the skills a live session has loaded
-   * (`AgentSession.loaded`), read only: `!memory` and `!skills`. Without it both words are
+   * (`AgentSession.loaded`), read only: `/memory` and `/skills`. Without it both words are
    * refused.
    */
   readonly loadedContext: boolean;
-  /** `next_prompt`: the agent guesses the next prompt after a turn. Without it `!next` is not offered. */
+  /** `next_prompt`: the agent guesses the next prompt after a turn. Without it `/next` is not offered. */
   readonly nextPrompts: boolean;
   /**
    * The model may ask the daemon to do something (`DaemonActions`): the agent offers it a tool for
@@ -291,7 +291,7 @@ export interface AgentWords {
   /**
    * The agent's terminal commands, without the slash, that a session started from the chat does
    * not offer, each with what the owner can do instead or null; empty when it has none. The
-   * daemon answers `!name` for one of them itself and sends the agent nothing, unless the
+   * daemon answers `/name` for one of them itself and sends the agent nothing, unless the
    * session's own list offers that name.
    */
   readonly notOffered: Readonly<Record<string, string | null>>;
@@ -562,7 +562,7 @@ export interface ListedSession {
   readonly id: string;
   /** What the agent's own picker shows for the session. */
   readonly title: string;
-  /** The title the owner gave it or the agent generated, which `!resume <title>` matches. */
+  /** The title the owner gave it or the agent generated, which `/resume <title>` matches. */
   readonly customTitle: string | null;
   readonly branch: string | null;
   /** Bytes of the transcript. */

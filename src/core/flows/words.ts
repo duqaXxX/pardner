@@ -2,8 +2,8 @@
  * A word of the daemon's own: what each does, and where it is answered. Typed in the channel (or
  * in a thread that holds no session) it is answered by a normal post in the channel; typed
  * inside a session's thread it is answered for the owner alone under the owner's message, or by
- * a mark on it, so nothing rings a phone; `!stop` is answered by a post that stays in the
- * thread, and `!open` shows its files there.
+ * a mark on it, so nothing rings a phone; `/stop` is answered by a post that stays in the
+ * thread, and `/open` shows its files there.
  */
 import { ChatError, type MessageId, type ThreadRef } from "../../chat/seam.ts";
 import { errorName } from "../../values.ts";
@@ -26,18 +26,18 @@ export interface WordPlace {
   readonly session: ThreadSession | null;
   /**
    * A thread that holds no session: a word typed there reads as being about that thread, so
-   * the ones that act on the whole channel (`!stop`, `!resume`, `!bind` with a folder) say where
+   * the ones that act on the whole channel (`/stop`, `/resume`, `/bind` with a folder) say where
    * to send them, for the owner alone, and change nothing.
    */
   readonly outside: boolean;
-  /** The prompts this word aborted before they reached a session (a `!stop`); 0 for any other. */
+  /** The prompts this word aborted before they reached a session (a `/stop`); 0 for any other. */
   readonly aborted: number;
-  /** The word's own ticket, taken by `!fork` only: a stop of its thread ends the wait. */
+  /** The word's own ticket, taken by `/fork` only: a stop of its thread ends the wait. */
   readonly ticket: Ticket | null;
 }
 
 /**
- * The answer to a `!stop` that stopped something: with the goal the session still has, which
+ * The answer to a `/stop` that stopped something: with the goal the session still has, which
  * the stop leaves set and the next message resumes, as the terminal's Esc does (measured
  * 2026-10-20, Claude Code 2.1.303).
  */
@@ -66,7 +66,7 @@ export type WordFlow = (
 
 /**
  * The words this agent and this chat cannot serve: each is refused when typed, and neither
- * `!help` nor a suggestion offers it.
+ * `/help` nor a suggestion offers it.
  */
 export function unservedWords(deps: FlowDeps, others: OtherFlows): ReadonlySet<string> {
   const { chat, agent } = deps;
@@ -109,7 +109,7 @@ export function unservedWords(deps: FlowDeps, others: OtherFlows): ReadonlySet<s
   if (!chat.capabilities.threadDelete) unserved.add(WORD["delete-thread"]);
   if (!chat.capabilities.channelClean) unserved.add(WORD["clean-channel"]);
   if (!agent.capabilities.shellCommands || !deps.shellCommands) unserved.add(WORD.shell);
-  // A daemon built without a way to update itself offers no `!pardner`.
+  // A daemon built without a way to update itself offers no `/pardner`.
   if (others.pardner === undefined) unserved.add(WORD.pardner);
   return unserved;
 }
@@ -123,7 +123,7 @@ function folded(result: boolean | null, aborted: number): boolean | null {
 }
 
 /**
- * `!stop` inside a session's thread: either answer is a post that stays (a line for the owner
+ * `/stop` inside a session's thread: either answer is a post that stays (a line for the owner
  * alone is gone on reload). False when nothing was stopped; when only a hold was cancelled or
  * messages not sent were dropped (null from the session, which said `Not sent.` or the note
  * itself) nothing is posted and the work counts as cut.
@@ -384,7 +384,7 @@ export function wordFlow(
         if (session === null) {
           await talk.inChannel(channel, texts.FORK_TOP_LEVEL);
         } else {
-          if (ticket === null) throw new TypeError("a !fork reached its flow with no ticket");
+          if (ticket === null) throw new TypeError("a /fork reached its flow with no ticket");
           await fork.word(ref, message, session, command.prompt, ticket);
         }
         return;

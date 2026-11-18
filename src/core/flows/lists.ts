@@ -1,6 +1,6 @@
 /**
- * The words that post a list in a channel, and what follows a pick from one: `!resume` with a
- * folder's sessions, `!bind` with the folders a session can start in. The core decides what is
+ * The words that post a list in a channel, and what follows a pick from one: `/resume` with a
+ * folder's sessions, `/bind` with the folders a session can start in. The core decides what is
  * offered, which rows the list holds and what a pick does; the chat provider draws the list and
  * checks that it was the owner who picked.
  */

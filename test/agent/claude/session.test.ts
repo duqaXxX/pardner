@@ -185,9 +185,9 @@ test(
     assert.equal(options.includePartialMessages, true);
     // Makes bypass possible, not active.
     assert.equal(options.allowDangerouslySkipPermissions, true);
-    // The checkpoints `!rewind` restores the files from.
+    // The checkpoints `/rewind` restores the files from.
     assert.equal(options.enableFileCheckpointing, true);
-    // The agent's guess at the next prompt, which `!next` offers (#151).
+    // The agent's guess at the next prompt, which `/next` offers (#151).
     assert.equal(options.promptSuggestions, true);
     assert.deepEqual(options.extraArgs, { "replay-user-messages": null });
     assert.deepEqual(Object.keys(options).sort(), OPTION_KEYS);

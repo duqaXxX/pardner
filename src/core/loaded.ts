@@ -1,5 +1,5 @@
 /**
- * `!memory` and `!skills`: what a live session has loaded, read only, as the terminal's
+ * `/memory` and `/skills`: what a live session has loaded, read only, as the terminal's
  * `/memory` and `/skills` panels list it. Each is one message for the owner alone.
  */
 import { homedir } from "node:os";

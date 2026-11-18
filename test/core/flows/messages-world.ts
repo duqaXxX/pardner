@@ -54,7 +54,7 @@ export const PLAIN_NAMES: Names = {
   author: "Plain",
   cli: "plain",
   chat: "Memory chat",
-  examples: "`!echo hello`, `!count one two`",
+  examples: "`/echo hello`, `/count one two`",
   login: "signin",
   logout: "signout",
   newSession: ["restart"],
@@ -472,11 +472,11 @@ export interface WorldOptions {
   readonly deletes?: boolean;
   /** The chat can clean a channel; `cleanChannel` records its calls in `World.cleanCalls`. */
   readonly cleans?: boolean;
-  /** The chat suggests commands for a `!word` that is none (`suggestCommands`). */
+  /** The chat suggests commands for a `/word` that is none (`suggestCommands`). */
   readonly suggests?: boolean;
   /** The chat posts lists in a thread and shares files into it (`threadLists`, `ThreadChat.share`). */
   readonly diff?: boolean;
-  /** The chat posts lists in a thread (`threadLists`): what `!next` offers its suggestion in. */
+  /** The chat posts lists in a thread (`threadLists`): what `/next` offers its suggestion in. */
   readonly lists?: boolean;
   /** The chat posts lists in a thread and folds a message into its title (`threadLists`, `messageFold`). */
   readonly rewind?: boolean;

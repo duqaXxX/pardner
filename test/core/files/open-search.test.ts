@@ -1,5 +1,5 @@
 /**
- * What `!open` is answered from, without a chat: the files changed in a session (the repositories
+ * What `/open` is answered from, without a chat: the files changed in a session (the repositories
  * of its folder, each counted from where its own HEAD was when the thread began, newest first),
  * the files a name matches, and the bytes of the file a path names. A chat module composes these
  * three calls (`Listings.repositories`, `changedIn` and `newestFirst`; `Listings.search`;
@@ -45,7 +45,7 @@ function madeBefore(path: string): string {
   return path;
 }
 
-/** What `!open` with no words offers: the files changed since the thread began, newest first. */
+/** What `/open` with no words offers: the files changed since the thread began, newest first. */
 async function changedNow(
   listings: Listings,
   folder: string,

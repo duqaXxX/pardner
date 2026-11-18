@@ -1,5 +1,5 @@
 /**
- * `!next` through the message flow, with the plain agent and the memory chat: the agent's guess at
+ * `/next` through the message flow, with the plain agent and the memory chat: the agent's guess at
  * the next prompt is offered with Send and Cancel, held in memory only, dropped when a message, a
  * turn or a close comes first, and sent as a typed prompt by Send (#151, design
  * `2026-11-08-next-command-design.md`).
@@ -53,10 +53,10 @@ function sends(world: MessagesWorld, ref: ThreadRef, offer: ReturnType<typeof of
   });
 }
 
-test("!next offers the suggestion the last turn ended with, and the text is shown nowhere else", async (t) => {
+test("/next offers the suggestion the last turn ended with, and the text is shown nowhere else", async (t) => {
   const { world, ref } = await threadOf(t);
   assert.ok(!world.shown(ref).join("\n").includes(GUESS), "nothing shows the guess unasked");
-  await world.says("!next", ref.thread);
+  await world.says("/next", ref.thread);
   await world.settle();
   const offer = offerIn(world, ref);
   assert.equal(offer.list.type === "suggestion" && offer.list.text, GUESS);
@@ -65,54 +65,54 @@ test("!next offers the suggestion the last turn ended with, and the text is show
   assert.ok(!readFileSync(join(world.folder, "state.json"), "utf8").includes(GUESS));
 });
 
-test("!next with no suggestion says so, naming the author", async (t) => {
+test("/next with no suggestion says so, naming the author", async (t) => {
   const agent = new PlainAgent({ suggestions: true });
   const world = await MessagesWorld.make(t, { agent, lists: true });
   agent.next(say("done"));
   const ref = await world.opened("add the feature");
-  await world.says("!next", ref.thread);
+  await world.says("/next", ref.thread);
   await world.settle();
   assert.equal(lastLine(world, ref), NONE);
   assert.equal(world.chat.threadLists().length, 0);
 });
 
-test("!next takes no argument, and is refused in the channel", async (t) => {
+test("/next takes no argument, and is refused in the channel", async (t) => {
   const { world, ref } = await threadOf(t);
-  await world.says("!next now", ref.thread);
+  await world.says("/next now", ref.thread);
   await world.settle();
   assert.equal(world.chat.threadLists().length, 0);
-  await world.says("!next");
+  await world.says("/next");
   await world.settle();
   assert.ok(world.inChannel().includes(texts.NEXT_TOP_LEVEL));
 });
 
-test("!next is not offered when the agent suggests nothing", async (t) => {
+test("/next is not offered when the agent suggests nothing", async (t) => {
   const world = await MessagesWorld.make(t, { lists: true });
   const ref = await world.opened("hello");
-  await world.says("!next", ref.thread);
+  await world.says("/next", ref.thread);
   await world.settle();
-  assert.match(lastLine(world, ref) ?? "", /`!next` is not offered here/);
+  assert.match(lastLine(world, ref) ?? "", /`\/next` is not offered here/);
 });
 
 test("Send sends the shown text as the owner's prompt and rewrites the offer to it", async (t) => {
   const { world, agent, ref } = await threadOf(t);
   agent.next(say("tests pass"));
-  await world.says("!next", ref.thread);
+  await world.says("/next", ref.thread);
   await world.settle();
   const offer = offerIn(world, ref);
   assert.equal(await world.chat.as("alice").picksSuggested(offer.message, true), true);
   await world.settle();
   assert.deepEqual(await world.prompts(), ["add the feature", GUESS]);
   assert.ok(world.shown(ref).some((line) => line === `> ${GUESS}`));
-  // Gone from the thread's held state: a second `!next` has nothing.
-  await world.says("!next", ref.thread);
+  // Gone from the thread's held state: a second `/next` has nothing.
+  await world.says("/next", ref.thread);
   await world.settle();
   assert.equal(lastLine(world, ref), NONE);
 });
 
 test("Send goes by the path of a typed prompt: a daemon that is restarting refuses it", async (t) => {
   const { world, ref } = await threadOf(t);
-  await world.says("!next", ref.thread);
+  await world.says("/next", ref.thread);
   await world.settle();
   const offer = offerIn(world, ref);
   world.sessions.draining = true;
@@ -124,7 +124,7 @@ test("Send goes by the path of a typed prompt: a daemon that is restarting refus
 
 test("a message of the owner's clears the suggestion: a later Send says the suggestion is out of date", async (t) => {
   const { world, agent, ref } = await threadOf(t);
-  await world.says("!next", ref.thread);
+  await world.says("/next", ref.thread);
   await world.settle();
   const offer = offerIn(world, ref);
   agent.next(say("on it"));
@@ -138,7 +138,7 @@ test("a message of the owner's clears the suggestion: a later Send says the sugg
 
 test("a message still waiting on its content has cleared it already", async (t) => {
   const { world, ref } = await threadOf(t);
-  await world.says("!next", ref.thread);
+  await world.says("/next", ref.thread);
   await world.settle();
   const offer = offerIn(world, ref);
   const read = new AsyncEvent();
@@ -163,7 +163,7 @@ test("a message still waiting on its content has cleared it already", async (t) 
 
 test("an offer made before a close and a resume is refused, the new suggestion kept", async (t) => {
   const { world, agent, ref } = await threadOf(t);
-  await world.says("!next", ref.thread);
+  await world.says("/next", ref.thread);
   await world.settle();
   const old = offerIn(world, ref);
   // The idle close: the process that made the guess is gone.
@@ -184,7 +184,7 @@ test("an offer made before a close and a resume is refused, the new suggestion k
 test("a second click finds nothing", async (t) => {
   const { world, agent, ref } = await threadOf(t);
   agent.next(say("done again"));
-  await world.says("!next", ref.thread);
+  await world.says("/next", ref.thread);
   await world.settle();
   const offer = offerIn(world, ref);
   await Promise.all([sends(world, ref, offer), sends(world, ref, offer)]);
@@ -195,7 +195,7 @@ test("a second click finds nothing", async (t) => {
 test("a double click on Send sends once and leaves the offer showing the sent words", async (t) => {
   const { world, agent, ref } = await threadOf(t);
   agent.next(say("done again"));
-  await world.says("!next", ref.thread);
+  await world.says("/next", ref.thread);
   await world.settle();
   const offer = offerIn(world, ref);
   const first = sends(world, ref, offer);
@@ -213,7 +213,7 @@ test("a word the core answers itself leaves the suggestion standing", async (t) 
   const world = await MessagesWorld.make(t, { agent, lists: true, suggests: true });
   agent.next(say("done"), suggest(GUESS));
   const ref = await world.opened("add the feature");
-  await world.says("!nosuchword", ref.thread);
+  await world.says("/nosuchword", ref.thread);
   await world.settle();
   assert.equal(world.sessions.suggestions.held(ref)?.text, GUESS);
 });
@@ -224,7 +224,7 @@ test("Send's prompt takes its place before a message typed while the offer is re
   rewrite.set();
   const { world, agent, ref } = await threadOf(t, { gates: { rewrite } });
   rewrite.clear();
-  await world.says("!next", ref.thread);
+  await world.says("/next", ref.thread);
   await world.settle();
   const offer = offerIn(world, ref);
   agent.next(say("one"), say("two"));
@@ -266,7 +266,7 @@ test("a thread with no session tells nothing when its first message is gone", as
 
 test("Cancel removes the offer and says nothing", async (t) => {
   const { world, ref } = await threadOf(t);
-  await world.says("!next", ref.thread);
+  await world.says("/next", ref.thread);
   await world.settle();
   const offer = offerIn(world, ref);
   const lines = world.shown(ref).length;
@@ -319,7 +319,7 @@ test("a suggestion that arrives while a prompt of the thread is in flight is dro
   world.agentSession().release();
   await world.settle();
   // The owner stops it: it is never sent, and the guess made before it must not outlive it.
-  await world.says("!stop", ref.thread);
+  await world.says("/stop", ref.thread);
   await world.settle();
   read.set();
   await typed;

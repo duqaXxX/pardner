@@ -1,5 +1,5 @@
 /**
- * `!rewind` through the message flow, with the plain agent and the memory chat: the prompts of a
+ * `/rewind` through the message flow, with the plain agent and the memory chat: the prompts of a
  * session listed in its thread, the actions offered at one, and what each does. The plain agent
  * keeps the files a test writes and a checkpoint of them at each prompt, and cuts its record of
  * the conversation once a prompt is sent after a `rewindTo` (as Claude Code does).
@@ -64,7 +64,7 @@ function lastLine(world: MessagesWorld, ref: ThreadRef): string | undefined {
 }
 
 async function openActions(world: MessagesWorld, ref: ThreadRef, promptId: string) {
-  await world.says("!rewind", ref.thread);
+  await world.says("/rewind", ref.thread);
   await world.settle();
   const points = listIn(world, ref);
   assert.equal(await world.chat.as("alice").picksPoint(points.message, promptId), true);
@@ -74,9 +74,9 @@ async function openActions(world: MessagesWorld, ref: ThreadRef, promptId: strin
   return actions;
 }
 
-test("!rewind lists the session's prompts, newest first", async (t) => {
+test("/rewind lists the session's prompts, newest first", async (t) => {
   const { world, ref } = await threadOf(t);
-  await world.says("!rewind", ref.thread);
+  await world.says("/rewind", ref.thread);
   await world.settle();
   const open = listIn(world, ref);
   assert.equal(open.list.type, "rewind-points");
@@ -135,7 +135,7 @@ test("a prompt with nothing to restore says so and leaves no controls", async (t
     rewind: { files: true, conversation: true, firstUncuttable: true },
   });
   store.writeFile(world.folder, "a.txt", "alpha");
-  await world.says("!rewind", ref.thread);
+  await world.says("/rewind", ref.thread);
   await world.settle();
   const points = listIn(world, ref);
   await world.chat.as("alice").picksPoint(points.message, first);
@@ -276,7 +276,7 @@ test("nothing is rewound while a turn runs", async (t) => {
   agent.next(say("working"), hold());
   await world.says("a long task", ref.thread);
   await world.settle();
-  await world.says("!rewind", ref.thread);
+  await world.says("/rewind", ref.thread);
   await world.settle();
   assert.equal(lastLine(world, ref), texts.REWIND_BUSY);
   // A list drawn before the turn started is refused the same.
@@ -301,7 +301,7 @@ test("a list made for another session is refused", async (t) => {
 
 test("a prompt the session does not hold is refused", async (t) => {
   const { world, ref, first } = await threadOf(t);
-  await world.says("!rewind", ref.thread);
+  await world.says("/rewind", ref.thread);
   await world.settle();
   const points = listIn(world, ref);
   if (points.list.type !== "rewind-points") throw new Error("no prompt list");
@@ -463,25 +463,25 @@ test("moving to a terminal drops a stored cut", async (t) => {
   await world.chat.as("alice").picksAction(actions.message, "conversation");
   await world.settle();
   assert.notEqual(world.state.thread(ref.channel, ref.thread)?.pendingCut, null);
-  await world.says("!terminal", ref.thread);
+  await world.says("/terminal", ref.thread);
   await world.settle();
   assert.equal(world.state.thread(ref.channel, ref.thread)?.pendingCut, null);
 });
 
-test("!rewind is refused in the channel, before a session started and with no prompt", async (t) => {
+test("/rewind is refused in the channel, before a session started and with no prompt", async (t) => {
   const store = new PlainStore();
   const agent = new PlainAgent({ store, rewind: { files: true, conversation: true } });
   const world = await MessagesWorld.make(t, { agent, rewind: true });
-  await world.says("!rewind");
+  await world.says("/rewind");
   await world.settle();
   assert.ok(world.inChannel().includes(texts.REWIND_TOP_LEVEL));
 });
 
 test("an agent with no way back and a chat with no lists do not offer the word", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new PlainAgent() });
-  await world.says("!help rewind");
+  await world.says("/help rewind");
   await world.settle();
-  assert.ok(!world.inChannel().some((line) => line.includes("`!rewind`")));
+  assert.ok(!world.inChannel().some((line) => line.includes("`/rewind`")));
 });
 
 // The fix round: a cut that waits for a prompt, and what runs beside a rewind.
@@ -629,12 +629,12 @@ test("replies are folded from the dropped prompts, whether or not the picked one
   assert.ok(second);
 });
 
-test("a second !rewind before the next prompt lists only the prompts before the cut", async (t) => {
+test("a second /rewind before the next prompt lists only the prompts before the cut", async (t) => {
   const { world, ref, first, second } = await threadOf(t);
   const actions = await openActions(world, ref, second);
   await world.chat.as("alice").picksAction(actions.message, "conversation");
   await world.settle();
-  await world.says("!rewind", ref.thread);
+  await world.says("/rewind", ref.thread);
   await world.settle();
   const open = listIn(world, ref);
   assert.equal(open.list.type, "rewind-points");

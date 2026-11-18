@@ -25,10 +25,10 @@ import {
 
 const identity = (text: string): string => text;
 
-// --- !help and !guide
+// --- /help and /guide
 
-// The plain agent has no bypass mode and the memory chat no file upload: `!bypass` and `!open`
-// are refused when typed, and the help does not list them; nor `!memory` and `!skills`, since
+// The plain agent has no bypass mode and the memory chat no file upload: `/bypass` and `/open`
+// are refused when typed, and the help does not list them; nor `/memory` and `/skills`, since
 // the plain agent lists nothing a session loaded.
 const UNSERVED = new Set([
   "bypass",
@@ -48,12 +48,12 @@ const UNSERVED = new Set([
   "pardner",
   "!",
 ]);
-// It keeps no record of trust either, so its `!bind` line speaks of none.
+// It keeps no record of trust either, so its `/bind` line speaks of none.
 const NO_TRUST = false;
 
-test("!help in the channel lists the daemon's words and says where the agent's commands are", async (t) => {
+test("/help in the channel lists the daemon's words and says where the agent's commands are", async (t) => {
   const world = await MessagesWorld.make(t);
-  await world.says("!help");
+  await world.says("/help");
   assert.deepEqual(world.inChannel().slice(1), [
     helpText(null, "", identity, PLAIN_NAMES, true, UNSERVED, NO_TRUST),
   ]);
@@ -63,25 +63,25 @@ test("!help in the channel lists the daemon's words and says where the agent's c
   assert.deepEqual(await world.prompts(), []);
 });
 
-test("!help in a session's thread adds the commands the session offers, less those a thread refuses", async (t) => {
+test("/help in a session's thread adds the commands the session offers, less those a thread refuses", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
-  await world.says("!help", ref.thread);
+  await world.says("/help", ref.thread);
   assert.equal(
     world.shown(ref).at(-1),
     helpText(PLAIN_COMMANDS, "", identity, PLAIN_NAMES, true, UNSERVED, NO_TRUST),
   );
-  await world.says("!help count", ref.thread);
+  await world.says("/help count", ref.thread);
   assert.equal(
     world.shown(ref).at(-1),
     helpText(PLAIN_COMMANDS, "count", identity, PLAIN_NAMES, true, UNSERVED, NO_TRUST),
   );
 });
 
-test("!help for an agent with no commands lists none", async (t) => {
+test("/help for an agent with no commands lists none", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new NoCommands() });
   const ref = await world.opened();
-  await world.says("!help", ref.thread);
+  await world.says("/help", ref.thread);
   const answer = world.shown(ref).at(-1) ?? "";
   assert.equal(answer, helpText(null, "", identity, PLAIN_NAMES, false, UNSERVED, NO_TRUST));
   assert.ok(!answer.includes(named(texts.HELP_AGENT, PLAIN_NAMES)));
@@ -90,7 +90,7 @@ test("!help for an agent with no commands lists none", async (t) => {
 
 test("a mistyped word gets the full list", async (t) => {
   const world = await MessagesWorld.make(t);
-  await world.says("!bypass maybe");
+  await world.says("/bypass maybe");
   assert.deepEqual(world.inChannel().slice(1), [
     helpText(null, "", identity, PLAIN_NAMES, true, UNSERVED, NO_TRUST),
   ]);
@@ -121,12 +121,12 @@ const PLAIN_OFFER: GuideOffer = {
   updates: false,
 };
 
-test("!guide is answered where it was typed", async (t) => {
+test("/guide is answered where it was typed", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
-  await world.says("!guide");
+  await world.says("/guide");
   assert.equal(world.inChannel().at(-1), guideText(PLAIN_NAMES, PLAIN_OFFER));
-  await world.says("!guide", ref.thread);
+  await world.says("/guide", ref.thread);
   assert.equal(world.shown(ref).at(-1), guideText(PLAIN_NAMES, PLAIN_OFFER));
 });
 
@@ -136,19 +136,19 @@ test("the references typed in a session's thread are written for the owner alone
   const session = world.sessions.get(ref.channel, ref.thread);
   assert.ok(session !== null);
   const say = t.mock.method(session.threadChat, "say");
-  const words = ["!help", "!help compact", "!guide", "!status", "!bypass maybe"];
+  const words = ["/help", "/help compact", "/guide", "/status", "/bypass maybe"];
   for (const word of words) await world.says(word, ref.thread);
   assert.equal(say.mock.calls.length, words.length);
   for (const call of say.mock.calls) assert.deepEqual(call.arguments[1], { ownerOnly: true });
 });
 
-test("!help and !guide in a channel bound to no folder are answered there, and start no session", async (t) => {
+test("/help and /guide in a channel bound to no folder are answered there, and start no session", async (t) => {
   const world = await MessagesWorld.make(t);
   const free = world.chat.openChannel("free");
-  await world.chat.as(OWNER).says(free, "!help");
-  await world.chat.as(OWNER).says(free, "!guide");
+  await world.chat.as(OWNER).says(free, "/help");
+  await world.chat.as(OWNER).says(free, "/guide");
   assert.deepEqual(
-    world.chat.texts(free).filter((line) => !line.startsWith("!")),
+    world.chat.texts(free).filter((line) => !line.startsWith("/")),
     [
       helpText(null, "", identity, PLAIN_NAMES, true, UNSERVED, NO_TRUST),
       guideText(PLAIN_NAMES, PLAIN_OFFER),
@@ -159,126 +159,126 @@ test("!help and !guide in a channel bound to no folder are answered there, and s
   assert.equal(world.state.channel(free), null);
 });
 
-test("!guide offers what the agent and the chat declare", async (t) => {
+test("/guide offers what the agent and the chat declare", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new WithBypass(), files: true });
-  await world.says("!guide");
+  await world.says("/guide");
   assert.equal(
     world.inChannel().at(-1),
     guideText(PLAIN_NAMES, { ...PLAIN_OFFER, bypass: true, fileUpload: true }),
   );
 });
 
-// --- !plan
+// --- /plan
 
-test("!plan belongs to a session", async (t) => {
+test("/plan belongs to a session", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new WithPlan() });
-  await world.says("!plan");
+  await world.says("/plan");
   assert.equal(world.inChannel().at(-1), texts.PLAN_TOP_LEVEL);
 });
 
-test("!plan with a request says the word takes none, in the channel and in a thread", async (t) => {
+test("/plan with a request says the word takes none, in the channel and in a thread", async (t) => {
   const agent = new WithPlan();
   const world = await MessagesWorld.make(t, { agent });
-  await world.says("!plan\nPrepare a plan for a file");
+  await world.says("/plan\nPrepare a plan for a file");
   assert.equal(world.inChannel().at(-1), texts.PLAN_TAKES_NO_TEXT);
   const ref = await world.opened();
-  await world.says("!plan prepare a plan", ref.thread);
+  await world.says("/plan prepare a plan", ref.thread);
   assert.equal(world.shown(ref).at(-1), texts.PLAN_TAKES_NO_TEXT);
   assert.deepEqual(agent.modes, []);
 });
 
-test("!plan switches a started session to plan mode and !plan off returns to its mode", async (t) => {
+test("/plan switches a started session to plan mode and /plan off returns to its mode", async (t) => {
   const agent = new WithPlan();
   const world = await MessagesWorld.make(t, { agent });
   const ref = await world.opened();
   const before = JSON.stringify(world.state.thread(ref.channel, ref.thread));
-  await world.says("!plan", ref.thread);
+  await world.says("/plan", ref.thread);
   assert.equal(world.shown(ref).at(-1), named(texts.PLAN_ON_THREAD, PLAIN_NAMES));
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   assert.ok(world.shown(ref).at(-1)?.includes("Mode: `planning`"));
-  await world.says("!plan off", ref.thread);
+  await world.says("/plan off", ref.thread);
   assert.equal(world.shown(ref).at(-1), texts.PLAN_OFF_THREAD);
   assert.deepEqual(agent.modes, ["planning", "standard"]);
   // Session only: nothing is stored about plan mode.
   assert.equal(JSON.stringify(world.state.thread(ref.channel, ref.thread)), before);
 });
 
-test("!plan off with bypass on returns to bypass, and !status shows plan meanwhile", async (t) => {
+test("/plan off with bypass on returns to bypass, and /status shows plan meanwhile", async (t) => {
   const agent = new WithPlan();
   const world = await MessagesWorld.make(t, { agent });
   const ref = await world.opened();
-  await world.says("!bypass on", ref.thread);
-  await world.says("!plan", ref.thread);
-  await world.says("!status", ref.thread);
+  await world.says("/bypass on", ref.thread);
+  await world.says("/plan", ref.thread);
+  await world.says("/status", ref.thread);
   assert.ok(world.shown(ref).at(-1)?.includes("Mode: `planning`"));
-  await world.says("!plan off", ref.thread);
+  await world.says("/plan off", ref.thread);
   assert.deepEqual(agent.modes, ["unrestricted", "planning", "unrestricted"]);
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   assert.ok(world.shown(ref).at(-1)?.includes("Mode: `unrestricted`"));
 });
 
-test("!bypass on during plan mode ends plan mode", async (t) => {
+test("/bypass on during plan mode ends plan mode", async (t) => {
   const agent = new WithPlan();
   const world = await MessagesWorld.make(t, { agent });
   const ref = await world.opened();
-  await world.says("!plan", ref.thread);
-  await world.says("!bypass on", ref.thread);
-  await world.says("!status", ref.thread);
+  await world.says("/plan", ref.thread);
+  await world.says("/bypass on", ref.thread);
+  await world.says("/status", ref.thread);
   assert.ok(world.shown(ref).at(-1)?.includes("Mode: `unrestricted`"));
 });
 
-test("!plan before the setup is started changes nothing", async (t) => {
+test("/plan before the setup is started changes nothing", async (t) => {
   const agent = new WithPlan();
   const world = await MessagesWorld.make(t, { agent });
   const ref = world.chat.openThread(world.channel);
   world.sessions.open(ref.channel, ref.thread);
-  await world.says("!plan", ref.thread);
+  await world.says("/plan", ref.thread);
   assert.equal(world.shown(ref).at(-1), texts.PLAN_BEFORE_START);
   assert.deepEqual(agent.modes, []);
 });
 
-test("!plan for an agent with no plan mode says so and changes nothing", async (t) => {
+test("/plan for an agent with no plan mode says so and changes nothing", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
-  await world.says("!plan", ref.thread);
+  await world.says("/plan", ref.thread);
   assert.equal(world.shown(ref).at(-1), named(texts.PLAN_UNAVAILABLE, PLAIN_NAMES));
-  await world.says("!plan off", ref.thread);
+  await world.says("/plan off", ref.thread);
   assert.equal(world.shown(ref).at(-1), named(texts.PLAN_UNAVAILABLE, PLAIN_NAMES));
 });
 
-test("!guide and !help offer plan only to an agent with a plan mode", async (t) => {
+test("/guide and /help offer plan only to an agent with a plan mode", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new WithPlan() });
-  await world.says("!guide");
+  await world.says("/guide");
   assert.equal(
     world.inChannel().at(-1),
     guideText(PLAIN_NAMES, { ...PLAIN_OFFER, bypass: true, plan: true }),
   );
 });
 
-// --- !bind and !resume
+// --- /bind and /resume
 
-test("!bind with a folder binds the channel, and alone offers the folders", async (t) => {
+test("/bind with a folder binds the channel, and alone offers the folders", async (t) => {
   const world = await MessagesWorld.make(t);
   mkdirSync(join(world.folder, "docs"));
-  await world.says("!bind docs");
+  await world.says("/bind docs");
   assert.equal(world.state.channel(world.channel)?.directory, join(world.folder, "docs"));
   assert.equal(
     world.inChannel().at(-1),
     fill(texts.BIND_OK, { directory: join(world.folder, "docs") }),
   );
-  await world.says("!bind");
+  await world.says("/bind");
   const lists = world.chat.lists();
   assert.equal(lists.length, 1);
   assert.equal(lists[0]?.list.type, "folders");
 });
 
-test("!bind inside a session's thread, or with a folder in a thread without one, says it works in the channel", async (t) => {
+test("/bind inside a session's thread, or with a folder in a thread without one, says it works in the channel", async (t) => {
   const world = await MessagesWorld.make(t);
   mkdirSync(join(world.folder, "docs"));
   const ref = await world.opened();
   const said = fill(texts.WORD_IN_THREAD, { word: "bind" });
-  await world.says("!bind docs", ref.thread);
-  await world.says("!bind", ref.thread);
+  await world.says("/bind docs", ref.thread);
+  await world.says("/bind", ref.thread);
   assert.deepEqual(
     world.shown(ref).filter((line) => line === said),
     [said, said],
@@ -292,74 +292,74 @@ test("!bind inside a session's thread, or with a folder in a thread without one,
     ],
   );
   const outside = world.chat.openThread(world.channel);
-  await world.says("!bind docs", outside.thread);
+  await world.says("/bind docs", outside.thread);
   assert.equal(world.shown(outside).at(-1), said);
   assert.deepEqual(tells(world, outside), [[said, {}]]);
   assert.equal(world.state.channel(world.channel)?.directory, world.folder);
-  await world.says("!bind", outside.thread);
+  await world.says("/bind", outside.thread);
   assert.equal(world.chat.lists().length, 1, "alone it lists the folders, as in the channel");
 });
 
-test("!resume offers the folder's sessions in the channel and is refused inside a thread", async (t) => {
+test("/resume offers the folder's sessions in the channel and is refused inside a thread", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
   const said = fill(texts.WORD_IN_THREAD, { word: "resume" });
-  await world.says("!resume", ref.thread);
+  await world.says("/resume", ref.thread);
   assert.equal(world.shown(ref).at(-1), said);
   const outside = world.chat.openThread(world.channel);
-  await world.says("!resume", outside.thread);
+  await world.says("/resume", outside.thread);
   assert.equal(world.shown(outside).at(-1), said);
   assert.deepEqual(tells(world, ref), [[said, {}]]);
   assert.deepEqual(tells(world, outside), [[said, {}]]);
   assert.deepEqual(world.chat.lists(), []);
-  await world.says("!resume");
+  await world.says("/resume");
   assert.equal(world.chat.lists().length, 1);
   assert.equal(world.chat.lists()[0]?.list.type, "sessions");
 });
 
-// --- !bypass
+// --- /bypass
 
-test("!bypass belongs to a session", async (t) => {
+test("/bypass belongs to a session", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new WithBypass() });
-  await world.says("!bypass on");
+  await world.says("/bypass on");
   assert.equal(world.inChannel().at(-1), texts.BYPASS_TOP_LEVEL);
 });
 
-test("!bypass switches a started session and keeps the choice", async (t) => {
+test("/bypass switches a started session and keeps the choice", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new WithBypass() });
   const ref = await world.opened();
-  await world.says("!bypass on", ref.thread);
+  await world.says("/bypass on", ref.thread);
   assert.equal(world.shown(ref).at(-1), texts.BYPASS_ON_THREAD);
   assert.equal(world.state.thread(ref.channel, ref.thread)?.bypass, true);
-  await world.says("!bypass off", ref.thread);
+  await world.says("/bypass off", ref.thread);
   assert.equal(world.shown(ref).at(-1), named(texts.BYPASS_OFF_THREAD, PLAIN_NAMES));
   assert.equal(world.state.thread(ref.channel, ref.thread)?.bypass, false);
   assert.deepEqual(world.chat.strayCalls(), [], "no reaction on a chat that has none");
 });
 
-test("!bypass before the setup is started changes nothing", async (t) => {
+test("/bypass before the setup is started changes nothing", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new WithBypass() });
   const ref = world.chat.openThread(world.channel);
   world.sessions.open(ref.channel, ref.thread);
-  await world.says("!bypass on", ref.thread);
+  await world.says("/bypass on", ref.thread);
   assert.equal(world.shown(ref).at(-1), texts.BYPASS_BEFORE_START);
   assert.equal(world.state.thread(ref.channel, ref.thread)?.bypass, null);
 });
 
-test("!bypass for an agent with no bypass mode says so and stores nothing", async (t) => {
+test("/bypass for an agent with no bypass mode says so and stores nothing", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
   const before = world.state.thread(ref.channel, ref.thread)?.bypass;
-  await world.says("!bypass on", ref.thread);
+  await world.says("/bypass on", ref.thread);
   assert.equal(world.shown(ref).at(-1), named(texts.BYPASS_UNAVAILABLE, PLAIN_NAMES));
   assert.equal(world.state.thread(ref.channel, ref.thread)?.bypass, before);
-  await world.says("!bypass off", ref.thread);
+  await world.says("/bypass off", ref.thread);
   assert.equal(world.shown(ref).at(-1), named(texts.BYPASS_UNAVAILABLE, PLAIN_NAMES));
   assert.equal(world.state.thread(ref.channel, ref.thread)?.bypass, before);
   assert.notEqual(before, true);
 });
 
-test("!bypass in a thread whose folder is gone says so, and stores nothing", async (t) => {
+test("/bypass in a thread whose folder is gone says so, and stores nothing", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new WithBypass() });
   const ref = await world.opened();
   const session = world.sessions.get(ref.channel, ref.thread);
@@ -368,7 +368,7 @@ test("!bypass in a thread whose folder is gone says so, and stores nothing", asy
   await session.close();
   const before = world.state.thread(ref.channel, ref.thread)?.bypass;
   rmSync(world.folder, { recursive: true });
-  await world.says("!bypass on", ref.thread);
+  await world.says("/bypass on", ref.thread);
   assert.equal(world.shown(ref).at(-1), fill(texts.DIRECTORY_MISSING, { directory: world.folder }));
   assert.equal(world.state.thread(ref.channel, ref.thread)?.bypass, before);
 });
@@ -376,21 +376,21 @@ test("!bypass in a thread whose folder is gone says so, and stores nothing", asy
 test("a word that took effect is marked on the message only where the chat has reactions", async (t) => {
   const plain = await MessagesWorld.make(t, { agent: new WithBypass() });
   const ref = await plain.opened();
-  await plain.says("!bypass on", ref.thread);
+  await plain.says("/bypass on", ref.thread);
   assert.deepEqual(plain.chat.strayCalls(), []);
 
   const reacting = await MessagesWorld.make(t, { agent: new WithBypass(), reactions: true });
   const there = await reacting.opened();
-  const word = await reacting.says("!bypass on", there.thread);
+  const word = await reacting.says("/bypass on", there.thread);
   assert.ok(reacting.chat.strayCalls().includes(`acknowledge ${word.id}`));
 });
 
-test("!bypass on and off switch the live session's mode in that order, and say so", async (t) => {
+test("/bypass on and off switch the live session's mode in that order, and say so", async (t) => {
   const agent = new WithPlan();
   const world = await MessagesWorld.make(t, { agent });
   const ref = await world.opened();
-  await world.says("!bypass on", ref.thread);
-  await world.says("!bypass off", ref.thread);
+  await world.says("/bypass on", ref.thread);
+  await world.says("/bypass off", ref.thread);
   assert.deepEqual(agent.modes, ["unrestricted", "standard"]);
   const on = texts.BYPASS_ON_THREAD;
   const off = named(texts.BYPASS_OFF_THREAD, PLAIN_NAMES);
@@ -406,46 +406,46 @@ test("a bind never touches the bypass of a thread that exists, nor closes its se
   const world = await MessagesWorld.make(t, { agent: new WithBypass() });
   mkdirSync(join(world.folder, "docs"));
   const ref = await world.opened();
-  await world.says("!bypass on", ref.thread);
-  await world.says("!bind docs");
+  await world.says("/bypass on", ref.thread);
+  await world.says("/bind docs");
   assert.equal(world.state.thread(ref.channel, ref.thread)?.bypass, true);
   assert.equal(world.agentSession().closed, false);
   assert.equal(world.sessions.get(ref.channel, ref.thread) !== null, true);
 });
 
-test("a malformed !bypass shows its own help line and its rule, at the top level and in a thread", async (t) => {
+test("a malformed /bypass shows its own help line and its rule, at the top level and in a thread", async (t) => {
   const world = await MessagesWorld.make(t, { agent: new WithBypass() });
   const ref = await world.opened();
   const before = world.state.thread(ref.channel, ref.thread)?.bypass;
-  await world.says("!bypass maybe");
+  await world.says("/bypass maybe");
   const channel = world.inChannel().at(-1) ?? "";
-  assert.ok(channel.includes("`!bypass") && channel.includes(texts.RULE_BYPASS), channel);
-  assert.ok(!channel.includes("`!guide`") && !channel.includes("`!count"), channel);
-  await world.says("!bypass maybe", ref.thread);
+  assert.ok(channel.includes("`/bypass") && channel.includes(texts.RULE_BYPASS), channel);
+  assert.ok(!channel.includes("`/guide`") && !channel.includes("`/count"), channel);
+  await world.says("/bypass maybe", ref.thread);
   const thread = world.shown(ref).at(-1) ?? "";
-  assert.ok(thread.includes("`!bypass") && thread.includes(texts.RULE_BYPASS), thread);
-  assert.ok(!thread.includes("`!guide`") && !thread.includes("`!count"), thread);
+  assert.ok(thread.includes("`/bypass") && thread.includes(texts.RULE_BYPASS), thread);
+  assert.ok(!thread.includes("`/guide`") && !thread.includes("`/count"), thread);
   assert.equal(world.state.thread(ref.channel, ref.thread)?.bypass, before);
 });
 
-// --- !stop
+// --- /stop
 
-test("!stop in the channel stops what runs there, and says when nothing does", async (t) => {
+test("/stop in the channel stops what runs there, and says when nothing does", async (t) => {
   const world = await MessagesWorld.make(t);
-  await world.says("!stop");
+  await world.says("/stop");
   assert.equal(world.inChannel().at(-1), texts.NOTHING_TO_STOP);
   const ref = await world.opened();
   (world.agent as PlainAgent).next(hold());
   await world.says("a long job", ref.thread);
   await world.settle();
   assert.equal(world.sessions.get(ref.channel, ref.thread)?.busy, true);
-  await world.says("!stop");
+  await world.says("/stop");
   assert.equal(world.inChannel().at(-1), texts.STOPPED_CHANNEL);
   await world.settle();
   assert.equal(world.sessions.get(ref.channel, ref.thread)?.busy, false);
 });
 
-test("!stop in the channel drops the goals of its open sessions too", async (t) => {
+test("/stop in the channel drops the goals of its open sessions too", async (t) => {
   // The maintainer, 2026-10-21: a thread's stop keeps the goal, as the terminal's Esc does; the
   // channel's stops everything, goals included.
   const condition = "the files a1.txt to a20.txt exist";
@@ -453,27 +453,27 @@ test("!stop in the channel drops the goals of its open sessions too", async (t) 
   const world = await MessagesWorld.make(t, { agent });
   const ref = await world.opened();
   agent.next(goalChanged({ state: "set", condition }), hold());
-  await world.says("!goal the files a1.txt to a20.txt exist", ref.thread);
+  await world.says("/goal the files a1.txt to a20.txt exist", ref.thread);
   await world.settle();
-  await world.says("!stop");
+  await world.says("/stop");
   assert.equal(world.inChannel().at(-1), texts.STOPPED_CHANNEL);
   assert.equal(agent.cleared, 1);
   assert.equal(world.sessions.get(ref.channel, ref.thread)?.goal, null);
 });
 
-test("!stop in a session's thread answers with a post of the thread", async (t) => {
+test("/stop in a session's thread answers with a post of the thread", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
-  await world.says("!stop", ref.thread);
+  await world.says("/stop", ref.thread);
   assert.equal(world.shown(ref).at(-1), texts.NOTHING_TO_STOP_THREAD);
   (world.agent as PlainAgent).next(hold());
   await world.says("a long job", ref.thread);
   await world.settle();
-  await world.says("!stop", ref.thread);
+  await world.says("/stop", ref.thread);
   assert.equal(world.shown(ref).at(-1), texts.STOPPED_THREAD);
 });
 
-test("ChatInbound.stop stops a running turn and posts what !stop does", async (t) => {
+test("ChatInbound.stop stops a running turn and posts what /stop does", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
   (world.agent as PlainAgent).next(hold());
@@ -499,7 +499,7 @@ test("ChatInbound.stop on a thread being deleted posts nothing", async (t) => {
   assert.equal(world.shown(ref).length, before);
 });
 
-test("a failure of ChatInbound.stop reaches the owner in the thread, as one of !stop does", async (t) => {
+test("a failure of ChatInbound.stop reaches the owner in the thread, as one of /stop does", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
   (world.agent as PlainAgent).next(hold());
@@ -518,15 +518,15 @@ test("a failure of ChatInbound.stop reaches the owner in the thread, as one of !
   );
 });
 
-test("!stop on a goal says the goal is still set, and not once it is achieved", async (t) => {
+test("/stop on a goal says the goal is still set, and not once it is achieved", async (t) => {
   // The stop ends the turn, not the goal: the next message resumes it (measured 2026-10-20).
   const condition = "the files a1.txt to a20.txt exist";
   const world = await MessagesWorld.make(t, { agent: new WithGoals() });
   const ref = await world.opened();
   (world.agent as PlainAgent).next(goalChanged({ state: "set", condition }), hold());
-  await world.says("!goal the files a1.txt to a20.txt exist", ref.thread);
+  await world.says("/goal the files a1.txt to a20.txt exist", ref.thread);
   await world.settle();
-  await world.says("!stop", ref.thread);
+  await world.says("/stop", ref.thread);
   assert.equal(
     world.shown(ref).at(-1),
     `${texts.STOPPED_THREAD}\n${fill(texts.GOAL_STILL_ACTIVE, { condition })}`,
@@ -537,24 +537,24 @@ test("!stop on a goal says the goal is still set, and not once it is achieved", 
   );
   await world.says("go on", ref.thread);
   await world.settle();
-  await world.says("!stop", ref.thread);
+  await world.says("/stop", ref.thread);
   assert.equal(world.shown(ref).at(-1), texts.STOPPED_THREAD);
 });
 
-test("!stop in a thread that holds no session stops nothing and says where to send it", async (t) => {
+test("/stop in a thread that holds no session stops nothing and says where to send it", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
   (world.agent as PlainAgent).next(hold());
   await world.says("a long job", ref.thread);
   await world.settle();
   const outside = world.chat.openThread(world.channel);
-  await world.says("!stop", outside.thread);
+  await world.says("/stop", outside.thread);
   assert.equal(world.shown(outside).at(-1), texts.STOP_OUTSIDE_SESSION);
   assert.deepEqual(tells(world, outside), [[texts.STOP_OUTSIDE_SESSION, {}]]);
   assert.equal(world.sessions.get(ref.channel, ref.thread)?.busy, true);
 });
 
-test("!stop in a thread stops that session alone, though another of the folder works too", async (t) => {
+test("/stop in a thread stops that session alone, though another of the folder works too", async (t) => {
   const world = await MessagesWorld.make(t);
   const first = await world.opened("one");
   const second = await world.opened("two");
@@ -570,21 +570,21 @@ test("!stop in a thread stops that session alone, though another of the folder w
   await world.settle();
   assert.equal(world.sessions.get(first.channel, first.thread)?.busy, true);
   assert.equal(world.sessions.get(second.channel, second.thread)?.busy, true);
-  await world.says("!stop", first.thread);
+  await world.says("/stop", first.thread);
   await world.settle();
   assert.equal(world.shown(first).at(-1), texts.STOPPED_THREAD);
   assert.equal(world.sessions.get(first.channel, first.thread)?.busy, false);
   assert.equal(world.sessions.get(second.channel, second.thread)?.busy, true);
 });
 
-test("the answers of !stop in a thread are posts that stay, and a thread's stop is no line for the owner alone", async (t) => {
+test("the answers of /stop in a thread are posts that stay, and a thread's stop is no line for the owner alone", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
-  await world.says("!stop", ref.thread);
+  await world.says("/stop", ref.thread);
   (world.agent as PlainAgent).next(hold());
   await world.says("a long job", ref.thread);
   await world.settle();
-  await world.says("!stop", ref.thread);
+  await world.says("/stop", ref.thread);
   const stays = { stays: true };
   assert.deepEqual(
     tells(world, ref).filter(
@@ -605,143 +605,143 @@ test("ChatInbound.stop in a thread that holds no session says there is nothing t
   assert.equal(world.shown(ref).at(-1), texts.NOTHING_TO_STOP_THREAD);
 });
 
-// --- !open
+// --- /open
 
-test("!open belongs to a session", async (t) => {
+test("/open belongs to a session", async (t) => {
   const world = await MessagesWorld.make(t, { files: true });
-  await world.says("!open notes.md");
+  await world.says("/open notes.md");
   assert.equal(world.inChannel().at(-1), texts.OPEN_TOP_LEVEL);
   assert.deepEqual(world.fileCalls, []);
 });
 
-test("!open in a session's thread hands the folder and the words to a chat that can share a file", async (t) => {
+test("/open in a session's thread hands the folder and the words to a chat that can share a file", async (t) => {
   const world = await MessagesWorld.make(t, { files: true });
   const ref = await world.opened();
-  await world.says("!open notes.md", ref.thread);
-  await world.says("!open", ref.thread);
+  await world.says("/open notes.md", ref.thread);
+  await world.says("/open", ref.thread);
   assert.deepEqual(world.fileCalls, [
     [ref, world.folder, "notes.md"],
     [ref, world.folder, ""],
   ]);
 });
 
-test("!open in a chat that cannot share a file says so", async (t) => {
+test("/open in a chat that cannot share a file says so", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
-  await world.says("!open notes.md", ref.thread);
+  await world.says("/open notes.md", ref.thread);
   assert.equal(world.shown(ref).at(-1), named(texts.OPEN_UNAVAILABLE, PLAIN_NAMES));
 });
 
-test("a failure of !open reaches the owner where the word was typed", async (t) => {
+test("a failure of /open reaches the owner where the word was typed", async (t) => {
   const world = await MessagesWorld.make(t, { files: true, openFails: true });
   const ref = await world.opened();
-  await world.says("!open notes.md", ref.thread);
+  await world.says("/open notes.md", ref.thread);
   assert.equal(
     world.shown(ref).at(-1),
     fill(named(texts.ERROR_REPLY, PLAIN_NAMES), { error: "Error" }),
   );
 });
 
-// --- !tag and !untag
+// --- /tag and /untag
 
 const SESSION_ID = (world: MessagesWorld, ref: { channel: string; thread: string }) =>
   world.state.thread(ref.channel, ref.thread)?.sessionId;
 
-test("!tag and !untag belong to a session, in the channel and in a thread that holds none", async (t) => {
+test("/tag and /untag belong to a session, in the channel and in a thread that holds none", async (t) => {
   const agent = new WithSessionTags();
   const world = await MessagesWorld.make(t, { agent, tags: true });
-  await world.says("!tag devops");
-  await world.says("!untag");
+  await world.says("/tag devops");
+  await world.says("/untag");
   const answers = () => world.inChannel().filter((line) => line === texts.TAG_TOP_LEVEL);
   assert.equal(answers().length, 2);
   const outside = world.chat.openThread(world.channel);
-  await world.says("!tag devops", outside.thread);
-  await world.says("!untag", outside.thread);
+  await world.says("/tag devops", outside.thread);
+  await world.says("/untag", outside.thread);
   assert.equal(answers().length, 4, "a thread that holds no session is answered in the channel");
   assert.deepEqual(world.tagCalls, []);
   assert.deepEqual(agent.tagCalls, []);
 });
 
-test("!tag in a session's thread tags the thread, then the agent's session, and marks the word", async (t) => {
+test("/tag in a session's thread tags the thread, then the agent's session, and marks the word", async (t) => {
   const agent = new WithSessionTags();
   const world = await MessagesWorld.make(t, { agent, tags: true, reactions: true });
   const ref = await world.opened();
   const id = SESSION_ID(world, ref);
   assert.ok(typeof id === "string" && id !== "");
-  const word = await world.says("!tag Release-2.1", ref.thread);
+  const word = await world.says("/tag Release-2.1", ref.thread);
   assert.deepEqual(world.tagCalls, [[ref, "Release-2.1"]]);
   assert.deepEqual(agent.tagCalls, [[world.folder, id, "Release-2.1"]]);
   assert.ok(world.chat.strayCalls().includes(`acknowledge ${word.id}`));
   // The mark is the whole answer: the owner's word is the last line of the thread.
-  assert.equal(world.shown(ref).at(-1), "!tag Release-2.1");
+  assert.equal(world.shown(ref).at(-1), "/tag Release-2.1");
   // A second tag replaces the first at the agent and the chat alike.
-  await world.says("!tag ops", ref.thread);
+  await world.says("/tag ops", ref.thread);
   assert.deepEqual(world.tagCalls.at(-1), [ref, "ops"]);
   assert.deepEqual(agent.tagCalls.at(-1), [world.folder, id, "ops"]);
 });
 
-test("!untag clears the thread's tag, then the agent's", async (t) => {
+test("/untag clears the thread's tag, then the agent's", async (t) => {
   const agent = new WithSessionTags();
   const world = await MessagesWorld.make(t, { agent, tags: true, reactions: true });
   const ref = await world.opened();
   const id = SESSION_ID(world, ref) as string;
-  const word = await world.says("!untag", ref.thread);
+  const word = await world.says("/untag", ref.thread);
   assert.deepEqual(world.tagCalls, [[ref, null]]);
   assert.deepEqual(agent.tagCalls, [[world.folder, id, null]]);
   assert.ok(world.chat.strayCalls().includes(`acknowledge ${word.id}`));
 });
 
-test("!tag with no name, or a name the rule refuses, shows the help and changes nothing", async (t) => {
+test("/tag with no name, or a name the rule refuses, shows the help and changes nothing", async (t) => {
   const agent = new WithSessionTags();
   const world = await MessagesWorld.make(t, { agent, tags: true });
   const ref = await world.opened();
-  for (const typed of ["!tag", "!tag two words", "!tag a/b", `!tag ${"x".repeat(41)}`]) {
+  for (const typed of ["/tag", "/tag two words", "/tag a/b", `/tag ${"x".repeat(41)}`]) {
     const before = world.shown(ref).length;
     await world.says(typed, ref.thread);
     assert.equal(world.shown(ref).length, before + 2, typed); // the word, then the help
     // Its own help line and the rule, not the list of every word.
     const answer = world.shown(ref).at(-1) ?? "";
-    assert.ok(answer.startsWith("`!tag <name>`"), typed);
+    assert.ok(answer.startsWith("`/tag <name>`"), typed);
     assert.ok(answer.endsWith(`\n${texts.RULE_TAG}`), typed);
-    assert.equal(answer.includes("`!guide`"), false, typed);
+    assert.equal(answer.includes("`/guide`"), false, typed);
   }
   assert.deepEqual(world.tagCalls, []);
   assert.deepEqual(agent.tagCalls, []);
 });
 
-test("!tag reads the name from the message without its formatting", async (t) => {
+test("/tag reads the name from the message without its formatting", async (t) => {
   const agent = new WithSessionTags();
   const world = await MessagesWorld.make(t, { agent, tags: true });
   const ref = await world.opened();
   await world.send({
     ref,
     id: "tag-1",
-    text: "!tag `CVE-0000-00000`",
-    bare: "!tag CVE-0000-00000",
+    text: "/tag `CVE-0000-00000`",
+    bare: "/tag CVE-0000-00000",
   });
   assert.deepEqual(world.tagCalls, [[ref, "CVE-0000-00000"]]);
 });
 
-test("!tag in a chat that cannot tag a thread says so, and the help leaves both words out", async (t) => {
+test("/tag in a chat that cannot tag a thread says so, and the help leaves both words out", async (t) => {
   const agent = new WithSessionTags();
   const world = await MessagesWorld.make(t, { agent });
   const ref = await world.opened();
-  await world.says("!tag devops", ref.thread);
+  await world.says("/tag devops", ref.thread);
   assert.equal(world.shown(ref).at(-1), named(texts.TAG_UNAVAILABLE, PLAIN_NAMES));
-  await world.says("!untag", ref.thread);
+  await world.says("/untag", ref.thread);
   assert.equal(world.shown(ref).at(-1), named(texts.TAG_UNAVAILABLE, PLAIN_NAMES));
   assert.deepEqual(world.tagCalls, []);
   assert.deepEqual(agent.tagCalls, []);
-  await world.says("!help", ref.thread);
-  assert.ok(!world.shown(ref).at(-1)?.includes("`!tag"));
-  assert.ok(!world.shown(ref).at(-1)?.includes("`!untag"));
+  await world.says("/help", ref.thread);
+  assert.ok(!world.shown(ref).at(-1)?.includes("`/tag"));
+  assert.ok(!world.shown(ref).at(-1)?.includes("`/untag"));
 });
 
 test("a refusal of the chat reaches the owner in the chat's name, and the agent's session is left alone", async (t) => {
   const agent = new WithSessionTags();
   const world = await MessagesWorld.make(t, { agent, tags: true, tagFails: true, reactions: true });
   const ref = await world.opened();
-  const word = await world.says("!tag devops", ref.thread);
+  const word = await world.says("/tag devops", ref.thread);
   assert.equal(
     world.shown(ref).at(-1),
     fill(named(texts.TAG_FAILED, PLAIN_NAMES), { error: "message_not_found" }),
@@ -754,7 +754,7 @@ test("a failure of the agent's tag leaves the chat's tag, tells the owner and st
   const agent = new WithSessionTags(true);
   const world = await MessagesWorld.make(t, { agent, tags: true, reactions: true });
   const ref = await world.opened();
-  const word = await world.says("!tag devops", ref.thread);
+  const word = await world.says("/tag devops", ref.thread);
   assert.deepEqual(world.tagCalls, [[ref, "devops"]]);
   assert.equal(world.shown(ref).at(-1), named(texts.TAG_AGENT_FAILED, PLAIN_NAMES));
   assert.ok(world.chat.strayCalls().includes(`acknowledge ${word.id}`));
@@ -766,7 +766,7 @@ test("a thread whose session has no id yet is tagged in the chat alone", async (
   const ref = world.chat.openThread(world.channel);
   world.sessions.open(ref.channel, ref.thread);
   assert.equal(SESSION_ID(world, ref), null);
-  await world.says("!tag devops", ref.thread);
+  await world.says("/tag devops", ref.thread);
   assert.deepEqual(world.tagCalls, [[ref, "devops"]]);
   assert.deepEqual(agent.tagCalls, []);
   assert.ok(!world.shown(ref).includes(named(texts.TAG_AGENT_FAILED, PLAIN_NAMES)));
@@ -775,32 +775,32 @@ test("a thread whose session has no id yet is tagged in the chat alone", async (
 test("an agent that declares no session tags is left out: the chat is tagged alone", async (t) => {
   const world = await MessagesWorld.make(t, { tags: true });
   const ref = await world.opened();
-  await world.says("!tag devops", ref.thread);
+  await world.says("/tag devops", ref.thread);
   assert.deepEqual(world.tagCalls, [[ref, "devops"]]);
   assert.equal("tagSession" in world.agent, false);
 });
 
-// --- !pin and !unpin
+// --- /pin and /unpin
 
-test("!pin and !unpin belong to a session, in the channel and in a thread that holds none", async (t) => {
+test("/pin and /unpin belong to a session, in the channel and in a thread that holds none", async (t) => {
   const world = await MessagesWorld.make(t, { pins: true });
-  await world.says("!pin");
-  await world.says("!unpin");
+  await world.says("/pin");
+  await world.says("/unpin");
   const answers = () => world.inChannel().filter((line) => line === texts.PIN_TOP_LEVEL);
   assert.equal(answers().length, 2);
   const outside = world.chat.openThread(world.channel);
-  await world.says("!pin", outside.thread);
-  await world.says("!unpin", outside.thread);
+  await world.says("/pin", outside.thread);
+  await world.says("/unpin", outside.thread);
   assert.equal(answers().length, 4, "a thread that holds no session is answered in the channel");
   assert.deepEqual(world.pinCalls, []);
 });
 
-test("!pin and !unpin change the pin alone: no tag, at the chat or the agent, and they mark the word", async (t) => {
+test("/pin and /unpin change the pin alone: no tag, at the chat or the agent, and they mark the word", async (t) => {
   const agent = new WithSessionTags();
   const world = await MessagesWorld.make(t, { agent, tags: true, pins: true, reactions: true });
   const ref = await world.opened();
-  const pin = await world.says("!pin", ref.thread);
-  const unpin = await world.says("!unpin", ref.thread);
+  const pin = await world.says("/pin", ref.thread);
+  const unpin = await world.says("/unpin", ref.thread);
   assert.deepEqual(world.pinCalls, [
     [ref, true],
     [ref, false],
@@ -811,32 +811,32 @@ test("!pin and !unpin change the pin alone: no tag, at the chat or the agent, an
   assert.ok(world.chat.strayCalls().includes(`acknowledge ${unpin.id}`));
 });
 
-test("!tag and !untag leave the pin alone", async (t) => {
+test("/tag and /untag leave the pin alone", async (t) => {
   const world = await MessagesWorld.make(t, { tags: true, pins: true });
   const ref = await world.opened();
-  await world.says("!tag devops", ref.thread);
-  await world.says("!untag", ref.thread);
+  await world.says("/tag devops", ref.thread);
+  await world.says("/untag", ref.thread);
   assert.deepEqual(world.pinCalls, []);
 });
 
-test("!pin in a chat that cannot pin says so, the help leaves both words out, and tags stay", async (t) => {
+test("/pin in a chat that cannot pin says so, the help leaves both words out, and tags stay", async (t) => {
   const world = await MessagesWorld.make(t, { tags: true });
   const ref = await world.opened();
-  await world.says("!pin", ref.thread);
+  await world.says("/pin", ref.thread);
   assert.equal(world.shown(ref).at(-1), named(texts.PIN_UNAVAILABLE, PLAIN_NAMES));
-  await world.says("!unpin", ref.thread);
+  await world.says("/unpin", ref.thread);
   assert.equal(world.shown(ref).at(-1), named(texts.PIN_UNAVAILABLE, PLAIN_NAMES));
-  await world.says("!help", ref.thread);
+  await world.says("/help", ref.thread);
   const help = world.shown(ref).at(-1);
-  assert.ok(!help?.includes("`!pin"));
-  assert.ok(!help?.includes("`!unpin"));
-  assert.ok(help?.includes("`!tag"));
+  assert.ok(!help?.includes("`/pin"));
+  assert.ok(!help?.includes("`/unpin"));
+  assert.ok(help?.includes("`/tag"));
 });
 
 test("a pin the chat refuses reaches the owner in the chat's name, and the word is not marked", async (t) => {
   const world = await MessagesWorld.make(t, { pins: true, pinFails: true, reactions: true });
   const ref = await world.opened();
-  const word = await world.says("!pin", ref.thread);
+  const word = await world.says("/pin", ref.thread);
   assert.equal(
     world.shown(ref).at(-1),
     fill(named(texts.PIN_FAILED, PLAIN_NAMES), { error: "message_not_found" }),
@@ -853,124 +853,124 @@ test("a word that fails in the channel is answered in the channel, and in a thre
     throw new TypeError("boom");
   });
   const failed = fill(named(texts.ERROR_REPLY, PLAIN_NAMES), { error: "TypeError" });
-  await world.says("!status");
+  await world.says("/status");
   assert.equal(world.inChannel().at(-1), failed);
   const session = world.sessions.get(ref.channel, ref.thread);
   assert.ok(session !== null);
   t.mock.method(session, "status", async () => {
     throw new TypeError("boom");
   });
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   assert.equal(world.shown(ref).at(-1), failed);
 });
 
-// --- !clean-channel
+// --- /clean-channel
 
-test("!clean-channel in a bound channel hands the confirmation to the chat", async (t) => {
+test("/clean-channel in a bound channel hands the confirmation to the chat", async (t) => {
   const world = await MessagesWorld.make(t, { cleans: true });
-  await world.says("!clean-channel");
+  await world.says("/clean-channel");
   assert.deepEqual(world.cleanCalls, [world.channel]);
 });
 
-test("!clean-channel in an unbound channel says so, and nothing is asked", async (t) => {
+test("/clean-channel in an unbound channel says so, and nothing is asked", async (t) => {
   const world = await MessagesWorld.make(t, { cleans: true });
   const free = world.chat.openChannel("free");
-  await world.chat.as(OWNER).says(free, "!clean-channel");
+  await world.chat.as(OWNER).says(free, "/clean-channel");
   assert.ok(world.chat.texts(free).includes(texts.CLEAN_UNBOUND));
   assert.deepEqual(world.cleanCalls, []);
 });
 
-test("!clean-channel in a session's thread is refused there, and nothing is asked", async (t) => {
+test("/clean-channel in a session's thread is refused there, and nothing is asked", async (t) => {
   const world = await MessagesWorld.make(t, { cleans: true });
   const ref = await world.opened();
-  await world.says("!clean-channel", ref.thread);
+  await world.says("/clean-channel", ref.thread);
   assert.equal(world.shown(ref).at(-1), fill(texts.WORD_IN_THREAD, { word: "clean-channel" }));
   assert.deepEqual(world.cleanCalls, []);
 });
 
-test("!clean-channel in a thread with no session is refused too", async (t) => {
+test("/clean-channel in a thread with no session is refused too", async (t) => {
   const world = await MessagesWorld.make(t, { cleans: true });
   const outside = world.chat.openThread(world.channel);
-  await world.says("!clean-channel", outside.thread);
+  await world.says("/clean-channel", outside.thread);
   assert.deepEqual(world.cleanCalls, []);
 });
 
-test("!clean-channel in a chat that cannot clean says so", async (t) => {
+test("/clean-channel in a chat that cannot clean says so", async (t) => {
   const world = await MessagesWorld.make(t);
-  await world.says("!clean-channel");
+  await world.says("/clean-channel");
   assert.ok(world.inChannel().includes(named(texts.CLEAN_UNAVAILABLE, PLAIN_NAMES)));
   assert.deepEqual(world.cleanCalls, []);
 });
 
-// --- !delete-thread
+// --- /delete-thread
 
-test("!delete-thread belongs to a session: at the top level of the channel it is refused", async (t) => {
+test("/delete-thread belongs to a session: at the top level of the channel it is refused", async (t) => {
   const world = await MessagesWorld.make(t, { deletes: true });
-  await world.says("!delete-thread");
+  await world.says("/delete-thread");
   assert.equal(world.inChannel().filter((l) => l === texts.DELETE_THREAD_TOP_LEVEL).length, 1);
   assert.deepEqual(world.deleteCalls, []);
 });
 
-test("!delete-thread in a thread state.json holds no session for goes to the chat's delete", async (t) => {
+test("/delete-thread in a thread state.json holds no session for goes to the chat's delete", async (t) => {
   const world = await MessagesWorld.make(t, { deletes: true });
   const outside = world.chat.openThread(world.channel);
-  await world.says("!delete-thread", outside.thread);
+  await world.says("/delete-thread", outside.thread);
   assert.deepEqual(world.deleteCalls, [outside]);
 });
 
-test("!delete-thread in a thread held by a delete under way says it is busy", async (t) => {
+test("/delete-thread in a thread held by a delete under way says it is busy", async (t) => {
   const world = await MessagesWorld.make(t, { deletes: true });
   const outside = world.chat.openThread(world.channel);
   assert.equal(world.sessions.hold(world.channel, outside.thread), true);
-  await world.says("!delete-thread", outside.thread);
+  await world.says("/delete-thread", outside.thread);
   assert.equal(world.shown(outside).at(-1), texts.DELETE_THREAD_BUSY);
   assert.deepEqual(world.deleteCalls, []);
 });
 
-test("!delete-thread in an unbound channel's thread does nothing but say so", async (t) => {
+test("/delete-thread in an unbound channel's thread does nothing but say so", async (t) => {
   const world = await MessagesWorld.make(t, { deletes: true });
   const outside = world.chat.openThread(world.channel);
   world.state.removeChannel(world.channel);
-  await world.says("!delete-thread", outside.thread);
+  await world.says("/delete-thread", outside.thread);
   assert.equal(world.shown(outside).at(-1), texts.DELETE_THREAD_UNBOUND);
   assert.deepEqual(world.deleteCalls, []);
 });
 
-test("!delete-thread in a thread of a chat that cannot delete says so, held or unbound too", async (t) => {
+test("/delete-thread in a thread of a chat that cannot delete says so, held or unbound too", async (t) => {
   const world = await MessagesWorld.make(t);
   const outside = world.chat.openThread(world.channel);
   world.sessions.hold(world.channel, outside.thread);
   world.state.removeChannel(world.channel);
-  await world.says("!delete-thread", outside.thread);
+  await world.says("/delete-thread", outside.thread);
   assert.equal(world.shown(outside).at(-1), named(texts.DELETE_THREAD_UNAVAILABLE, PLAIN_NAMES));
 });
 
-test("!delete-thread in an idle session's thread hands the confirmation to the chat", async (t) => {
+test("/delete-thread in an idle session's thread hands the confirmation to the chat", async (t) => {
   const world = await MessagesWorld.make(t, { deletes: true });
   const ref = await world.opened();
-  await world.says("!delete-thread", ref.thread);
+  await world.says("/delete-thread", ref.thread);
   assert.deepEqual(world.deleteCalls, [ref]);
   // The chat asks the owner; the core adds no line of its own.
-  assert.equal(world.shown(ref).at(-1), "!delete-thread");
+  assert.equal(world.shown(ref).at(-1), "/delete-thread");
 });
 
-test("!delete-thread while the session works is refused, and nothing is asked", async (t) => {
+test("/delete-thread while the session works is refused, and nothing is asked", async (t) => {
   const world = await MessagesWorld.make(t, { deletes: true });
   const ref = await world.opened();
   (world.agent as PlainAgent).next(hold());
   await world.says("a long job", ref.thread);
   await world.settle();
-  await world.says("!delete-thread", ref.thread);
+  await world.says("/delete-thread", ref.thread);
   assert.equal(world.shown(ref).at(-1), texts.DELETE_THREAD_BUSY);
   assert.deepEqual(world.deleteCalls, []);
 });
 
-test("!delete-thread in a chat that cannot delete a thread says so, and the help leaves it out", async (t) => {
+test("/delete-thread in a chat that cannot delete a thread says so, and the help leaves it out", async (t) => {
   const world = await MessagesWorld.make(t);
   const ref = await world.opened();
-  await world.says("!delete-thread", ref.thread);
+  await world.says("/delete-thread", ref.thread);
   assert.equal(world.shown(ref).at(-1), named(texts.DELETE_THREAD_UNAVAILABLE, PLAIN_NAMES));
   assert.deepEqual(world.deleteCalls, []);
-  await world.says("!help", ref.thread);
-  assert.ok(!world.shown(ref).at(-1)?.includes("`!delete-thread"));
+  await world.says("/help", ref.thread);
+  assert.ok(!world.shown(ref).at(-1)?.includes("`/delete-thread"));
 });

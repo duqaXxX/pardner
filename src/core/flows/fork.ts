@@ -1,5 +1,5 @@
 /**
- * `!fork`: a copy of a thread's session in a new thread of the same channel, as the terminal's
+ * `/fork`: a copy of a thread's session in a new thread of the same channel, as the terminal's
  * `/fork` copies a session into a new one while the original goes on.
  */
 import type { ThreadRef } from "../../chat/seam.ts";
@@ -155,7 +155,7 @@ export function forkFlow(
         try {
           opened = await channelChat.open.call(channelChat, root, { lead, words: line });
         } catch (error) {
-          // The copy stays with the agent, which lists it (`!resume` finds it).
+          // The copy stays with the agent, which lists it (`/resume` finds it).
           logger.warning(
             `a fork's thread could not be opened, its copy ${copy} kept: ${errorName(error)}`,
           );

@@ -1,7 +1,7 @@
 /**
  * A session open in a terminal on the host (`flows/terminal.ts`): a terminal's running turn is
  * waited out, a terminal left open is asked about once, what it wrote is shown before the reply,
- * and `!terminal` gives the line to run there.
+ * and `/terminal` gives the line to run there.
  */
 import assert from "node:assert/strict";
 import { type TestContext, test } from "node:test";
@@ -200,7 +200,7 @@ test("a cancelled wait for a terminal's turn sends nothing", async (t) => {
 test("the turns a terminal wrote come first, one message each", async (t) => {
   const { world, agent, ref, session } = await makeWorld(t);
   session.saved = { id: "m1", at: 1 };
-  session.movedMidTurn = true; // `!terminal` cut a turn here
+  session.movedMidTurn = true; // `/terminal` cut a turn here
   agent.foreign.set(SESSION, {
     changed: true,
     turns: [
@@ -292,7 +292,7 @@ test("a turn the agent opens during the question is waited out before the messag
   assert.equal(seen.stops, 1);
 });
 
-test("!terminal on a session that has not started says so", async (t) => {
+test("/terminal on a session that has not started says so", async (t) => {
   const { world, ref } = await makeWorld(t);
   const fresh = world.thread();
   await world.flows.terminal.move(fresh.ref, fresh.session);
@@ -300,7 +300,7 @@ test("!terminal on a session that has not started says so", async (t) => {
   assert.deepEqual(after(world, ref), []);
 });
 
-test("!terminal on an idle session gives the line that continues it", async (t) => {
+test("/terminal on an idle session gives the line that continues it", async (t) => {
   const { world, agent, ref, session } = await makeWorld(t);
   await world.flows.terminal.move(ref, session);
   assert.ok(agent.words.terminal !== null);
@@ -326,7 +326,7 @@ test("an agent with no terminal offers no move, and a holder stops no message", 
   assert.deepEqual(world.open(ref), []);
   await world.flows.terminal.move(ref, session);
   assert.deepEqual(after(world, ref), [
-    "Plain has no terminal to move a session to, so `!terminal` does nothing.",
+    "Plain has no terminal to move a session to, so `/terminal` does nothing.",
   ]);
 });
 
@@ -357,7 +357,7 @@ test("a list that cannot be read keeps a wait going", async (t) => {
 test("a turn the terminal went on with and the owner interrupted there says so", async (t) => {
   const { world, agent, ref, session } = await makeWorld(t);
   session.saved = { id: "m1", at: 1 };
-  session.movedMidTurn = true; // `!terminal` cut a turn here
+  session.movedMidTurn = true; // `/terminal` cut a turn here
   agent.foreign.set(SESSION, {
     changed: true,
     turns: [

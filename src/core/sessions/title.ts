@@ -1,7 +1,7 @@
 /**
  * The session's title on its thread's root: at the end of each turn the agent is asked for the
  * title it shows for the session (generated, or set by the owner), and the chat makes the root
- * show it. The root's own words are kept in `state.json` first (`rootPrompt`), for `!status`. Both
+ * show it. The root's own words are kept in `state.json` first (`rootPrompt`), for `/status`. Both
  * sides are optional capabilities; without either nothing happens.
  */
 import { ChatError } from "../../chat/seam.ts";

@@ -135,7 +135,7 @@ export function claudeAgent(options: ClaudeBackendOptions = {}): AgentEntry {
         // The SDK's `listSessions`, which the back end calls in the daemon's own process, has no
         // option for the folder (`ListSessionsOptions`, sdk.d.ts 0.3.301) and reads
         // `process.env.CLAUDE_CONFIG_DIR` (bundled sdk.mjs, not documented): without this, it
-        // would look in the default login's folder, and `!resume` and the session
+        // would look in the default login's folder, and `/resume` and the session
         // index would come up empty. (The cleanup reads the back end's own projects folder and
         // is not affected.) It is written once, at build. The usage probe's bare session passes
         // no `env`, so the SDK gives it this environment, and the limits it reads are those of

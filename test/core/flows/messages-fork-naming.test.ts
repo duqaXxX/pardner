@@ -1,5 +1,5 @@
 /**
- * A bare `!fork` copy (#141): it starts no process and shows no status until its first turn, and
+ * A bare `/fork` copy (#141): it starts no process and shows no status until its first turn, and
  * the first prompt with text names it through the live session, once.
  */
 import assert from "node:assert/strict";
@@ -15,7 +15,7 @@ async function bareCopy(t: Parameters<typeof MessagesWorld.make>[0], agent = new
   // A chat with reactions, so that the root's status is drawn and kept.
   const world = await MessagesWorld.make(t, { agent, reactions: true });
   const origin = await world.opened("the first task");
-  await world.says("!fork", origin.thread);
+  await world.says("/fork", origin.thread);
   await world.settle();
   const other = world.state.threads().find(([, thread]) => thread !== origin.thread);
   assert.ok(other, "a second thread holds the copy");
@@ -52,7 +52,7 @@ test("a fork with a prompt is born ran and named", async (t) => {
   const world = await MessagesWorld.make(t, { agent });
   const origin = await world.opened("the first task");
   agent.next(say("On it."));
-  await world.says("!fork look into it", origin.thread);
+  await world.says("/fork look into it", origin.thread);
   await world.settle();
   const other = world.state.threads().find(([, thread]) => thread !== origin.thread);
   assert.ok(other);
@@ -64,7 +64,7 @@ test("a fork with a prompt is born ran and named", async (t) => {
 
 test("a word first connects the copy, then the first prompt renames it once", async (t) => {
   const { world, agent, ref } = await bareCopy(t);
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   await world.settle();
   assert.equal(agent.sessions.length, 2, "the word started the copy's process");
   assert.equal(shownStatus(world, ref), null, "no status for a copy that has not run");
@@ -100,7 +100,7 @@ test("the title is the plain text, not the chat's markup", async (t) => {
 test("a passthrough command first runs the copy but names nothing; the next prompt names it", async (t) => {
   const { world, agent, ref } = await bareCopy(t);
   agent.next(say("hi"));
-  await world.says("!echo hi", ref.thread);
+  await world.says("/echo hi", ref.thread);
   await world.settle();
   assert.deepEqual(renames(agent), []);
   const after = stored(world, ref);
@@ -141,7 +141,7 @@ test("the prompt that names the copy waits until every prompt sent before it is 
   // and the prompt may be sent while its turn has not begun.
   const agent = new PlainAgent({ promptDuringTurn: true });
   const { world, ref } = await bareCopy(t, agent);
-  await world.says("!status", ref.thread); // connects the copy
+  await world.says("/status", ref.thread); // connects the copy
   await world.settle();
   const copy = agent.sessions.at(-1);
   assert.ok(copy);
@@ -185,7 +185,7 @@ test("a hold cancelled before any turn leaves the root with no status", async (t
 
 test("a turn the agent opens in a copy that never ran ends with its status", async (t) => {
   const { world, agent, ref } = await bareCopy(t);
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   await world.settle();
   assert.equal(shownStatus(world, ref), null);
   const process = agent.sessions.at(-1);
@@ -209,7 +209,7 @@ test("a turn the agent opens in a copy that never ran ends with its status", asy
 
 test("a rename cut by a close keeps the copy waiting for its name, across a restart", async (t) => {
   const { world, agent, ref } = await bareCopy(t);
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   await world.settle();
   const process = agent.sessions.at(-1);
   assert.ok(process);
@@ -267,7 +267,7 @@ test("an original with no title is linked as the original thread", async (t) => 
   t.after(() => {
     proto.link = real;
   });
-  await world.says("!fork", origin.thread);
+  await world.says("/fork", origin.thread);
   await world.settle();
   const root = world.inChannel().find((line) => line.startsWith("Fork of "));
   assert.equal(root, `Fork of [${texts.FORK_ORIGINAL_LABEL}]`);
@@ -281,7 +281,7 @@ test("the rename waits for a turn the agent opened, and runs on an idle session"
     };
   }
   const { world, agent, ref } = await bareCopy(t, new During());
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   await world.settle();
   const process = agent.sessions.at(-1);
   const session = world.sessions.get(ref.channel, ref.thread);
@@ -320,9 +320,9 @@ test("the rename waits for a turn the agent opened, and runs on an idle session"
 test("an unknown word sent as a prompt still names the copy; a copy of another session does not wait", async (t) => {
   const { world, agent, ref } = await bareCopy(t);
   agent.next(say("Done."));
-  await world.says("!nosuchword and more", ref.thread);
+  await world.says("/nosuchword and more", ref.thread);
   await world.settle();
-  assert.deepEqual(renames(agent), ["!nosuchword and more"]);
+  assert.deepEqual(renames(agent), ["/nosuchword and more"]);
   world.state.setSession(ref.channel, ref.thread, "another-session");
   assert.equal(stored(world, ref).forkNamed, true);
   assert.equal(stored(world, ref).forkRan, true);
@@ -351,7 +351,7 @@ const agentTurnEnd = (sessionId: string | null) =>
 
 test("the rename waits for a report turn the core already expects", async (t) => {
   const { world, agent, ref } = await bareCopy(t, new Background());
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   await world.settle();
   const process = agent.sessions.at(-1);
   const session = world.sessions.get(ref.channel, ref.thread);
@@ -404,7 +404,7 @@ test("the rename waits for a report turn the core already expects", async (t) =>
 
 test("a stop during the wait for the agent's turn renames nothing", async (t) => {
   const { world, agent, ref } = await bareCopy(t, new Background());
-  await world.says("!status", ref.thread);
+  await world.says("/status", ref.thread);
   await world.settle();
   const process = agent.sessions.at(-1);
   assert.ok(process);
@@ -412,7 +412,7 @@ test("a stop during the wait for the agent's turn renames nothing", async (t) =>
   await world.settle();
   await world.says("fix the timeout", ref.thread);
   await world.settle();
-  const stopping = world.says("!stop", ref.thread);
+  const stopping = world.says("/stop", ref.thread);
   await world.settle();
   process.emit(agentTurnEnd(stored(world, ref).sessionId));
   await stopping;

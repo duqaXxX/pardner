@@ -1,6 +1,6 @@
 /**
  * The order of what the owner sends into one thread or one channel, as the core takes it: a
- * prompt still reading its files, a stop, a `!next` offer's Send and a typed message each take
+ * prompt still reading its files, a stop, a `/next` offer's Send and a typed message each take
  * their place in line when the provider hands them over, whatever each takes to finish. The
  * plain agent and the memory chat; a prompt that reads its files slowly stands in for a check
  * that takes longer for one message than for the one sent after it.
@@ -38,7 +38,7 @@ test(
     const done = new AsyncEvent();
     const sending = world.send({ ref, id: "m-2", text: "second", ...slowPrompt("second", done) });
     await world.settle();
-    await world.says("!stop", ref.thread); // handed over after the prompt, while it still reads
+    await world.says("/stop", ref.thread); // handed over after the prompt, while it still reads
     done.set();
     await sending;
     await world.settle();
@@ -62,7 +62,7 @@ test(
     const done = new AsyncEvent();
     const sending = world.send({ ref, id: "m-2", text: "second", ...slowPrompt("second", done) });
     await world.settle();
-    await world.says("!stop"); // the channel's own stop, handed over after the thread's prompt
+    await world.says("/stop"); // the channel's own stop, handed over after the thread's prompt
     done.set();
     await sending;
     await world.settle();
@@ -88,7 +88,7 @@ test(
       ...slowPrompt("a new prompt", done),
     });
     await world.settle();
-    await world.says("!stop");
+    await world.says("/stop");
     done.set();
     await sending;
     await world.settle();
@@ -104,7 +104,7 @@ async function offered(t: Parameters<typeof MessagesWorld.make>[0]) {
   const world = await MessagesWorld.make(t, { agent, lists: true });
   agent.next(say("done"), suggest(GUESS));
   const ref = await world.opened("add the feature");
-  await world.says("!next", ref.thread);
+  await world.says("/next", ref.thread);
   await world.settle();
   const offer = world.chat.threadLists().findLast((list) => list.ref.thread === ref.thread);
   assert.ok(offer?.list.type === "suggestion", "an offer is open in the thread");

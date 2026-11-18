@@ -1,5 +1,5 @@
 /**
- * The time limit `!open` puts on a wait, on the injected clock.
+ * The time limit `/open` puts on a wait, on the injected clock.
  */
 import type { Clock } from "../../clock.ts";
 

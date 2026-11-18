@@ -1,5 +1,5 @@
 /**
- * `!bind` alone: the folders under the allowed root where a session can start.
+ * `/bind` alone: the folders under the allowed root where a session can start.
  *
  * Claude Code has no folder picker: the terminal starts in the folder it is launched from. The list
  * holds the allowed root and the folders two levels below it that Claude Code trusts, since a

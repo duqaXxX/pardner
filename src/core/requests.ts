@@ -202,7 +202,7 @@ export class Approvals {
 
   /**
    * Record the message that shows a request, so it can be removed once decided; false when the
-   * request was decided before its message was known (`!stop` while posting).
+   * request was decided before its message was known (`/stop` while posting).
    */
   posted(approvalId: string, messageId: string): boolean {
     const entry = this.entries.get(approvalId);

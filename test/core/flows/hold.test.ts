@@ -141,7 +141,7 @@ test("bypass typed after start while held switches the session", LIMIT, async (t
   // Start was applied, then the hold asks: the setup's box is gone, so the word works as in a
   // session that ran, and holds after Continue.
   const { ref, sending } = await world.held();
-  const word = await world.says("!bypass on", ref.thread);
+  const word = await world.says("/bypass on", ref.thread);
   assert.ok(world.shown(ref).includes(texts.BYPASS_ON_THREAD));
   assert.deepEqual(
     world.chat.calls("acknowledge").map((call) => call.args[0]),
@@ -334,7 +334,7 @@ test(
     const agent = new WithFolderTrust();
     const world = await HoldWorld.make(t, { agent });
     await world.busy();
-    const { ref, sending } = await world.held("!echo hello"); // a command: held, then `ensureConnected`
+    const { ref, sending } = await world.held("/echo hello"); // a command: held, then `ensureConnected`
     // The setup connected it already; a client the agent lost since makes Continue connect again.
     await internals(world.session(ref)).dropClient();
     agent.folderTrusted = async () => false;
@@ -353,7 +353,7 @@ test("a generic connect error after continue reacts error not a raised hand", LI
   // agent raising something `ensureConnected` does not special-case, most likely) must not leave
   // the hold's raised hand standing for ever either.
   await world.busy();
-  const { ref, sending } = await world.held("!echo hello");
+  const { ref, sending } = await world.held("/echo hello");
   await internals(world.session(ref)).dropClient(); // a lost client makes Continue reconnect
   agent.failNextStart(new Error("logged out"));
   await world.answerHold(ref, true);
@@ -418,7 +418,7 @@ test("a stop answer that cannot be posted is not the word's failure", LIMIT, asy
   const world = await HoldWorld.make(t);
   const ref = await world.opened("hi");
   world.hooks.tellFails = true;
-  await world.says("!stop", ref.thread);
+  await world.says("/stop", ref.thread);
   // One attempt at the answer, and no error line for a stop that did what it was asked.
   assert.deepEqual(world.hooks.attempts, [texts.NOTHING_TO_STOP_THREAD]);
 });
@@ -427,12 +427,12 @@ test("stop in the held thread cancels it", LIMIT, async (t) => {
   const world = await HoldWorld.make(t);
   await world.busy();
   const { ref, sending } = await world.held();
-  await world.says("!stop", ref.thread);
+  await world.says("/stop", ref.thread);
   await world.settle();
   assert.ok(world.shown(ref).includes(texts.NOT_SENT)); // told before the message is waited for
   await sending;
   await unsent(world);
-  // `!stop` cancelled the hold: `Not sent.` alone, from the waiter, since nothing the agent
+  // `/stop` cancelled the hold: `Not sent.` alone, from the waiter, since nothing the agent
   // itself was doing stopped (no separate "Nothing is running..." on top of it).
   assert.equal(world.shown(ref).filter((line) => line === texts.NOT_SENT).length, 1);
   assert.ok(!world.shown(ref).includes(texts.NOTHING_TO_STOP_THREAD));
@@ -443,7 +443,7 @@ test("a top level stop of the channel cancels the hold", LIMIT, async (t) => {
   const world = await HoldWorld.make(t);
   await world.busy();
   const { ref, sending } = await world.held();
-  await world.says("!stop");
+  await world.says("/stop");
   await world.settle();
   assert.ok(world.shown(ref).includes(texts.NOT_SENT)); // told before the message is waited for
   await sending;
@@ -453,12 +453,12 @@ test("a top level stop of the channel cancels the hold", LIMIT, async (t) => {
 
 test("a top level stop with only a cancelled hold says nothing else", LIMIT, async (t) => {
   const world = await HoldWorld.make(t);
-  // The busy session lives in ANOTHER channel here, so this channel's own `!stop` cancels the
+  // The busy session lives in ANOTHER channel here, so this channel's own `/stop` cancels the
   // hold and stops nothing else: `stopChannel`'s own `null` must not read as "nothing stopped"
   // and add a second, contradicting notice on top of `Not sent.`.
   const busy = await world.busy("busy elsewhere", world.sameFolder);
   const { ref, sending } = await world.held();
-  await world.says("!stop");
+  await world.says("/stop");
   await world.settle();
   assert.ok(world.shown(ref).includes(texts.NOT_SENT)); // told before the message is waited for
   await sending;
@@ -582,7 +582,7 @@ test("a message queued behind a drain cancelled hold is also refused", LIMIT, as
   assert.ok((world.shown(ref).at(-1) as string).startsWith(texts.RESTARTING));
 });
 
-// No handler is cancelled in this daemon: the wait ends only through `Holds` (a click, `!stop`, a
+// No handler is cancelled in this daemon: the wait ends only through `Holds` (a click, `/stop`, a
 // drain). So the two outcomes are read after a wait that ends with no answer: the marker leaves
 // `waitingForOwner`, and the question's id is gone from `holds`.
 test("a cancelled wait does not leak the hold", LIMIT, async (t) => {
@@ -603,7 +603,7 @@ test("a hold decided before its message id is known does not flicker", LIMIT, as
   const world = await HoldWorld.make(t);
   await world.busy();
   // The question is posted, but not yet recorded in `holds`: the stop (`holds.cancel`, exactly
-  // what `!stop` does) lands inside the post, once the chat has the message and before the
+  // what `/stop` does) lands inside the post, once the chat has the message and before the
   // daemon has its id.
   world.hooks.afterAsk = (ref) => {
     if (world.questions.at(-1) === "hold") world.holds.cancel(ref.channel, ref.thread);
@@ -706,7 +706,7 @@ test(
     await world.start(ref);
     await world.asked("hold", ref); // the question is in the chat, and the core does not know it yet
     // The owner stops the thread while the post has not yet answered.
-    await world.says("!stop", ref.thread);
+    await world.says("/stop", ref.thread);
     gate.set();
     await world.settle();
     assert.equal(world.open("hold").length, 0); // gone before the message is waited for

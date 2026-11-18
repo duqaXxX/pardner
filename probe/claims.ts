@@ -110,14 +110,14 @@ export const CLAIMS: readonly Claim[] = [
     "gesture",
     "a session starts and its init message names the CLI version",
     "src/agent/claude/translate.ts#Translator.translate",
-    "send any message in a bound channel; `!status` shows the Claude Code version",
+    "send any message in a bound channel; `/status` shows the Claude Code version",
   ),
   claim(
     "P2",
     "gesture",
-    "`!status` reads the initialization result and the context usage",
+    "`/status` reads the initialization result and the context usage",
     "src/agent/claude/session.ts#ClaudeSession.info",
-    "send `!status`; it lists the model and a `Context:` line",
+    "send `/status`; it lists the model and a `Context:` line",
   ),
   claim(
     "P3",
@@ -143,9 +143,9 @@ export const CLAIMS: readonly Claim[] = [
   claim(
     "P6",
     "gesture",
-    "`!resume` knows the session: the folder's listing holds the session its thread has open",
+    "`/resume` knows the session: the folder's listing holds the session its thread has open",
     "src/agent/claude/listing.ts#directorySessions",
-    "send `!resume` in a channel; the list counts the session open in its own thread",
+    "send `/resume` in a channel; the list counts the session open in its own thread",
   ),
   claim(
     "P7",
@@ -157,16 +157,16 @@ export const CLAIMS: readonly Claim[] = [
   claim(
     "P8",
     "gesture",
-    "`!stop` interrupts a running turn and its reply ends",
+    "`/stop` interrupts a running turn and its reply ends",
     "src/agent/claude/session.ts#ClaudeSession.interrupt",
-    "ask for a long answer and send `!stop` while it writes",
+    "ask for a long answer and send `/stop` while it writes",
   ),
   claim(
     "P9",
     "model",
-    "with `!bypass on`, a Bash call runs without asking",
+    "with `/bypass on`, a Bash call runs without asking",
     "src/agent/claude/session.ts#ClaudeSession.setPermissionMode",
-    "send `!bypass on`, ask Claude to run a command: no Approve button; then `!bypass off`",
+    "send `/bypass on`, ask Claude to run a command: no Approve button; then `/bypass off`",
   ),
   claim(
     "P10",
@@ -185,9 +185,9 @@ export const CLAIMS: readonly Claim[] = [
   claim(
     "P12",
     "model",
-    "`!stop` ends a background command",
+    "`/stop` ends a background command",
     "src/agent/claude/session.ts#ClaudeSession.stopTask",
-    "ask Claude to run `tail -f` on a file in the background, then send `!stop`",
+    "ask Claude to run `tail -f` on a file in the background, then send `/stop`",
   ),
   claim(
     "P13",
@@ -210,15 +210,15 @@ export const CLAIMS: readonly Claim[] = [
     "gesture",
     "a resumed session keeps the model set with `/model`",
     "src/agent/claude/backend.ts#ClaudeBackend.start",
-    "in a thread, send `!model sonnet`, let the session idle-close or restart the daemon, " +
-      "send a message; `!status` shows the model",
+    "in a thread, send `/model sonnet`, let the session idle-close or restart the daemon, " +
+      "send a message; `/status` shows the model",
   ),
   claim(
     "P16",
     "gesture",
     "a resumed session loses the effort set with `setEffort`, and `Options.effort` restores it",
     "src/agent/claude/session.ts#ClaudeSession.setEffort",
-    "in a thread, send `!effort low`, restart the daemon, send a message; the footer shows `low`",
+    "in a thread, send `/effort low`, restart the daemon, send a message; the footer shows `low`",
   ),
   claim(
     "P17",
@@ -235,7 +235,7 @@ export const CLAIMS: readonly Claim[] = [
     "a resumed session keeps the model the setup set with `/model`",
     "src/agent/claude/session.ts#ClaudeSession.setModel",
     "at the top level, pick a model in the setup and press Start, restart the daemon, reply " +
-      "in the thread; `!status` shows the model",
+      "in the thread; `/status` shows the model",
   ),
   claim(
     "P19",
@@ -252,7 +252,7 @@ export const CLAIMS: readonly Claim[] = [
     "the reply to `/goal` opens with the command's `Goal set:` line: an assistant message " +
       "whose `message_id` no `message_start` event announced",
     "src/agent/claude/translate.ts#Translator.translate",
-    "send `!goal reply with the single word tick`; the reply opens with `Goal set:` and the " +
+    "send `/goal reply with the single word tick`; the reply opens with `Goal set:` and the " +
       "condition, then Claude's text, written once",
   ),
   claim(
@@ -261,7 +261,7 @@ export const CLAIMS: readonly Claim[] = [
     "the reply to `/compact` is the compaction's line: its `compact_boundary` comes before " +
       "every frame of its turn that starts one, and a result follows it",
     "src/agent/claude/translate.ts#Translator.translate",
-    "send `!compact` in a thread with a few turns; the reply is `Compacted the " +
+    "send `/compact` in a thread with a few turns; the reply is `Compacted the " +
       "conversation:` and the tokens before and after",
   ),
   claim(
@@ -270,7 +270,7 @@ export const CLAIMS: readonly Claim[] = [
     "`/compact` opens with a `status` system message that says `compacting`: the thread's " +
       "status line reads `Compacting conversation…` while it runs",
     "src/agent/claude/translate.ts#Translator.translate",
-    "send `!compact` in a thread with a few turns; the line under the thread reads " +
+    "send `/compact` in a thread with a few turns; the line under the thread reads " +
       "`Compacting conversation…` until the reply appears",
   ),
   claim(
@@ -278,8 +278,8 @@ export const CLAIMS: readonly Claim[] = [
     "limit",
     "each command `docs/limits.md` lists as not offered to a session is answered `isn't " +
       "available in this environment`",
-    "src/core/commands.ts#parseBang",
-    "send `!branch` in a thread; the reply is `/branch isn't available in this " +
+    "src/core/commands.ts#parseCommand",
+    "send `/branch` in a thread; the reply is `/branch isn't available in this " +
       "environment.` A command that answers anything else is no longer a limit: take its " +
       "row out of `docs/limits.md` and say so in the issue it names",
   ),
@@ -312,8 +312,8 @@ export const CLAIMS: readonly Claim[] = [
       "says the level a command set, so the back end can tell the core; the PostModelSwitch hook " +
       "of `/model` gives `to_model` before that result",
     "src/agent/claude/translate.ts#effortChanged",
-    "in a thread, send `!effort low`; the footer shows `low`, then `!effort auto`; it shows `auto`; " +
-      "send `!model opus`: the footer shows `Opus 5.5` at once, not the model before it",
+    "in a thread, send `/effort low`; the footer shows `low`, then `/effort auto`; it shows `auto`; " +
+      "send `/model opus`: the footer shows `Opus 5.5` at once, not the model before it",
   ),
   claim(
     "P27",
@@ -343,7 +343,7 @@ export const CLAIMS: readonly Claim[] = [
       "lists a transcript written under `<folder>/projects/<project key>/<id>.jsonl`",
     "src/agent/claude/module.ts#claudeAgent",
     "this scene needs no login: it writes a transcript of its own. If it fails, an instance with " +
-      "`CLAUDE_CONFIG_DIR` in its `.env` lists no session in `!resume` and in the chat's " +
+      "`CLAUDE_CONFIG_DIR` in its `.env` lists no session in `/resume` and in the chat's " +
       "session index: read `docs/sdk-surface.md` for the row that names the variable, and look for an " +
       "option of `ListSessionsOptions` that names the folder, which would replace the write the " +
       "module makes into `process.env`",
@@ -369,8 +369,8 @@ export const CLAIMS: readonly Claim[] = [
     "the SDK's `tagSession(id, tag, { dir })` sets, changes and clears the tag of a session: " +
       "`getSessionInfo` reads back each tag, and `undefined` once it is cleared",
     "src/agent/claude/backend.ts#ClaudeBackend.tagSession",
-    "this scene needs no login: it writes a transcript of its own. If it fails, `!tag` and " +
-      "`!untag` leave the agent's own tag as it was: the chat shows the tag and the owner is " +
+    "this scene needs no login: it writes a transcript of its own. If it fails, `/tag` and " +
+      "`/untag` leave the agent's own tag as it was: the chat shows the tag and the owner is " +
       "told the agent's did not change. Read `docs/sdk-surface.md` for the row that names " +
       "`tagSession`",
   ),
@@ -383,7 +383,7 @@ export const CLAIMS: readonly Claim[] = [
     "src/agent/claude/backend.ts#ClaudeBackend.sessionTitle",
     "the scene runs up to three Haiku turns and reads the title through the back end. Nothing is " +
       "proved when Claude Code wrote none in three turns (UNPROVEN). If it fails, the thread's " +
-      "first message is never replaced by a title and `!status` has no `Title:` line: read " +
+      "first message is never replaced by a title and `/status` has no `Title:` line: read " +
       "`docs/sdk-surface.md` for the row that names `customTitle`, and look for the `ai-title` " +
       "entry in a transcript",
   ),
@@ -393,8 +393,8 @@ export const CLAIMS: readonly Claim[] = [
     "a `/goal` reaches the session's transcript as `goal_status` entries: the goal set, then achieved " +
       "with whole `iterations`, `durationMs` and `tokens`, both before the turn's result",
     "src/agent/claude/goals.ts#goalChange",
-    "send `!goal reply with the single word tick`; the reply ends with `✔ Goal achieved (…)` " +
-      "before its footer. If it fails, the reply shows no goal line and `!stop` never says a " +
+    "send `/goal reply with the single word tick`; the reply ends with `✔ Goal achieved (…)` " +
+      "before its footer. If it fails, the reply shows no goal line and `/stop` never says a " +
       "goal is still active: read the `transcript.ts` entry of `docs/sdk-surface.md`, " +
       "and look for the `goal_status` attachments in a transcript",
   ),
@@ -435,7 +435,7 @@ export const CLAIMS: readonly Claim[] = [
       "of the initialization result, where the file is the user settings of `CLAUDE_CONFIG_DIR`",
     "src/agent/claude/info.ts#agentInfo",
     "set a default mode in the settings of the Claude Code login, start a thread with bypass " +
-      "off and send `!status`; its `Mode:` line names that mode",
+      "off and send `/status`; its `Mode:` line names that mode",
   ),
   claim(
     "P39",
@@ -490,10 +490,10 @@ export const CLAIMS: readonly Claim[] = [
       "was made from a session that still runs: its transcript holds a `<fork-source>` note",
     "src/agent/claude/session.ts#forkSource",
     "the variable is in Claude Code's own source, on no page. In a thread, ask for `sleep 90` in " +
-      "the background, then `!fork tell me in one line whether you have a background task`: the " +
+      "the background, then `/fork tell me in one line whether you have a background task`: the " +
       "copy says it has one still running and names the session it was forked from, never that " +
       "the command stopped. If it fails, look for `CLAUDE_CODE_RESUME_SOURCE_ALIVE` and " +
-      "`fork-source` in the bundled CLI's strings, and read `docs/limits.md` for the row on `!fork`",
+      "`fork-source` in the bundled CLI's strings, and read `docs/limits.md` for the row on `/fork`",
   ),
   claim(
     "P44",
@@ -502,7 +502,7 @@ export const CLAIMS: readonly Claim[] = [
       "to the prompt that created a file lists that file, and a real run takes the file away",
     "src/agent/claude/session.ts#ClaudeSession.restoreFiles",
     "in a thread ask Claude to create a file with the Write tool, then in a second message another, " +
-      "and send `!rewind`: the second prompt offers Restore code with the counts of one file. If " +
+      "and send `/rewind`: the second prompt offers Restore code with the counts of one file. If " +
       "it offers nothing, `enableFileCheckpointing` is not in force: look for it in " +
       "`ClaudeSession.#options`",
   ),
@@ -513,7 +513,7 @@ export const CLAIMS: readonly Claim[] = [
       "that prompt keeps the session id and the model no longer sees that prompt, and the same " +
       "guard over a range of two turns is refused with `Resume rejected by --resume-drops-turn:`",
     "src/agent/claude/backend.ts#ClaudeBackend.start",
-    "in a thread give Claude a codeword, then another, send `!rewind` and pick Restore conversation " +
+    "in a thread give Claude a codeword, then another, send `/rewind` and pick Restore conversation " +
       "on the second prompt, then ask for every codeword: only the first is named. If the thread " +
       "reports that the agent could not rewind, the guard refused a range it should accept: read " +
       "`docs/limits.md` for the row on restoring the conversation",
@@ -526,8 +526,8 @@ export const CLAIMS: readonly Claim[] = [
       "`command_uuid` is that uuid, a `session_title_changed` record carrying the title and a " +
       "`result` of `success` with `num_turns` 0",
     "src/agent/claude/session.ts#ClaudeSession.rename",
-    "the daemon names a bare `!fork` copy with it and waits for that `completed`: with the record " +
-      "gone, send `!fork` alone, then a first message in the copy's thread: the message never " +
+    "the daemon names a bare `/fork` copy with it and waits for that `completed`: with the record " +
+      "gone, send `/fork` alone, then a first message in the copy's thread: the message never " +
       "starts a turn. Read `docs/sdk-surface.md` for the rows that name it",
   ),
   claim(
@@ -537,7 +537,7 @@ export const CLAIMS: readonly Claim[] = [
       "after its first turn and, after a second one that changed a file, yields a " +
       "`prompt_suggestion` record with text a few seconds at most after the turn's `result`",
     "src/agent/claude/session.ts#ClaudeSession",
-    "in a thread ask Claude to create a file, then to change it, and send `!next` after the " +
+    "in a thread ask Claude to create a file, then to change it, and send `/next` after the " +
       "second reply: it offers the words Claude Code shows grey in the terminal. If it says no " +
       "suggestion yet, look for `promptSuggestions` in `ClaudeSession.#options` and read " +
       "`docs/limits.md` for the row on the suggested next prompt",
@@ -549,7 +549,7 @@ export const CLAIMS: readonly Claim[] = [
       "with no step and no replay, and `session_state_changed` `idle` comes only after the " +
       "second prompt's turn has ended: no `idle` ahead of a sent prompt that still runs",
     "src/core/sessions/session.ts#ThreadSession.expectCutPrompts",
-    "in a fresh thread send two messages in a row and `!stop` at once: the second is answered " +
+    "in a fresh thread send two messages in a row and `/stop` at once: the second is answered " +
       "or told `was not sent because you stopped it` (the root says done once either is " +
       "settled). If the second is told not sent while it ran, or the root stays working, " +
       "the order of `idle` changed: read the seam's contract on `declaredState`",
@@ -630,7 +630,7 @@ export const CLAIMS: readonly Claim[] = [
       "numbered sections), not the terminal's short one, as `docs/limits.md` says",
     "src/agent/claude/translate.ts#Translator.translate",
     "the scene reads the request that follows a `/compact`. Nothing is proved when no request " +
-      "carries the instructions. If it fails, send `!compact` and read the summary Claude Code " +
+      "carries the instructions. If it fails, send `/compact` and read the summary Claude Code " +
       "writes: the row on how a conversation is summarized changes",
   ),
   claim(

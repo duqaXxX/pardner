@@ -11,7 +11,7 @@ import { Event } from "./tasks.ts";
 
 export class Turn {
   /**
-   * What the agent is sent. For a shell command, the command as the owner typed it (`!!…`), which
+   * What the agent is sent. For a shell command, the command as the owner typed it (`!…`), which
    * a note about a turn that never ran quotes, until the run's own prompt replaces it.
    */
   prompt: PromptContent;
@@ -19,7 +19,7 @@ export class Turn {
   readonly done = new Event();
   /** The daemon's own id for the prompt, which the agent names when it takes it. */
   readonly uuid: string = randomUUID();
-  /** The shell command this turn runs before it sends anything (`!!`); null for a prompt. */
+  /** The shell command this turn runs before it sends anything (`!`); null for a prompt. */
   readonly shell: string | null;
   /** What the thread shows of the command's run, from its run until a reply shows it. */
   head: string | null = null;
@@ -32,15 +32,15 @@ export class Turn {
   inDoubt = false;
 
   /**
-   * What the owner typed, in the chat's plain text, for a prompt that may name a bare `!fork`
-   * copy; null for a command, a `!!command` or a message with no typed text.
+   * What the owner typed, in the chat's plain text, for a prompt that may name a bare `/fork`
+   * copy; null for a command, a `!command` or a message with no typed text.
    */
   readonly title: string | null;
 
-  /** The owner's message this prompt came in; null for a prompt of the daemon's or a `!!command`. */
+  /** The owner's message this prompt came in; null for a prompt of the daemon's or a `!command`. */
   readonly messageId: MessageId | null;
 
-  /** The owner's message the turn's reply is for, `!!command`'s included: a reply opened again for the turn keeps it. */
+  /** The owner's message the turn's reply is for, `!command`'s included: a reply opened again for the turn keeps it. */
   readonly replyFor: MessageId | null;
 
   constructor(
@@ -73,7 +73,7 @@ export interface ActiveTurn {
    * `N messages were not sent`. A prompt whose replay did not come during the turn waits for its
    * own turn. An `AgentSession.interrupt` with such a prompt queued ends a report turn with
    * `error_during_execution`, and the prompt then runs as a turn of its own. A prompt already
-   * taken in when `!stop` ends the turn with a result the agent started is released with the
+   * taken in when `/stop` ends the turn with a result the agent started is released with the
    * note like any other (not measured: what Claude Code does with it on an interrupt). If the
    * session is abandoned first (`ThreadSession.abandon`: a lost process, a close, a restart), the
    * prompt is listed among the messages not sent, whether or not Claude Code had taken it in;
@@ -81,7 +81,7 @@ export interface ActiveTurn {
    */
   readonly taken: Turn[];
   /**
-   * The turn began after a `!stop` that found prompts sent and no turn: that stop reacted ✅ before
+   * The turn began after a `/stop` that found prompts sent and no turn: that stop reacted ✅ before
    * it began, so its stopped end still owes the root the status of a turn that ended.
    */
   readonly afterStop: boolean;
@@ -135,7 +135,7 @@ export function notSent(turns: readonly Turn[], because: string): string {
   });
   const starts = turns.map((turn) => {
     // A shell command is quoted as typed, with how it ended when it ran.
-    const typed = turn.shell === null ? asked(turn.prompt) : `!!${turn.shell}`;
+    const typed = turn.shell === null ? asked(turn.prompt) : `!${turn.shell}`;
     const ran = turn.head === null ? "" : ` (${turn.head.split("\n", 1)[0]})`;
     return `- "${oneLine(typed, NOT_SENT_START)}"${ran}`;
   });

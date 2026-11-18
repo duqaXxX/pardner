@@ -1,4 +1,4 @@
-/** Whether a folder can hold a session, the folder a typed path names, and `!status`'s terminal line. */
+/** Whether a folder can hold a session, the folder a typed path names, and `/status`'s terminal line. */
 import { realpathSync, statSync } from "node:fs";
 import { opendir, stat } from "node:fs/promises";
 import { isAbsolute, sep } from "node:path";
@@ -26,7 +26,7 @@ export function trustedBy(agent: AgentBackend): (folder: string) => Promise<bool
 
 /**
  * `agent`'s answer for the repository holding a folder when the daemon's own git may run in it:
- * the one lookup behind the footer and `!open`. Null for an agent with no record of trust
+ * the one lookup behind the footer and `/open`. Null for an agent with no record of trust
  * (`folderTrust`): the daemon's git runs in no folder then.
  */
 export function repositoryBy(agent: AgentBackend): (folder: string) => Promise<Repository | null> {
@@ -65,7 +65,7 @@ export function verdictBy(agent: AgentBackend): (folder: string) => Promise<Repo
 
 /**
  * What tells the owner which repositories still need `agent`'s trust before the footer and
- * `!open` read them: the ones below `folder`, and `also`, the one the footer's mark is for, which
+ * `/open` read them: the ones below `folder`, and `also`, the one the footer's mark is for, which
  * is read from the folder the session works in and can be anywhere the agent went. Each comes
  * with the shell line that asks for the trust at its key (the key alone for an agent that gives
  * no such line); nothing for an agent that keeps no record of trust. Rejects as the lookups do.
@@ -150,8 +150,8 @@ export function resolveDirectory(
 }
 
 /**
- * The `!status` line with the command that forks a session in the terminal (the agent's
- * `words.terminal`, `template`), run from the thread's folder, where `!resume` in its channel
+ * The `/status` line with the command that forks a session in the terminal (the agent's
+ * `words.terminal`, `template`), run from the thread's folder, where `/resume` in its channel
  * then finds the fork. `escapeMarkup` is the chat's, for a reference (`ChatProvider.escape`).
  */
 export function terminalLine(

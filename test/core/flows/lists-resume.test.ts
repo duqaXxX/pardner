@@ -1,5 +1,5 @@
 /**
- * `!resume` as a flow of the core, over the memory chat and the plain agent's record of
+ * `/resume` as a flow of the core, over the memory chat and the plain agent's record of
  * sessions: the list, a typed target, a pick, and every way a pick can be stale.
  */
 import assert from "node:assert/strict";
@@ -77,7 +77,7 @@ test("the rows leave out the sessions a thread holds, and count them", async (t)
 
 test("a typed id prefix resumes the session into the thread of the word", async (t) => {
   const world = await withSessions(t);
-  const ref = await world.word("!resume bbbbbbbb");
+  const ref = await world.word("/resume bbbbbbbb");
   await world.flows.resume.word(ref, "bbbbbbbb");
   assert.equal(world.state.thread(ref.channel, ref.thread)?.sessionId, THIRD);
   assert.deepEqual(world.chat.texts(ref.channel, ref.thread).slice(1), [
@@ -340,7 +340,7 @@ test("an agent with no session listing is offered no list and finds no target", 
   const world = await ListsWorld.build(t, agent);
   await world.bound(world.app);
   world.remember(world.app, FIRST, "Fix the footer", 1_000);
-  const unlisted = `${agent.name} keeps no list of its sessions, so \`!resume\` has nothing to pick from.`;
+  const unlisted = `${agent.name} keeps no list of its sessions, so \`/resume\` has nothing to pick from.`;
   await world.flows.resume.word(await world.word(), "");
   assert.deepEqual(world.chat.lists(), []);
   assert.deepEqual(world.said().slice(-1), [unlisted]);
@@ -394,7 +394,7 @@ test("a session whose first turn still runs already holds its id, and is not res
   const held = world.state.thread(first.channel, first.thread)?.sessionId;
   assert.ok(typeof held === "string" && held.length > 0);
   assert.equal(working.busy, true);
-  const ref = await world.word(`!resume ${held}`);
+  const ref = await world.word(`/resume ${held}`);
   await world.flows.resume.word(ref, held);
   assert.equal(world.state.thread(ref.channel, ref.thread), null);
   assert.deepEqual(world.said().slice(-1), [
@@ -508,8 +508,8 @@ test("only the list reads the transcripts for dates: a typed target and a pick c
   world.remember(world.app, FIRST, "Fix the footer", 1_000);
   world.remember(world.app, SECOND, "Add a trust gate", 3_000);
   world.remember(world.app, THIRD, "Rename the folder", 2_000);
-  await world.flows.resume.word(await world.word(`!resume ${FIRST}`), FIRST);
-  const picked = await world.word("!resume");
+  await world.flows.resume.word(await world.word(`/resume ${FIRST}`), FIRST);
+  const picked = await world.word("/resume");
   await pick(world, picked);
   assert.equal(world.state.thread(picked.channel, picked.thread)?.sessionId, THIRD);
   assert.deepEqual(agent.dated, []);

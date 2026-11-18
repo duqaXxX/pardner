@@ -1,7 +1,7 @@
 /**
- * Step 10 of the scenario the memory chat carries: `!!command` in a session's thread. The owner
+ * Step 10 of the scenario the memory chat carries: `!command` in a session's thread. The owner
  * confirms it, the daemon runs it with a real Bash in the session's folder, and the agent is told
- * of the run and answers it in the same reply. Cancel, `!stop`, the instance's switch, an agent
+ * of the run and answers it in the same reply. Cancel, `/stop`, the instance's switch, an agent
  * that cannot be told and the channel itself each send nothing.
  */
 import assert from "node:assert/strict";
@@ -32,7 +32,7 @@ test(
     await world.start();
     const thread = await session(world);
 
-    const sending = world.owner.says(world.channel, "!!pwd && echo hi", { thread });
+    const sending = world.owner.says(world.channel, "!pwd && echo hi", { thread });
     const asked = await world.request("shell", thread);
     assert.deepEqual(asked.request, {
       type: "shell",
@@ -77,7 +77,7 @@ test("Cancel runs nothing and tells the owner", async (t) => {
   await world.start();
   const thread = await session(world);
 
-  const sending = world.owner.says(world.channel, `!!touch "${world.folder}/ran"`, { thread });
+  const sending = world.owner.says(world.channel, `!touch "${world.folder}/ran"`, { thread });
   const asked = await world.request("shell", thread);
   assert.equal(await world.owner.answers(asked.requestId, { type: "shell", run: false }), true);
   await sending;
@@ -89,20 +89,20 @@ test("Cancel runs nothing and tells the owner", async (t) => {
   await world.finish();
 });
 
-test("!stop ends a running command and the agent is told nothing", POSIX_ONLY, async (t) => {
+test("/stop ends a running command and the agent is told nothing", POSIX_ONLY, async (t) => {
   const world = World.make(t, { shell: true });
   await world.start();
   const thread = await session(world);
 
   const { existsSync } = await import("node:fs");
   const command = "echo started; touch .started; sleep 30";
-  const sending = world.owner.says(world.channel, `!!${command}`, { thread });
+  const sending = world.owner.says(world.channel, `!${command}`, { thread });
   const asked = await world.request("shell", thread);
   await world.owner.answers(asked.requestId, { type: "shell", run: true });
   await sending;
   // Bash runs in real time: the stop is sent once the command is under way.
   while (!existsSync(`${world.folder}/.started`)) await new Promise((r) => setTimeout(r, 10));
-  await world.owner.says(world.channel, "!stop", { thread });
+  await world.owner.says(world.channel, "/stop", { thread });
   await world.until(
     () => world.shown(thread).some((text) => text.startsWith("Stopped after")),
     "the stopped run",
@@ -122,7 +122,7 @@ test(
     const thread = await session(world);
     const { existsSync } = await import("node:fs");
     const command = "touch .started; sleep 0.5; echo done";
-    const sending = world.owner.says(world.channel, `!!${command}`, { thread });
+    const sending = world.owner.says(world.channel, `!${command}`, { thread });
     const asked = await world.request("shell", thread);
     await world.owner.answers(asked.requestId, { type: "shell", run: true });
     await sending;
@@ -146,7 +146,7 @@ test(
     await stopping;
     assert.deepEqual(world.prompts(), ["hello"]);
     const shown = world.shown(thread).join("\n");
-    assert.match(shown, new RegExp(`"!!${command}" \\(✓ exit 0 · `), shown);
+    assert.match(shown, new RegExp(`"!${command}" \\(✓ exit 0 · `), shown);
     await world.finish();
   },
 );
@@ -156,7 +156,7 @@ test("a prompt sent after a shell command waits for it", POSIX_ONLY, async (t) =
   await world.start();
   const thread = await session(world);
 
-  const shell = world.owner.says(world.channel, "!!echo first", { thread });
+  const shell = world.owner.says(world.channel, "!echo first", { thread });
   const asked = await world.request("shell", thread);
   const prompt = world.owner.says(world.channel, "second", { thread });
   await world.settle();
@@ -187,7 +187,7 @@ test("an instance that turned shell commands off asks nothing and runs nothing",
   const world = World.make(t, { shell: true, env: ["PARDNER_SHELL=off"] });
   await world.start();
   const thread = await session(world);
-  await world.owner.says(world.channel, "!!echo hi", { thread });
+  await world.owner.says(world.channel, "!echo hi", { thread });
   await world.settle();
   assert.equal(world.shown(thread).at(-1), texts.SHELL_OFF);
   assert.deepEqual(world.chat.requests(), []);
@@ -199,7 +199,7 @@ test("an agent that cannot be told of a shell command is not offered one", async
   const world = World.make(t);
   await world.start();
   const thread = await session(world);
-  await world.owner.says(world.channel, "!!echo hi", { thread });
+  await world.owner.says(world.channel, "!echo hi", { thread });
   await world.settle();
   assert.equal(world.shown(thread).at(-1), named(texts.SHELL_UNAVAILABLE, NAMES));
   assert.deepEqual(world.chat.requests(), []);
@@ -209,7 +209,7 @@ test("an agent that cannot be told of a shell command is not offered one", async
 test("in the channel a shell command is refused: it needs a session's thread", async (t) => {
   const world = World.make(t, { shell: true });
   await world.start();
-  await world.owner.says(world.channel, "!!echo hi");
+  await world.owner.says(world.channel, "!echo hi");
   await world.settle();
   // A post in the channel, as the other words of one session answer there.
   assert.ok(world.chat.texts(world.channel).includes(texts.SHELL_OUTSIDE_SESSION));

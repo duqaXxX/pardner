@@ -1,5 +1,5 @@
 /**
- * `!terminal` through the message flow, and a message that meets a terminal on the way to its
+ * `/terminal` through the message flow, and a message that meets a terminal on the way to its
  * session: the word cuts a running turn without an interrupt, ends its reply and gives the line
  * that continues it; the next message resumes the same session id.
  */
@@ -13,7 +13,7 @@ import { hold, PlainAgent, saved, say } from "../../support/plain-agent.ts";
 import { settledTurn } from "../../support/settle.ts";
 import { MessagesWorld } from "./messages-world.ts";
 
-test("!terminal during a turn cuts it with no interrupt and gives the continuing line", async (t) => {
+test("/terminal during a turn cuts it with no interrupt and gives the continuing line", async (t) => {
   const agent = new PlainAgent({ terminal: true });
   const world = await MessagesWorld.make(t, { agent });
   const ref = await world.opened();
@@ -29,7 +29,7 @@ test("!terminal during a turn cuts it with no interrupt and gives the continuing
     interrupts += 1;
   };
 
-  await world.says("!terminal", ref.thread);
+  await world.says("/terminal", ref.thread);
   await world.settle();
   assert.equal(session?.busy, false);
   assert.equal(live.closed, true, "the process is closed");

@@ -1,5 +1,5 @@
 /**
- * `!stop` with no turn running and background tasks alive: the agent's process is closed
+ * `/stop` with no turn running and background tasks alive: the agent's process is closed
  * instead of the tasks stopped one by one, since Claude Code opens a turn of its own to react to
  * a task stopped that way and the agent carries on. The next message resumes the same session;
  * the process that resumes it tells of the tasks it lost (`stop-close-resume`, recorded on

@@ -15,13 +15,14 @@ import type { CommandInfo, PromptContent } from "../../agent/seam.ts";
 import type { InboundMessage, ShellRequest, ThreadRef } from "../../chat/seam.ts";
 import { strip } from "../../text.ts";
 import {
+  COMMAND_PREFIX,
   type Command,
   commandPool,
   hostOnly,
-  isBangAlone,
+  isPrefixAlone,
   notOfferedAnswer,
   type Passthrough,
-  parseBang,
+  parseCommand,
   rankCandidates,
   refusedInThread,
   type Shell,
@@ -50,7 +51,7 @@ type Submission = Pick<InboundMessage, "ref" | "text" | "plain" | "content"> & {
 
 /**
  * What `deliver` sends to a session: a message (a prompt, files, a command for the agent), or a
- * `!!command`, which the owner confirms once every other guard has passed.
+ * `!command`, which the owner confirms once every other guard has passed.
  */
 type Outgoing =
   | {
@@ -169,7 +170,7 @@ export function messages(
   }
 
   /**
-   * A `!word` typed in a session's thread that the session does not list: when the chat suggests
+   * A `/word` typed in a session's thread that the session does not list: when the chat suggests
    * commands, shows the owner the ones it could mean, or says that none looks like it, and sends
    * nothing to the agent. `typed` is what the owner wrote, exactly. The session is connected, so
    * that it lists its commands. False when the chat does not suggest, or when `command` is a name
@@ -200,7 +201,7 @@ export function messages(
     if (candidates.length === 0) {
       await talk.tell(
         ref,
-        fill(texts.NO_SUCH_COMMAND, { word: chat.escape(`!${word}`, "notice") }),
+        fill(texts.NO_SUCH_COMMAND, { word: chat.escape(`${COMMAND_PREFIX}${word}`, "notice") }),
       );
       return true;
     }
@@ -214,7 +215,7 @@ export function messages(
   }
 
   /**
-   * A prompt the daemon sends on the owner's word (`!fork`'s), in a thread that holds a session:
+   * A prompt the daemon sends on the owner's word (`/fork`'s), in a thread that holds a session:
    * it takes the path of a message they wrote there, the same-folder hold and the terminal's
    * check included, and a failure is told in that thread. Its id is the thread's root, which
    * nothing reads for a message that is no command.
@@ -274,8 +275,8 @@ export function messages(
   /**
    * The body of a send, run inside the thread's arrival lock, which its caller holds (`arrival`
    * cannot be taken twice): the setup when due, the restart refusal, the same-folder hold, the
-   * terminal that holds the session, a `!!command`'s confirmation, then `submit`. A typed message
-   * and a `!!command` both pass here, so neither can wake a session the other could not.
+   * terminal that holds the session, a `!command`'s confirmation, then `submit`. A typed message
+   * and a `!command` both pass here, so neither can wake a session the other could not.
    */
   async function deliver(
     ref: ThreadRef,
@@ -293,7 +294,7 @@ export function messages(
     }
     const message = outgoing.kind === "message" ? outgoing : null;
     const command = message?.command ?? null;
-    // A `!!command` is only ever typed in a session's thread.
+    // A `!command` is only ever typed in a session's thread.
     const inThread = message?.inThread ?? true;
     let session = opened;
     // `held` is the object a Continue's mark was left standing on (`holdEnd({ continued: true })`
@@ -309,7 +310,7 @@ export function messages(
     // finally, puts back the mark a Start, Continue, Send here or Run left. `askOwner` tells it
     // itself when it refuses to open, and answers null: that return is the same exit.
     try {
-      // A `!!command`'s text is built at the submit below: only a message has content to read.
+      // A `!command`'s text is built at the submit below: only a message has content to read.
       let prompt: PromptContent = "";
       if (message !== null) {
         const read = await message.message.content();
@@ -407,7 +408,7 @@ export function messages(
         return true;
       };
       if (!(await besideOthers())) return;
-      // A `!!command` is confirmed once nothing else stands between it and the session: Run
+      // A `!command` is confirmed once nothing else stands between it and the session: Run
       // leaves the waiting mark for the submit to replace (`holdEnd`), and any other way out puts
       // back the mark the thread had, in the finally.
       if (outgoing.kind === "shell") {
@@ -451,7 +452,7 @@ export function messages(
             prompt = asCommand ? `${agent.words.commandPrefix}${command.text}` : content;
           }
           // (sync) Checked last, with no await before the submit: a stop can start while the
-          // files are read. The daemon's words still work meanwhile (`!stop` shortens the
+          // files are read. The daemon's words still work meanwhile (`/stop` shortens the
           // wait); a new turn would not finish, and the chat does not send this message
           // again. A stop that ended meanwhile (the daemon is gone) sends nothing and says
           // nothing.
@@ -465,7 +466,7 @@ export function messages(
             const typed = outgoing.command.command;
             turns.set(
               ticket,
-              await session.submit(`!!${typed}`, typed, ticket.signal, null, null, outgoing.id),
+              await session.submit(`!${typed}`, typed, ticket.signal, null, null, outgoing.id),
             );
           } else {
             // The title is what the owner typed, as the chat's plain text, for a prompt alone: a
@@ -519,7 +520,7 @@ export function messages(
   }
 
   /**
-   * `!!command`: the owner's shell command, run in the session's folder once the owner confirms
+   * `!command`: the owner's shell command, run in the session's folder once the owner confirms
    * it, then told to the session, whose answer is the turn's reply. In the thread's arrival
    * order, as a prompt is, so a message sent after it waits for the confirmation, and through the
    * same guards (`deliver`): the same-folder hold and the terminal are asked before the
@@ -560,8 +561,8 @@ export function messages(
    */
   async function route(message: InboundMessage): Promise<void> {
     const { ref } = message;
-    // (sync) A prompt, a command or a `!fork` takes its ticket the moment it is handed over; a
-    // `!stop` aborts the tickets of its thread, or of its channel, before anything is awaited.
+    // (sync) A prompt, a command or a `/fork` takes its ticket the moment it is handed over; a
+    // `/stop` aborts the tickets of its thread, or of its channel, before anything is awaited.
     const read = classify(message);
     const { command } = read;
     let aborted = 0;
@@ -627,7 +628,7 @@ export function messages(
     // `SessionClosed`, which `replyOnFailure` tells.
     // A message with files is a prompt: no daemon word or command takes a file. A word is a
     // word however it is formatted: the typed text carries the chat's marks (a backtick before
-    // the `!` of a message in inline code), which `plain` has removed. Nor is a message that
+    // the `/` of a message in inline code), which `plain` has removed. Nor is a message that
     // was spoken: what the chat heard never turns bypass on, stops a session or becomes a
     // command, whatever its first character. Both are `literal`.
     // A known session's thread routes a word to it; anywhere else (truly top-level, or a
@@ -637,15 +638,15 @@ export function messages(
     // The text that read as a word: what a suggestion shows back to the owner.
     let written = message.text;
     if (!message.literal) {
-      command = parseBang(message.text, message.bare);
+      command = parseCommand(message.text, message.bare);
       if (command === null) {
-        command = parseBang(message.plain, message.bare);
+        command = parseCommand(message.plain, message.bare);
         written = message.plain;
       }
-      // `!` alone is a prompt unless the chat suggests and a session's thread is where it was
+      // `/` alone is a prompt unless the chat suggests and a session's thread is where it was
       // typed: then it asks for every command. Suggestions are made nowhere else.
       if (command === null && session !== null && chat.capabilities.commandSuggestions) {
-        if (isBangAlone(message.text) || isBangAlone(message.plain)) {
+        if (isPrefixAlone(message.text) || isPrefixAlone(message.plain)) {
           command = { kind: "passthrough", text: "" };
         }
       }

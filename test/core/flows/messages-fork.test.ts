@@ -1,5 +1,5 @@
 /**
- * `!fork` through the message flow: a copy of the thread's session in a new thread of the
+ * `/fork` through the message flow: a copy of the thread's session in a new thread of the
  * channel, which inherits the effort and the bypass and starts on the prompt, while the original
  * goes on; made once a running turn has ended.
  */
@@ -19,7 +19,7 @@ function copyOf(world: MessagesWorld, origin: ThreadRef): ThreadRef {
   return { channel: other[0], thread: other[1] };
 }
 
-test("!fork <prompt> opens a thread whose session is a copy and starts it on the prompt", async (t) => {
+test("/fork <prompt> opens a thread whose session is a copy and starts it on the prompt", async (t) => {
   const agent = new WithBypass();
   const world = await MessagesWorld.make(t, { agent });
   const origin = await world.opened("the first task");
@@ -29,7 +29,7 @@ test("!fork <prompt> opens a thread whose session is a copy and starts it on the
   assert.ok(original);
 
   agent.next(say("Looking into it."));
-  await world.says("!fork look into the timeout", origin.thread);
+  await world.says("/fork look into the timeout", origin.thread);
   await world.settle();
 
   const ref = copyOf(world, origin);
@@ -60,13 +60,13 @@ test("!fork <prompt> opens a thread whose session is a copy and starts it on the
   assert.ok(line.includes(" · running · ") && line.includes(copied.sessionId), line);
 });
 
-test("!fork alone opens the copy's thread and leaves it waiting", async (t) => {
+test("/fork alone opens the copy's thread and leaves it waiting", async (t) => {
   const agent = new PlainAgent();
   const world = await MessagesWorld.make(t, { agent });
   const origin = await world.opened("the first task");
   const sent = (await world.prompts()).length;
 
-  await world.says("!fork", origin.thread);
+  await world.says("/fork", origin.thread);
   await world.settle();
 
   const ref = copyOf(world, origin);
@@ -83,7 +83,7 @@ test("a copy keeps what it was copied from across a restart of the daemon", asyn
   const first = await MessagesWorld.make(t, { agent });
   const origin = await first.opened("the first task");
   const original = first.state.thread(origin.channel, origin.thread)?.sessionId;
-  await first.says("!fork", origin.thread);
+  await first.says("/fork", origin.thread);
   await first.settle();
   const ref = copyOf(first, origin);
   await first.sessions.closeAll();
@@ -96,7 +96,7 @@ test("a copy keeps what it was copied from across a restart of the daemon", asyn
   assert.equal(start?.forkOf?.session, original, "started as the copy it is, every time");
 });
 
-test("!fork during a turn waits for it to end", async (t) => {
+test("/fork during a turn waits for it to end", async (t) => {
   const agent = new PlainAgent();
   const world = await MessagesWorld.make(t, { agent });
   const origin = await world.opened("the first task");
@@ -105,7 +105,7 @@ test("!fork during a turn waits for it to end", async (t) => {
   await world.settle();
   assert.equal(world.sessions.get(origin.channel, origin.thread)?.busy, true);
 
-  const forking = world.says("!fork", origin.thread);
+  const forking = world.says("/fork", origin.thread);
   await world.settle();
   assert.equal(world.state.threads().length, 1, "no copy while the turn runs");
 
@@ -115,9 +115,9 @@ test("!fork during a turn waits for it to end", async (t) => {
   assert.equal(world.state.threads().length, 2);
 });
 
-test("!fork in the channel is refused", async (t) => {
+test("/fork in the channel is refused", async (t) => {
   const world = await MessagesWorld.make(t);
-  await world.says("!fork look into it");
+  await world.says("/fork look into it");
   await world.settle();
   assert.ok(world.inChannel().includes(texts.FORK_TOP_LEVEL), world.inChannel().join("\n"));
   assert.equal(world.state.threads().length, 0);
@@ -127,33 +127,33 @@ class NoForks extends PlainAgent {
   override readonly capabilities: Capabilities = { ...PLAIN_CAPABILITIES, sessionForks: false };
 }
 
-test("!fork with an agent that cannot copy a session is refused, and nothing is opened", async (t) => {
+test("/fork with an agent that cannot copy a session is refused, and nothing is opened", async (t) => {
   const agent = new NoForks();
   const world = await MessagesWorld.make(t, { agent });
   const origin = await world.opened("the first task");
-  await world.says("!fork look into it", origin.thread);
+  await world.says("/fork look into it", origin.thread);
   await world.settle();
   const refusal = texts.named(texts.FORK_UNAVAILABLE, PLAIN_NAMES);
   assert.ok(world.shown(origin).includes(refusal), world.shown(origin).join("\n"));
   assert.equal(world.state.threads().length, 1);
 });
 
-test("!fork of a session that works in an earlier folder of the channel is refused", async (t) => {
+test("/fork of a session that works in an earlier folder of the channel is refused", async (t) => {
   const world = await MessagesWorld.make(t);
   const origin = await world.opened("the first task");
   world.state.bind(world.channel, join(world.folder, "elsewhere"));
-  await world.says("!fork look into it", origin.thread);
+  await world.says("/fork look into it", origin.thread);
   await world.settle();
   assert.ok(world.shown(origin).includes(texts.FORK_OLD_FOLDER), world.shown(origin).join("\n"));
   assert.equal(world.state.threads().length, 1, "no copy's thread");
 });
 
-test("!fork while pardner waits to restart makes no copy", async (t) => {
+test("/fork while pardner waits to restart makes no copy", async (t) => {
   const agent = new PlainAgent();
   const world = await MessagesWorld.make(t, { agent });
   const origin = await world.opened("the first task");
   world.sessions.draining = true;
-  await world.says("!fork look into it", origin.thread);
+  await world.says("/fork look into it", origin.thread);
   await world.settle();
   assert.equal(world.state.threads().length, 1, "no copy's thread");
   assert.ok(!world.inChannel().some((line) => line.startsWith("Fork of ")));
@@ -165,11 +165,11 @@ function rootOf(world: MessagesWorld, ref: ThreadRef) {
   return { text, lead: world.chat.leadOf(ref) };
 }
 
-test("!fork <prompt> opens a root with its lead and the one-line words, and stores nothing yet", async (t) => {
+test("/fork <prompt> opens a root with its lead and the one-line words, and stores nothing yet", async (t) => {
   const agent = new WithSessionTitle();
   const world = await MessagesWorld.make(t, { agent, titles: true });
   const origin = await world.opened("the first task");
-  await world.says("!fork look into the timeout", origin.thread);
+  await world.says("/fork look into the timeout", origin.thread);
   await world.settle();
   const ref = copyOf(world, origin);
   const { text, lead } = rootOf(world, ref);
@@ -179,11 +179,11 @@ test("!fork <prompt> opens a root with its lead and the one-line words, and stor
   assert.equal(world.state.thread(ref.channel, ref.thread)?.rootPrompt, null);
 });
 
-test("!fork alone opens a root that is its lead, with empty words", async (t) => {
+test("/fork alone opens a root that is its lead, with empty words", async (t) => {
   const agent = new WithSessionTitle();
   const world = await MessagesWorld.make(t, { agent, titles: true });
   const origin = await world.opened("the first task");
-  await world.says("!fork", origin.thread);
+  await world.says("/fork", origin.thread);
   await world.settle();
   const { text, lead } = rootOf(world, copyOf(world, origin));
   assert.equal(text, lead?.lead);
@@ -196,7 +196,7 @@ test("the copy's first title stores the one-line words, not the whole prompt", a
   const origin = await world.opened("the first task");
   agent.title = "Fix the timeout";
   const long = `look into the timeout ${"and more ".repeat(30)}`.trim();
-  await world.says(`!fork ${long}`, origin.thread);
+  await world.says(`/fork ${long}`, origin.thread);
   await world.settle();
   const ref = copyOf(world, origin);
   const stored = world.state.thread(ref.channel, ref.thread)?.rootPrompt;
@@ -210,7 +210,7 @@ test("a title refused for good leaves no stored words on the copy", async (t) =>
   const world = await MessagesWorld.make(t, { agent, titles: true, titleFails: "permanent" });
   const origin = await world.opened("the first task");
   agent.title = "Fix the timeout";
-  await world.says("!fork look into it", origin.thread);
+  await world.says("/fork look into it", origin.thread);
   await world.settle();
   const ref = copyOf(world, origin);
   assert.equal(world.state.thread(ref.channel, ref.thread)?.rootPrompt, null);

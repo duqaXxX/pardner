@@ -690,7 +690,7 @@ test("the goal stream is judged on a turn that said the goal was set", async () 
 });
 
 test("a limit claim is FELL, never BROKEN, and a scene that proved nothing leaves it UNPROVEN", () => {
-  const limit = claim("L90", "limit", "a limit", "src/core/commands.ts#parseBang", "how");
+  const limit = claim("L90", "limit", "a limit", "src/core/commands.ts#parseCommand", "how");
   assert.equal(evaluate(limit, observation(true, true)).outcome, "HOLDS");
   assert.equal(evaluate(limit, observation(true, false)).outcome, "FELL");
   assert.equal(evaluate(limit, observation(false, false)).outcome, "UNPROVEN");
@@ -701,8 +701,14 @@ test("a limit claim is FELL, never BROKEN, and a scene that proved nothing leave
 });
 
 test("a fallen limit does not block a certificate, is listed in it and in the checklist only when unproven", () => {
-  const limit = claim("L90", "limit", "a limit", "src/core/commands.ts#parseBang", "how");
-  const unproven = claim("L91", "limit", "another limit", "src/core/commands.ts#parseBang", "how");
+  const limit = claim("L90", "limit", "a limit", "src/core/commands.ts#parseCommand", "how");
+  const unproven = claim(
+    "L91",
+    "limit",
+    "another limit",
+    "src/core/commands.ts#parseCommand",
+    "how",
+  );
   const results = [
     evaluate(GESTURE, observation(true, true)),
     evaluate(limit, observation(true, false, "gone")),

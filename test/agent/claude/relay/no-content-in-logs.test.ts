@@ -12,11 +12,11 @@
  * daemon produces.
  *
  * Covered: a prompt at top level, its reply (the agent's text, streamed and final), a prompt in
- * the thread, `!bind` with a path, `!help` with a filter, and the free text of a question's
+ * the thread, `/bind` with a path, `/help` with a filter, and the free text of a question's
  * answer and the note text of a question. A message from a device that is not the owner's is
  * played in `test/chat/relay/inbound.test.ts`. Not covered: the text of a file or a clip the owner
  * attaches (the relay chat carries files from step 6), a search box of the chat (the relay has
- * none), `!resume`, `!open`, and a failure's own wording (a line that quotes an error message is
+ * none), `/resume`, `/open`, and a failure's own wording (a line that quotes an error message is
  * the error's, which `errorName` keeps out of the log by design).
  */
 import assert from "node:assert/strict";
@@ -89,8 +89,8 @@ test(
     assert.ok(read.parts.some((p) => String(p.body.markdown).includes(ANSWER)));
 
     const inThread = await w.prompt(`and then ${IN_THREAD}`, w.thread);
-    const bound = await w.prompt(`!bind ${join(h.tmpPath, FOLDER)}`, null);
-    const help = await w.prompt(`!help ${FILTER}`, null);
+    const bound = await w.prompt(`/bind ${join(h.tmpPath, FOLDER)}`, null);
+    const help = await w.prompt(`/help ${FILTER}`, null);
     await w.until((r) =>
       [inThread, bound, help].every((name) => r.answers.some((a) => a.re === name)),
     );

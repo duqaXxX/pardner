@@ -72,10 +72,10 @@ What crosses the chat seam, in both directions:
 |---|---|---|
 | a reply | core to provider | `ReplySink`: `text`, `task`, `finish`, `closeOut`, `waitLanded`, `settle`. A session holds it as a `Reply`, which adds `rest`, `last`, `overtaken` and `showFooter`. A tool's line crosses as a `TaskUpdate` and the footer as `FooterFields`, which the provider formats |
 | a thread | core to provider | `ThreadChat`, one per thread from `ChatProvider.thread`: `openReply`, the root's status (`showStatus`, `clearStatus`, `settleStatus`), the activity line under the last message (`showActivity`, which takes an `Activity` and leaves its words to the provider, `activityRefused`, `written`), the list of what still runs (`showRunning`), the loop card of scheduled runs (`showLoop`, `endLoop`), the daemon's own lines (`notice`, `tell`, `say`, `rewrite`, `acknowledge`, `link`), a request put to the owner (`ask`, `withdraw`, `keepAnswers`), a list with a control per row (`offer`, with `threadLists`) and a shared file (`share`, with `fileUpload`), a reply a stop left open (`endReply`) and `close` |
-| a channel | core to provider | `ChannelChat`, from `ChatProvider.channel`: `notice` (which resolves with the id of the message posted, null when the chat cannot say), `say`, `open` (with `threadOpen`: a message that starts a thread, which `!fork` posts), `tell`, `rewrite`, and the lists a word posts (`offer`, `withdraw`) |
+| a channel | core to provider | `ChannelChat`, from `ChatProvider.channel`: `notice` (which resolves with the id of the message posted, null when the chat cannot say), `say`, `open` (with `threadOpen`: a message that starts a thread, which `/fork` posts), `tell`, `rewrite`, and the lists a word posts (`offer`, `withdraw`) |
 | the provider | core to provider | `ChatProvider`: `name`, `capabilities`, `escape` and `channelName` (what a core text relies on to write a name and a channel for the chat's markup, beside `ThreadChat.link`), `openedAt`, `channelState`, `threadState`, `cleanupControl` (the chat's control that runs the cleanup at once, which a refused resume names), `index`, `openFile`, `tagThread`, `titleThread` and `statusMark` where declared, and `start`, `stop` and `close` |
 | a request | core to provider | typed by what it asks, never by how it is drawn: `OwnerRequest` is a `PermissionRequest`, a `QuestionRequest`, a `HoldRequest` or a `SetupRequest`; a list is an `OwnerList`, of folders, of sessions or the update of pardner |
-| an owner's act | provider to core | `ChatInbound`: `message` (an `InboundMessage`), `answer` (an `OwnerAnswer` to the request `requestId` names), `picked` (a `ListPick` from an `OwnerList`) and `unbound` (the owner wrote in a channel bound to no folder: the core tells how to bind), `rootGone` and `stop` (the owner used the chat's control that stops a thread's session, answered as `!stop` is; true when something was stopped). The provider calls them for the owner alone, and hands over the messages and stops of one channel in the order the owner sent them (a typed `!stop` is a message); a stop acts on every message handed over before it that has not reached the agent (`InFlight`, `src/core/flows/in-flight.ts`) |
+| an owner's act | provider to core | `ChatInbound`: `message` (an `InboundMessage`), `answer` (an `OwnerAnswer` to the request `requestId` names), `picked` (a `ListPick` from an `OwnerList`) and `unbound` (the owner wrote in a channel bound to no folder: the core tells how to bind), `rootGone` and `stop` (the owner used the chat's control that stops a thread's session, answered as `/stop` is; true when something was stopped). The provider calls them for the owner alone, and hands over the messages and stops of one channel in the order the owner sent them (a typed `/stop` is a message); a stop acts on every message handed over before it that has not reached the agent (`InFlight`, `src/core/flows/in-flight.ts`) |
 | a failure | provider to core | `ChatError`, whose name is the provider's code for the failed call |
 
 The core decides what is asked, which choices exist and what follows an answer; the provider
@@ -89,13 +89,13 @@ else of it.
 | `registry.REGISTRY` | the agents and the chats by name, and the two names taken when `.env` selects none |
 | `flows.buildFlows`, `Inbound` | the core's side of `ChatInbound`: what a message, an answer, a pick and an unbound channel mean and what follows each (`src/core/flows/`: `messages`, `words`, `status`, `asking`, `lists`, `resume`, `bind`, `repair`, `notices`), all answering the owner through `Talk` |
 | `CorePort` | what a provider may call and read of the core: the live sessions, `state.json`, the pending requests and holds, the agent's name, words and session listing |
-| `SessionManager` | the live `ThreadSession` objects, one per open thread, and what spans them: `!bind`, `!resume`, the drain |
+| `SessionManager` | the live `ThreadSession` objects, one per open thread, and what spans them: `/bind`, `/resume`, the drain |
 | `ThreadSession` | one thread: its agent session, prompt queue, turns, requests, status and idle close |
 | `ClaudeBackend`, `ClaudeSession` | the Claude Code process of a session and everything read from Claude Code's own records |
 | `Translator` | turns the records of the SDK's stream into session events |
 | `TurnRenderer` | turns the session events into a model of one reply |
 | `RelayProvider`, `Inbound`, `Outbox` | the relay chat as the seam sees it: the connection, the reading of the owner's messages (they call `ChatInbound`) and the writing of a reply as parts and an answer ([relay-provider.md](relay-provider.md)) |
-| `commands` | the `!word` parser and the daemon's own words |
+| `commands` | the `/word` parser and the daemon's own words |
 | `Approvals`, `Holds`, `setup` | the questions the daemon puts to the owner and keeps while it waits: tool permission, a same-folder hold, a session's setup, a shell command's confirmation |
 | `StateStore` | `state.json`: the channels, their threads and what crash repair needs |
 
@@ -106,10 +106,10 @@ One message's way from the chat to the agent and back, with Claude Code:
    `InboundMessage`. A provider hands over the messages of one thread in the order it received them,
    although its checks take longer for one than for another.
 3. The listener calls `ChatInbound.message`. The message flow (`messages.messages`) reads a message
-   that starts with `!` with `commands.parseBang`, as one of the daemon's words (`words.wordFlow`)
-   or as a passthrough to a command of the agent. Anything else is a prompt. A prompt, a command and a `!fork` hold an in-flight ticket
+   that starts with `/` or `!` with `commands.parseCommand`, as one of the daemon's words (`words.wordFlow`)
+   or as a passthrough to a command of the agent. Anything else is a prompt. A prompt, a command and a `/fork` hold an in-flight ticket
    (`InFlight`, `src/core/flows/in-flight.ts`) until they reach the session's queue; a stop of their
-   thread or channel aborts it and the message says `Not sent.`. A `!fork`'s ticket is released
+   thread or channel aborts it and the message says `Not sent.`. A `/fork`'s ticket is released
    before the copy is made, and the copy's prompt takes one in the copy's thread. A message refused
    before it reaches the session (`hostOnly`, a thread that is not a session's, a file that could
    not be read) says its refusal, not `Not sent.`. A top-level message
@@ -164,7 +164,7 @@ Terms used throughout:
 | turn | One prompt sent to the agent, and what it does until its result arrives |
 | reply | What the daemon writes in the thread for a turn |
 | report turn | A turn the agent starts by itself to report a finished background task |
-| bypass | The permission mode that skips permission requests (`bypassPermissions` in Claude Code), kept per thread and set with `!bypass` |
+| bypass | The permission mode that skips permission requests (`bypassPermissions` in Claude Code), kept per thread and set with `/bypass` |
 | root status | The session's state as the chat shows it on the thread's root message: working, waiting for the owner, ended, error, or a restart waiting for it. |
 | drain | The wait at shutdown for the turns already sent to finish |
 | record | One object of the SDK's stream, as Claude Code wrote it |
@@ -230,7 +230,7 @@ and never calls what serves it. The core invents no substitute. What every modul
 alike needs no capability. `effortLevels` and
 `permissionModes` are values, not switches, and their rows say what the core reads them for.
 
-`!guide` is made of parts (`src/core/guide.ts`, `guideText`), and the words `!help` lists follow
+`/guide` is made of parts (`src/core/guide.ts`, `guideText`), and the words `/help` lists follow
 the same capabilities. A part appears when the pair declares what it describes: `folderTrust`,
 `models`, an agent with effort levels, a `bypass` mode, `commands`, `questions`,
 `backgroundTasks` and `sessionListing` of the agent, and `fileUpload`, `threadTags` and `threadPins` of the chat.
@@ -239,42 +239,42 @@ the same capabilities. A part appears when the pair declares what it describes: 
 |---|---|
 | `effortLevels` | the levels `StartOptions.effort` and `AgentSession.setEffort` take; a stored level outside them is dropped, with a line in the log, and the setup offers them as its Effort control when `models` is not declared |
 | `liveEffort` | the setup starts a fresh agent session to change the effort, since no prompt has been sent |
-| `permissionModes` | the modes by role (`default`, `auto`, `bypass`); with `bypass` null the setup offers no Bypass checkbox and `!bypass` answers that the agent has no such mode (`texts.BYPASS_UNAVAILABLE`) |
+| `permissionModes` | the modes by role (`default`, `auto`, `bypass`); with `bypass` null the setup offers no Bypass checkbox and `/bypass` answers that the agent has no such mode (`texts.BYPASS_UNAVAILABLE`) |
 | `subagents` | an event that runs under a call of its own, or a task that is a subagent's, is ignored, with a warning in the log |
 | `backgroundTasks` | a task that outlives its turn, and the turn the agent starts to report it, are ignored; the session tracks and waits for none |
 | `foldedNotifications` | a task that ends inside a turn counts as reported by that turn; the reply is closed out, with the footer, when the turn ends, and a report turn the agent opens afterwards gets a reply of its own. With it, such a task is owed a report turn until `notification_folded` names it (see "A report turn after the turn a task ended in") |
 | `compaction` | the compaction events are ignored |
 | `declaredState` | a `state_changed` event is ignored, with a warning in the log; the thread's activity line says `Working…` for the owner's prompts alone, so a turn the agent starts by itself shows none |
-| `questions` | `!guide` leaves out the sentence about the question form and titles its approvals section "Approvals"; no other code of the core reads it, and the conformance suite runs its question checks only for a back end that declares it |
+| `questions` | `/guide` leaves out the sentence about the question form and titles its approvals section "Approvals"; no other code of the core reads it, and the conformance suite runs its question checks only for a back end that declares it |
 | `usageLimits` | `AgentBackend.usageLimits` is absent and the footer shows no limit |
-| `sessionTags` | `AgentBackend.tagSession` is absent and `!tag` and `!untag` change the chat's tag alone; a thread whose session has no id yet is tagged in the chat alone as well. A rejection of `tagSession` leaves the chat's tag and is told to the owner (`texts.TAG_AGENT_FAILED`) |
-| `sessionTitles` | `AgentBackend.sessionTitle` is absent: the core shows no title on the root and `!status` has no `Title:` |
-| `fileRestore` | `AgentSession.restoreFiles` is absent and `!rewind` offers no Restore code; with neither this nor `conversationRewind` `!rewind` is not offered |
-| `conversationRewind` | `StartOptions.rewindTo` is never passed and `!rewind` offers no Restore conversation |
-| `goals` | a `goal_changed` event is ignored, with a warning in the log: a reply shows no goal line, `!stop` never says a goal is still set, and a channel's `!stop` drops no goal (`AgentSession.clearGoal` is never called) |
+| `sessionTags` | `AgentBackend.tagSession` is absent and `/tag` and `/untag` change the chat's tag alone; a thread whose session has no id yet is tagged in the chat alone as well. A rejection of `tagSession` leaves the chat's tag and is told to the owner (`texts.TAG_AGENT_FAILED`) |
+| `sessionTitles` | `AgentBackend.sessionTitle` is absent: the core shows no title on the root and `/status` has no `Title:` |
+| `fileRestore` | `AgentSession.restoreFiles` is absent and `/rewind` offers no Restore code; with neither this nor `conversationRewind` `/rewind` is not offered |
+| `conversationRewind` | `StartOptions.rewindTo` is never passed and `/rewind` offers no Restore conversation |
+| `goals` | a `goal_changed` event is ignored, with a warning in the log: a reply shows no goal line, `/stop` never says a goal is still set, and a channel's `/stop` drops no goal (`AgentSession.clearGoal` is never called) |
 | `models` | `AgentInfo.models` is ignored: the setup has no Model select and `AgentSession.setModel` is never called |
-| `commands` | `AgentInfo.commands` is ignored: a `!name` that is no word of the daemon is sent as typed, and `!help` lists no command of the agent |
+| `commands` | `AgentInfo.commands` is ignored: a `/name` that is no word of the daemon is sent as typed, and `/help` lists no command of the agent |
 | `promptDuringTurn` | every prompt is sent at once: the agent takes it into the running turn or runs it next (the contract is on the seam) |
-| `sessionListing` | `!resume` answers that the agent keeps no list of its sessions (`texts.RESUME_UNLISTED`), and the cleanup never reads the agent's session list. A chat's session index, when it has one, does not check it: it calls `AgentBackend.listSessions` through the port (`HomeAgent`) for the titles of the threads it lists |
-| `folderTrust` | every folder counts as trusted, `!bind` offers every folder under the root (`texts.BIND_LIST_ANY`; the notice of an unbound channel, `texts.UNBOUND_ANY`, and the `!bind` line of `!help`, `texts.HELP_WORDS_ANY`, say nothing of trust either), and the daemon's own git runs in no folder, so the footer shows no branch and no changes |
-| `loadedContext` | `AgentSession.loaded` is absent: `!memory` and `!skills` answer that the agent does not list what a session loaded (`texts.LOADED_UNAVAILABLE`), and neither `!help`, the suggestions nor `!guide` offer them |
-| `nextPrompts` | no `next_prompt` event is read, and `!next` answers that it is not offered (`texts.NEXT_UNAVAILABLE`); neither `!help` nor `!guide` offers it |
+| `sessionListing` | `/resume` answers that the agent keeps no list of its sessions (`texts.RESUME_UNLISTED`), and the cleanup never reads the agent's session list. A chat's session index, when it has one, does not check it: it calls `AgentBackend.listSessions` through the port (`HomeAgent`) for the titles of the threads it lists |
+| `folderTrust` | every folder counts as trusted, `/bind` offers every folder under the root (`texts.BIND_LIST_ANY`; the notice of an unbound channel, `texts.UNBOUND_ANY`, and the `/bind` line of `/help`, `texts.HELP_WORDS_ANY`, say nothing of trust either), and the daemon's own git runs in no folder, so the footer shows no branch and no changes |
+| `loadedContext` | `AgentSession.loaded` is absent: `/memory` and `/skills` answer that the agent does not list what a session loaded (`texts.LOADED_UNAVAILABLE`), and neither `/help`, the suggestions nor `/guide` offer them |
+| `nextPrompts` | no `next_prompt` event is read, and `/next` answers that it is not offered (`texts.NEXT_UNAVAILABLE`); neither `/help` nor `/guide` offers it |
 
 | Chat capability | What the core does without it |
 |---|---|
 | `nativeStreaming` | the renderer holds the pieces of a text and hands the reply sink each text whole |
-| `rootStatus` | the session asks for no status on the root, the crash repair sets no error status, `ChatProvider.statusMark` is absent and a channel's `!status` writes each session's status as a word |
+| `rootStatus` | the session asks for no status on the root, the crash repair sets no error status, `ChatProvider.statusMark` is absent and a channel's `/status` writes each session's status as a word |
 | `acknowledgement` | `ThreadChat.acknowledge` is absent and a word that took effect is not marked on the owner's message |
 | `activityLine` | `ThreadChat.showActivity` and `activityRefused` are absent, the session shows no activity line, and no message says that a restart waits |
-| `fileUpload` | `ChatProvider.openFile` and `ThreadChat.share` are absent, `!open` answers that the chat cannot show a file (`texts.OPEN_UNAVAILABLE`), and `!diff` is not offered |
-| `threadLists` | `ThreadChat.offer` is absent and `!diff` and `!rewind` are not offered: `!help`, `!guide` and the suggestions leave them out, and typing one answers `texts.DIFF_UNAVAILABLE` or `texts.REWIND_UNAVAILABLE`. The picks of such a list reach the core as `diff-file`, `diff-view`, `rewind-point` and `rewind-action` (`ListPick`) |
-| `messageFold` | `ThreadChat.fold` and `Reply.posted` are absent: `!rewind` still goes back, and a line says the replies after the prompt were not marked as removed (`texts.REWIND_NO_FOLD`) |
-| `threadTags` | `ChatProvider.tagThread` is absent, `!tag` and `!untag` answer that the chat cannot tag a thread (`texts.TAG_UNAVAILABLE`), and `!help` and `!guide` leave them out |
-| `threadPins` | `ChatProvider.pinThread` is absent, `!pin` and `!unpin` answer that the chat cannot pin a thread (`texts.PIN_UNAVAILABLE`), and `!help` and `!guide` leave them out |
+| `fileUpload` | `ChatProvider.openFile` and `ThreadChat.share` are absent, `/open` answers that the chat cannot show a file (`texts.OPEN_UNAVAILABLE`), and `/diff` is not offered |
+| `threadLists` | `ThreadChat.offer` is absent and `/diff` and `/rewind` are not offered: `/help`, `/guide` and the suggestions leave them out, and typing one answers `texts.DIFF_UNAVAILABLE` or `texts.REWIND_UNAVAILABLE`. The picks of such a list reach the core as `diff-file`, `diff-view`, `rewind-point` and `rewind-action` (`ListPick`) |
+| `messageFold` | `ThreadChat.fold` and `Reply.posted` are absent: `/rewind` still goes back, and a line says the replies after the prompt were not marked as removed (`texts.REWIND_NO_FOLD`) |
+| `threadTags` | `ChatProvider.tagThread` is absent, `/tag` and `/untag` answer that the chat cannot tag a thread (`texts.TAG_UNAVAILABLE`), and `/help` and `/guide` leave them out |
+| `threadPins` | `ChatProvider.pinThread` is absent, `/pin` and `/unpin` answer that the chat cannot pin a thread (`texts.PIN_UNAVAILABLE`), and `/help` and `/guide` leave them out |
 | `threadTitles` | `ChatProvider.titleThread` is absent and the core reads no title for the root, whatever the agent declares |
-| `threadDelete` | `ChatProvider.deleteThread` is absent, `!delete-thread` answers that the chat cannot delete a thread (`texts.DELETE_THREAD_UNAVAILABLE`), and `!help` and `!guide` leave it out |
-| `channelClean` | `ChatProvider.cleanChannel` is absent, `!clean-channel` answers `texts.CLEAN_UNAVAILABLE` and is left out of `!help` and `!guide` |
-| `commandSuggestions` | `ChatProvider.suggestCommands` is absent: a `!word` that is no command goes to the agent as typed, and `!` alone is a prompt. With it, and with the agent's `commands` capability, `deliver` stops, inside a session's thread only, a word the session does not list (name or alias) right after `ensureConnected`: before the setup and the same-folder hold when the session is connected or never ran, after the hold when it ran and was closed (so a Cancel starts no process). It ranks the candidates (`commands.commandPool`, `commands.rankCandidates`) and hands them over; nothing reaches the agent. What the owner sends from the suggestion comes back through `ChatInbound.message` as an ordinary message |
+| `threadDelete` | `ChatProvider.deleteThread` is absent, `/delete-thread` answers that the chat cannot delete a thread (`texts.DELETE_THREAD_UNAVAILABLE`), and `/help` and `/guide` leave it out |
+| `channelClean` | `ChatProvider.cleanChannel` is absent, `/clean-channel` answers `texts.CLEAN_UNAVAILABLE` and is left out of `/help` and `/guide` |
+| `commandSuggestions` | `ChatProvider.suggestCommands` is absent: a `/word` that is no command goes to the agent as typed, and `/` alone is a prompt. With it, and with the agent's `commands` capability, `deliver` stops, inside a session's thread only, a word the session does not list (name or alias) right after `ensureConnected`: before the setup and the same-folder hold when the session is connected or never ran, after the hold when it ran and was closed (so a Cancel starts no process). It ranks the candidates (`commands.commandPool`, `commands.rankCandidates`) and hands them over; nothing reaches the agent. What the owner sends from the suggestion comes back through `ChatInbound.message` as an ordinary message |
 
 A chat is required to receive a message, to write a reply it can edit, and to put a request or a
 form to the owner, and a session is a thread: none of these has a capability. Two things a chat
@@ -320,7 +320,7 @@ A test of the configuration the daemon ships (`test/config.test.ts`) names the r
 the top of `test/`. A test that runs the core or a chat provider
 over Claude's recorded streams, tool vocabulary, trust record or model list is a test of the Claude
 module and lives under `test/agent/claude/`: the sessions (`sessions/`), the reply over the recordings and the golden files (`reply/`), the folder trust
-under the footer's git and `!open` (`files/`, `footer-git.test.ts`). `test/conformance/` runs every
+under the footer's git and `/open` (`files/`, `footer-git.test.ts`). `test/conformance/` runs every
 module the registry names against the checks of its seam; the scenarios run the plain agent and
 the memory chat.
 
@@ -336,10 +336,10 @@ module that breaks it fails only in use.
 | Subject | Rule | Checked by `test/conformance/agent.ts` |
 |---|---|---|
 | A tool the terminal words | `AgentBackend.tools` names, by the agent's own tool names, the tools whose calls the terminal folds in words, whose file changes it previews (the title for a change to an existing file; a created file shows its content under the tool's name), whose calls a reply holds until they end (`askers`, `launchers`), whose failure it counts with the others, and the input keys it titles or times a call by. The core draws exactly what is declared and shows any other tool as its name and its line; `plan` names the tool whose approval asks for a plan, and the core hands the chat the plan as `ApprovalRequest.plan`. `AgentEntry.toolNames` lists every tool name the agent is known to offer; none of them, and none of the vocabulary, appears as a string literal under `src/core/` or `src/chat/`, but in a constant `test/vocabulary.test.ts` lists by name (a task kind's label, a button's) | not checked: the plain agent (`PLAIN_TOOLS`) and `test/core/reply/vocabulary.test.ts` prove the core draws a vocabulary of another agent |
-| A command | The owner types `!name args`. When `name` is the `name` of an entry of `AgentInfo.commands`, the agent receives the prompt `name args` behind `AgentWords.commandPrefix` (`/` for Claude Code; the message flow, `messages.messages`); an alias does not match, and any other `!text` arrives as typed. A name in `AgentWords.newSession` is refused inside a thread, and the names in `AgentWords.login` and `AgentWords.logout`, and those in `AgentWords.notOffered` that the session's own list does not have, are answered by the core (`commands.notOfferedAnswer`): none of them reaches the agent | `a command's output arrives whole, once, and uses no model`; nothing checks the text that arrives as typed |
+| A command | The owner types `/name args`. When `name` is the `name` of an entry of `AgentInfo.commands`, the agent receives the prompt `name args` behind `AgentWords.commandPrefix` (`/` for Claude Code; the message flow, `messages.messages`); an alias does not match, and any other `/text` arrives as typed. A name in `AgentWords.newSession` is refused inside a thread, and the names in `AgentWords.login` and `AgentWords.logout`, and those in `AgentWords.notOffered` that the session's own list does not have, are answered by the core (`commands.notOfferedAnswer`): none of them reaches the agent | `a command's output arrives whole, once, and uses no model`; nothing checks the text that arrives as typed |
 | The effort | `effort_observed` and `effort_changed` come before the `turn_ended` of their turn: `ThreadSession.showFooterIfEnded` builds the footer once the session has ended, from what it has by then. Null is the agent's default | Not checked: only that a level is one of `Capabilities.effortLevels` |
 | The model | `model_changed` carries the id of the model the agent runs after a switch (a command, `setModel`, a fallback, a resume) and comes before the `turn_ended` of the command's turn, ahead of a `contextUsage` that after a command still names the model before it. Needs `models` | `a command that switches the model says so before the turn ends`; a back end without `models` emits none (`assertDeclared`) |
-| A goal | `goal_changed` says what became of the goal the owner set with the agent's command: `set`, `not_met` (the agent goes on working for it), `achieved` with the counts it gives, or `cleared`. A check and an achievement come before the `turn_ended` of the turn they belong to; the core draws them in that turn's reply and keeps the condition of a set goal in memory for `!stop`, which names `AgentWords.goalClear` when the agent has one. The agent's own command says when a goal is set or cleared. `clearGoal` is called on an idle session only, after a channel's stop, and shows no event. Needs `goals` | a back end without `goals` emits none (`assertDeclared`) |
+| A goal | `goal_changed` says what became of the goal the owner set with the agent's command: `set`, `not_met` (the agent goes on working for it), `achieved` with the counts it gives, or `cleared`. A check and an achievement come before the `turn_ended` of the turn they belong to; the core draws them in that turn's reply and keeps the condition of a set goal in memory for `/stop`, which names `AgentWords.goalClear` when the agent has one. The agent's own command says when a goal is set or cleared. `clearGoal` is called on an idle session only, after a channel's stop, and shows no event. Needs `goals` | a back end without `goals` emits none (`assertDeclared`) |
 | What the stop hooks said | `stop_hooks_ran` says what the owner's stop hooks said at a turn's end: how many ran, why one stopped the session, what each that refused to end the turn said and what each added for the agent. It comes before the `turn_ended` of the turn it belongs to, after the words written before it; the core draws `Ran N stop hooks`, then the reason for stopping, a `Stop hook error:` line for each refusal and a `Stop hook feedback:` line for each added context, as a line of that turn's reply (`stopHookLines`), every further line indented under the first and passed through `ChatProvider.escape`, so it shows as the hook wrote it. A goal's failed check is a `goal_changed`, never this event | Not checked |
 | Who started a turn | `turn_ended.startedBy` is `owner` for a prompt's turn and `agent` for one the agent starts by itself, to report a task or to answer another session's message. `report_started` names the task before such a turn's words, and needs `backgroundTasks` | `startedBy` is checked for a prompt's turn only |
 | A notification folded | An agent that declares `foldedNotifications` emits `notification_folded` with the task's id when the running turn takes that task's notification, after the task's end and before the turn's `turn_ended`; it emits none for a task whose report the agent opens a turn for, and needs `backgroundTasks`. `task_ended.foldNamed` says per task whether it can: false when the SDK gave the run no id | Only that a back end that lacks `foldedNotifications` emits none (`assertDeclared`, run on the turns of the suite) |
@@ -362,8 +362,8 @@ declares it (a conformance check asserts that): `listSessions` and `datedSession
 core checks the capability and the member before it calls one; a module that declares
 `folderTrust` with no `folderTrusted` has no folder trusted. `AgentInfo.models` is an empty list
 without `models`. `AgentWords.terminal` is null for an agent with no terminal to continue in: the
-core answers `!terminal` with `texts.TERMINAL_UNAVAILABLE`, leaves the terminal line out of
-`!status` and does not look for terminals that hold a session. `SessionEvent.peer_message` and `SessionEvent.subagent_message` need
+core answers `/terminal` with `texts.TERMINAL_UNAVAILABLE`, leaves the terminal line out of
+`/status` and does not look for terminals that hold a session. `SessionEvent.peer_message` and `SessionEvent.subagent_message` need
 no capability: an agent whose sessions cannot message each other, or whose subagents send no message, never emits them.
 
 ### What a chat must do that the types do not say
@@ -456,20 +456,20 @@ text, since it can quote a message; the daemon logs the states of the connection
 - A queued turn is dropped without a reply of its own (`ThreadSession.dropQueued`). One note
   (`turn.notSent`, `N messages were not sent because pardner restarted: send them again.`, with the
   start of each) is added to the end of the thread's running reply, or posted as a message of its
-  own when nothing runs. A `!stop` drops the turns not sent yet the same way, with the note
+  own when nothing runs. A `/stop` drops the turns not sent yet the same way, with the note
   `N messages were not sent because you stopped it: send them again.`, the one a worker has taken
   while the process starts included.
 - Approvals and questions stay open: the chat's connection closes only after the drain. A
-  same-folder hold or a setup still open is cancelled, as `!stop` would.
+  same-folder hold or a setup still open is cancelled, as `/stop` would.
 - A thread left with only background tasks says that a restart waits in its activity line
   (`ThreadSession.threadActivity`, an `Activity` of kind `restart-wait`, brought up to date by `ThreadSession.showRestartWait` at every poll
   of the drain), naming them by their counts (`1 shell`, `2 agents`), since the daemon cannot tell whether a task (a
   dev server, a watcher) ever ends. A status line does not notify and goes with the restart, where a
   message would do both. Where the chat refuses the activity line (`ThreadChat.activityRefused`),
-  one message says it (`texts.RESTART_WAITS_MESSAGE`). `!stop` while a turn runs interrupts
+  one message says it (`texts.RESTART_WAITS_MESSAGE`). `/stop` while a turn runs interrupts
   it and ends the tasks with `AgentSession.stopTask`; Claude Code starts no turn to report a task
   stopped this way (measured: "Stopped task, no report turn"), so neither the drain nor the
-  thread's next prompt waits `constants.INJECTED_TURN_WAIT` for one. `!stop` with no turn running
+  thread's next prompt waits `constants.INJECTED_TURN_WAIT` for one. `/stop` with no turn running
   does not use `stopTask`: Claude Code opens a turn of its own 1 to 2 seconds after such a stop,
   to react to the tasks, and the agent goes on (measured 2026-10-18, CLI 2.1.302).
   `ThreadSession.stop` closes the agent's process instead
@@ -478,7 +478,7 @@ text, since it can quote a message; the daemon logs the states of the connection
   the footer needs, without waiting for it: the footer names the model and context of that read
   when it answered before the process ended (the SDK rejects a request still pending when the
   query closes, sdk.mjs 0.3.302, and has no timeout for one). Otherwise it names those of the
-  last live read the session made (`lastContext`, kept by every footer and `!status`, and by one read made when a
+  last live read the session made (`lastContext`, kept by every footer and `/status`, and by one read made when a
   turn ends while its footer waits for background work, since the stop's own read loses the race
   against the close with the real CLI (measured 2026-10-18, Claude Code 2.1.302; `keepContext`:
   one request per turn, delaying nothing, voided by a model switch or compaction that comes
@@ -488,7 +488,7 @@ text, since it can quote a message; the daemon logs the states of the connection
   logged when the read did not answer. It denies and withdraws the approvals a background agent waits on, as a stop
   of a running turn does. It holds the connect lock until the ends are drawn, so no process
   resumes in the middle of them. The session keeps its thread, id, bypass and effort, and
-  `ensureConnected` resumes it at the next message. `!stop` typed in the channel stops its
+  `ensureConnected` resumes it at the next message. `/stop` typed in the channel stops its
   sessions together (`SessionManager.stopChannel`), since each close waits for its process to exit (2.0 s until the stream ended, measured 2026-10-18 on SDK 0.3.302). The
   resumed process reports each lost task as `stopped` and ends a turn with `num_turns` 0 and no
   text (`test/fixtures/sdk/stop-close-resume.jsonl`). Nothing about the stop is stored, so a
@@ -530,7 +530,7 @@ keeps its own limit, and it runs from the last step that completed: `daemon.run`
 session `SessionManager.closeAll` has closed, and `daemon.main` arms the timer again at each report.
 A shutdown with many replies to end takes longer than the limit (each costs two acquires of the
 shared update limiter, 1.5 seconds a token past a burst of 5: 20 sessions took 53 seconds on
-the fake clock) and is not cut. A start of the agent that a word of the daemon made (`!status`, the
+the fake clock) and is not cut. A start of the agent that a word of the daemon made (`/status`, the
 setup of a thread) and that does not answer completes no step: `ThreadSession.close` waits for it
 and does not abandon it, so the process ends 30 seconds after the last step. What that end leaves
 is ended by the next start's repair, the replies still open and the status of the threads; the
@@ -593,7 +593,7 @@ fields of the `Config`, and each holds only non-enumerable properties, so a log 
 `StateStore` (in `state`) keeps, for each bound channel, its directory and, for each of its threads,
 the folder it was opened in, its Claude Code session id, its bypass choice (on, off, or never
 chosen), the effort level set with `/effort` and `ended`, the status of its root once it is done or
-in error (cleared when the root turns working or waiting again; read only by the session index), the cut of a rewind no prompt has followed yet (`pending_cut`: the prompt's id and the agent's token), the terminals the owner chose **Send here** for (`terminals_allowed`: ids of the agent's processes, which hold the start time besides the pid so that a reused pid is another terminal; written only when some are set, replaced at each answer, cleared when the thread's session id changes, and gone with the thread), the text of its root as the owner wrote it, kept when the root is replaced by the session's title (`root_prompt`), and for a thread `!fork` opened the session its own is a copy of and when the copy was made (`fork_of`, `session_id` and `at`, written only when set; a copy made with no prompt adds `ran` and `named`, each written only while false: no turn has started in it, and its first message has not named it), in
+in error (cleared when the root turns working or waiting again; read only by the session index), the cut of a rewind no prompt has followed yet (`pending_cut`: the prompt's id and the agent's token), the terminals the owner chose **Send here** for (`terminals_allowed`: ids of the agent's processes, which hold the start time besides the pid so that a reused pid is another terminal; written only when some are set, replaced at each answer, cleared when the thread's session id changes, and gone with the thread), the text of its root as the owner wrote it, kept when the root is replaced by the session's title (`root_prompt`), and for a thread `/fork` opened the session its own is a copy of and when the copy was made (`fork_of`, `session_id` and `at`, written only when set; a copy made with no prompt adds `ran` and `named`, each written only while false: no turn has started in it, and its first message has not named it), in
 `state.json` in the instance's configuration folder (version 3, which names the agent
 and the chat that wrote the file). `bypass` is `true` for on and `false` for not on; an
 explicit off also writes `bypass_off: true`, and a thread with `bypass` false and no `bypass_off`
@@ -714,7 +714,7 @@ chat stops. It removes only what an answer makes certain:
 - `cleanup.forgetGoneThreads` then asks about each thread of the channels `forgetGoneChannels`
   found in the same pass (`ChatProvider.threadState`, answering as `channelState` does) and
   removes, with `StateStore.removeThread`, each one that is `gone`: its first message no longer
-  exists, and its session shows in `!resume` again because no thread holds it. A channel that gave
+  exists, and its session shows in `/resume` again because no thread holds it. A channel that gave
   no answer or was just forgotten has none of its threads asked about, and a thread with a live
   session is kept.
 - `StateStore.prune` then drops a no-session thread that the chat (`ChatProvider.openedAt`) says
@@ -750,7 +750,7 @@ neither stores the tombstone's text as the prompt nor edits it ). Nothing the da
 
 ### When a thread leaves `state.json`
 
-A thread's entry is removed in three cases, and no other code removes one. An idle close, `!stop`
+A thread's entry is removed in three cases, and no other code removes one. An idle close, `/stop`
 and a restart keep it.
 
 | Case | What removes it | Described in |
@@ -762,7 +762,7 @@ and a restart keep it.
 ## Who may talk to it
 
 The chat provider checks that it was the owner on every inbound path that acts (a message,
-including a `!word`, a button, a form), each path on its own, before it calls `ChatInbound`: the
+including a `/word`, a button, a form), each path on its own, before it calls `ChatInbound`: the
 core is never told of an act of anyone else, and the chat conformance suite holds that for every
 provider (a message, a click and a form from someone else, and from the owner's own user id in
 another tenant of the chat, never arrive). What "the owner" is, and what else a provider refuses
@@ -772,20 +772,20 @@ Where the daemon's own answers go is decided in `words.wordFlow`. A word typed a
 level, or in a thread that holds no session, acts as a top-level word: its answer is a normal post
 in the channel (`Talk.inChannel`, or `Talk.say` with no thread), which is neither ephemeral
 nor a thread reply, so it stays after a reload and never notifies. Three words are the exception in
-a thread that holds no session, where a word reads as being about that thread: `!stop`, `!resume`
-and `!bind` with a folder act on the whole channel, so there they change nothing and say where to
+a thread that holds no session, where a word reads as being about that thread: `/stop`, `/resume`
+and `/bind` with a folder act on the whole channel, so there they change nothing and say where to
 send them, for the owner alone (`texts.STOP_OUTSIDE_SESSION`, `texts.WORD_IN_THREAD`). A word typed
 inside a session's thread is answered by `Talk.tell` or by `Talk.say`, a line for the owner alone
-under the owner's message, which a chat may drop on reload; `!bypass` adds `Talk.acknowledge` (a
-chat with `acknowledgement`: a mark on the word, which stays); `!stop` there is answered by a post in
+under the owner's message, which a chat may drop on reload; `/bypass` adds `Talk.acknowledge` (a
+chat with `acknowledgement`: a mark on the word, which stays); `/stop` there is answered by a post in
 the thread, which stays: `texts.STOPPED_THREAD` when it stopped something,
-`texts.NOTHING_TO_STOP_THREAD` when nothing runs; `!open` posts its button in the thread.
+`texts.NOTHING_TO_STOP_THREAD` when nothing runs; `/open` posts its button in the thread.
 `messages.messages` chooses the same place for a word's failure, and `Talk.replyOnFailure` logs
 a report that itself fails instead of letting it throw, since a throw would reach the
 message flow's own failure path, which posts `texts.failureReply` (the line follows `ChatError.failure`) threaded under the word. The old-folder
 notice (`texts.OLD_THREAD_FOLDER`, shown on a prompt sent in a thread whose folder differs from the
 channel's current one) and `Not sent.` are lines for the owner alone as well. A Resume button carries
-`<session id>@<thread id>`, the thread of the owner's `!resume` message (resume.parseResumeValue);
+`<session id>@<thread id>`, the thread of the owner's `/resume` message (resume.parseResumeValue);
 the click is checked like any other inbound path, and a value in any other shape answers
 `texts.RESUME_STALE`.
 
@@ -841,7 +841,7 @@ left unfinished does not hide the next turn's text.
 | `agent_error` of kind `authentication` | the same, with `error` `authentication_failed` | a note asking to run `claude` and `/login` on the host. Claude Code sends this category for a 401 and for a 403 alike |
 | any other `agent_error` | the same, with any other `error` | the text of the message, as a notice (note 5) |
 | `model_refused` | a `system` record of subtype `model_refusal_fallback` (with a `model_changed` to `fallback_model` after it, unless `scope` is `local`) or `model_refusal_no_fallback` | a quoted warning (`> ⚠️ ` and the record's `content`, or `<model> refused this request (<category>); no other model answered.` when `content` is empty), and when `retracted_message_uuids` holds any, `> ↩ Retracted: the <model> attempt above.`. What the refused attempt wrote stays: the reply only grows. Written as a line, so it does not stand in for the turn's final text |
-| `compacted` | a `system` record of subtype `compact_boundary` | `Compacted the conversation: 15.0k → 2.0k tokens.`, from its `compact_metadata`, whether the owner asked (`!compact`) or Claude Code compacted on its own (note 6) |
+| `compacted` | a `system` record of subtype `compact_boundary` | `Compacted the conversation: 15.0k → 2.0k tokens.`, from its `compact_metadata`, whether the owner asked (`/compact`) or Claude Code compacted on its own (note 6) |
 | `turn_ended` | a `result` record | its text, when nothing else was written (note 7) |
 
 Notes on the table:
@@ -969,7 +969,7 @@ session hands the answers to the reply itself (`ThreadSession.keepAnswers`,
 request. When the reply has no line of its own for that call (a question asked inside a subagent
 shows on the subagent's line), the request is rewritten instead, with no buttons, into the same
 record, with the same `✓ ` first line (`ThreadChat.keepAnswers`, requests.answeredBlocks); if the chat refuses that rewrite, the
-request is deleted, so no button is left that no longer works. `!stop` denies every request still
+request is deleted, so no button is left that no longer works. `/stop` denies every request still
 pending in the session's own thread and deletes its message, and a request still waiting when the
 session closes or loses its process is answered as refused (`Approvals.denyAll`): a denial for a
 permission, a skip for a question. The back end passes the callback's `signal` to the handler
@@ -983,10 +983,10 @@ it could not be shown (`texts.APPROVAL_UNPOSTED`), and the tool's line records t
 ## Footer
 
 The footer is one context line, shown once when the session has ended everything it was doing,
-and at a forced end (`!stop`, a restart, a lost process, an error). The session decides it and
+and at a forced end (`/stop`, a restart, a lost process, an error). The session decides it and
 no provider does: `ThreadSession.showFooterIfEnded` runs at that moment, right after the
 checkmark (`ThreadSession.reactDoneIfIdle`), at the forced ends (`ThreadSession.abandon`, which a
-close and a lost process reach, and the end of a turn or of a task that `!stop` cut), and when
+close and a lost process reach, and the end of a turn or of a task that `/stop` cut), and when
 what held the end back goes without a turn's end: a reply's end that failed for good
 (`ThreadSession.awaitLanding`) or a prompt that could not start. One definition of the end serves the checkmark
 and the footer, `ThreadSession.sessionEnded`: nobody to answer, no unlanded reply, and
@@ -995,7 +995,7 @@ back as it holds the checkmark. The footer goes under the reply the session's la
 into (`ThreadSession.footerOwedTo`: a turn that started, a report, a standalone update), through
 `Reply.showFooter`, and stays owed until the chat says it landed there; work that starts while it
 is read owes its own, on its own reply, and the read is dropped. It goes on a reply and never on a
-line of the daemon's own: after `!stop` it stays on the reply the stop ended, with the line that
+line of the daemon's own: after `/stop` it stays on the reply the stop ended, with the line that
 says the stop below it. A prompt that could not start wrote no work and is never named, so it
 gets none, and a reply whose end did not land takes none. A footer drawn before stays where it
 is, and a reply keeps the first footer drawn on it. No reply's end carries the footer, so a reply that rests for background work shows none
@@ -1008,7 +1008,7 @@ it, or the first turn of a report when no prompt did, to the moment the session 
 background reports included, written as the terminal writes a turn's length
 (`footer.formatWorkDuration`) and `done` with the end time (a chat may draw it as a date, which each reader's
 client shows in its own time zone); the start is kept in memory only, so a daemon restart
-begins a new count at the next prompt or turn, and `!status` never has it. Then `⚡ bypass` when bypass is on, the model from `AgentSession.contextUsage`
+begins a new count at the next prompt or turn, and `/status` never has it. Then `⚡ bypass` when bypass is on, the model from `AgentSession.contextUsage`
 (the SDK's `getContextUsage()`, named by the display name of the agent's model list, `core/models.ts`;
 after a model switch, the id of the latest `model_changed` until a turn that went to the model ends
 or the usage names that id, `ThreadSession.modelSwitched`; a switch inside a turn waits for the next one), the effort level, the name of the folder this thread was opened in,
@@ -1020,7 +1020,7 @@ With limits, that account is the one they were read for (`UsageLimits.account`),
 switched since the thread connected never shows one account's limits beside another's name;
 without them it is the account the thread's process reported at its connect (`AgentInfo.account`).
 For Claude both are the email of the initialize answer's `account`, which the SDK reads once, when
-the process starts; both are kept in memory only. `!status` shows the account's plan beside
+the process starts; both are kept in memory only. `/status` shows the account's plan beside
 it; the footer does not. The folder the session works in is the `cwd` of the
 latest hook input, which follows a `cd` and a worktree (`ThreadSession.workingDirectory`, set by the
 event `folder_changed`): the back end registers a `Stop` hook, and a `PostToolUse` hook after every
@@ -1034,7 +1034,7 @@ killed at `footer.GIT_TIMEOUT` would leave the lock behind and stop every commit
 changes show only where that folder is in a repository the daemon's git may run in
 (`AgentBackend.trustedRepository`, for Claude `trust.trustedRepository`: one the owner trusted in
 Claude Code by its own key, since a trusted folder does not stand for a repository inside it);
-anywhere else no git runs and the footer leaves both out (`!bind` and `!status` name the
+anywhere else no git runs and the footer leaves both out (`/bind` and `/status` name the
 repositories below the folder still to trust: `AgentBackend.untrustedRepository`, for Claude
 `trust.untrustedRepository`, and `listing.untrustedRepositories`, at most
 `directory.UNTRUSTED_ROWS`, each with `AgentWords.trust` at its key),
@@ -1082,13 +1082,13 @@ The git fields and the trust verdict come from one lookup, `directory.verdictBy`
 neither runs git; an error from either is logged and gives no verdict), made by `footer.gitReading` under `footer.GIT_TIMEOUT` with the git calls: a lookup that
 stalls gives no mark and no git fields. Where the agent says the repository holding the folder lacks only
 the owner's trust, `ThreadSession.footerData` passes `FooterFields.gitUntrusted` and the provider draws a
-mark in place of the git fields (`git: not trusted`); `!status` shows `Git: not trusted` and names that
+mark in place of the git fields (`git: not trusted`); `/status` shows `Git: not trusted` and names that
 repository, read from the folder the session works in and so possibly outside the bound folder, with the line that asks for the trust. A repository
 with no work tree git can list, a lookup that fails (logged) and an agent without `folderTrust` give no mark.
 The lookup runs at every footer, so trusting the repository in the agent's terminal gives a normal footer on
 the next turn with no restart.
 
-`!status`, sent inside a session's thread, lists the same values one per line (`Model: ...`,
+`/status`, sent inside a session's thread, lists the same values one per line (`Model: ...`,
 `Context: ...`), read by the same `ThreadSession.footerData` and written from the same list,
 `footer.footerFields`, as the footer writes them (`footer.formatStatusFields`), then the running
 tasks; bypass and the folder are left out, since its Mode and Directory lines show them. When the
@@ -1108,7 +1108,7 @@ none is running, since the model and the context come from it (the context usage
 a session's first turn and during a turn; measured: "Usage before first turn"). The session tokens
 are those of the process's last result, left out until its first turn and after a result that
 reports none (`/usage`, `/clear`). Claude Code's version comes with a turn's `init` record and not
-with the start (measured: "Version on init"), so a process started by `!status` shows
+with the start (measured: "Version on init"), so a process started by `/status` shows
 `started, version shown after the first turn`. When the directory is missing, unreadable or not
 trusted, the status ends with the message a prompt would get there; when the process fails to start
 for another reason, it ends with the error line a prompt would get.
@@ -1118,13 +1118,13 @@ for another reason, it ends with the error line a prompt would get.
 `SessionManager` (in `manager`) keeps one `ThreadSession` per open thread, across every bound
 channel. A top-level message opens one in the channel's current folder (`SessionManager.open`); a
 reply inside a thread hands back its existing one, rebuilding it first if a restart, an idle close
-or a refused resume closed it (`SessionManager.get`); a Resume click or `!resume <id or title>` opens
-one already set to a chosen session id, in the thread of the owner's `!resume` message
+or a refused resume closed it (`SessionManager.get`); a Resume click or `/resume <id or title>` opens
+one already set to a chosen session id, in the thread of the owner's `/resume` message
 (`SessionManager.resume`); the resume flow of the core (`resume.resuming`) posts the confirmation,
 then removes the list the pick came from; when the confirmation did not post, or the removal
 fails, the list is edited into a line that says what was resumed, so buttons never outlive a
 resume and a failure there never blocks the confirmation. Each thread keeps the folder it was opened
-in for as long as it exists: `!bind` changes only where the *next* thread starts, and refuses while
+in for as long as it exists: `/bind` changes only where the *next* thread starts, and refuses while
 any of the channel's threads is not idle (`SessionManager.bind`).
 
 A `ThreadSession` knows neither library. It starts its agent through `AgentBackend.start`, reads
@@ -1145,9 +1145,9 @@ closed when the start returns (`ThreadSession.connect`).
   Claude Code's own record (`projects["<path>"].hasTrustDialogAccepted` in `~/.claude.json`) by its
   rules, without running git: a repository's root decides, a trusted parent does not cover it, and
   outside a repository a trusted folder covers its subdirectories. The daemon's own git (footer,
-  `!status`, `!open`) runs only in a repository whose key is trusted (`trust.trustedRepository`).
+  `/status`, `/open`) runs only in a repository whose key is trusted (`trust.trustedRepository`).
   An untrusted folder starts nothing, and the reply says to open `claude` there in the terminal
-  once and accept the dialog; `!bind` runs the same checks (`directory.checkDirectory`: missing,
+  once and accept the dialog; `/bind` runs the same checks (`directory.checkDirectory`: missing,
   unreadable, untrusted) and gives the reason instead of promising a session. What the owner does
   is in [How trust applies to git](setup.md#how-trust-applies-to-git); how a folder's repository
   and key are found, and what the daemon has not verified on Windows, is in the header of
@@ -1161,7 +1161,7 @@ closed when the start returns (`ThreadSession.connect`).
   `markdown`, `CLAUDE_CODE_FORK_SUBAGENT=1` and `CLAUDE_CODE_WEB_SEARCH_REFILLS_PER_HOUR=100`. The
   environment is the terminal's defaults, then the daemon's own, then the Claude Code variables
   the owner's file sets (`VARIABLES` in `src/agent/claude/module.ts`), then
-  `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1`, which nothing overrides, and for a copy `!fork` made, `CLAUDE_CODE_RESUME_SOURCE_ALIVE` from its thread's `fork_of` at every start (`forkSource`), as the terminal's `/fork` starts its copy: the back end passes the
+  `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1`, which nothing overrides, and for a copy `/fork` made, `CLAUDE_CODE_RESUME_SOURCE_ALIVE` from its thread's `fork_of` at every start (`forkSource`), as the terminal's `/fork` starts its copy: the back end passes the
   `session_state_changed` record on as `state_changed` (`working`, `idle`, `waiting`). The session
   the usage probe starts gets none of this. The reason for each option, with the measurement and
   the date, is the comment above its constant in `src/agent/claude/session.ts`.
@@ -1172,9 +1172,9 @@ closed when the start returns (`ThreadSession.connect`).
   callback like any other (measured: "Chrome in an SDK session"). The MCP servers the owner
   configured load as in the terminal.
 - After the start, `AgentSession.info` gives the commands the session offers, with their aliases
-  (for `!help` and `!`), its models, and the permission mode Claude Code started in
+  (for `/help` and `/`), its models, and the permission mode Claude Code started in
   (`ThreadSession.nativeMode`, kept as reported). All three are read from the SDK's initialization
-  result, which carries the aliases and the mode (measured: "Initialization result"). `!bypass off`
+  result, which carries the aliases and the mode (measured: "Initialization result"). `/bypass off`
   returns to that mode, or to `default` when the folder's own settings start it in
   `bypassPermissions`. An agent that reports no mode (`AgentInfo.permissionMode` null: a release can
   drop the field, which the SDK's types do not declare) is read as `default` and, for a thread whose
@@ -1182,13 +1182,13 @@ closed when the start returns (`ThreadSession.connect`).
   says once, with the channel and thread ids, that the agent reported no permission mode.
   `ThreadSession.bypass` is the one answer to "does this run in bypass": the
   owner's choice when there is one, else `ThreadSession.nativeMode`. The footer's `⚡ bypass`,
-  `!status`, the channel list and the setup's checkbox all read it.
+  `/status`, the channel list and the setup's checkbox all read it.
 - The daemon never chooses the mode a thread runs in with bypass off: it is the one the owner's
   Claude Code settings give (`permissions.defaultMode`). `ThreadSession.mode` holds the mode the
   session runs in: what the start left, then each `mode_changed` event, which the back end makes of
   the `permissionMode` Claude Code reports in a `status` system record after every change of mode
-  (measured: "Permission mode status"). The `Mode:` line of `!status` shows it; the footer and the
-  channel list mark bypass alone. When Claude Code refuses the mode `!bypass off` returns to (auto
+  (measured: "Permission mode status"). The `Mode:` line of `/status` shows it; the footer and the
+  channel list mark bypass alone. When Claude Code refuses the mode `/bypass off` returns to (auto
   mode on a model that has none), `ThreadSession.setBypass` sets `default`, since the refusal leaves
   bypass running.
 - If the thread's stored session cannot be resumed (its transcript was deleted), the back end's
@@ -1213,12 +1213,12 @@ closed when the start returns (`ThreadSession.connect`).
   rejects with one of those errors fails under the same name (`ProcessLostError`). The requests the thread had open are denied and their messages
   deleted, as a close does it (`ThreadSession.settleRequests`), so none keeps buttons nobody can
   answer and the session stops counting as waiting for the owner: the idle close can fire and
-  `!stop` has nothing left to deny. The open reply ends with an error line, every waiting message
+  `/stop` has nothing left to deny. The open reply ends with an error line, every waiting message
   is told, and the next message starts a new process, once the lost process's reader has ended.
   A failure of the chat while a reply is written never stops the session or the running turn.
 ### Messages, the same-folder hold and the setup
 
-- Messages are sent to the agent at once when it declares `promptDuringTurn` (it takes them into the running turn or runs them next), else queued and run one at a time; each turn gets its own reply in the thread. A `!!command` waits until no turn runs and nothing is sent (`ThreadSession.untilIdle`). `!stop`
+- Messages are sent to the agent at once when it declares `promptDuringTurn` (it takes them into the running turn or runs them next), else queued and run one at a time; each turn gets its own reply in the thread. A `!command` waits until no turn runs and nothing is sent (`ThreadSession.untilIdle`). `/stop`
   interrupts the running turn, denies its pending approvals and stops the thread's background tasks
   (`AgentSession.stopTask`); an interrupt or a stop of one task that the agent refuses is logged by
   the error's name and the others go on. It then shows `✅` on the root through `ThreadSession.react`, which clears
@@ -1232,20 +1232,20 @@ closed when the start returns (`ThreadSession.connect`).
   owner as a `HoldRequest`; the wait is kept
   in `hold.Holds`, memory only). The wait runs
   inside the thread's own arrival lock (`messages.messages`), so a later message of the same thread
-  queues behind it and opens no second hold. `!stop` inside the held thread or a top-level `!stop`
+  queues behind it and opens no second hold. `/stop` inside the held thread or a top-level `/stop`
   of its channel cancels the wait the same way `Don't send` does (`Holds.cancel`); so does
   `SessionManager.drain`, which also cancels every hold still open when a restart starts (a hold
   opened after that point checks `SessionManager.draining` itself, since the drain never revisits
   it). Either way the owner gets `Not sent.`; a hold a message could not post is cancelled and told
   `texts.HOLD_UNPOSTED`, failing closed: nothing is sent into a folder another session is using.
-- A shell command (`!!<command>`, `commands.Shell`): routed before the words, in the thread's
+- A shell command (`!<command>`, `commands.Shell`): routed before the words, in the thread's
   arrival lock as a prompt is (`messages.messages`), so a later message of the thread waits for
   it. It is refused when `PARDNER_SHELL` is off (`Config.shellCommands`), when the agent does not
   declare `shellCommands`, outside a session's thread and in a session that never ran. Otherwise
   it passes the guards a typed message passes, in the same function (`deliver`, which runs inside
   the arrival lock its caller holds): the restart refusal, the same-folder hold and the terminal
   that holds the session. Then `askOwner` puts a `ShellRequest` to the owner, kept in `hold.Holds` with the kind `shell`, so
-  an answer of another kind never resolves it; `Cancel`, `!stop` and a drain end it as `Don't send`
+  an answer of another kind never resolves it; `Cancel`, `/stop` and a drain end it as `Don't send`
   ends a hold. After `Run` the hold and the terminal are looked at again, since the owner may
   have taken minutes to click: a session that started working since, or a terminal turn, is asked
   about; one the owner already sent beside, or a terminal already allowed, is not. Then `Run`
@@ -1259,10 +1259,10 @@ closed when the start returns (`ThreadSession.connect`).
   when the agent takes the prompt into a turn already running, `ThreadSession.headTaken` writes it
   there; a turn that fails shows it before the error, and one a drain drops is named in the note
   with how it ended. After the run the worker connects again and checks `settled` and the drain
-  once more, in the same step as the send. A `!stop` during the run ends it and stops the rest as
-  any `!stop` does: the reply shows the run as stopped and the agent is sent nothing.
+  once more, in the same step as the send. A `/stop` during the run ends it and stops the rest as
+  any `/stop` does: the reply shows the run as stopped and the agent is sent nothing.
 - Session setup: a session's first prompt is held before the same-folder hold and before anything is
-  sent: a top-level message that opens a session (a prompt, files, or a `!name` passthrough), and a
+  sent: a top-level message that opens a session (a prompt, files, or a `/name` passthrough), and a
   reply in a thread where nothing was ever sent (`ThreadSession.neverRan`: no turn queued and no
   stored session id), as after a cancelled setup or a same-folder hold's `Don't send`.
   `setup.setupFlow` starts the agent session, then puts a `SetupRequest` to the owner through
@@ -1277,12 +1277,12 @@ closed when the start returns (`ThreadSession.connect`).
   `effortLevels` when it lists no model (left out when the agent has none either). A bypass choice
   is shown only when the request offers a bypass mode, and is ticked when the folder's own Claude
   Code settings start the process in bypassPermissions, so unticking is an explicit off, with
-  `!bypass off`'s semantics. Changing the model redraws the message with the new model's levels,
+  `/bypass off`'s semantics. Changing the model redraws the message with the new model's levels,
   drawn from what the request said. Start carries the setup id and the provider reads every control into the
   selection of an `OwnerAnswer`; the core reads that against the
   models, efforts and bypass the request offered (`setup.chosen`), and `ThreadSession.applySetup` applies it, and Start is authoritative:
   effort and bypass are written from the choice whatever `state.json` held (a restart can have left
-  either; `!bypass` in the thread is refused before Start, `ThreadSession.beforeStart` and
+  either; `/bypass` in the thread is refused before Start, `ThreadSession.beforeStart` and
   `texts.BYPASS_BEFORE_START`, and one typed while Start is applied waits for it,
   `ThreadSession.switchBypass`), so what runs is what the summary says. An effort the live session
   does not run at is stored and set on the live session with `AgentSession.setEffort`: the Claude
@@ -1304,7 +1304,7 @@ closed when the start returns (`ThreadSession.connect`).
   since the caller is resolved at the `result` and the next turn may already be writing. The in-line mark, on the two paths that take it, can cover next-turn lines already written, and those are dropped. A line
   flushed after that read, or a `stat` that keeps failing past the command's end, is read with a
   later record. The `idle` the session says after it is read as any state: the activity line
-  does not change. An `interrupt()` while the command runs (`!stop`, which `ThreadSession.stop` forwards while a Start is applied) makes
+  does not change. An `interrupt()` while the command runs (`/stop`, which `ThreadSession.stop` forwards while a Start is applied) makes
   `setModel` reject and closes the session, so `ThreadSession.applySetup` undoes the setup and the
   owner gets `Not sent.`; the first prompt of a setup that went through runs on the chosen model.
   It does not call the SDK's `setModel`, which leaves an override that a later `/model` to the
@@ -1314,9 +1314,9 @@ closed when the start returns (`ThreadSession.connect`).
   choice, or the folder's own bypass). The message then becomes one summary line, written inside the
   same wait (a cancel that already deleted the message skips the edit), and stays; the held message
   goes on unchanged. The wait shares `askOwner` and `hold.Holds` with the same-folder hold.
-  The entry stays in `Holds` while the answer is applied, so `!stop`, a top-level `!stop` and a
+  The entry stays in `Holds` while the answer is applied, so `/stop`, a top-level `/stop` and a
   drain cancel it then too (`Pending.cancelled`): nothing is sent, the message is deleted, the owner
-  gets `Not sent.` and `!stop` does not say nothing is running. An answer that arrives before
+  gets `Not sent.` and `/stop` does not say nothing is running. An answer that arrives before
   `chat.postMessage` has returned is applied the same way. A failed apply removes the message and
   the error reaches the owner. Whatever an unsent Start applied (stored effort, bypass, the agent
   session with its effort and model) is undone by `ThreadSession.forgetSetup`, called when a setup
@@ -1328,7 +1328,7 @@ closed when the start returns (`ThreadSession.connect`).
 
 - Each `ThreadSession` asks its `ThreadChat` for one of four statuses (`working`, `waiting`, `done`,
   `error`; for a chat that declares `rootStatus` only), and the provider shows it on the thread's own root message: a
-  top-level owner message, or the owner's own `!resume` message. Every change of the status goes through `ThreadSession.setStatus`, which sets the
+  top-level owner message, or the owner's own `/resume` message. Every change of the status goes through `ThreadSession.setStatus`, which sets the
   word asked last, its copy in `state.json` and the root together. `ThreadSession.react` asks for a status at once and does not await it, since a status
   must never delay a turn, and the chat makes the changes in the order asked; the one exception is
   `✅`, awaited right after the end of the reply it follows, so it never shows first. `⏳` working: a
@@ -1352,8 +1352,8 @@ closed when the start returns (`ThreadSession.connect`).
   asked for last and makes no call when the root already shows it. A session rebuilt on the same
   root (a restart, a resumed thread) starts from a fresh state of the provider's, so an earlier
   session's leftover status never sits next to the new one. A status the chat refuses for good is logged once for the whole process and the provider stops asking for the
-  rest of the run. A top-level word (`!status`, `!stop`,
-  `!bind`) is not a session and gets no reaction of its own.
+  rest of the run. A top-level word (`/status`, `/stop`,
+  `/bind`) is not a session and gets no reaction of its own.
 - Each `ThreadSession` also has the thread's activity line (`ThreadChat.showActivity`; for a chat
   that declares `activityLine` only), which the provider draws as the chat's line under the thread's last message, saying what
   `ThreadSession.threadActivity` gives in the chat's own words . `Working…`
@@ -1371,13 +1371,13 @@ closed when the start returns (`ThreadSession.connect`).
   lasts, and ends it with the `status` record that carries `compact_result`, and the back end says
   each once. The first event also starts the turn it belongs to, when one is due. During a stop
   that only background tasks hold, the line says `RESTART_WAITS` whatever the footer shows.
-  Nothing while an approval, a question or a hold waits on the owner, while `!stop` winds a turn
+  Nothing while an approval, a question or a hold waits on the owner, while `/stop` winds a turn
   down, and once the session is closed. `ThreadSession.showThreadStatus` brings the status to that
   line after anything that can change it (every `ThreadSession.react`, the start and the end of a
   turn, a failed or dropped prompt, `ThreadSession.abandon`, every change of the running tasks
   through `ThreadSession.showRunning`). `ThreadChat.showActivity` never waits on the chat: the provider makes its calls in order, so two
   quick changes end on the last one and a turn that ends at once sets nothing. 
-  An answer to a word typed in the thread (`!status`, `!bypass`) is posted outside the session:
+  An answer to a word typed in the thread (`/status`, `/bypass`) is posted outside the session:
   `Answers.deliver`, the one function those posts go through, tells `SessionManager.wrote`, which
   reaches the live session's status the same way (`ThreadChat.written`). `ThreadSession.close`
   clears the status after it has cancelled its tasks (`ThreadChat.close`). Nothing about it is
@@ -1457,7 +1457,7 @@ closed when the start returns (`ThreadSession.connect`).
   cross, the prompt's replay tells whose turn starts, before its first word
   (`ThreadSession.whoseTurn`). Where no replay settles it, `turn_ended` tells who started the turn,
   and the queue is put back in order (`ThreadSession.settle`, which logs it); that one reply can
-  then carry the other's label. A message a `!stop` in the gap may have cut with its turn is in
+  then carry the other's label. A message a `/stop` in the gap may have cut with its turn is in
   doubt (`Turn.inDoubt`) until its replay shows it runs or the wait drops it: no turn that shows
   something before its end, no compaction, refusal or task end is put on its account
   (`ThreadSession.owed`), while the thread's status still counts it. A turn that a further stop
@@ -1525,11 +1525,11 @@ for both and the prompt gets no reply of its own. The core sends every prompt at
   corrects the guess at the turn's end (`ThreadSession.settle`).
 - `AgentSession.interrupt` with such a prompt queued ends the report turn with
   `error_during_execution`, and the prompt then runs as a turn of its own. What Claude Code does
-  with a prompt taken in when `!stop` interrupts is not measured.
+  with a prompt taken in when `/stop` interrupts is not measured.
 - A session abandoned first (a lost process, a close, a restart) gives a prompt taken in the same
   note as at a normal end, and lists among the messages not sent only those not taken in (a
   prompt dropped with the process is not in the transcript a resume reads, measured 2026-11-09).
-- `!stop` with prompts sent and no turn running still interrupts, but leaves `interrupting`
+- `/stop` with prompts sent and no turn running still interrupts, but leaves `interrupting`
   down: the turn that starts afterwards reacts `⏳` as any turn does, and its stopped end puts
   the root back on `✅` (`ActiveTurn.afterStop`). The channel's stop drops the goal after that turn's
   end, as after any stopped turn (`stopTail`). An interrupt 50 to 300 ms after a send from idle
@@ -1537,7 +1537,7 @@ for both and the prompt gets no reply of its own. The core sends every prompt at
   replay (measured 2026-11-09). The prompt then gets the note that it was not sent, in place of an
   empty `Stopped the current turn.` (`ActiveTurn.replayed`); an interrupt at 0 ms is ignored and
   the prompt runs. A command of the agent is never sent into a running turn: it waits for
-  `ThreadSession.untilIdle` like a `!!command`.
+  `ThreadSession.untilIdle` like a `!command`.
 
 The order of replays, the cases above and what is released when are in the doc comments of
 `ThreadSession.acknowledge`, `ThreadSession.whoseTurn` and `ActiveTurn.taken`.
@@ -1554,7 +1554,7 @@ The order of replays, the cases above and what is released when are in the doc c
 - A thread whose agent lists a scheduled job is not closed: the wait goes on hour by hour for
   `constants.LOOPS_BELIEVED_SECONDS` (7 days, the time Claude Code keeps a job) after the agent
   last listed it, since the list is reported only when a turn ends. The list is kept in memory
-  only, and `!status` shows it (`ThreadSession.scheduledJobs`).
+  only, and `/status` shows it (`ThreadSession.scheduledJobs`).
 
 ### Scheduled runs and the loop card
 
@@ -1628,9 +1628,9 @@ The order of replays, the cases above and what is released when are in the doc c
   (running, sent or queued) ends with `This reply ended before an answer:` and the reason. A closing
   session denies its open requests and takes them back, and denies without showing it a request
   the agent makes from then on (`ThreadSession.askOwner`). A closing
-  session waits for an agent session that a daemon word (`!help`, `!bypass`, `!status`) is still
+  session waits for an agent session that a daemon word (`/help`, `/bypass`, `/status`) is still
   starting, then closes it, and starts no other: the word gets `SessionClosed`, which tells the
-  owner to send it again, and `!bypass` stores nothing. It waits the same way for a start its own
+  owner to send it again, and `/bypass` stores nothing. It waits the same way for a start its own
   worker gave up when the close cancelled it: the session keeps that start, and `close` returns,
   and `doneClosing` fires, only once the agent process is closed (`AgentBackend.start` takes no
   signal, so a launching process is closed when it is there). A session rebuilt to replace one still
@@ -1648,14 +1648,14 @@ back when it starts (`ThreadSession.ensureConnected`), because Claude Code's own
 restores `bypassPermissions` (documented: "Resume and bypass"). An explicit off in a folder whose
 own settings start in bypass is set back to `default`, so the folder's bypass does not return
 silently; never chosen leaves Claude Code's own mode. Bypass and the `/effort` level belong to the
-thread, not to the Claude Code session id, so a session `!resume` opens starts with both unset
+thread, not to the Claude Code session id, so a session `/resume` opens starts with both unset
 (what the owner sees: [Answers and limits of the words](setup.md#answers-and-limits-of-the-words)).
 How each case reaches the agent is in the doc comment of `ThreadSession.bypassChoice`.
 
 ### The title on the root
 
 At the end of every turn (`ThreadSession` calls `title.ThreadTitle.refresh` after the status is
-shown, and does not await it), at a `!status` that read a title, and once more after an idle close
+shown, and does not await it), at a `/status` that read a title, and once more after an idle close
 (the agent may write its title a moment after a turn's end, which that turn's read missed), the
 session asks the agent for its title
 (`AgentBackend.sessionTitle`) and, for a new one, has the chat make the root read it and nothing
@@ -1684,7 +1684,7 @@ at the next one, unless the chat says the refusal is permanent. `root_prompt` is
 message content `state.json` holds, because the daemon deleted it from the chat; it goes with its
 thread when the thread is removed.
 
-A root opened with a lead (`ChannelChat.open(markdown, { lead, words })`, used by `!fork` for
+A root opened with a lead (`ChannelChat.open(markdown, { lead, words })`, used by `/fork` for
 `Fork of <link>`) keeps the lead in front of the title. The chat remembers the lead, the rest of the
 root's words, the title and `words` (what the owner typed that the root shows, one line, in the form
 the agent receives a message) in the message's metadata, and
@@ -1700,7 +1700,7 @@ turn. A failure of either call is logged as one warning with the error's name an
 text, and the turn goes on: the refresh runs after the turn's reply, status and footer, and
 nothing waits for it.
 
-`!status` in a thread reads the agent's title again (`sessionTitle`, before the check that the
+`/status` in a thread reads the agent's title again (`sessionTitle`, before the check that the
 session was not closed meanwhile, the last await of `ThreadSession.status`) and shows it on a
 `Title:` line after the session lines. As the last line it shows `Prompt:` and the stored
 `rootPrompt`, as the owner wrote it in the form the agent receives a message; an empty one is left
@@ -1713,9 +1713,9 @@ leaves its line out, and a failure to read the title is logged and leaves that l
 thread not titled yet has no prompt. With Claude Code the title
 is `SDKSessionInfo.customTitle` (see `docs/sdk-surface.md`).
 
-## Files offered by `!open`
+## Files offered by `/open`
 
-What `!open` offers, which of it changed since a thread started and which paths are safe to read
+What `/open` offers, which of it changed since a thread started and which paths are safe to read
 are the core's, in `src/core/files/` (`listing`, `changed`, `read`, `paths`, `waiting`), written
 for any chat. A provider reaches them through `core/port.ts`.
 
@@ -1723,7 +1723,7 @@ The search reads the folder from disk, and the changed files come from git:
 
 - **Repositories.** `listing.repositoriesOf` takes the one holding the folder when
   `SessionManager.repository` finds it usable, else the usable ones at most two levels below it
-  (the walk `!bind` uses, which never enters a repository). A repository deeper is not looked up,
+  (the walk `/bind` uses, which never enters a repository). A repository deeper is not looked up,
   so its files are walked like any folder.
 - **The listing.** Inside a repository the files are `ls-files --cached --others
   --exclude-standard`, as the terminal's `@` picker does under `respectGitignore`; elsewhere
@@ -1732,7 +1732,7 @@ The search reads the folder from disk, and the changed files come from git:
   seconds (3 when it ran out of time or a repository's list failed), and at most 16 folders. The
   repositories of a folder are kept for 5 seconds, and git runs in at most 4 at once.
 - **No match.** A kept listing is never the reason for "no match": `Listings.search` lists the
-  folder again first. A search over an incomplete listing says so (`Found.complete`): `!open
+  folder again first. A search over an incomplete listing says so (`Found.complete`): `/open
   <words>` answers texts.OPEN_NO_MATCH_PARTIAL and the search message adds the same line under its buttons.
   Every file that matches is checked on disk, outside the listing's budget.
 - **Changed files.** The union over the same repositories (`changed.changedIn`): `status` under
@@ -1740,7 +1740,7 @@ The search reads the folder from disk, and the changed files come from git:
   writes the index, so none can leave an `index.lock` that stops the owner's own `git`.
 - **The start commit.** `changed.startCommit` is where `HEAD` was when the thread started, read
   from HEAD's reflog at the thread's start (the provider passes the root's `thread_ts` as epoch
-  seconds). It is computed when `!open` builds the list and kept nowhere, so a restart gives the
+  seconds). It is computed when `/open` builds the list and kept nowhere, so a restart gives the
   same answer. A reflog that does not go back that far gives its oldest entry, unless the
   repository was made or cloned since the thread began: then every file counts. With no reflog
   or no commit yet, the list is the uncommitted and untracked files.
@@ -1759,24 +1759,24 @@ The tool is the agent module's, what it does is the core's, and the upload is th
   offers `ThreadChat.share`. Its
   `share` (`src/core/sessions/share.ts`) joins a relative path onto the folder the session works
   in (`ThreadSession.workingDirectory`, else the bound folder) and reads it with
-  `files.read.readOpenable` under the bound folder (the rule of `!open`), titling it with its path
+  `files.read.readOpenable` under the bound folder (the rule of `/open`), titling it with its path
   from the real bound folder, refuses an empty file, checks the abort signal, then
   calls `ThreadChat.share`. It resolves with a line for the model from `texts.SHARE_*`, naming no
-  tool and no chat, and sets the thread's activity line again, as `!open` does after an upload.
+  tool and no chat, and sets the thread's activity line again, as `/open` does after an upload.
 - **The Claude module** (`src/agent/claude/daemon-tools.ts`) builds one in-process MCP server named
   `pardner` for each `ClaudeSession`, with one tool for each member present, and adds it to
   `Options.mcpServers`; a `bare` session builds none. The tool is deferred behind tool search and
   carries no annotation. A handler that throws returns an error result with a generic line, and the
   log keeps the error's name alone. The signal an action receives aborts when the session closes.
-- **The chat** shares the bytes through the one upload function `ThreadChat.share` and `!open` both
-  use, so a file shared by the tool is typed as `!open` types it.
+- **The chat** shares the bytes through the one upload function `ThreadChat.share` and `/open` both
+  use, so a file shared by the tool is typed as `/open` types it.
 
 A call is an ordinary tool call to the permission flow: `ClaudeSession`'s `canUseTool` decides
 nothing on the tool's name.
 
-## Changed files of `!diff`
+## Changed files of `/diff`
 
-`!diff` is the core's (`src/core/flows/diff.ts`); the chat draws a list and shares a file
+`/diff` is the core's (`src/core/flows/diff.ts`); the chat draws a list and shares a file
 (`ThreadChat.offer`, `ThreadChat.share`). The word runs git only in the repository the agent's
 record of trust names for the session's folder (`SessionManager.repository`); an agent that keeps
 no record (`folderTrust` false) does not offer it. A repository still to trust is refused with the
@@ -1812,9 +1812,9 @@ agent's own line (`AgentWords.trust`).
   not stored: a restart, an idle close of the process and a turn typed in a terminal leave none,
   and a change made by a shell command is under `Current` only.
 
-## Going back with `!rewind`
+## Going back with `/rewind`
 
-`!rewind` is the core's (`src/core/flows/rewind.ts`); the agent lists the prompts and restores
+`/rewind` is the core's (`src/core/flows/rewind.ts`); the agent lists the prompts and restores
 the files or cuts the conversation, the chat draws two lists and folds messages
 (`ThreadChat.offer`, `ThreadChat.fold`). The agent declares `fileRestore` and
 `conversationRewind` (either is enough for the word to be offered), the chat `threadLists`.
@@ -1842,10 +1842,10 @@ the files or cuts the conversation, the chat draws two lists and folds messages
   to the core): the agent refuses the cut once someone else wrote to the session, the thread goes
   on without it and the owner is told (`texts.REWIND_DROPPED`). A move to a terminal drops the cut too (and tells the owner,
   `texts.REWIND_DROPPED_TERMINAL`); the turns a terminal wrote are kept by the token alone, since
-  the foreign-turn check has no saved message to compare with until the next prompt. `!rewind` lists only the prompts before a cut that waits. `RewindRefused` (the agent could not
+  the foreign-turn check has no saved message to compare with until the next prompt. `/rewind` lists only the prompts before a cut that waits. `RewindRefused` (the agent could not
   cut there) starts the session without the cut; a refusal when the cut is asked again after an
   idle close is logged and the thread goes on with the whole conversation. The saved message of
-  the foreign-turn check and the turns' edits of `!diff` of the dropped prompts are forgotten. What is
+  the foreign-turn check and the turns' edits of `/diff` of the dropped prompts are forgotten. What is
   folded and forgotten is the dropped prompts' (the agent's list from the picked one on), found by
   id.
 - **The replies.** `sessions/rewind-memory.RewindMemory` remembers, per prompt, the replies its
@@ -1863,9 +1863,9 @@ the files or cuts the conversation, the chat draws two lists and folds messages
   2026-10-29). Every non-bare session starts with `enableFileCheckpointing`. A start the CLI
   refuses arrives through `initializationResult()` and is `RewindRefused` when a cut was asked.
 
-## The suggested next prompt with `!next`
+## The suggested next prompt with `/next`
 
-`!next` is the core's (`src/core/flows/next.ts`); the agent says its guess after a turn (the event
+`/next` is the core's (`src/core/flows/next.ts`); the agent says its guess after a turn (the event
 `next_prompt`, said after the turn's `turn_ended` and before the next turn's first event), the
 chat draws a list with Send and Cancel. The guess is held in memory only, per thread, in
 `Suggestions` (`src/core/suggestions.ts`, owned by `SessionManager`), under a fresh UUID for each.
@@ -1880,7 +1880,7 @@ guards of a typed prompt then apply. The offer is no request: no `Holds` entry, 
 
 ## Updating pardner
 
-The owner can update the copy the daemon runs from the chat (`!pardner update` and the choice in its
+The owner can update the copy the daemon runs from the chat (`/pardner update` and the choice in its
 offer) and from a terminal (`pardner update`). The
 owner's view is in `docs/setup.md`, "Updating pardner"; This section is the machinery and the measurements it rests on.
 
@@ -1899,12 +1899,12 @@ owner's view is in `docs/setup.md`, "Updating pardner"; This section is the mach
 | `core/port/updates.UpdatesHost` | what the core sees of the machine: `installed`, `latest`, `updatable`, `copyVersion`, `supervised`, `sharing`, `lock`, `updateHeld`, `install`, `restartOthers` (the instances it did not reach), `restart`, `logFile`, `changelog`. `latest`, `updatable` and `install` take the `AbortSignal` that ends npm |
 | `core/updates.Updates` | the state in memory: the latest version and when it was checked, why a check failed, whether the copy updates, and the phase of an update (`idle`, `installing`, `restarting`, `failed`). `check` runs one at a time, never rejects, and resolves false when the copy was being replaced by another process (the previous answer about the copy stands); `noticeDue` and `line` give the notice and the line of the chat's page (`UpdateLine`, none for a copy that does not update or a daemon no service runs); `onChange` redraws the page. `track` runs a click so that a stop can wait for it (`settled`) or end its install (`cancelInstall`); `endChecks` ends the questions to the registry |
 | `core/updates.checkEvery` | the check at start and every `UPDATE_CHECK_SECONDS` (6 hours), or after `UPDATE_RETRY_SECONDS` (30) when a check could not finish, on the signal that ends the cleanup, and none once a drain has begun |
-| `core/flows/update.updating` | the `PardnerFlow`: `show` (`!pardner`), `update` (the offer), `restart`, `picked` (the click, from the offer or from the page) and `notice` |
+| `core/flows/update.updating` | the `PardnerFlow`: `show` (`/pardner`), `update` (the offer), `restart`, `picked` (the click, from the offer or from the page) and `notice` |
 | `core/sessions/manager.SessionManager.blockStarts` | blocks every start of an agent process until the function it returns is called |
-| `core/sessions/deps.SessionDeps.updating` | whether any process of the machine holds the update lock (`UpdatesHost.updateHeld`): `ThreadSession.ensureConnected` and the usage probe wait on it as on `blockStarts`, and so do a message that opens a thread (`SessionManager.refusesStarts`) and `!pardner restart` |
+| `core/sessions/deps.SessionDeps.updating` | whether any process of the machine holds the update lock (`UpdatesHost.updateHeld`): `ThreadSession.ensureConnected` and the usage probe wait on it as on `blockStarts`, and so do a message that opens a thread (`SessionManager.refusesStarts`) and `/pardner restart` |
 
 The daemon reads its version at the start of `run` (`version.installedVersion`), not at first use:
-an install replaces the copy's `package.json` while the process goes on, and what `!pardner`
+an install replaces the copy's `package.json` while the process goes on, and what `/pardner`
 reports is the version it started as.
 
 ### A stop during an update
@@ -1962,7 +1962,7 @@ and the offer). The version is the choice's value, untrusted like every pick's.
    under way.`, which names no version because the holder's is not known), and the
    daemon is checked for draining once more. Then, one by one: the version is newer than the one
    that runs, the copy still updates (`Updates.validate`), the daemon is supervised, and the copy
-   does not already hold the version (it would only need `!pardner restart`). Each of these
+   does not already hold the version (it would only need `/pardner restart`). Each of these
    refusals rewrites the offer into its sentence and changes nothing else.
 3. `SessionManager.blockStarts`: for as long as the install runs, `ThreadSession.ensureConnected`
    throws `StartsBlocked`, which answers `texts.RESTARTING`, and so do the words that connect a
@@ -1991,7 +1991,7 @@ failed install with a drain the owner was already told about and no way to cance
 
 ### The message after the restart
 
-`!pardner restart` posts its line through `Talk.postInChannel`, which resolves with the id
+`/pardner restart` posts its line through `Talk.postInChannel`, which resolves with the id
 `ChannelChat.notice` returns (null when the chat cannot say, and then nothing is recorded). The
 flow writes `restart_notice` before it calls `UpdatesHost.restart`, so a crash between the two
 leaves a record whose message is still rewritten. `run` takes the record before
@@ -2001,8 +2001,8 @@ leaves a record whose message is still rewritten. `run` takes the record before
 `Updates.installed` is the version asked, else `texts.UPDATE_NOT_TAKEN`. It then removes the key,
 after a rewrite the chat refused or for a message deleted since (the log line carries the error's
 name only), but only while the key still names that message (`StateStore.clearRestartNotice`): a
-`!pardner restart` typed meanwhile has recorded its own, which stays for the next start. The flow
-answers a second `!pardner restart` while the first is being asked as it answers one during a
+`/pardner restart` typed meanwhile has recorded its own, which stays for the next start. The flow
+answers a second `/pardner restart` while the first is being asked as it answers one during a
 drain, and records nothing for it. A restart asked from a
 terminal, a `SIGTERM` from the service manager and the instances `UpdatesHost.restartOthers`
 signals write no key, and neither does an offer that names an instance that did not restart: the
@@ -2020,7 +2020,7 @@ supervision test applies, since the command restarts services and is not restart
 anything, whether to tell him (`Updates.noticeDue`: a newer version found by a check, the copy
 updates, no update under way, a service runs this daemon, not the version `StateStore.updateNotice` holds). It records the version
 then, so a second message sent right after finds it told, and so does a restart of the daemon. A
-message that is itself `!pardner` records the version and adds nothing, since its answer says it.
+message that is itself `/pardner` records the version and adds nothing, since its answer says it.
 The line goes to the thread of the message through `ThreadChat.tell`; for a message of the channel,
 whose thread has no reply yet, to the channel through `ChannelChat.tell`, because a chat may show a
 line for the owner alone in a thread only once that thread is active.
@@ -2074,7 +2074,7 @@ down when the observation was made. A documentation read has no version. A row n
 the package it was observed through (`ClaudeSDKClient`, `claude-agent-sdk`,
 `@anthropic-ai/claude-agent-sdk`); the behaviour is Claude Code's own. A row observed through the
 Python SDK, which the daemon no longer uses, says so when it has not been measured again on the
-TypeScript SDK. The last row is a documentation read, not an observation. Where `!open` relies on
+TypeScript SDK. The last row is a documentation read, not an observation. Where `/open` relies on
 git's behaviour, its measurements are in the header of `src/core/files/listing.ts` and repeated by
 `test/core/files/changed.test.ts`. 
 

@@ -50,7 +50,7 @@ export type FooterKey =
   | "week_limit"
   | "account";
 
-/** One of the footer's values: `!status` shows `label: value`, a provider's footer its own mark. */
+/** One of the footer's values: `/status` shows `label: value`, a provider's footer its own mark. */
 export interface FooterField {
   readonly key: FooterKey;
   readonly label: string;
@@ -118,7 +118,7 @@ export class UsageCache {
 
 /**
  * `git` on `repository`: its output, or null when it fails. The caller holds the time limit
- * (`gitState` here, `openfile` for `!open`) through `signal`, which kills the process and
+ * (`gitState` here, `openfile` for `/open`) through `signal`, which kills the process and
  * rejects with its reason, and chooses commands that never write the index (see `changesOf`).
  * With `maxBytes`, the process is killed once it has written more than that, and what was read
  * so far (more than `maxBytes` bytes) is the answer: a caller that bounds what it keeps needs
@@ -427,7 +427,7 @@ export function formatLimit(limit: UsageLimit, now: number): string {
 }
 
 /**
- * The values the footer and `!status` both show, in the footer's order; what is not known is left
+ * The values the footer and `/status` both show, in the footer's order; what is not known is left
  * out. One list, so the two never write a value differently.
  */
 export function footerFields(data: FooterFields, now: number): FooterField[] {
@@ -500,7 +500,7 @@ export function valueWithDetail(field: FooterField): string {
 }
 
 /**
- * The footer's values as `!status` lines, one per field; bypass and the folder are left out,
+ * The footer's values as `/status` lines, one per field; bypass and the folder are left out,
  * since the status's Mode and Directory lines already show them.
  */
 export function formatStatusFields(data: FooterFields, now: number): string[] {

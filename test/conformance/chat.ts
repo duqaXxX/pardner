@@ -122,7 +122,7 @@ export interface Person {
   picksPoint(listed: ThreadListed, promptId: string): Promise<void>;
   /** Uses the control of `action` in the actions of a rewind list offered in a thread. */
   picksAction(listed: ThreadListed, action: RewindAction): Promise<void>;
-  /** Uses Send (`send` true) or Cancel of a suggestion offered in a thread (`!next`). */
+  /** Uses Send (`send` true) or Cancel of a suggestion offered in a thread (`/next`). */
   picksSuggested(listed: ThreadListed, send: boolean): Promise<void>;
   /**
    * Deletes the message `said` (the first message of a thread when its id is the thread's own),
@@ -1813,8 +1813,8 @@ export function chatConformance(
             s.rig.owner.says(s.rig.channel, "in thread A", { thread: s.ref.thread }),
           ];
           await hold.held;
-          sent.push(s.rig.owner.says(s.rig.channel, "!stop"));
-          const expected = ["message in thread A", "message !stop"];
+          sent.push(s.rig.owner.says(s.rig.channel, "/stop"));
+          const expected = ["message in thread A", "message /stop"];
           if (s.rig.owner.stops !== undefined) {
             sent.push(s.rig.owner.stops(root.ref));
             expected.push(`stop ${root.ref.thread}`);
@@ -1892,41 +1892,41 @@ export function chatConformance(
         "a text sent from a suggestion's field from somebody else never arrives",
         "commandSuggestions",
         async (s) => {
-          const typed = await s.rig.owner.says(s.rig.channel, "!mo opus", {
+          const typed = await s.rig.owner.says(s.rig.channel, "/mo opus", {
             thread: s.ref.thread,
           });
           s.inbound.messages.length = 0;
           await s.provider.suggestCommands?.(s.ref, {
-            typed: "!mo opus",
+            typed: "/mo opus",
             message: typed.id,
             all: false,
             candidates: [
               {
                 name: "model",
-                usage: "!model [name]",
+                usage: "/model [name]",
                 description: "Switch the model",
                 group: "agent",
-                text: "!model opus",
+                text: "/model opus",
               },
             ],
           });
           const where = { channel: s.rig.channel, thread: s.ref.thread };
-          const shown = s.rig.read(where).find((m) => m.pressable && m.text.includes("!mo opus"));
+          const shown = s.rig.read(where).find((m) => m.pressable && m.text.includes("/mo opus"));
           assert.ok(shown, "the suggestion is shown, with a control");
           for (const person of strangers(s.rig)) {
-            await person.types(shown, s.ref, "!model opus");
+            await person.types(shown, s.ref, "/model opus");
             assert.ok(s.inbound.empty);
           }
-          await s.rig.owner.types(shown, s.ref, "!model opus");
+          await s.rig.owner.types(shown, s.ref, "/model opus");
           assert.equal(s.inbound.messages.length, 1, "the owner's does, on the same control");
           const [message] = s.inbound.messages;
-          assert.equal(message?.text, "!model opus");
-          assert.equal(message?.plain, "!model opus");
+          assert.equal(message?.text, "/model opus");
+          assert.equal(message?.plain, "/model opus");
           assert.equal(message?.id, typed.id, "the message that typed the word");
           assert.deepEqual(message?.ref, s.ref);
           assert.equal(message?.topLevel, false);
           assert.equal(message?.literal, false, "read as typed text");
-          assert.equal(promptText((await message?.content()) ?? null), "!model opus");
+          assert.equal(promptText((await message?.content()) ?? null), "/model opus");
         },
       );
 

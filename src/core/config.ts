@@ -14,7 +14,7 @@ const [AGENT_VARIABLE] = SELECTORS;
 /** The variables the core itself requires; each module names its own. */
 export const REQUIRED = ["ALLOWED_ROOT"] as const;
 
-/** `on` or `off`: whether `!!` runs the owner's shell commands; absent, on. */
+/** `on` or `off`: whether `!` runs the owner's shell commands; absent, on. */
 export const SHELL_VARIABLE = "PARDNER_SHELL";
 
 /** The configuration is missing, unsafe or invalid; the message says what to fix. */
@@ -55,7 +55,7 @@ export interface Config {
   readonly agent: string;
   readonly allowedRoot: string;
   readonly configDir: string;
-  /** `!!` runs the owner's shell commands (`PARDNER_SHELL`). */
+  /** `!` runs the owner's shell commands (`PARDNER_SHELL`). */
   readonly shellCommands: boolean;
   /** The values of the agent's `required` and `optional` variables the file sets. */
   readonly agentVariables: Variables;
@@ -135,7 +135,7 @@ function isDirectory(path: string): boolean {
 }
 
 /**
- * Whether `!!` is on: `on` or `off` in any case, on when the file does not set it. Any other value
+ * Whether `!` is on: `on` or `off` in any case, on when the file does not set it. Any other value
  * throws `ConfigError`: a mistyped `off` must not leave the commands on.
  */
 function shellSwitch(written: string | undefined): boolean {

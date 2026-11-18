@@ -43,7 +43,7 @@ export class DirectoryUnreadable extends DirectoryUnavailable {
 
 /**
  * The session closed (the daemon stopping, or the idle close, most likely) while something was
- * using it: a daemon word (`!status`, `!bypass`), or `submit` queuing an owner's prompt (the
+ * using it: a daemon word (`/status`, `/bypass`), or `submit` queuing an owner's prompt (the
  * caller retries once, against a freshly looked-up session).
  */
 export class SessionClosed extends Error {
@@ -65,7 +65,7 @@ export class SessionGone extends Error {
 }
 
 /**
- * `!bypass` was asked of an agent with no mode that skips permission requests: nothing was
+ * `/bypass` was asked of an agent with no mode that skips permission requests: nothing was
  * switched or stored.
  */
 export class BypassUnavailable extends Error {
@@ -76,7 +76,7 @@ export class BypassUnavailable extends Error {
 }
 
 /**
- * `!plan` was asked of an agent with no plan mode: nothing was switched.
+ * `/plan` was asked of an agent with no plan mode: nothing was switched.
  */
 export class PlanUnavailable extends Error {
   constructor() {

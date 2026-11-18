@@ -91,15 +91,15 @@ export function namesOf(
 }
 
 export const UNBOUND = naming(
-  "This channel is not bound to a folder yet. Send `!bind` to choose one of the folders " +
-    "{agent} trusts, or `!bind <folder>` with the folder's path relative to `{root}`, for " +
-    "example `!bind my-project`. `!guide` explains how pardner works.",
+  "This channel is not bound to a folder yet. Send `/bind` to choose one of the folders " +
+    "{agent} trusts, or `/bind <folder>` with the folder's path relative to `{root}`, for " +
+    "example `/bind my-project`. `/guide` explains how pardner works.",
 );
 // The same notice for an agent that keeps no record of trust: every folder under the root is offered.
 export const UNBOUND_ANY =
-  "This channel is not bound to a folder yet. Send `!bind` to choose one of the folders " +
-  "under `{root}`, or `!bind <folder>` with the folder's path relative to `{root}`, for " +
-  "example `!bind my-project`. `!guide` explains how pardner works.";
+  "This channel is not bound to a folder yet. Send `/bind` to choose one of the folders " +
+  "under `{root}`, or `/bind <folder>` with the folder's path relative to `{root}`, for " +
+  "example `/bind my-project`. `/guide` explains how pardner works.";
 export const AUTH_FAILED = naming(
   "{agent} is not logged in on the host. On that machine, run `{cli}`, then `/{login}`. " +
     "The login is never done from {chat}.",
@@ -113,10 +113,10 @@ export const LOGIN_ON_HOST = naming(
   "Log in on the host: on that machine, run `{cli}`, then `/{login}`. " +
     "The login is never done from {chat}.",
 );
-// `!name` for a command of the agent's terminal that a session from the chat does not offer
+// `/name` for a command of the agent's terminal that a session from the chat does not offer
 // (`AgentWords.notOffered`): answered by the daemon, so that no turn of the agent's is spent on it.
 export const NOT_OFFERED = naming(
-  "`!{command}` is a command of {agent} that a session started from {chat} does not offer.",
+  "`/{command}` is a command of {agent} that a session started from {chat} does not offer.",
 );
 export const NOT_OFFERED_SEE = "What differs from the terminal: {link}";
 export const LOGOUT_ON_HOST = naming(
@@ -125,7 +125,7 @@ export const LOGOUT_ON_HOST = naming(
 );
 export const DIRECTORY_MISSING =
   "The directory `{directory}` no longer exists. Restore it to keep using this thread, or, in " +
-  "the channel, bind another folder with `!bind <path>` and send a new message to start a " +
+  "the channel, bind another folder with `/bind <path>` and send a new message to start a " +
   "session there.";
 export const DIRECTORY_UNTRUSTED = naming(
   "{agent} has not been trusted in `{directory}`, so its hooks and settings would run " +
@@ -143,11 +143,11 @@ export const SESSION_GONE = naming(
 // tell a thread that never held a session from one whose session may still be resumable.
 export const NOT_A_SESSION =
   "This thread holds no session. In the channel, send a new message to start one, or " +
-  "`!resume` to continue an earlier one.";
+  "`/resume` to continue an earlier one.";
 export const OPEN_TOP_LEVEL =
-  "Opening a file belongs to one session: send `!open` inside its thread.";
+  "Opening a file belongs to one session: send `/open` inside its thread.";
 // Shown only by a chat that cannot share a file into a thread.
-export const OPEN_UNAVAILABLE = naming("{chat} cannot show a file here, so `!open` does nothing.");
+export const OPEN_UNAVAILABLE = naming("{chat} cannot show a file here, so `/open` does nothing.");
 // What the model reads when it asks the daemon to share a file into the thread. `{path}` is the
 // path it sent (`SHARE_DONE`: the file's path from the folder); `{size}` the most the chat takes as one file; `{error}` the chat's own code.
 export const SHARE_DONE = "`{path}` was shared into the thread.";
@@ -158,10 +158,10 @@ export const SHARE_EMPTY = "`{path}` is empty: there is nothing to share.";
 export const SHARE_STOPPED = "The session was stopped before `{path}` was shared.";
 export const SHARE_REFUSED = "`{path}` could not be shared: {error}.";
 export const TAG_TOP_LEVEL =
-  "A tag belongs to one session: send `!tag <name>` or `!untag` inside its thread.";
+  "A tag belongs to one session: send `/tag <name>` or `/untag` inside its thread.";
 // Shown only by a chat that cannot tag a thread.
 export const TAG_UNAVAILABLE = naming(
-  "{chat} cannot tag a thread here, so `!tag` and `!untag` do nothing.",
+  "{chat} cannot tag a thread here, so `/tag` and `/untag` do nothing.",
 );
 // The chat refused the tag: the agent's tag was not asked for.
 export const TAG_FAILED = naming("{chat} refused the tag: `{error}`.");
@@ -170,41 +170,41 @@ export const TAG_AGENT_FAILED = naming(
   "{chat} shows the change, but {agent}'s own tag for this session did not change.",
 );
 export const PIN_TOP_LEVEL =
-  "A pin belongs to one session: send `!pin` or `!unpin` inside its thread.";
+  "A pin belongs to one session: send `/pin` or `/unpin` inside its thread.";
 // Shown only by a chat that cannot pin a thread.
 export const PIN_UNAVAILABLE = naming(
-  "{chat} cannot pin a thread here, so `!pin` and `!unpin` do nothing.",
+  "{chat} cannot pin a thread here, so `/pin` and `/unpin` do nothing.",
 );
 export const PIN_FAILED = naming("{chat} refused the pin: `{error}`.");
 export const DELETE_THREAD_TOP_LEVEL =
-  "Deleting a thread belongs to one session: send `!delete-thread` inside its thread.";
+  "Deleting a thread belongs to one session: send `/delete-thread` inside its thread.";
 // Shown only by a chat that cannot delete a thread.
 export const DELETE_THREAD_UNAVAILABLE = naming(
-  "{chat} cannot delete a thread here, so `!delete-thread` does nothing.",
+  "{chat} cannot delete a thread here, so `/delete-thread` does nothing.",
 );
 // The same rule as the chat's index: a thread that works or waits is never deleted.
 export const DELETE_THREAD_BUSY =
-  "Not deleted: this thread is working or waiting for you. Send `!stop` first, then " +
-  "`!delete-thread` again.";
+  "Not deleted: this thread is working or waiting for you. Send `/stop` first, then " +
+  "`/delete-thread` again.";
 // A thread in a channel bound to no folder: the chat's delete only touches a bound channel.
 export const DELETE_THREAD_UNBOUND =
-  "This channel is bound to no folder, so `!delete-thread` deletes nothing here.";
+  "This channel is bound to no folder, so `/delete-thread` deletes nothing here.";
 // Shown only by a chat that cannot clean a channel.
 export const CLEAN_UNAVAILABLE = naming(
-  "{chat} cannot clean a channel here, so `!clean-channel` does nothing.",
+  "{chat} cannot clean a channel here, so `/clean-channel` does nothing.",
 );
 export const CLEAN_UNBOUND =
-  "This channel is bound to no folder, so `!clean-channel` deletes nothing here.";
-export const WORD_IN_THREAD = "`!{word}` works in the channel, not inside a thread.";
-// `!stop` typed in a thread that holds no session: it would have stopped the whole channel.
+  "This channel is bound to no folder, so `/clean-channel` deletes nothing here.";
+export const WORD_IN_THREAD = "`/{word}` works in the channel, not inside a thread.";
+// `/stop` typed in a thread that holds no session: it would have stopped the whole channel.
 export const STOP_OUTSIDE_SESSION =
-  "This thread holds no session. Send `!stop` in the channel to stop every session, or inside " +
+  "This thread holds no session. Send `/stop` in the channel to stop every session, or inside " +
   "a session's thread to stop that one.";
-// Shown in a session's thread by a chat that suggests commands, when a `!word` is no command and
+// Shown in a session's thread by a chat that suggests commands, when a `/word` is no command and
 // nothing looks like it.
 export const NO_SUCH_COMMAND =
-  "No command looks like {word}: send `!` alone to list them all. To send it as text, put " +
-  "anything before the `!`, as in `\\!important`.";
+  "No command looks like {word}: send `/` alone to list them all. To send it as text, put " +
+  "anything before the `/`, as in `\\/important`.";
 export const CLEAR_IN_THREAD =
   "One thread is one session: send a new message in the channel to start a new one.";
 export const ERROR_REPLY = naming("{agent} reported an error: `{error}`");
@@ -225,10 +225,10 @@ export const TAKEN_INTO_REPLY_MANY = naming("{agent} took {count} messages into 
 export const BECAUSE_RESTARTED = "pardner restarted";
 export const BECAUSE_SHUTDOWN = "pardner stopped";
 export const BECAUSE_STOPPED = naming("{agent} stopped");
-// The owner's `!stop` dropped the turns not yet sent. (`BECAUSE_STOPPED` is the agent's own stop.)
+// The owner's `/stop` dropped the turns not yet sent. (`BECAUSE_STOPPED` is the agent's own stop.)
 export const BECAUSE_OWNER_STOPPED = "you stopped it";
 export const BECAUSE_MOVED = "the session moved to the terminal";
-// The line a reply ends with when `!terminal` took its turn to the terminal.
+// The line a reply ends with when `/terminal` took its turn to the terminal.
 export const MOVED_TO_TERMINAL = "Moved to the terminal, which continues this turn.";
 // The same, for work that had not reached the agent yet: nothing runs there for it.
 export const MOVED_BEFORE_SENT = "Moved to the terminal.";
@@ -237,10 +237,10 @@ export const ENDED_IDLE = "pardner closed this idle session";
 export const RESTARTING =
   "pardner is updating, stopping or restarting; unless it is stopping, send this again in a moment.";
 
-// `!pardner` and the update from the chat. A text that names the chat is `naming`;
+// `/pardner` and the update from the chat. A text that names the chat is `naming`;
 // the link to the changelog is drawn by the chat (its markup), beside `UPDATE_WHAT_CHANGED`.
 export const UPDATE_STATUS_NEWER =
-  "pardner {installed} · latest {latest}, checked {time} · `!pardner update` installs it";
+  "pardner {installed} · latest {latest}, checked {time} · `/pardner update` installs it";
 export const UPDATE_STATUS_CURRENT = "pardner {installed} · the latest version, checked {time}";
 export const UPDATE_STATUS_UNKNOWN =
   "pardner {installed} · latest version unknown: {reason} at {time}";
@@ -267,9 +267,9 @@ export const UPDATE_DEFAULT_INSTANCE = "the default instance";
 export const UPDATE_BUTTON = "Update to {latest}";
 export const UPDATE_LATEST = "pardner {installed} is already the latest version.";
 export const UPDATE_UNKNOWN =
-  "The latest version is unknown: {reason}. `!pardner update` tries again.";
+  "The latest version is unknown: {reason}. `/pardner update` tries again.";
 export const UPDATE_NOTICE =
-  "pardner {latest} is available (this copy runs {installed}) · `!pardner update` installs it";
+  "pardner {latest} is available (this copy runs {installed}) · `/pardner update` installs it";
 // The line of the chat's own page: `UPDATE_HOME_AVAILABLE` with the link and the button, the
 // dialog the button asks through, then the states of a click.
 export const UPDATE_HOME_AVAILABLE = "pardner {latest} is available, this copy runs {installed}";
@@ -283,23 +283,23 @@ export const UPDATE_INSTALLING = "Installing pardner {latest}…";
 export const UPDATE_INSTALLED = "Installed pardner {latest}. Restarting once running turns finish.";
 export const UPDATE_UNDER_WAY = "An update to {version} is already under way.";
 export const UPDATE_NEWER_SINCE =
-  "Installing pardner {latest}… {newer} came out since this message: `!pardner update` " +
+  "Installing pardner {latest}… {newer} came out since this message: `/pardner update` " +
   "installs it after the restart.";
 export const UPDATE_ALREADY_RUNS = "pardner already runs {latest}.";
 export const UPDATE_COPY_HOLDS =
   "The copy already holds {latest}; pardner runs {installed} until it restarts: " +
-  "`!pardner restart`.";
+  "`/pardner restart`.";
 // Another process holds the machine's update lock (another instance's click, or the terminal's
 // `pardner update`): whose it is and which version are not known.
 export const UPDATE_ELSEWHERE = "An update of pardner is already under way.";
 export const UPDATE_DRAINING =
-  "pardner is stopping or restarting: if it is restarting, send `!pardner update` again once it is back.";
+  "pardner is stopping or restarting: if it is restarting, send `/pardner update` again once it is back.";
 export const UPDATE_FAILED_PERMISSION =
   "The update failed: npm may not write to {folder}. pardner keeps running {installed}. npm's " +
   "message is in the log, {log}.";
 export const UPDATE_FAILED_NETWORK =
   "The update failed: npm could not reach the registry. pardner keeps running {installed}; " +
-  "`!pardner update` tries again.";
+  "`/pardner update` tries again.";
 export const UPDATE_FAILED_OTHER =
   "The update failed: npm ended with status {status}. pardner keeps running {installed}. npm's " +
   "message is in the log, {log}.";
@@ -327,21 +327,21 @@ export const UPDATE_RESTARTED = "pardner restarted at {time}.";
 export const UPDATE_DONE = "Updated to pardner {version}.";
 export const UPDATE_NOT_TAKEN =
   "pardner restarted on {installed}, not on {asked}: the update did not take.";
-// Under RESTARTING, and after a channel's `!status`, while a stop waits: one row per thread that
+// Under RESTARTING, and after a channel's `/status`, while a stop waits: one row per thread that
 // holds it.
 export const RESTART_WAITS_FOR = "It is waiting for:";
 export const RESTART_WAITS_HEADER = `pardner is stopping or restarting. ${RESTART_WAITS_FOR}`;
 export const RESTART_WAIT_ROW = "• {channel}, {link}: {hold}";
 export const RESTART_WAIT_SESSION = "Session"; // the link's label for a session with no title yet
-export const RESTART_WAIT_STOP = "`!stop` in a thread ends the wait there.";
+export const RESTART_WAIT_STOP = "`/stop` in a thread ends the wait there.";
 export const RESTART_WAITS_MORE = "…and {count} more.";
-// In a channel's `!status`, a post every member reads: the threads of other channels are counted
+// In a channel's `/status`, a post every member reads: the threads of other channels are counted
 // and not named.
 export const RESTART_WAITS_ELSEWHERE = "{count} more in other channels.";
 export const RESTART_HOLD_OWNER = "an approval or a question is waiting for you";
 export const RESTART_HOLD_TURN = "a turn is running";
 export const RESTART_HOLD_TASKS = "{counts} running";
-// Ends by itself (`INJECTED_TURN_WAIT`): `!stop` has nothing to stop there.
+// Ends by itself (`INJECTED_TURN_WAIT`): `/stop` has nothing to stop there.
 export const RESTART_HOLD_REPORT = "a background task is about to report, within 30 seconds";
 // The one form of a task started in the background, whatever its kind: the
 // terminal's two lines for an agent it starts in the background, `**type**(description)` and
@@ -395,7 +395,7 @@ export const STOP_HOOK_FEEDBACK = "⎿ Stop hook feedback: {context}";
 export const STOP_HOOK_MORE = "\u00a0\u00a0\u00a0{line}";
 // Under `Stopped.`: a stop ends the turn, not the goal, which the next message resumes.
 export const GOAL_STILL_ACTIVE = "◎ Goal still active: {condition}";
-export const GOAL_STILL_ACTIVE_CLEAR = "◎ Goal still active: {condition} · `!{clear}` drops it";
+export const GOAL_STILL_ACTIVE_CLEAR = "◎ Goal still active: {condition} · `/{clear}` drops it";
 export const NO_OUTPUT = naming("_Done. {agent} returned no text._");
 export const BIND_OK =
   "Bound this channel to `{directory}`. The next message starts a new session there.";
@@ -413,11 +413,11 @@ export const OLD_THREAD_FOLDER = naming(
 );
 export const BIND_MISSING =
   "`{path}` does not exist. Give the path of an existing folder under `{root}`, for example " +
-  "`!bind my-project`.";
+  "`/bind my-project`.";
 export const BIND_FILE = "`{path}` is a file, not a folder.";
 export const BIND_OUTSIDE =
-  "`{path}` is outside `{root}`, the folder `!bind` binds under. Give its path relative to " +
-  "that folder, for example `!bind my-project`.";
+  "`{path}` is outside `{root}`, the folder `/bind` binds under. Give its path relative to " +
+  "that folder, for example `/bind my-project`.";
 export const SESSION_CLOSED =
   "Nothing was done: this session closed while it ran (idle for a while, or the daemon " +
   "restarted). Send it again if it is still meant.";
@@ -426,14 +426,14 @@ export const BIND_LIST = naming("Folders under `{root}` that {agent} trusts:");
 export const BIND_LIST_ANY = "Folders under `{root}`:";
 export const BIND_EMPTY = naming(
   "No folder under `{root}` is trusted by {agent} yet. Open one in the terminal with " +
-    "`{cli}` and accept the trust dialog, then send `!bind` again.",
+    "`{cli}` and accept the trust dialog, then send `/bind` again.",
 );
 export const BIND_ALREADY = "This channel is already bound to `{directory}`.";
 export const BIND_BUSY =
   "Sessions are running in this channel: binding another folder now would cut their work. " +
-  "Let them finish or send `!stop`, then bind again.";
+  "Let them finish or send `/stop`, then bind again.";
 export const BYPASS_TOP_LEVEL =
-  "Bypass belongs to one session: send `!bypass on` inside its thread.";
+  "Bypass belongs to one session: send `/bypass on` inside its thread.";
 // True with the setup on screen and without it (after a stop, a restart or a Cancel).
 // Shown only by an agent with no mode that skips permission requests.
 export const BYPASS_UNAVAILABLE = naming(
@@ -443,24 +443,24 @@ export const BYPASS_BEFORE_START =
   "This session has not started yet: tick Bypass in its setup and press Start. " +
   "If no setup is shown, send a message here first.";
 export const BYPASS_ON_THREAD =
-  "Bypass is on in this session: every tool runs without asking, until `!bypass off`. " +
+  "Bypass is on in this session: every tool runs without asking, until `/bypass off`. " +
   "It survives a restart.";
 // Says nothing about what is asked: that is the mode the owner's own settings give.
 export const BYPASS_OFF_THREAD = naming(
   "Bypass is off in this session: {agent} follows your permission settings again.",
 );
 export const PLAN_TOP_LEVEL =
-  "Plan mode is set per thread: start a thread with a first message, then send `!plan` on its own inside it, and your request after.";
+  "Plan mode is set per thread: start a thread with a first message, then send `/plan` on its own inside it, and your request after.";
 export const PLAN_TAKES_NO_TEXT =
-  "`!plan` takes no text: send `!plan` on its own inside a thread, then your request as a separate message.";
+  "`/plan` takes no text: send `/plan` on its own inside a thread, then your request as a separate message.";
 // Shown only by an agent with no plan mode.
 export const PLAN_UNAVAILABLE = naming("{agent} has no plan mode.");
 export const PLAN_BEFORE_START =
-  "This thread has no session yet: send a first message, then `!plan`, then your request.";
-// Plan mode ends with the plan's approval, `!plan off`, or a `!bypass` word (which sets a mode).
+  "This thread has no session yet: send a first message, then `/plan`, then your request.";
+// Plan mode ends with the plan's approval, `/plan off`, or a `/bypass` word (which sets a mode).
 export const PLAN_ON_THREAD = naming(
   "Plan mode is on in this session: {agent} plans first and asks you to approve the plan. " +
-    "`!plan off` leaves it, and so does `!bypass on` or `!bypass off`.",
+    "`/plan off` leaves it, and so does `/bypass on` or `/bypass off`.",
 );
 export const PLAN_OFF_THREAD = "Plan mode is off in this session.";
 export const STOPPED = "Stopped the current turn.";
@@ -469,9 +469,9 @@ export const ANSWERED = naming("User answered {author}'s questions:");
 export const STOPPED_CHANNEL = "Stopped what was running in this channel.";
 // The same as a message, only where the chat refuses the app an activity line.
 export const RESTART_WAITS_MESSAGE =
-  "pardner stops or restarts once these background tasks end: {counts}. `!stop` ends them now.";
+  "pardner stops or restarts once these background tasks end: {counts}. `/stop` ends them now.";
 export const NOTHING_TO_STOP = "Nothing is running in this channel.";
-// Both answers to `!stop` in a thread are posts that stay: an ephemeral line is gone on reload.
+// Both answers to `/stop` in a thread are posts that stay: an ephemeral line is gone on reload.
 export const STOPPED_THREAD = "Stopped.";
 export const NOTHING_TO_STOP_THREAD = "Nothing is running in this session.";
 // The same-folder hold: two sessions in one folder at once.
@@ -482,7 +482,7 @@ export const HOLD_UNPOSTED = naming(
 export const HOLD_GONE =
   "This question is no longer open: it was already answered, or pardner restarted.";
 export const NOT_SENT = "Not sent.";
-// Under a `!!command` that ran when the owner stopped the session before it was sent.
+// Under a `!command` that ran when the owner stopped the session before it was sent.
 export const SHELL_NOT_TOLD_STOPPED = "Not told to the agent: you stopped the session.";
 export const SHELL_EXITED = "✓ exit 0 · {seconds}";
 export const SHELL_FAILED = "✗ exit {code} · {seconds}";
@@ -513,11 +513,11 @@ export const TERMINAL_SENT = "Sent here.";
 export const TERMINAL_TURN_ENDED = "The terminal's turn ended.";
 export const TERMINAL_MOVED = "Moved to the terminal.";
 export const TERMINAL_NOT_MOVED = "Not moved.";
-// `!terminal`'s answers. `{command}` is the line to run, shown as a command.
-// `!fork`'s answers. `{link}` is a link to a thread; `{session}` the copy's id.
-export const FORK_TOP_LEVEL = "`!fork` works inside a session's thread, not in the channel.";
+// `/terminal`'s answers. `{command}` is the line to run, shown as a command.
+// `/fork`'s answers. `{link}` is a link to a thread; `{session}` the copy's id.
+export const FORK_TOP_LEVEL = "`/fork` works inside a session's thread, not in the channel.";
 export const FORK_UNAVAILABLE = naming(
-  "`!fork` is not offered here: {agent} or {chat} cannot copy a session into a new thread.",
+  "`/fork` is not offered here: {agent} or {chat} cannot copy a session into a new thread.",
 );
 export const FORK_NOT_STARTED = "This session has not started yet: send it a message first.";
 // The new thread's root, in a reference's markup.
@@ -538,10 +538,10 @@ export const FORK_ORIGINAL_LABEL = "the original thread"; // the link of a copy 
 export const FORK_OLD_FOLDER =
   "This session works in an earlier folder of the channel: a copy of it would start in the " +
   "channel's folder, where it does not exist.";
-// `!diff`'s answers.
-export const DIFF_TOP_LEVEL = "`!diff` works inside a session's thread, not in the channel.";
+// `/diff`'s answers.
+export const DIFF_TOP_LEVEL = "`/diff` works inside a session's thread, not in the channel.";
 export const DIFF_UNAVAILABLE = naming(
-  "`!diff` is not offered here: {chat} cannot show a list with controls and share a file in a " +
+  "`/diff` is not offered here: {chat} cannot show a list with controls and share a file in a " +
     "thread, or {agent} keeps no record of the folders it trusts.",
 );
 export const DIFF_NOT_STARTED = "This session has not started yet: send it a message first.";
@@ -553,7 +553,7 @@ export const DIFF_UNTRUSTED = naming(
   "{agent} has not trusted this repository yet, so pardner runs no git in it. Before you " +
     "trust it, read its settings and hooks for {agent}: they run without asking once it is " +
     "trusted. To trust it, run this line in the terminal, accept the trust dialog, then send " +
-    "`!diff` again: {command}",
+    "`/diff` again: {command}",
 );
 export const DIFF_VIEW_CURRENT = "Current";
 // The view of what one turn edited, numbered from the first prompt of the process that runs.
@@ -561,7 +561,7 @@ export const DIFF_VIEW_TURN = "T{turn}";
 export const DIFF_CLEAN = "No changes: the working tree matches HEAD.";
 export const DIFF_FAILED = "git could not list the changes, or took too long.";
 export const DIFF_TITLE = "Changed files";
-export const DIFF_STALE = "That list belongs to another session. Send `!diff` again.";
+export const DIFF_STALE = "That list belongs to another session. Send `/diff` again.";
 // A file picked from a list. `{path}` is the file, shown as written.
 export const DIFF_FILE_GONE = "`{path}` no longer differs from HEAD.";
 export const DIFF_FILE_BINARY = "`{path}` is binary: git shows no text diff for it.";
@@ -570,33 +570,33 @@ export const DIFF_FILE_TOO_LARGE = naming(
 );
 export const DIFF_FILE_FAILED = "git could not read the diff of `{path}`.";
 export const DIFF_FILE_REFUSED = naming("{chat} did not take the diff of `{path}`: {error}.");
-export const DIFF_VIEW_GONE = "That view is no longer available. Send `!diff` again.";
-// `!rewind`'s answers.
-export const REWIND_TOP_LEVEL = "`!rewind` works inside a session's thread, not in the channel.";
+export const DIFF_VIEW_GONE = "That view is no longer available. Send `/diff` again.";
+// `/rewind`'s answers.
+export const REWIND_TOP_LEVEL = "`/rewind` works inside a session's thread, not in the channel.";
 export const REWIND_UNAVAILABLE = naming(
-  "`!rewind` is not offered here: {chat} cannot show a list with controls, or {agent} cannot go " +
+  "`/rewind` is not offered here: {chat} cannot show a list with controls, or {agent} cannot go " +
     "back to an earlier prompt.",
 );
 export const REWIND_NOT_STARTED = "This session has not started yet: send it a message first.";
 export const REWIND_NONE = "This session has no prompt to go back to yet.";
 export const REWIND_BUSY =
-  "`!rewind` waits until nothing runs here: a turn, a question or approval waiting for you, or " +
-  "background work. `!stop` ends them; then send `!rewind` again.";
+  "`/rewind` waits until nothing runs here: a turn, a question or approval waiting for you, or " +
+  "background work. `/stop` ends them; then send `/rewind` again.";
 export const REWIND_TITLE = "Go back to a prompt";
 export const REWIND_ACTIONS_TITLE = "Go back to";
-export const REWIND_STALE = "That list belongs to another session. Send `!rewind` again.";
-export const REWIND_POINT_GONE = "That prompt is no longer in the session. Send `!rewind` again.";
+export const REWIND_STALE = "That list belongs to another session. Send `/rewind` again.";
+export const REWIND_POINT_GONE = "That prompt is no longer in the session. Send `/rewind` again.";
 // At a prompt where no file changed and the conversation cannot be cut (the first prompt).
 export const REWIND_NOTHING = "There is nothing to restore at that prompt.";
 export const REWIND_CANCELLED = "Left as it was.";
 // The list, once an action ran.
 export const REWIND_DONE = "Went back.";
 // A second pick while an action runs, and a pick of a list whose action already ran.
-export const REWIND_UNDER_WAY = "`!rewind` is already going back; wait for it to finish.";
+export const REWIND_UNDER_WAY = "`/rewind` is already going back; wait for it to finish.";
 export const REWIND_ALREADY = "That rewind is already done.";
-export const NEXT_TOP_LEVEL = "`!next` works inside a session's thread, not in the channel.";
+export const NEXT_TOP_LEVEL = "`/next` works inside a session's thread, not in the channel.";
 export const NEXT_UNAVAILABLE = naming(
-  "`!next` is not offered here: {chat} cannot show a list with controls, or {agent} suggests no " +
+  "`/next` is not offered here: {chat} cannot show a list with controls, or {agent} suggests no " +
     "next prompt.",
 );
 export const NEXT_NONE = naming(
@@ -649,7 +649,7 @@ export const REWIND_REFUSED_AFTER_CODE = naming(
 );
 export const REWIND_BUSY_AFTER_CODE =
   "The code was restored, but something started to run, so the conversation is as it was. " +
-  "`!rewind` again, once nothing runs.";
+  "`/rewind` again, once nothing runs.";
 // Under the replies the rewind could not mark as removed.
 export const REWIND_NOT_MARKED = naming(
   "{chat} would not mark {count} of the replies after that prompt as removed: they stay as they were.",
@@ -663,10 +663,10 @@ export const REWIND_UNKNOWN_REPLIES =
 // The title of a reply's message that a rewind went back over.
 export const REWOUND_TITLE = "Removed by rewind";
 export const TERMINAL_TOP_LEVEL =
-  "`!terminal` works inside a session's thread, not in the channel.";
+  "`/terminal` works inside a session's thread, not in the channel.";
 // Shown only for an agent with no terminal to continue a session in.
 export const TERMINAL_UNAVAILABLE = naming(
-  "{agent} has no terminal to move a session to, so `!terminal` does nothing.",
+  "{agent} has no terminal to move a session to, so `/terminal` does nothing.",
 );
 export const TERMINAL_NOT_STARTED = "This session has not started yet: send it a message first.";
 export const TERMINAL_CUT = naming(
@@ -675,17 +675,17 @@ export const TERMINAL_CUT = naming(
 );
 export const TERMINAL_IDLE = "Continue in the terminal with:\n{command}";
 export const TERMINAL_WAIT =
-  "A turn is running here: wait for its end, or `!stop` it, then continue in the terminal " +
+  "A turn is running here: wait for its end, or `/stop` it, then continue in the terminal " +
   "with:\n{command}";
 // A turn the owner ran in the terminal, shown in the thread before the reply to his next message.
 export const TERMINAL_TURN = "🖥 In the terminal:\n{prompt}\n\n{reply}";
 export const TERMINAL_TURN_UNANSWERED = "🖥 In the terminal:\n{prompt}";
-// A turn moved with `!terminal`, which the terminal went on with by itself.
+// A turn moved with `/terminal`, which the terminal went on with by itself.
 export const TERMINAL_TURN_WENT_ON = "🖥 In the terminal, the turn went on:\n\n{reply}";
 export const TERMINAL_TURN_WENT_ON_INTERRUPTED =
   "🖥 In the terminal, the turn went on, and you interrupted it.";
-export const SHELL_OUTSIDE_SESSION = "`!!` runs a shell command inside a session's thread.";
-// `!memory` and `!skills` (`loaded.ts`): what a live session has loaded, read only.
+export const SHELL_OUTSIDE_SESSION = "`!` runs a shell command inside a session's thread.";
+// `/memory` and `/skills` (`loaded.ts`): what a live session has loaded, read only.
 export const MEMORY_TITLE = "Memory files loaded ({count}, {tokens} tokens):";
 export const MEMORY_LINE = "• {path} · {tokens} tokens";
 export const MEMORY_NONE = "No memory file is loaded in this session.";
@@ -693,7 +693,7 @@ export const SKILLS_TITLE = "Skills ({count}):";
 export const SKILLS_LINE = "• {name} · {about}";
 export const SKILLS_NONE = "No skill is available in this session.";
 export const LOADED_TOP_LEVEL =
-  "`!memory` and `!skills` list what a session loaded, inside its thread.";
+  "`/memory` and `/skills` list what a session loaded, inside its thread.";
 export const LOADED_UNAVAILABLE = naming("{agent} does not list what a session loaded.");
 export const SHELL_FIRST_PROMPT =
   "Send this session its first prompt before a shell command: it starts with its setup.";
@@ -723,14 +723,14 @@ export const STATUS_TERMINAL_TURN =
   "⚠️ A turn is running here: writing in the terminal before it ends splits the session.";
 export const STATUS_TERMINAL_TURN_MOVE =
   "⚠️ A turn is running here: writing in the terminal before it ends splits the session. " +
-  "`!terminal` moves it there now.";
+  "`/terminal` moves it there now.";
 export const STATUS_TERMINAL_BACKGROUND =
   "⚠️ {counts} still running here: writing in the terminal before it ends splits the session.";
 // The repositories below a session's folder that the agent's record of trust does not cover
 //: the daemon's own git runs in none of them, and only the agent gives that trust,
-// in a terminal. Said after `!bind` and in a thread's `!status`; one line per repository below.
+// in a terminal. Said after `/bind` and in a thread's `/status`; one line per repository below.
 export const UNTRUSTED_REPOSITORIES = naming(
-  "{agent} has not trusted these repositories yet, so the footer and `!open` show no git " +
+  "{agent} has not trusted these repositories yet, so the footer and `/open` show no git " +
     "changes in them. Before you trust one, read its settings and hooks for {agent}: they run " +
     "without asking once it is trusted. To trust it, run its line in the terminal and accept " +
     "the trust dialog:",
@@ -753,13 +753,13 @@ export const LOOP_PAUSED =
   "Scheduled loop paused{runs}: it resumes with your next message in this thread";
 export const STATUS_LOOP = "Loop `{cadence}`: {prompt}";
 export const STATUS_WORKING = "Working in: `{directory}`";
-// The count `!status` adds to a session's row.
+// The count `/status` adds to a session's row.
 export const RUNNING = "⏳ {counts}";
 // The terminal's words for a task that outlives its turn (`· 1 shell still running`, Claude Code
 // 2.1.287, read 2026-10-02), and the title of the list of what still runs, with no hourglass.
 export const STILL_RUNNING = "{counts} still running";
 export const ACTIVITY_BUSY = "running a turn, {queued} queued";
-// `!status` sent to the channel (top-level, or a thread that holds no session): the channel's
+// `/status` sent to the channel (top-level, or a thread that holds no session): the channel's
 // folder, then one line per live session, each with a link to its thread.
 export const STATUS_CHANNEL_HEADER = "Directory: `{directory}`";
 export const STATUS_CHANNEL_EMPTY = "No session in this channel.";
@@ -780,75 +780,75 @@ export const STATUS_CHANNEL_FOLDER = " · folder `{directory}`";
 export const STATUS_CHANNEL_LINK_FALLBACK = "thread `{thread_ts}`";
 export const HELP_OWN = "**pardner**";
 export const HELP_RULE =
-  "A message that starts with `!` is a command, in code or bold too. To send it as text, put " +
-  "anything before the `!`, as in `\\!goal`.";
+  "A message that starts with `/` is a command, and one that starts with `!` is a shell command, " +
+  "in code or bold too. To send either as text, put anything before it, as in `\\/goal` or `\\!ls`.";
 export const HELP_WORDS: readonly Named[] = [
-  "`!guide` how pardner works, in a few lines; in the channel or inside a thread",
-  "`!help [text]` this list, or only the lines that contain the text; in the channel or " +
+  "`/guide` how pardner works, in a few lines; in the channel or inside a thread",
+  "`/help [text]` this list, or only the lines that contain the text; in the channel or " +
     "inside a thread",
-  "`!status` in the channel: every session's state; inside a thread: that session's " +
+  "`/status` in the channel: every session's state; inside a thread: that session's " +
     "directory, mode and the footer's values",
-  "`!stop` in the channel: every running session, its background tasks and its pending " +
+  "`/stop` in the channel: every running session, its background tasks and its pending " +
     "approvals; inside a thread: only that session",
-  "`!memory` the memory files this session loaded, with their size; inside a thread, refused " +
+  "`/memory` the memory files this session loaded, with their size; inside a thread, refused " +
     "in the channel",
-  "`!skills` the skills this session can use, with what each does; inside a thread, refused in " +
+  "`/skills` the skills this session can use, with what each does; inside a thread, refused in " +
     "the channel",
-  "`!terminal` move this session to a terminal on the host: a running turn goes on there by " +
+  "`/terminal` move this session to a terminal on the host: a running turn goes on there by " +
     "itself; inside a thread, refused in the channel",
-  "`!fork [prompt]` copy this session into a new thread of the channel, as the terminal's " +
+  "`/fork [prompt]` copy this session into a new thread of the channel, as the terminal's " +
     "`/fork` does: the copy keeps this session's settings and starts on the prompt, or waits for " +
     "your first message there; this thread goes on as it was; inside a thread, refused in the " +
     "channel",
-  "`!diff` the files this session's repository has changed since HEAD, untracked files " +
+  "`/diff` the files this session's repository has changed since HEAD, untracked files " +
     "included, as the terminal's `/diff` lists them; a button per file shares its diff into the " +
     "thread, and once the session edited files a selector shows a turn's edits; inside a " +
     "thread, refused in the channel",
-  "`!rewind` go back to an earlier prompt of this session, as the terminal's `/rewind` does: " +
+  "`/rewind` go back to an earlier prompt of this session, as the terminal's `/rewind` does: " +
     "pick a prompt, then restore the code, the conversation or both; the replies you went back " +
     "over stay in the thread, marked as removed; inside a thread, refused in the channel",
-  "`!next` offer the prompt {agent} suggests after a turn; inside a thread, refused in the channel",
-  "`!bind [folder]` the folders {agent} trusts, or bind this channel to one, its path " +
+  "`/next` offer the prompt {agent} suggests after a turn; inside a thread, refused in the channel",
+  "`/bind [folder]` the folders {agent} trusts, or bind this channel to one, its path " +
     "relative to the allowed root; in the channel, refused inside a thread",
-  "`!bypass on|off` run every tool without asking, until `!bypass off`; it survives a " +
+  "`/bypass on|off` run every tool without asking, until `/bypass off`; it survives a " +
     "restart; inside a thread, refused in the channel",
-  "`!plan [off]` plan before acting: {agent} proposes a plan and asks you to approve it; " +
-    "`!plan off` leaves plan mode; this session only, it does not survive a restart; inside a " +
+  "`/plan [off]` plan before acting: {agent} proposes a plan and asks you to approve it; " +
+    "`/plan off` leaves plan mode; this session only, it does not survive a restart; inside a " +
     "thread, refused in the channel",
-  "`!resume [session]` this directory's sessions, or resume one by id or name in the " +
-    "thread of your `!resume` message; in the channel, refused inside a thread",
-  "`!open [file]` share a file of the session's folder into the thread, where {chat} opens it in " +
+  "`/resume [session]` this directory's sessions, or resume one by id or name in the " +
+    "thread of your `/resume` message; in the channel, refused inside a thread",
+  "`/open [file]` share a file of the session's folder into the thread, where {chat} opens it in " +
     "its file viewer: the files changed in the session alone, or a path or part of a name; inside a thread, refused in " +
     "the channel",
-  "`!tag <name>` mark this session's thread with a tag, 1 to 40 letters, digits, `.`, `_` or " +
+  "`/tag <name>` mark this session's thread with a tag, 1 to 40 letters, digits, `.`, `_` or " +
     "`-`: {chat} shows it on the thread's first message, and {agent} gets it on the session; " +
     "inside a thread, refused in the channel",
-  "`!untag` take the tag away, with or without the tag's name after it; inside a thread, refused " +
+  "`/untag` take the tag away, with or without the tag's name after it; inside a thread, refused " +
     "in the channel",
-  "`!pin` keep this session's thread at hand: {chat} pins its first message; inside a thread, " +
+  "`/pin` keep this session's thread at hand: {chat} pins its first message; inside a thread, " +
     "refused in the channel",
-  "`!unpin` take the pin off the thread's first message, however it was made; inside a thread, " +
+  "`/unpin` take the pin off the thread's first message, however it was made; inside a thread, " +
     "refused in the channel",
-  "`!delete-thread` delete every message of this session's thread from {chat}, once you confirm; " +
-    "the session stays in {agent} and `!resume` lists it again; refused while the thread works " +
+  "`/delete-thread` delete every message of this session's thread from {chat}, once you confirm; " +
+    "the session stays in {agent} and `/resume` lists it again; refused while the thread works " +
     "or waits for you; inside a thread, refused in the channel",
-  "`!clean-channel` delete from {chat} the channel's threads and what sits outside them, once " +
+  "`/clean-channel` delete from {chat} the channel's threads and what sits outside them, once " +
     "you confirm; the sessions stay in {agent}; threads in use or pinned stay; in the channel, " +
     "refused inside a thread",
-  "`!! <command>` run a shell command in the session's folder, as the terminal's `!` does, " +
+  "`!<command>` run a shell command in the session's folder, as the terminal's `!` does, " +
     "once you click Run; {agent} gets the command and its output and answers; inside a " +
     "thread, refused in the channel",
-  "`!pardner [update|restart]` the version that runs and the latest one; `update` offers the " +
+  "`/pardner [update|restart]` the version that runs and the latest one; `update` offers the " +
     "latest and installs it on your click, `restart` restarts pardner, both once running turns " +
     "finish; `update` and `restart` in the channel, refused inside a thread",
 ].map(naming);
-// The words for an agent that keeps no record of trust: only the `!bind` line differs.
+// The words for an agent that keeps no record of trust: only the `/bind` line differs.
 const HELP_BIND_ANY = naming(
-  "`!bind [folder]` the folders under the allowed root, or bind this channel to one, its " +
+  "`/bind [folder]` the folders under the allowed root, or bind this channel to one, its " +
     "path relative to that root; in the channel, refused inside a thread",
 );
 export const HELP_WORDS_ANY: readonly Named[] = HELP_WORDS.map((word) =>
-  word.template.startsWith("`!bind ") ? HELP_BIND_ANY : word,
+  word.template.startsWith("`/bind ") ? HELP_BIND_ANY : word,
 );
 // The sentence that follows a mistyped word's own help line, on the rule its arguments broke.
 export const RULE_NO_ARGUMENT = "This word takes nothing after it.";
@@ -857,7 +857,7 @@ export const RULE_BYPASS = "Say `on` or `off` after it.";
 export const RULE_PARDNER = "Say `update` or `restart` after it, or nothing.";
 export const HELP_NO_MATCH = "No command matches `{query}`.";
 export const HELP_AGENT = naming(
-  "\n**{agent}** (this session, now). Any other `!name args` runs that command; " +
+  "\n**{agent}** (this session, now). Any other `/name args` runs that command; " +
     "these words above come first.",
 );
 export const HELP_UNBOUND = naming(
@@ -873,7 +873,7 @@ export const APPROVAL_GONE =
 export const RESUME_LIST = "Sessions in `{directory}`, newest first:";
 // Shown only by an agent that keeps no list of its sessions.
 export const RESUME_UNLISTED = naming(
-  "{agent} keeps no list of its sessions, so `!resume` has nothing to pick from.",
+  "{agent} keeps no list of its sessions, so `/resume` has nothing to pick from.",
 );
 // Two processes on one session share its file and not its conversation (measured 2026-10-03,
 // SDK 0.2.163 beside a host CLI 2.1.288 process): each keeps the session as it loaded
@@ -883,15 +883,15 @@ export const RESUME_OK =
   "there first: while it is open in both, neither sees the other's messages, and a later " +
   "resume keeps only one side's.";
 export const RESUME_NONE =
-  "No session in `{directory}` has the id or name `{target}`: `!resume` lists them.";
+  "No session in `{directory}` has the id or name `{target}`: `/resume` lists them.";
 export const RESUME_AMBIGUOUS =
   "More than one session in `{directory}` is named or starts with `{target}`: pick one from " +
-  "`!resume`.";
-export const RESUME_STALE = "This list is out of date: send `!resume` again for a current one.";
+  "`/resume`.";
+export const RESUME_STALE = "This list is out of date: send `/resume` again for a current one.";
 export const RESUME_GONE =
-  "That session is not in this channel's directory any more: `!resume` lists them.";
+  "That session is not in this channel's directory any more: `/resume` lists them.";
 export const RESUME_HELD =
-  "This thread already holds a session: send `!resume` again in the channel to pick another.";
+  "This thread already holds a session: send `/resume` again in the channel to pick another.";
 // What the list is rewritten to after a Resume click, only when it cannot be deleted.
 export const RESUME_LISTED = "Resumed {title} in {link}.";
 // A session held by any thread of any channel is never resumed a second time; `{link}` is the
@@ -905,7 +905,7 @@ export const RESUME_HELD_UNREACHABLE =
 export const RESUME_FREE_NOW =
   "{control} frees it now; otherwise the cleanup does within {hours} hours.";
 export const RESUME_FREE_LATER = "The cleanup frees it within {hours} hours.";
-// `!guide`: how to use the bot, in the owner's words, as parts that `src/core/guide.ts` chooses
+// `/guide`: how to use the bot, in the owner's words, as parts that `src/core/guide.ts` chooses
 // among and joins: a part appears only when the agent and the chat serve what it describes.
 // `test/core/commands.test.ts` fails when a word of the daemon is missing from the whole; keep
 // the tone plain and every line true of the current behaviour.
@@ -917,15 +917,15 @@ export const GUIDE_INTRO = naming(
 );
 export const GUIDE_START = "**Get started**";
 export const GUIDE_BIND_TRUSTED = naming(
-  "1. `!bind` lists the folders {agent} trusts, with a Bind button each; `!bind <folder>` " +
-    "binds one by its path relative to your allowed root: `!bind my-project`. {agent} must trust " +
-    "that folder first: open `{cli}` there once in the terminal and accept. `!bind` works only as a " +
+  "1. `/bind` lists the folders {agent} trusts, with a Bind button each; `/bind <folder>` " +
+    "binds one by its path relative to your allowed root: `/bind my-project`. {agent} must trust " +
+    "that folder first: open `{cli}` there once in the terminal and accept. `/bind` works only as a " +
     "top-level message in the channel.",
 );
 export const GUIDE_BIND_ANY =
-  "1. `!bind` lists the folders under your allowed root, with a Bind button each; " +
-  "`!bind <folder>` binds one by its path relative to your allowed root: `!bind my-project`. " +
-  "`!bind` works only as a top-level message in the channel.";
+  "1. `/bind` lists the folders under your allowed root, with a Bind button each; " +
+  "`/bind <folder>` binds one by its path relative to your allowed root: `/bind my-project`. " +
+  "`/bind` works only as a top-level message in the channel.";
 export const GUIDE_FIRST_MESSAGE = naming(
   "2. Write a message in the channel: it opens a session, and its reply appears in a thread of its " +
     "own, growing as {author} works, with a line for each tool it uses. Reply inside that thread to " +
@@ -934,15 +934,15 @@ export const GUIDE_FIRST_MESSAGE = naming(
 // Step 3 holds what the setup asks for; `{choices}` is the items on offer, joined as a list.
 export const GUIDE_SETUP =
   "3. Before that first message is sent, the thread asks for {choices}; **Start** sends your " +
-  "message with those choices, and `!stop` cancels it instead.";
+  "message with those choices, and `/stop` cancels it instead.";
 export const GUIDE_SETUP_MODEL = "the **Model**";
 export const GUIDE_SETUP_EFFORT = naming("the **Effort** (`Default` leaves {agent}'s own choice)");
 export const GUIDE_SETUP_BYPASS = "**Bypass permissions**";
 export const GUIDE_COMMANDS = naming(
   "**Commands**\n" +
-    "{agent}'s commands start with `!` instead of `/`: {examples}. They run inside " +
-    "a session's thread, where `!help` lists every command that session offers, and `!help <text>` " +
-    "filters the list; typed in the channel, `!help` lists pardner's own words instead.",
+    "{agent}'s commands start with `/`, as in the terminal: {examples}. They run inside " +
+    "a session's thread, where `/help` lists every command that session offers, and `/help <text>` " +
+    "filters the list; typed in the channel, `/help` lists pardner's own words instead.",
 );
 // Joined to the guide's commands section, with `{names}` the agent's new-session commands.
 export const GUIDE_NEW_SESSION =
@@ -960,32 +960,32 @@ export const GUIDE_QUESTION = naming(
 // The Sessions section, sentence by sentence: `guide.ts` leaves out the tasks and the resume ones.
 export const GUIDE_SESSIONS_STATUS =
   "**Sessions**\n" +
-  "`!status` typed in the channel lists the folder and every session still live, each linked to " +
+  "`/status` typed in the channel lists the folder and every session still live, each linked to " +
   "its thread; inside a thread it shows that session's directory, mode and the footer's values. " +
-  "`!stop` typed in the channel stops every running session";
+  "`/stop` typed in the channel stops every running session";
 export const GUIDE_SESSIONS_TASKS = " and its background tasks";
 export const GUIDE_SESSIONS_STOP = "; inside a thread it stops only that one.";
 export const GUIDE_SESSIONS_RESUME =
-  "`!resume`, typed in the channel only, lists this folder's twenty " +
+  "`/resume`, typed in the channel only, lists this folder's twenty " +
   "newest sessions, from the terminal too, each with the start of its id and a **Resume** button; " +
-  "`!resume <id>` (that start is enough), or `!resume <title>` for a session that has one, resumes " +
-  "it in the thread of your `!resume` message.";
+  "`/resume <id>` (that start is enough), or `/resume <title>` for a session that has one, resumes " +
+  "it in the thread of your `/resume` message.";
 export const GUIDE_SESSIONS_LOADED =
-  "Inside a thread, `!memory` lists the memory files its session loaded and `!skills` the skills " +
+  "Inside a thread, `/memory` lists the memory files its session loaded and `/skills` the skills " +
   "it can use, read only.";
 export const GUIDE_SESSIONS_FORK =
-  "Inside a thread, `!fork <prompt>` copies its session into a new thread of the channel, which " +
+  "Inside a thread, `/fork <prompt>` copies its session into a new thread of the channel, which " +
   "starts on the prompt while this one goes on, as the terminal's `/fork` does.";
 export const GUIDE_SESSIONS_TERMINAL =
-  "To continue a session in the terminal, run the `Terminal:` command `!status` shows in its " +
-  "thread, or send `!terminal` there, which moves a running turn too. Write from one side at a " +
+  "To continue a session in the terminal, run the `Terminal:` command `/status` shows in its " +
+  "thread, or send `/terminal` there, which moves a running turn too. Write from one side at a " +
   "time: a terminal left open does not see what you write here, and is reopened before you " +
   "write there again.";
 export const GUIDE_FILES = naming(
   "**Files**\n" +
-    "`!open`, sent inside a session's thread, offers the files changed in that session and a search " +
+    "`/open`, sent inside a session's thread, offers the files changed in that session and a search " +
     "over the folder's files; choosing one shares it into the thread, where {chat} opens it in its " +
-    "file viewer, with Markdown rendered. `!open <path>` opens that file, and `!open <words>` the file " +
+    "file viewer, with Markdown rendered. `/open <path>` opens that file, and `/open <words>` the file " +
     "whose path contains them, or lists the files that do. The search reads the folder from disk and " +
     "leaves out what `.gitignore` excludes inside a git repository.",
 );
@@ -993,7 +993,7 @@ export const GUIDE_FILES = naming(
 export const GUIDE_FILES_LIMIT = "A file over {size} is not opened.";
 export const GUIDE_DIFF = naming(
   "**Changes**\n" +
-    "`!diff`, sent inside a session's thread, lists the files that differ from HEAD in its git " +
+    "`/diff`, sent inside a session's thread, lists the files that differ from HEAD in its git " +
     "repository, untracked ones included, with the lines added and removed; **Diff** on a row " +
     "shares that file's diff into the thread, where {chat} opens it in its file viewer. Once the " +
     "session has edited files, a selector also shows the edits of one turn. It works in a " +
@@ -1001,73 +1001,73 @@ export const GUIDE_DIFF = naming(
 );
 export const GUIDE_REWIND = naming(
   "**Going back**\n" +
-    "`!rewind`, sent inside a session's thread, lists the session's prompts. Pick one to restore " +
+    "`/rewind`, sent inside a session's thread, lists the session's prompts. Pick one to restore " +
     "the code to how it was when you sent it, the conversation to before it, or both; the " +
     "replies you went back over stay in the thread, folded under **Removed by rewind**, and the " +
     "prompt is posted again to send. It waits until nothing runs.",
 );
 export const GUIDE_NEXT = naming(
   "**Next prompt**\n" +
-    "`!next`, sent inside a session's thread, shows the prompt {agent} suggests after a turn, " +
+    "`/next`, sent inside a session's thread, shows the prompt {agent} suggests after a turn, " +
     "with **Send** and **Cancel**: **Send** sends those words as your own prompt. The suggestion " +
-    "is forgotten when you send a prompt, a `!!` command or a command for {agent}, when a turn " +
+    "is forgotten when you send a prompt, a `!command` or a command for {agent}, when a turn " +
     "starts, or when the session closes.",
 );
 export const GUIDE_BYPASS = naming(
   "**Bypass**\n" +
-    "`!bypass on`, sent inside a session's thread, lets {agent} run every tool without asking in " +
-    "that session, until `!bypass off`; a restart of pardner keeps it. The footer shows ⚡ " +
+    "`/bypass on`, sent inside a session's thread, lets {agent} run every tool without asking in " +
+    "that session, until `/bypass off`; a restart of pardner keeps it. The footer shows ⚡ " +
     "bypass while it is on.",
 );
 export const GUIDE_PLAN = naming(
   "**Plan mode**\n" +
-    "`!plan`, sent inside a session's thread, makes {agent} plan before it acts: it proposes a plan " +
-    "and asks you to approve it. `!plan off` leaves plan mode, and so does `!bypass on` or " +
-    "`!bypass off`. It belongs to the running session: a restart of pardner or an idle close " +
+    "`/plan`, sent inside a session's thread, makes {agent} plan before it acts: it proposes a plan " +
+    "and asks you to approve it. `/plan off` leaves plan mode, and so does `/bypass on` or " +
+    "`/bypass off`. It belongs to the running session: a restart of pardner or an idle close " +
     "puts the session back in its normal mode.",
 );
 export const GUIDE_TAGS = naming(
   "**Tags**\n" +
-    "`!tag <name>`, sent inside a session's thread, marks it: {chat} shows `[name]` at the start " +
+    "`/tag <name>`, sent inside a session's thread, marks it: {chat} shows `[name]` at the start " +
     "of the thread's first message, and where {agent} can tag a session it gets the same tag. " +
-    "The name is 1 to 40 letters, digits, `.`, `_` or `-`; a new `!tag` replaces the old one. " +
-    "`!untag` takes the tag away. A thread whose session has not started yet is marked in {chat} " +
+    "The name is 1 to 40 letters, digits, `.`, `_` or `-`; a new `/tag` replaces the old one. " +
+    "`/untag` takes the tag away. A thread whose session has not started yet is marked in {chat} " +
     "alone.",
 );
 export const GUIDE_PINS = naming(
   "**Pins**\n" +
-    "`!pin`, sent inside a session's thread, pins its first message in {chat}, which keeps the " +
-    "thread at hand. `!unpin` takes the pin away, however it was " +
+    "`/pin`, sent inside a session's thread, pins its first message in {chat}, which keeps the " +
+    "thread at hand. `/unpin` takes the pin away, however it was " +
     "made. A tag and a pin are independent.",
 );
 export const GUIDE_SHELL = naming(
   "**Shell commands**\n" +
-    "`!!command`, sent inside a session's thread, is the terminal's `!command`: pardner shows " +
+    "`!command`, sent inside a session's thread, is the terminal's `!command`: pardner shows " +
     "it with **Run** and **Cancel**, then runs it with Bash in the session's folder and shows " +
-    "its output; {agent} gets the command and its output, and answers. `!stop` stops a command " +
+    "its output; {agent} gets the command and its output, and answers. `/stop` stops a command " +
     "that runs.",
 );
 export const GUIDE_CLEAN = naming(
   "**Cleaning a channel**\n" +
-    "`!clean-channel`, sent in the channel, says how many threads would go and stay and asks " +
+    "`/clean-channel`, sent in the channel, says how many threads would go and stay and asks " +
     "you to confirm, then deletes them from {chat} with what sits outside them. The sessions stay " +
-    "in {agent}: `!resume` lists them again.",
+    "in {agent}: `/resume` lists them again.",
 );
 export const GUIDE_DELETE = naming(
   "**Deleting a thread**\n" +
-    "`!delete-thread`, sent inside a session's thread, asks you to confirm, then deletes every " +
+    "`/delete-thread`, sent inside a session's thread, asks you to confirm, then deletes every " +
     "message of the thread from {chat}, yours and the bot's. The session stays in {agent}: " +
-    "`!resume` lists it again. A thread that is working or waiting for you is not deleted: " +
-    "`!stop` it first.",
+    "`/resume` lists it again. A thread that is working or waiting for you is not deleted: " +
+    "`/stop` it first.",
 );
 // Joined to the guide only where pardner can update itself (`GuideOffer.updates`).
 export const GUIDE_UPDATES =
   "**Updates**\n" +
-  "`!pardner` shows the version that runs and the latest one. `!pardner update`, typed in the " +
+  "`/pardner` shows the version that runs and the latest one. `/pardner update`, typed in the " +
   "channel, offers the latest version with a button that installs it: running turns finish " +
-  "first, then pardner restarts on the new version. `!pardner restart` restarts it without " +
+  "first, then pardner restarts on the new version. `/pardner restart` restarts it without " +
   "installing anything. Both work only while pardner runs as a service.";
-export const GUIDE_END = "`!guide` shows this text again.";
+export const GUIDE_END = "`/guide` shows this text again.";
 
 /** The line a failed request answers with: it names who failed, and only the code of the failure. */
 export function failureReply(error: unknown, names: Names): string {

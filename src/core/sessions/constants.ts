@@ -28,7 +28,7 @@ export const TASK_EVENTS: ReadonlySet<SessionEventType> = new Set([
 // `backgroundTasks` declares (measured on Claude Code 2.1.280). Only a session of an agent with
 // that capability waits at all. If that turn never comes, the owner's queue moves on.
 export const INJECTED_TURN_WAIT = 30.0;
-// How long the answer to `!stop` waits for the reply it cut short to end. An interrupted turn
+// How long the answer to `/stop` waits for the reply it cut short to end. An interrupted turn
 // ends within a second or two; a final write that is retried takes ten.
 export const STOP_TAIL_WAIT = 15.0;
 // Each kind of task as the list of what still runs counts it and as its end line names it, the way the terminal
@@ -62,7 +62,7 @@ export const IDLE_CLOSE_SECONDS = 3600.0;
 // is reported only when a turn ends, so one that expired in silence would keep the session open
 // for good.
 export const LOOPS_BELIEVED_SECONDS = 7 * 24 * 3600.0;
-// How much of a job's prompt `!status` shows.
+// How much of a job's prompt `/status` shows.
 export const LOOP_PROMPT_LIMIT = 60;
 // The one hold a thread can have open at once, in the session's waiting set alongside real
 // approval ids (`waitingForOwner` and the idle-close timer treat every entry the same).

@@ -17,7 +17,7 @@ sessions close; `close` erases the keys held in memory.
 ## A reply
 
 `openReply(onOpenMessage, prompt)` takes the owner's message the reply is for; the core passes it for
-every turn of an owner's prompt, `!!command` included, and nothing for a report turn. The reply
+every turn of an owner's prompt, `!command` included, and nothing for a report turn. The reply
 writes text only. While that prompt has no answer, each `text` call becomes parts (kind 4), each at
 most 64 KiB of UTF-8 and cut between characters, each naming by `re` the answer the prompt will get;
 the text is added to that answer. Text written after the prompt's answer, or by a reply with no
@@ -35,7 +35,7 @@ Every prompt the bot started must get exactly one answer (kind 5, `re` the promp
 its replies or empty). With none, a restart shows the prompt cut although it ran; one written early
 shows it answered although a crash cut it. `ChatInbound.message` is no signal: measured on 2026-11-17
 with the memory chat and the plain agent, it resolves when the prompt reaches the agent, with the turn
-still held, and at once for a prompt sent during a turn and for a `!word`. The seam therefore has
+still held, and at once for a prompt sent during a turn and for a `/word`. The seam therefore has
 `InboundMessage.handled?()`, which the core calls once when it no longer works on the message: when the
 turn that took it ends (`Turn.done`), or, for a word, a drop or a refusal, when its flow ends. The core calls it after `replyOnFailure`, so a failure's text is in the thread before the prompt closes.
 The memory chat does not set it. The relay's inbound sets it and writes the answer and the decision in one store write. A prompt whose work in the core ends after the provider was stopped is not answered, so the next

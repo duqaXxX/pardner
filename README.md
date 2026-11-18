@@ -32,30 +32,30 @@ The steps from the package to a paired daemon are in [docs/setup.md](docs/setup.
 
 | Command | What it does |
 |---|---|
-| `!guide` | Explains how the channel works |
-| `!bind <folder>` | Binds the channel to a project folder |
-| `!status` | Lists the channel's sessions; in a thread, shows that session's details |
-| `!stop` | Stops every session of the channel; in a thread, that one |
-| `!memory` | Lists the memory files a thread's session loaded |
-| `!skills` | Lists the skills a thread's session can use |
-| `!terminal` | Moves a thread's session to a terminal on your Mac, a running turn with it |
-| `!fork [prompt]` | Copies a thread's session into a new thread, as the terminal's `/fork` does |
-| `!resume` | Lists the folder's sessions, the terminal's included, to resume one |
-| `!bypass on` / `off` | Switches a session to `bypassPermissions` and back |
-| `!plan` / `!plan off` | Switches a session to plan mode and back |
-| `!open` | Shares a file of the session's folder into the thread |
-| `!diff` | Lists the files the session's git repository changed since HEAD |
-| `!rewind` | Goes back to an earlier prompt of the session: restores its code, its conversation or both |
-| `!next` | Offers the agent's suggested next prompt to send |
-| `!tag <name>` | Tags the thread's first message and the session |
-| `!untag` | Takes the tag away |
-| `!pin` | Pins the thread's first message |
-| `!unpin` | Takes the pin away |
-| `!delete-thread` | Deletes the thread, once you confirm |
-| `!clean-channel` | Deletes the channel's threads and what sits outside them, once you confirm |
-| `!!<command>` | Runs a shell command in the session's folder once you confirm; Claude Code answers its output |
-| `!pardner` | Shows the version that runs and the latest; `update` installs the newer one, `restart` restarts |
-| `!help` | Lists the commands a session offers |
+| `/guide` | Explains how the channel works |
+| `/bind <folder>` | Binds the channel to a project folder |
+| `/status` | Lists the channel's sessions; in a thread, shows that session's details |
+| `/stop` | Stops every session of the channel; in a thread, that one |
+| `/memory` | Lists the memory files a thread's session loaded |
+| `/skills` | Lists the skills a thread's session can use |
+| `/terminal` | Moves a thread's session to a terminal on your Mac, a running turn with it |
+| `/fork [prompt]` | Copies a thread's session into a new thread, as the terminal's `/fork` does |
+| `/resume` | Lists the folder's sessions, the terminal's included, to resume one |
+| `/bypass on` / `off` | Switches a session to `bypassPermissions` and back |
+| `/plan` / `/plan off` | Switches a session to plan mode and back |
+| `/open` | Shares a file of the session's folder into the thread |
+| `/diff` | Lists the files the session's git repository changed since HEAD |
+| `/rewind` | Goes back to an earlier prompt of the session: restores its code, its conversation or both |
+| `/next` | Offers the agent's suggested next prompt to send |
+| `/tag <name>` | Tags the thread's first message and the session |
+| `/untag` | Takes the tag away |
+| `/pin` | Pins the thread's first message |
+| `/unpin` | Takes the pin away |
+| `/delete-thread` | Deletes the thread, once you confirm |
+| `/clean-channel` | Deletes the channel's threads and what sits outside them, once you confirm |
+| `!<command>` | Runs a shell command in the session's folder once you confirm; Claude Code answers its output |
+| `/pardner` | Shows the version that runs and the latest; `update` installs the newer one, `restart` restarts |
+| `/help` | Lists the commands a session offers |
 
 Some of these words need features the relay chat does not offer yet; [docs/limits.md](docs/limits.md) lists which.
 

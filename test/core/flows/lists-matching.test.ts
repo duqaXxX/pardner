@@ -1,5 +1,5 @@
 /**
- * Which session a typed `!resume` target means, and what the answer to a bind says: the two
+ * Which session a typed `/resume` target means, and what the answer to a bind says: the two
  * decisions of words and numbers the lists flows own.
  */
 import assert from "node:assert/strict";

@@ -1471,7 +1471,7 @@ test("a result that names no count of steps reads as one that took some", () => 
   assert.equal(ended?.steps, null);
 });
 
-// A process resumed after `!stop` closed the one that ran a background subagent (// `stop-close-resume`, recorded on 2026-10-18 with `@anthropic-ai/claude-agent-sdk` 0.3.302,
+// A process resumed after `/stop` closed the one that ran a background subagent (// `stop-close-resume`, recorded on 2026-10-18 with `@anthropic-ai/claude-agent-sdk` 0.3.302,
 // Claude Code 2.1.302 and the daemon's options, the owner's prompt sent as the process opened):
 // the task's notification says `stopped`, a result with `num_turns` 0 and no text follows, and
 // only then the turn of the prompt.

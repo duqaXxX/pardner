@@ -143,7 +143,7 @@ test("the owner's decision becomes the seam's answer", () => {
 test("a request decided before its message is known says so", () => {
   const approvals = new Approvals(MEMORY_NAMES);
   const [approvalId] = approvals.open(CHANNEL, THREAD, "Bash: ls");
-  approvals.denyAll(CHANNEL, THREAD); // !stop while the request was being posted
+  approvals.denyAll(CHANNEL, THREAD); // /stop while the request was being posted
   assert.equal(approvals.posted(approvalId, "msg-1"), false);
   const [liveId, pending] = approvals.open(CHANNEL, THREAD, "Bash: ls");
   assert.equal(approvals.posted(liveId, "msg-2"), true);

@@ -1,4 +1,5 @@
-/** `!guide`: the guide assembled from the parts of `texts.ts` that the agent and the chat can serve. */
+/** `/guide`: the guide assembled from the parts of `texts.ts` that the agent and the chat can serve. */
+import { COMMAND_PREFIX } from "./commands.ts";
 import * as texts from "./texts.ts";
 import { fill, type Named, type Names, named } from "./texts.ts";
 
@@ -30,11 +31,11 @@ export interface GuideOffer {
   readonly fileUpload: boolean;
   /** With `fileUpload`: the most bytes a shared file holds (`fileLimit`). */
   readonly fileLimit?: number;
-  /** The chat shows lists and files in a thread, and the agent keeps a record of trust (`!diff`). */
+  /** The chat shows lists and files in a thread, and the agent keeps a record of trust (`/diff`). */
   readonly diff: boolean;
-  /** The agent goes back to a prompt and the chat shows lists in a thread (`!rewind`). */
+  /** The agent goes back to a prompt and the chat shows lists in a thread (`/rewind`). */
   readonly rewind: boolean;
-  /** The agent suggests a next prompt and the chat shows lists in a thread (`!next`). */
+  /** The agent suggests a next prompt and the chat shows lists in a thread (`/next`). */
   readonly next: boolean;
   /** The chat tags a thread (`threadTags`). */
   readonly threadTags: boolean;
@@ -46,7 +47,7 @@ export interface GuideOffer {
   readonly channelClean: boolean;
   /** The agent reads a shell command's output (`shell`) and the instance has not turned it off. */
   readonly shell: boolean;
-  /** pardner can update itself: the host gave the daemon a way to (`!pardner`). */
+  /** pardner can update itself: the host gave the daemon a way to (`/pardner`). */
   readonly updates: boolean;
 }
 
@@ -87,7 +88,7 @@ export function guideText(names: Names, offered: GuideOffer): string {
     (offered.forks ? ` ${texts.GUIDE_SESSIONS_FORK}` : "") +
     ` ${texts.GUIDE_SESSIONS_TERMINAL}`;
 
-  const [first, ...others] = names.newSession.map((name) => `\`!${name}\``);
+  const [first, ...others] = names.newSession.map((name) => `\`${COMMAND_PREFIX}${name}\``);
   const newSession =
     first === undefined
       ? ""

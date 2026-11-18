@@ -1,4 +1,4 @@
-/** Scratch folders and git repositories for the tests of the file index, `!open` and the changed files. */
+/** Scratch folders and git repositories for the tests of the file index, `/open` and the changed files. */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
