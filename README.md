@@ -15,14 +15,15 @@ instead of a terminal.
   only the person it was paired with, and listens on no port: it connects out to the relay. Each
   channel it serves is bound to a project folder, and each thread holds a session.
 - The relay (`src/relay/`) stores and passes the messages, which it cannot read. It is meant for a
-  machine of yours; the package carries its code but no command that starts it yet.
+  machine of yours; `pardner relay init` and `pardner relay serve` start it
+  ([setup](docs/setup.md#a-relay-on-this-mac)).
 - The app is where you read and write: for macOS, not released yet.
 - The protocol the three speak is in `src/protocol/`.
 
 ## Status
 
 In development, macOS only. No app reads the bot's messages yet, so a session cannot be started
-from a message today, and the relay has no documented way to run.
+from a message today, and the relay runs in the foreground only, not as a service.
 [docs/features.md](docs/features.md) lists what is tested and what is still checked by hand, and
 [docs/limits.md](docs/limits.md) what the terminal does and the chat does not.
 

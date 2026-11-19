@@ -4,7 +4,8 @@
  * an agent, a chat or what only one of them has: the core and the seams are written for any agent
  * and any chat. A module's own name is one of the words, and its directory one of the homes, from
  * the directories themselves; the rest it declares itself, as the `words` of its registry entry.
- * `src/protocol/` and `src/relay/`, the relay chat's protocol and its server, may say `relay` alone.
+ * `src/protocol/` and `src/relay/`, the relay chat's protocol and its server, may say `relay` alone,
+ * and so may the files named in `RELAY_STARTERS`, which start the relay's program.
  * Comments are exempt: they may say what was measured, and on what.
  *
  * The scans by what they catch: `named` (a module's names, anywhere in `src/` outside the
@@ -65,6 +66,12 @@ export const HOMES = [...moduleDirectories(SRC), "registry.ts"];
 const RELAY_PIECES = ["protocol/", "relay/"];
 const RELAY = "relay";
 
+// The files that start the relay's program, which runs as a process of its own (relay design 2.1),
+// name it to do so, and may say `relay` alone: the command's words (`cli.ts`) and the child process
+// with the relay's folder (`host/relay-child.ts`). Each is listed by its path; the core, the seams
+// and `daemon.ts`, which dispatches through `cli.ts`, are never on this list.
+const RELAY_STARTERS = ["cli.ts", "host/relay-child.ts"];
+
 /** The words of `source`, the file at `file` under `src/` (forward slashes), outside their home. */
 export function strayWords(
   file: string,
@@ -72,7 +79,8 @@ export function strayWords(
   words: readonly string[] = WORDS,
 ): string[] {
   if (HOMES.some((home) => file === home || file.startsWith(home))) return [];
-  const piece = RELAY_PIECES.some((folder) => file.startsWith(folder));
+  const piece =
+    RELAY_PIECES.some((folder) => file.startsWith(folder)) || RELAY_STARTERS.includes(file);
   return named(source, piece ? words.filter((word) => word !== RELAY) : words);
 }
 
@@ -142,6 +150,17 @@ test("the protocol and the relay may say relay and no other module's word", () =
   assert.deepEqual(strayWords("relay/x.ts", 'const agent = "claude";'), ["1: claude"]);
   assert.deepEqual(strayWords("core/x.ts", "const relayKey = 1;"), ["1: relay"]);
   assert.deepEqual(strayWords("chat/relay/x.ts", 'const agent = "claude";'), []);
+});
+
+test("the files that start the relay may say relay and no other module's word", () => {
+  for (const file of ["cli.ts", "host/relay-child.ts"]) {
+    assert.deepEqual(strayWords(file, "const relayDir = 1;"), [], file);
+    assert.deepEqual(strayWords(file, 'const agent = "claude";'), ["1: claude"], file);
+  }
+  // A path is on the list whole: a file beside one, or below a listed name, is not.
+  for (const file of ["daemon.ts", "host/program.ts", "core/cli.ts", "host/relay-child.tsx"]) {
+    assert.deepEqual(strayWords(file, "const relayDir = 1;"), ["1: relay"], file);
+  }
 });
 
 test("no source file outside the modules and the registry names an agent or a chat", () => {

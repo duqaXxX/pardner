@@ -60,7 +60,7 @@
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentConfigError, type AgentEntry } from "./agent/seam.ts";
-import { answer, answerSetup, answerUpdate, parseArguments } from "./cli.ts";
+import { answerCommand, answerSetup, parseArguments } from "./cli.ts";
 import { type Clock, monotonicClock, systemClock } from "./clock.ts";
 import { CLEAN_EVERY_SECONDS, Cleanups, clean } from "./core/cleanup.ts";
 import { ConfigError, loadConfig } from "./core/config.ts";
@@ -700,8 +700,5 @@ export async function start(): Promise<void> {
     process.exitCode = await answerSetup(invocation, { chat, agents, defaults }, output);
     return;
   }
-  process.exitCode =
-    invocation.kind === "update"
-      ? await answerUpdate(invocation, output)
-      : answer(invocation, output, REGISTRY.agents);
+  process.exitCode = await answerCommand(invocation, output, REGISTRY.agents);
 }
