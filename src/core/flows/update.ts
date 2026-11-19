@@ -79,7 +79,11 @@ export function updating(deps: FlowDeps, updates: Updates, talk: Talk): PardnerF
   const notRestarted = (failures: readonly RestartFailure[]): string | null => {
     if (failures.length === 0) return null;
     return failures
-      .map(({ instance, status }) => {
+      .map((failure) => {
+        if ("job" in failure) {
+          return fill(texts.UPDATE_JOB_FAILED, { job: failure.job, reason: failure.reason });
+        }
+        const { instance, status } = failure;
         const reason =
           status === null
             ? texts.UPDATE_OTHER_NO_MANAGER

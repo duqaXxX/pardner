@@ -11,8 +11,8 @@ import { packageVersion } from "../../version.ts";
 import { copyOf } from "../program.ts";
 import type { RelayProgram } from "../relay-child.ts";
 import { failed, isInstanceName, listedJob, listedRows, ok, plistFacts, xml } from "./launchd.ts";
-import { listReport } from "./listing.ts";
-import type { InstanceListing, InstanceRow, Report, Run } from "./seam.ts";
+import { listReport, loadedOn } from "./listing.ts";
+import type { CopyJobs, InstanceListing, InstanceRow, Report, Run } from "./seam.ts";
 
 const BASE_LABEL = "local.pardner-relay";
 
@@ -73,6 +73,8 @@ export interface RelayManager {
   install(program: RelayProgram, directory: string, listen: string): Report;
   /** Unloads the job and removes its definition; leaves `directory` and the log. */
   uninstall(directory: string): Report;
+  /** Sends the relay `SIGTERM`; the manager starts it again. */
+  restart(): Report;
   /** Every relay job on the machine, printed. */
   list(): Report;
   /** The data `list` prints: the rows are the relay jobs, `entry.copy` the copy of each. */
@@ -194,6 +196,17 @@ export class RelayLaunchd implements RelayManager {
     });
   }
 
+  restart(): Report {
+    return this.#guarded(() => {
+      const job = this.#job();
+      if (job === null) return failed(1, [`${this.#label} is not loaded.`]);
+      // Its next start, which launchd makes on its own, runs the copy as it is now.
+      if (job.pid === null) return ok([`${this.#label} is not running; launchd starts it again.`]);
+      this.#launchctl(["kill", "TERM", `gui/${this.#options.uid}/${this.#label}`]);
+      return ok([`Sent SIGTERM to ${this.#label} (pid ${job.pid}): launchd starts it again.`]);
+    });
+  }
+
   list(): Report {
     return listReport(this.instances(), "No pardner relay job is installed.");
   }
@@ -252,4 +265,20 @@ export class RelayLaunchd implements RelayManager {
       throw error;
     }
   }
+}
+
+/** The relay jobs as an update sees them: the running ones on a copy, restarted by `SIGTERM`. */
+export function relayJobs(options: Omit<RelayLaunchdOptions, "instance">): CopyJobs {
+  return {
+    runningOn(copy) {
+      const listing = new RelayLaunchd({ ...options, instance: null }).instances();
+      if ("failure" in listing) return listing;
+      return loadedOn(listing.rows, copy)
+        .filter((row) => row.pid !== null)
+        .map((row) => ({
+          title: row.instance === null ? "the default relay" : `relay \`${row.instance}\``,
+          restart: () => new RelayLaunchd({ ...options, instance: row.instance }).restart(),
+        }));
+    },
+  };
 }

@@ -5,7 +5,7 @@
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { machineHost } from "./cli.ts";
+import { machineHost, machineJobs } from "./cli.ts";
 import type { Instance } from "./core/instance.ts";
 import { UpdateUnderWay, updateHeld, updateLock } from "./core/lock.ts";
 import type { RestartFailure, UpdatableAnswer, UpdatesHost } from "./core/port/updates.ts";
@@ -14,7 +14,7 @@ import { programOf } from "./host/program.ts";
 import { type RunAsync, runAsync } from "./host/run.ts";
 import { logPath } from "./host/service/launchd.ts";
 import { loadedOn } from "./host/service/listing.ts";
-import type { InstanceRow, ServiceManager } from "./host/service/seam.ts";
+import type { CopyJobs, InstanceRow, ServiceManager } from "./host/service/seam.ts";
 import { getLogger } from "./log.ts";
 import { errorCode, errorName } from "./values.ts";
 import { changelogOf, packageVersion } from "./version.ts";
@@ -29,6 +29,8 @@ export interface UpdateMachine {
   entry(): string;
   /** The service manager of the instance named (null: the default one); null where the system has none. */
   service(instance: string | null): ServiceManager | null;
+  /** The other jobs that run a copy beside the daemons; null where the system has none. */
+  jobs(): CopyJobs | null;
 }
 
 /** The machine pardner runs on. The entry is read when asked: a test never reaches it. */
@@ -37,6 +39,7 @@ export function realMachine(): UpdateMachine {
     run: runAsync,
     entry: () => programOf(process.argv[1] ?? "", process.env.PATH ?? "", process.execPath).main,
     service: (name) => machineHost.service({ name }),
+    jobs: machineJobs,
   };
 }
 
@@ -127,6 +130,24 @@ export function updatesHost(options: UpdatesHostOptions): UpdatesHost {
           );
           failed.push({ instance: row.instance, status: report?.code ?? null });
         }
+      }
+      // The instances' failures are told whatever the jobs do.
+      try {
+        const jobs = machine.jobs()?.runningOn(copy);
+        if (jobs !== undefined && "failure" in jobs) {
+          logger.warning(`could not list the jobs on the copy: ${jobs.failure}`);
+        } else {
+          for (const job of jobs ?? []) {
+            const report = job.restart();
+            if (report.code !== 0) {
+              const reason = report.err.join(" ") || `status ${report.code}`;
+              logger.warning(`could not restart ${job.title}: ${reason}`);
+              failed.push({ job: job.title, reason });
+            }
+          }
+        }
+      } catch (error) {
+        logger.warning(`could not restart the jobs on the copy: ${errorName(error)}`);
       }
       return failed;
     },

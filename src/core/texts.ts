@@ -318,6 +318,8 @@ export const UPDATE_OTHER_FAILED =
 export const UPDATE_OTHER_FAILED_DEFAULT =
   "The default instance did not restart: {reason}. `pardner service restart` in a terminal " +
   "restarts it.";
+export const UPDATE_JOB_FAILED =
+  "Not restarted: {job} ({reason}). It runs the version before the update until it restarts.";
 export const UPDATE_OTHER_STATUS = "the service manager ended with status {status}";
 export const UPDATE_OTHER_NO_MANAGER = "it has no service manager";
 export const UPDATE_RESTART = "Restarting pardner once running turns finish.";

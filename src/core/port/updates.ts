@@ -42,12 +42,17 @@ export type InstallOutcome =
   | { readonly kind: "mismatch"; readonly found: string | null }
   | { readonly kind: "failed"; readonly failure: UpdateFailure };
 
-/** An instance the restart did not reach: `status` is the service manager's, null when it has none. */
-export interface RestartFailure {
-  /** The instance's name; null for the default instance. */
-  readonly instance: string | null;
-  readonly status: number | null;
-}
+/**
+ * What the restart did not reach: an instance, whose `status` is the service manager's (null when
+ * it has none), or another job that runs the copy, by the title and the reason the host gives.
+ */
+export type RestartFailure =
+  | {
+      /** The instance's name; null for the default instance. */
+      readonly instance: string | null;
+      readonly status: number | null;
+    }
+  | { readonly job: string; readonly reason: string };
 
 /** The machine's update lock, held: one update at a time on the machine, whichever instance. */
 export interface UpdateLockHeld {
@@ -99,8 +104,8 @@ export interface UpdatesHost {
    */
   install(copy: string, version: string, signal: AbortSignal): Promise<InstallOutcome>;
   /**
-   * Sends the restart to the other instances on the copy the install replaced; the ones it did
-   * not reach.
+   * Sends the restart to the other instances and the other jobs on the copy the install replaced;
+   * the ones it did not reach.
    */
   restartOthers(copy: string): Promise<readonly RestartFailure[]>;
   /** Asks this daemon's own drained stop (`StopSignals.request`); the service starts it again. */

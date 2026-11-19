@@ -1054,6 +1054,25 @@ test("a click from a channel's offer records the offer's message and the version
   assert.deepEqual(world.state.restartNotice, expected);
 });
 
+test("a job that did not restart is told by its title and the host's reason", async (t) => {
+  const host = new FakeUpdatesHost();
+  host.restartFailures = [
+    { job: "job-1", reason: "restart refused" },
+    { job: "job-2", reason: "no manager" },
+  ];
+  const { world } = await updating(t, host);
+  const list = await offered(world);
+  await world.chat.as(OWNER).picks(list.message, VERSION);
+  assert.equal(
+    world.inChannel().at(-1),
+    [
+      "Installed pardner 0.3.1. Restarting once running turns finish.",
+      "Not restarted: job-1 (restart refused). It runs the version before the update until it restarts.",
+      "Not restarted: job-2 (no manager). It runs the version before the update until it restarts.",
+    ].join("\n"),
+  );
+});
+
 test("an offer that tells of an instance that did not restart is kept as it is: nothing recorded", async (t) => {
   // The next start would rewrite the whole offer into `Updated to…`, and the instance still to
   // restart by hand would no longer be named anywhere in the channel.

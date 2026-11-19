@@ -9,9 +9,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { logPath } from "../src/host/service/launchd.ts";
+import { relayJobs } from "../src/host/service/relay.ts";
 import { logger, updatesHost } from "../src/updates-host.ts";
 import { changelogOf } from "../src/version.ts";
-import { FakeMachine, FakeService } from "./support/updates.ts";
+import { machineOf } from "./support/relay-machine.ts";
+import { FakeJobs, FakeMachine, FakeService } from "./support/updates.ts";
 
 function setup(t: TestContext, name: string | null = null, service = true) {
   const base = realpathSync(mkdtempSync(join(tmpdir(), "awd-updates-host-")));
@@ -130,11 +132,84 @@ test("an instance with no service manager to restart it is reported with no stat
   assert.deepEqual(await host.restartOthers(machine.copy), [{ instance: "gone", status: null }]);
 });
 
+test("jobs that cannot be read leave the instances' failures told", async (t) => {
+  const { host, machine, own } = setup(t);
+  own.rows = [{ instance: "gone", loaded: true, pid: 3, entry: entry(machine.copy) }];
+  machine.copyJobs = {
+    runningOn: () => {
+      throw new Error("EACCES: the agents folder cannot be read");
+    },
+  };
+  assert.deepEqual(await host.restartOthers(machine.copy), [{ instance: "gone", status: null }]);
+});
+
 test("every restart that went through reports nothing", async (t) => {
   const { host, machine, own } = setup(t);
   machine.services.set("work2", new FakeService());
   own.rows = [{ instance: "work2", loaded: true, pid: 9, entry: entry(machine.copy) }];
   assert.deepEqual(await host.restartOthers(machine.copy), []);
+});
+
+test("the restart goes to each running job of the copy, and the ones it did not reach are named by title", async (t) => {
+  const { host, machine } = setup(t);
+  const jobs = new FakeJobs({
+    [machine.copy]: ["job-1", "job-2", "job-3"],
+    "/elsewhere": ["job-9"],
+  });
+  jobs.codes.set("job-2", 1);
+  machine.copyJobs = jobs;
+  assert.deepEqual(await host.restartOthers(machine.copy), [
+    { job: "job-2", reason: "restart refused" },
+  ]);
+  assert.deepEqual(jobs.restarted, ["job-1", "job-2", "job-3"], "a refusal does not stop the rest");
+  assert.deepEqual(jobs.asked, [machine.copy]);
+});
+
+test("a job listing that cannot be read is logged, and the daemons' restarts stand", async (t) => {
+  const { host, machine, own } = setup(t);
+  const work2 = new FakeService();
+  machine.services.set("work2", work2);
+  own.rows = [{ instance: "work2", loaded: true, pid: 9, entry: entry(machine.copy) }];
+  const jobs = new FakeJobs({});
+  jobs.failure = "launchctl list failed";
+  machine.copyJobs = jobs;
+  const warned = t.mock.method(logger, "warning", () => {});
+  assert.deepEqual(await host.restartOthers(machine.copy), []);
+  assert.equal(work2.restarts, 1);
+  assert.match(
+    String(warned.mock.calls[0]?.arguments[0]),
+    /could not list the jobs on the copy: launchctl list failed/,
+  );
+});
+
+test("the relay jobs of the copy are restarted through the host's jobs, three folders above their entry", async (t) => {
+  const { host, machine, base } = setup(t);
+  const home = join(base, "home");
+  const run = machineOf(
+    home,
+    [
+      {
+        kind: "relay",
+        instance: null,
+        entry: join(machine.copy, "dist", "relay", "main.js"),
+        pid: 5,
+      },
+      {
+        kind: "relay",
+        instance: "mini",
+        entry: join(machine.copy, "dist", "relay", "main.js"),
+        pid: 6,
+      },
+      { kind: "relay", instance: "else", entry: "/elsewhere/pardner/dist/relay/main.js", pid: 7 },
+    ],
+    ["launchctl kill"],
+  );
+  machine.copyJobs = relayJobs({ home, uid: 501, run });
+  assert.deepEqual(await host.restartOthers(machine.copy), [
+    { job: "the default relay", reason: "launchctl kill failed: refused" },
+    { job: "relay `mini`", reason: "launchctl kill failed: refused" },
+  ]);
+  assert.equal(run.calls.filter((call) => call.args[0] === "kill").length, 2);
 });
 
 test("an update under way is asked of the machine's lock, this daemon's own take included", async (t) => {

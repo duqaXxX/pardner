@@ -33,8 +33,9 @@ import { type RelayProgram, relayDirOf, runRelayChild } from "./host/relay-child
 import { type RunAsync, runAsync, runCommand } from "./host/run.ts";
 import { Launchd } from "./host/service/launchd.ts";
 import { loadedOn } from "./host/service/listing.ts";
-import { RelayLaunchd, type RelayManager } from "./host/service/relay.ts";
+import { RelayLaunchd, type RelayManager, relayJobs } from "./host/service/relay.ts";
 import {
+  type CopyJobs,
   type Report,
   SERVICE_ACTIONS,
   type ServiceAction,
@@ -347,15 +348,11 @@ export interface RelayHost {
   relayService(name: string | null): RelayManager | null;
 }
 
+/** What the relay's job manager needs of this machine. */
+const relayMachine = () => ({ home: homedir(), uid: process.getuid?.() ?? 0, run: runCommand });
+
 const machineRelayManager = (name: string | null): RelayManager | null =>
-  process.platform === "darwin"
-    ? new RelayLaunchd({
-        home: homedir(),
-        uid: process.getuid?.() ?? 0,
-        instance: name,
-        run: runCommand,
-      })
-    : null;
+  process.platform === "darwin" ? new RelayLaunchd({ ...relayMachine(), instance: name }) : null;
 
 export const machineRelayHost: RelayHost = {
   home: homedir(),
@@ -366,6 +363,10 @@ export const machineRelayHost: RelayHost = {
   }),
   relayService: machineRelayManager,
 };
+
+/** The relay jobs, for an update to restart beside the daemons. */
+export const machineJobs = (): CopyJobs | null =>
+  process.platform === "darwin" ? relayJobs(relayMachine()) : null;
 
 /**
  * Answers `pardner relay`: `init` and `serve` run the relay's own entry as a child and return its
@@ -482,6 +483,8 @@ export function answerSetup(
 
 /** What `update` needs of the machine beyond the service: npm, the home, a terminal. */
 export interface UpdateHost extends Host {
+  /** The other jobs that run a copy, which an update restarts with the daemons; null where there are none. */
+  jobs(): CopyJobs | null;
   /** Runs npm. */
   run: RunAsync;
   /** The owner's home, where the update lock lives. */
@@ -496,6 +499,7 @@ export interface UpdateHost extends Host {
 
 export const machineUpdateHost: UpdateHost = {
   ...machineHost,
+  jobs: machineJobs,
   run: runAsync,
   home: homedir(),
   version: installedVersion,
@@ -597,14 +601,33 @@ export async function answerUpdate(
   }
   const listing = host.service(DEFAULT_INSTANCE)?.instances() ?? { rows: [], refused: [] };
   if ("failure" in listing) return failure(output, listing.failure);
-  const restarts = loadedOn(listing.rows, updatable.copy).filter((row) => row.pid !== null);
+  const jobs = host.jobs()?.runningOn(updatable.copy) ?? [];
+  if ("failure" in jobs) return failure(output, jobs.failure);
+  // The daemons and the other jobs that run this copy, each with how it is restarted. A daemon
+  // waits for its running turns; another job restarts at once.
+  const daemons = loadedOn(listing.rows, updatable.copy)
+    .filter((row) => row.pid !== null)
+    .map((row) => ({
+      title: instanceName(row.instance),
+      restart: () => host.service({ name: row.instance })?.restart(),
+    }));
+  const restarts = [...daemons, ...jobs];
+  const wait =
+    daemons.length === 0
+      ? null
+      : jobs.length === 0
+        ? { sentence: " Running turns finish first.", clause: ": running turns finish first" }
+        : {
+            sentence: " Running turns finish first on the instances; the others restart at once.",
+            clause: ": running turns finish first on the instances",
+          };
   output.out(
     `Update pardner ${running} → ${latest.version} · What changed: ${changelogOf(latest.version)}\n`,
   );
   output.out(
     restarts.length === 0
       ? "No service runs this copy: it is installed and nothing restarts.\n"
-      : `It restarts: ${restarts.map((row) => instanceName(row.instance)).join(", ")}. Running turns finish first.\n`,
+      : `It restarts: ${restarts.map((job) => job.title).join(", ")}.${wait?.sentence ?? ""}\n`,
   );
   if (!invocation.yes) {
     if (!host.interactive) {
@@ -639,13 +662,13 @@ export async function answerUpdate(
   }
   const sent: string[] = [];
   let code = 0;
-  for (const row of restarts) {
-    const report = host.service({ name: row.instance })?.restart();
+  for (const job of restarts) {
+    const report = job.restart();
     if (report === undefined || report.code !== 0) {
       code = 1;
-      for (const line of report?.err ?? []) output.err(`${line}\n`);
+      for (const line of report?.err ?? []) output.err(`${job.title}: ${line}\n`);
     } else {
-      sent.push(instanceName(row.instance));
+      sent.push(job.title);
     }
   }
   const named =
@@ -655,7 +678,7 @@ export async function answerUpdate(
       ? `Installed pardner ${latest.version}. No service runs this copy, so nothing was restarted.\n`
       : sent.length === 0
         ? `Installed pardner ${latest.version}.\n`
-        : `Installed pardner ${latest.version}. Sent the restart to ${named}: running turns finish first.\n`,
+        : `Installed pardner ${latest.version}. Sent the restart to ${named}${wait?.clause ?? ""}.\n`,
   );
   return code;
 }
