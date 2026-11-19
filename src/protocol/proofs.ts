@@ -58,6 +58,26 @@ export function readProof(r: Reader, kind: ProofKind): Proof {
 
 /** The bytes a proof's signatures cover: the platform's `sign` over them signs the proof. */
 export const encodeProof = (p: Proof): Bytes => writeProof(new Writer(), p).bytes();
+/** What every proof binds, from the relay's pinned key, its nonce and this connection's binding; the device nonce is drawn here. */
+export const sessionOf = (
+  platform: Platform,
+  relay: Bytes,
+  relayNonce: Bytes,
+  binding: Bytes,
+): Session => ({
+  relay: relayKeyId(platform, relay),
+  deviceNonce: platform.random(32),
+  relayNonce,
+  binding,
+});
+
+/** The platform's signature over a proof; it throws when the platform cannot sign, which a connection takes as a drop. */
+export function signProof(platform: Platform, name: string, proof: Proof): Bytes {
+  const sig = platform.sign(name, encodeProof(proof));
+  if (!sig.ok) throw new Error("the platform did not sign");
+  return sig.value;
+}
+
 export const decodeProof = (bytes: Bytes, kind: ProofKind): Result<Proof> =>
   Object.hasOwn(LABELS, kind) ? decode(bytes, (r) => readProof(r, kind)) : fail("bad-input");
 
