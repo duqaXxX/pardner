@@ -1,7 +1,8 @@
 /**
- * The vectors inside JavaScriptCore, with CryptoKit behind the platform interface: the joined
- * script and the Swift program of `test/protocol/jsc/` built into a temporary folder and run.
- * Only a Mac with the Command Line Tools can do it.
+ * The vectors inside JavaScriptCore, with CryptoKit behind the platform interface: `swift test` in
+ * `app/` runs the vector files and the checks only Swift can make, on the joined script this file
+ * builds into a temporary folder. The checks that need both engines stay here: a seal CryptoKit
+ * makes opens on Node. Only a Mac with Xcode can do it.
  */
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -18,22 +19,22 @@ import {
 import { tempDirSync } from "../support/temp.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..");
-const JSC = join(import.meta.dirname, "jsc");
+const APP = join(ROOT, "app");
 
 function skipReason(): string | false {
   if (process.platform !== "darwin") return "JavaScriptCore with CryptoKit runs on macOS only";
-  const swiftc = spawnSync("swiftc", ["--version"], { stdio: "ignore" });
-  return swiftc.status === 0 ? false : "swiftc is not on the path";
+  // The Command Line Tools alone have `swiftc` and not what `swift test` needs.
+  const developer = spawnSync("xcode-select", ["-p"], { encoding: "utf8" });
+  return /\.app\/Contents\/Developer/.test(developer.stdout) ? false : "no Xcode is selected";
 }
 
 test("every vector file passes in JavaScriptCore on CryptoKit", {
   skip: skipReason(),
-  timeout: 450_000,
+  timeout: 960_000, // the sum of the steps below: 120 + 450 + 240 + 60 + 30 s, and the Node checks,
 }, () => {
   const folder = tempDirSync("pardner-jsc-");
   try {
     const script = join(folder, "protocol.js");
-    const program = join(folder, "run");
     execFileSync(
       process.execPath,
       [join(ROOT, ".github/scripts/join-protocol.mjs"), script, "vectors.js"],
@@ -42,45 +43,31 @@ test("every vector file passes in JavaScriptCore on CryptoKit", {
         timeout: 120_000,
       },
     );
-    execFileSync(
-      "swiftc",
-      [
-        "-O",
-        "-parse-as-library",
-        join(JSC, "platform.swift"),
-        join(JSC, "run.swift"),
-        "-o",
-        program,
-      ],
-      { timeout: 240_000, stdio: "pipe" },
-    );
-    const run = spawnSync(program, [script, join(import.meta.dirname, "vectors")], {
-      encoding: "utf8",
-      timeout: 60_000,
-    });
-    assert.equal(run.status, 0, run.stdout + run.stderr);
-    assert.match(run.stdout, /0 failed cases/);
-    // DeriveKeyPair on CryptoKit gives the private key of RFC 9180's own vector (A.3, 7.1.3).
-    const rfc = JSON.parse(
-      readFileSync(join(import.meta.dirname, "vectors", "hpke-rfc9180.json"), "utf8"),
-    ).vector as { ikmR: string; skRm: string };
-    const derived = spawnSync(program, ["derive", rfc.ikmR], { encoding: "utf8", timeout: 30_000 });
-    assert.equal(derived.stdout.trim(), rfc.skRm, derived.stderr);
-    // The boundary of DeriveKeyPair's acceptance, which no ikm reaches: 0, 1, n-1, n, 2^256-1.
-    const n = BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
-    const scalar = (v: bigint) => v.toString(16).padStart(64, "0");
-    const accepts = (v: bigint) =>
-      spawnSync(program, ["accepts", scalar(v)], {
+    // The build output stays in the temporary folder: none lands in the repository, and two runs
+    // never share a build lock.
+    const scratch = ["--scratch-path", join(folder, "build")];
+    const swift = (args: string[], timeout: number, env?: NodeJS.ProcessEnv) =>
+      spawnSync("swift", [...args, ...scratch], {
+        cwd: APP,
         encoding: "utf8",
-        timeout: 30_000,
-      }).stdout.trim();
-    assert.deepEqual([0n, 1n, n - 1n, n, 2n ** 256n - 1n].map(accepts), [
-      "false",
-      "true",
-      "true",
-      "false",
-      "false",
-    ]);
+        timeout,
+        env: { ...process.env, ...env },
+      });
+    const tests = swift(["test"], 450_000, { PARDNER_JOINED_SCRIPT: script });
+    assert.equal(tests.status, 0, tests.stdout + tests.stderr);
+    // Never zero, and never fewer than the package defines: a run that executes nothing is no pass.
+    const defined = (
+      readFileSync(join(APP, "Tests", "VectorTests", "VectorTests.swift"), "utf8").match(
+        /func test\w+\(/g,
+      ) ?? []
+    ).length;
+    const executed = Number(
+      /Executed (\d+) tests, with 0 failures/.exec(tests.stdout + tests.stderr)?.[1],
+    );
+    assert.ok(defined > 0 && executed >= defined, `executed ${executed} of ${defined} tests`);
+    const built = swift(["build", "--product", "vector-tool"], 240_000);
+    assert.equal(built.status, 0, built.stdout + built.stderr);
+    const program = join(swift(["build", "--show-bin-path"], 60_000).stdout.trim(), "vector-tool");
     // The other direction: a seal CryptoKit makes, under the package's `info`, opens on Node. The
     // vector files hold the first: seals Node made, which the run above opened in JavaScriptCore.
     const node = createNodePlatform();

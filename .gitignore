@@ -16,3 +16,10 @@
 
 # The tarball `npm pack` builds for the install.
 /pardner-*.tgz
+
+# SwiftPM and Xcode: the build folder holds absolute paths, per-user data the login.
+.build/
+xcuserdata/
+*.xcuserstate
+DerivedData/
+.swiftpm/

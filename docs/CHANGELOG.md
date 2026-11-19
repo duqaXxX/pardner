@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- `app/`: the Swift package of the macOS app (macOS 15 or later). `Platform` is the protocol package's platform
+  interface on CryptoKit; `ProtocolHost` runs the joined protocol script in JavaScriptCore on a thread of its own and
+  returns a JavaScript fault as a Swift error. `swift test` in `app/` runs the vector files inside JavaScriptCore. The
+  Xcode project `app/Pardner.xcodeproj` builds an empty macOS window, signed ad hoc, and the macOS CI job builds it.
+
+### Changed
+
+- `test/protocol/jsc.test.ts` runs `swift test` in `app/` and keeps the cross-engine seal check on Node; the Swift
+  harness that was in `test/protocol/jsc/` is now in `app/`.
+
 ## [0.16.0] - 2026-11-18
 
 ### Added
