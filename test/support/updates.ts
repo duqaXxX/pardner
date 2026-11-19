@@ -16,6 +16,8 @@ import type {
 } from "../../src/core/port/updates.ts";
 import type { CommandResult, RunAsync } from "../../src/host/run.ts";
 import type {
+  CopyJob,
+  CopyJobs,
   InstanceListing,
   InstanceRow,
   Report,
@@ -204,6 +206,8 @@ export class FakeMachine implements UpdateMachine {
   readonly npmSignals: Array<AbortSignal | undefined> = [];
   /** Per instance name (`""` for the default instance): its service manager; absent: none. */
   readonly services = new Map<string, FakeService>();
+  /** The other jobs that run a copy; null: the system has none. */
+  copyJobs: CopyJobs | null = null;
 
   constructor(base: string, version: string) {
     this.root = join(base, "global", "lib", "node_modules");
@@ -259,5 +263,41 @@ export class FakeMachine implements UpdateMachine {
 
   service(instance: string | null): ServiceManager | null {
     return this.services.get(instance ?? "") ?? null;
+  }
+
+  jobs(): CopyJobs | null {
+    return this.copyJobs;
+  }
+}
+
+/** Jobs beside the daemons, by neutral titles; `restart` is recorded and answers `code`. */
+export class FakeJobs implements CopyJobs {
+  /** The copies asked about, in order. */
+  readonly asked: string[] = [];
+  /** `runningOn` answers a failure with this sentence while it is set. */
+  failure: string | null = null;
+  readonly restarted: string[] = [];
+  /** The exit code of `restart` per title; absent: 0. */
+  readonly codes = new Map<string, number>();
+
+  /** The titles of the jobs that run each copy, or of the ones that run whichever copy is asked. */
+  readonly running: Record<string, string[]> | string[];
+
+  constructor(running: Record<string, string[]> | string[]) {
+    this.running = running;
+  }
+
+  runningOn(copy: string): CopyJob[] | { failure: string } {
+    this.asked.push(copy);
+    if (this.failure !== null) return { failure: this.failure };
+    const titles = Array.isArray(this.running) ? this.running : (this.running[copy] ?? []);
+    return titles.map((title) => ({
+      title,
+      restart: (): Report => {
+        this.restarted.push(title);
+        const code = this.codes.get(title) ?? 0;
+        return { code, out: [], err: code === 0 ? [] : ["restart refused"] };
+      },
+    }));
   }
 }

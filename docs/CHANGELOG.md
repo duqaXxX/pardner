@@ -47,6 +47,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- `pardner update` and the update from the chat restart the relay services (`local.pardner-relay[.<name>]`) whose
+  entry is in the updated copy, by `SIGTERM`, at once; `launchd` starts them again. The terminal's "It restarts:" line
+  names them and each of its failure lines starts with the service's name; the chat's offer names one that was not
+  restarted, with the reason the service manager gave.
 - The relay's Time Machine exclusion (`tmutil addexclusion`) gets 60 seconds instead of 10: it took 11 seconds on a
   Mac mini (macOS 27.2.1, 2026-11-19), so `init` failed and a served relay could never start there.
 - `test/protocol/jsc.test.ts` runs `swift test` in `app/` and keeps the cross-engine seal check on Node; the Swift

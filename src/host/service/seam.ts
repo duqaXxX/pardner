@@ -75,6 +75,19 @@ export interface ServiceManager {
   runningPid(): number | null;
 }
 
+/** A job that runs the copy of an update, beside the daemons: the owner reads its title. */
+export interface CopyJob {
+  readonly title: string;
+  /** Sends the job a stop that the service manager answers with a start. */
+  restart(): Report;
+}
+
+/** The jobs of one kind on the machine, as an update asks of them. */
+export interface CopyJobs {
+  /** The jobs that run now from the package folder `copy`, or the sentence that says why the machine could not be read. */
+  runningOn(copy: string): CopyJob[] | { failure: string };
+}
+
 /** How a manager runs a system command: its exit status (null when killed) and its output. */
 export type Run = (
   command: string,

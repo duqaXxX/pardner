@@ -145,6 +145,7 @@ const manager: RelayManager = {
     calls.push(`uninstall ${directory}`);
     return report;
   },
+  restart: () => report,
   list: () => {
     calls.push("list");
     return report;

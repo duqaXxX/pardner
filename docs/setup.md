@@ -744,7 +744,7 @@ with `.plist`. `service install`, `uninstall`, `status`, `restart`, `stop` and `
 an instance name. Instances installed from one copy run it
 together: `npm install -g pardner@latest` replaces that copy, and each of them needs its own
 `pardner service restart --instance <name>` to run the new one. The update from the chat and
-`pardner update` restart every instance on the copy, see [Updating pardner](#updating-pardner).
+`pardner update` restart every instance on the copy, and the relay services that run it, see [Updating pardner](#updating-pardner).
 
 ### One daemon per chat identity
 
@@ -1141,7 +1141,11 @@ and then:
    package; the offer then adds one sentence for it, ``Instance `<name>` did
    not restart: <reason>. `pardner service restart --instance <name>` in a terminal restarts
    it.`` (``The default instance did not restart: <reason>. `pardner service restart` in a
-   terminal restarts it.`` for the default one).
+   terminal restarts it.`` for the default one). The relay services whose entry is in that copy
+   get a `SIGTERM` in the same step, and `launchd` starts them again on the new copy at once,
+   without waiting for turns; one the restart did not reach adds ``Not restarted: <the default
+   relay | relay `<name>`> (<reason>). It runs the version before the update until it
+   restarts.``
 
 Once the new daemon is connected it rewrites the offer in place when the chat can edit a message:
 `Updated to pardner <latest>.` when the version that runs is the one asked, and `pardner
@@ -1227,7 +1231,9 @@ pardner update --yes
 the running copy is the one `npm install -g` replaces, prints what changes and which instances
 restart, asks `Update? [y/N]` (without a terminal it refuses unless `--yes`), installs, reads the
 copy's `package.json` again, and sends the restart to every running service of that copy, each
-after its running turns finish. It needs no service: with none running the copy, it ends with
+after its running turns finish. The relay services whose entry is in that copy get a `SIGTERM` too,
+at once, and `launchd` starts them again; the "It restarts:" line names them ("the default relay",
+"relay `mini`"), and each failure line on stderr starts with the name of the service it is about. It needs no service: with none running the copy, it ends with
 `No service runs this copy, so nothing was restarted.` once installed. It takes no `--instance`,
 since it is about a copy. It exits with 0 when it updated or had nothing to do and with 1 when it
 failed or could not tell.

@@ -12,13 +12,17 @@ import { test } from "node:test";
 import { answerUpdate, type Output, parseArguments, type UpdateHost, USAGE } from "../src/cli.ts";
 import { updateLock } from "../src/core/lock.ts";
 import type { CommandResult, RunAsync } from "../src/host/run.ts";
+import { relayJobs } from "../src/host/service/relay.ts";
 import type {
+  CopyJobs,
   InstanceListing,
   InstanceRow,
   Report,
   ServiceManager,
 } from "../src/host/service/seam.ts";
 import { setWriter } from "../src/log.ts";
+import { machineOf } from "./support/relay-machine.ts";
+import { FakeJobs } from "./support/updates.ts";
 
 // An install that fails logs npm's words; they are not wanted in the test report.
 setWriter(() => {});
@@ -124,6 +128,8 @@ interface Setup {
   place?: "global" | "elsewhere" | "link";
   published?: boolean;
   noService?: boolean;
+  /** The other jobs that run the copy, given the copy and the home. */
+  jobs?: (copy: string, home: string) => CopyJobs;
 }
 
 function world(t: { after(fn: () => void): void }, setup: Setup = {}): World {
@@ -190,6 +196,7 @@ function world(t: { after(fn: () => void): void }, setup: Setup = {}): World {
   const host: UpdateHost = {
     updateUnderWay: () => false,
     service: (instance) => (setup.noService === true ? null : service(instance.name)),
+    jobs: () => setup.jobs?.(copy, home) ?? null,
     program: () => ({
       node: "/n/node",
       main: join(own, "dist", "main.js"),
@@ -564,5 +571,78 @@ test("a restart that fails is reported, and the others are still sent", async (t
   assert.equal(await answerUpdate({ kind: "update", check: false, yes: true }, output, w.host), 1);
   assert.ok(w.calls.includes("restart work2"));
   assert.match(output.stdout, /Installed pardner 0\.3\.1\./);
-  assert.equal(output.stderr, "local.pardner is not running\n");
+  // Each line says which service it is about.
+  assert.equal(output.stderr, "the default instance: local.pardner is not running\n");
+});
+
+test("update restarts the jobs that run the copy, beside the daemons, and names them", async (t) => {
+  const jobs = new FakeJobs(["job-1", "job-2"]);
+  const w = world(t, { jobs: () => jobs });
+  const output = captured();
+  assert.equal(await answerUpdate({ kind: "update", check: false, yes: true }, output, w.host), 0);
+  assert.match(
+    output.stdout,
+    /It restarts: the default instance, job-1, job-2\. Running turns finish first on the instances; the others restart at once\./,
+  );
+  assert.match(
+    output.stdout,
+    /Sent the restart to the default instance, job-1 and job-2: running turns finish first on the instances\./,
+  );
+  assert.deepEqual(jobs.restarted, ["job-1", "job-2"]);
+});
+
+test("a job that does not restart is told on stderr and ends the update with 1", async (t) => {
+  const jobs = new FakeJobs(["job-1", "job-2"]);
+  jobs.codes.set("job-1", 1);
+  const w = world(t, { jobs: () => jobs });
+  const output = captured();
+  assert.equal(await answerUpdate({ kind: "update", check: false, yes: true }, output, w.host), 1);
+  assert.equal(output.stderr, "job-1: restart refused\n");
+  assert.match(output.stdout, /Sent the restart to the default instance and job-2:/);
+  assert.deepEqual(jobs.restarted, ["job-1", "job-2"], "the second is tried after the first fails");
+});
+
+test("with jobs alone, no line speaks of running turns", async (t) => {
+  const jobs = new FakeJobs(["job-1"]);
+  const w = world(t, { rows: () => [], jobs: () => jobs });
+  const output = captured();
+  assert.equal(await answerUpdate({ kind: "update", check: false, yes: true }, output, w.host), 0);
+  assert.match(output.stdout, /It restarts: job-1\.\n/);
+  assert.match(output.stdout, /Sent the restart to job-1\.\n/);
+  assert.doesNotMatch(output.stdout, /turns/);
+});
+
+test("a job listing that fails stops the update before it installs", async (t) => {
+  const jobs = new FakeJobs({});
+  jobs.failure = "launchctl list failed: Could not connect";
+  const w = world(t, { jobs: () => jobs });
+  const output = captured();
+  assert.equal(await answerUpdate({ kind: "update", check: false, yes: true }, output, w.host), 1);
+  assert.equal(output.stderr, "pardner update: launchctl list failed: Could not connect\n");
+  assert.ok(!w.calls.some((call) => call.startsWith("npm install")));
+});
+
+test("the relay jobs of the copy are restarted, found three folders above their entry", async (t) => {
+  let run: ReturnType<typeof machineOf> | undefined;
+  const w = world(t, {
+    jobs: (copy, home) => {
+      const entry = join(copy, "dist", "relay", "main.js");
+      run = machineOf(home, [
+        { kind: "relay", instance: null, entry, pid: 5 },
+        { kind: "relay", instance: "mini", entry, pid: 6 },
+        { kind: "relay", instance: "idle", entry, pid: null },
+        { kind: "relay", instance: "else", entry: "/elsewhere/pardner/dist/relay/main.js", pid: 8 },
+        { kind: "daemon", instance: "work", entry: join(copy, "dist", "main.js"), pid: 9 },
+      ]);
+      return relayJobs({ home, uid: 501, run });
+    },
+  });
+  const output = captured();
+  assert.equal(await answerUpdate({ kind: "update", check: false, yes: true }, output, w.host), 0);
+  assert.match(
+    output.stdout,
+    /It restarts: the default instance, the default relay, relay `mini`\. Running turns finish first on the instances; the others restart at once\./,
+  );
+  const kills = run?.calls.filter((call) => call.args[0] === "kill").map((call) => call.args[2]);
+  assert.deepEqual(kills, ["gui/501/local.pardner-relay", "gui/501/local.pardner-relay.mini"]);
 });
