@@ -190,4 +190,28 @@ public final class ProtocolHost: @unchecked Sendable { // sound: immutable field
             return Handle(owner: owner, token: token, state: state, thread: thread)
         }
     }
+
+    /// Calls `method` of the object `handle` names and returns what it answers, as a value: bytes cross as `Uint8Array`. A JavaScript exception faults the host.
+    public func call(_ handle: Handle, _ method: String, _ arguments: [HostValue] = []) async throws -> HostValue {
+        guard handle.owner == id else { throw HostError.foreignHandle }
+        return try await perform { state in
+            guard let target = state.table[handle.token] else { throw HostError.foreignHandle }
+            let bridge = Bridge(state.context!)
+            let answer = target.invokeMethod(method, withArguments: arguments.map(bridge.jsValue))
+            // A throw leaves no value: `run` reports the recorded exception after this block.
+            guard state.box.message == nil, let answer else { return HostValue.null }
+            return try bridge.hostValue(answer)
+        }
+    }
+
+    /// Calls the factory `method` of the package's `protocol` object with the host's platform first, and returns what it made as a handle: the way to make an object that holds the platform, which never crosses.
+    public func construct(_ method: String, _ arguments: [HostValue] = []) async throws -> Handle {
+        let (owner, thread) = (id, thread)
+        return try await perform { state in
+            let bridge = Bridge(state.context!)
+            let target = state.context!.objectForKeyedSubscript("protocol")!
+            let made = target.invokeMethod(method, withArguments: [state.platformObject!] + arguments.map(bridge.jsValue))!
+            return Handle(owner: owner, token: state.store(made), state: state, thread: thread)
+        }
+    }
 }

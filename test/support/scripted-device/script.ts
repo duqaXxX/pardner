@@ -10,7 +10,7 @@
  * decoded with the package before they are sent, and one that does not decode stops the run as a
  * `Defect`, unless the step is marked `"decoding": true`.
  *
- * Ops: `together` (design 4.1 of the crash images: `lists` of steps that run at once, a step with `pipe` not waited for), `prove` (`enrol`, `recovery` or `head` for an upload, else active), `submit` (`entry`: add,
+ * Ops: `export` (builds an item as `submit` does and hands its bytes to the run's `exported`, sending nothing: the bytes of a driver under test), `together` (design 4.1 of the crash images: `lists` of steps that run at once, a step with `pipe` not waited for), `prove` (`enrol`, `recovery` or `head` for an upload, else active), `submit` (`entry`: add,
  * remove, reset, create, epoch, message), `put-blob`, `get-blob`, `read`, `give-seal`,
  * `recovery-log`, `upload-done`, `close`, `follow` (the next push on a kept connection, checked as a read: the same `expect`), and `relay` (`act`: an act on the relay's process, 5.2, played by
  * the run's `World`; a link is never reused across a restart, so every act that ends the process closes
@@ -141,6 +141,7 @@ export async function run(
   platform: Platform = createNodePlatform(),
   world?: World,
   observe?: (seen: Observed) => void,
+  exported?: (kind: 1 | 2 | 3 | 4, item: { signed: Bytes; sig: Bytes }) => void,
 ) {
   let target = first;
   const links = new Map<string, { link: Link; device: string }>();
@@ -611,6 +612,13 @@ export async function run(
         return prove(step);
       case "submit":
         return submit(step);
+      case "export": {
+        const c = conn(step);
+        const built = build(step, String(step.by ?? c.device), String(step.sender ?? c.device));
+        if (!exported) throw new Defect(`line ${step.line}: no one takes an exported item`);
+        if (typeof step.as === "string") items.set(step.as, signedId(platform, built.signed));
+        return exported(KIND[step.entry as keyof typeof KIND], built);
+      }
       case "read":
         return read(step);
       case "follow":

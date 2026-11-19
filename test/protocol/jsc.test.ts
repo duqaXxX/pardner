@@ -53,22 +53,25 @@ test("every vector file passes in JavaScriptCore on CryptoKit", {
         timeout,
         env: { ...process.env, ...env },
       });
-    const tests = swift(["test"], 450_000, { PARDNER_JOINED_SCRIPT: script });
+    // RelayConnectionTests need a relay: app-relay.test.ts runs them.
+    const tests = swift(["test", "--skip", "RelayConnectionTests"], 450_000, {
+      PARDNER_JOINED_SCRIPT: script,
+    });
     assert.equal(tests.status, 0, tests.stdout + tests.stderr);
     // Never zero, and never fewer than the package defines: a run that executes nothing is no pass.
     // Every test file of every bundle counts, since `executed` below is the total over all of them.
     const testsDir = join(APP, "Tests");
     const defined = readdirSync(testsDir, { recursive: true, encoding: "utf8" })
-      .filter((file) => file.endsWith(".swift"))
+      .filter((file) => file.endsWith(".swift") && !file.endsWith("RelayConnectionTests.swift"))
       .reduce(
         (sum, file) =>
           sum + (readFileSync(join(testsDir, file), "utf8").match(/func test\w+\(/g) ?? []).length,
         0,
       );
-    // Each test bundle runs on its own and ends with its own "All tests" line: the total is their sum.
+    // Each test bundle runs on its own and ends with its own "All tests" line ("Selected tests" under `--skip`): the total is their sum.
     const executed = [
       ...(tests.stdout + tests.stderr).matchAll(
-        /Test Suite 'All tests' passed[^\n]*\n\s*Executed (\d+) tests, with 0 failures/g,
+        /Test Suite '(?:All|Selected) tests' passed[^\n]*\n\s*Executed (\d+) tests, with 0 failures/g,
       ),
     ].reduce((sum, m) => sum + Number(m[1]), 0);
     assert.ok(defined > 0 && executed >= defined, `executed ${executed} of ${defined} tests`);

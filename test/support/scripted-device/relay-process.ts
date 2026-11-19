@@ -33,7 +33,7 @@ const LIMITS = new URL("../../../src/relay/limits.ts", import.meta.url).href;
  * The child's entry: the real `run` with raised limits (5.4, finding 6), and a `sync` that fails the
  * journal's with `EIO` while `flag` exists (5.3). With `recorder`, `node:fs` is replaced first (crash images 2.2).
  */
-const ENTRY = (dir: string, flag: string, recorder?: string) => `
+const ENTRY = (dir: string, flag: string, recorder?: string, port = 0) => `
 import { existsSync, fstatSync, statSync } from "node:fs";
 ${recorder ?? ""}
 const { run } = await import(${JSON.stringify(MAIN)});
@@ -47,7 +47,7 @@ const seam = { ...nodeSeam, sync: async (fd) => {
 } };
 const big = { fine: 1e6, coarse: 1e6, all: 1e6, windowMs: 60_000 };
 const figures = { ...FIGURES, rate: big, recovery: big, ban: { ...FIGURES.ban, after: 1e6 } };
-process.exitCode = await run(["serve", "--dir", ${JSON.stringify(dir)}, "--listen", "127.0.0.1:0"], { seam, figures, exec: () => {} });
+process.exitCode = await run(["serve", "--dir", ${JSON.stringify(dir)}, "--listen", "127.0.0.1:${port}"], { seam, figures, exec: () => {} });
 `;
 
 /** Makes `to` hold exactly what `from` holds, writing each file over the live one so the journal keeps its inode (5.2). */
@@ -81,6 +81,8 @@ export class RelayProcess implements World {
   private target: Target = { port: 1, relay: new Uint8Array() };
   private durable?: number;
   private live = false;
+  /** The port the next `serve` listens on: 0 lets the system choose, a number keeps an address a client holds. */
+  private listen = 0;
   /** Whether the last `put-back-under` rewrote the journal (design 6.2: an equal journal is the journal alone). */
   private rewrote = false;
   private acting = "";
@@ -114,7 +116,7 @@ export class RelayProcess implements World {
     const hook =
       r &&
       `const { install } = await import(${JSON.stringify(new URL("../crash/record.ts", import.meta.url).href)});\ninstall(${JSON.stringify(r.root)}, ${JSON.stringify(r.file)}, ${JSON.stringify(this.hold)});`;
-    return ENTRY(this.dir, this.flag, hook);
+    return ENTRY(this.dir, this.flag, hook, this.listen);
   }
 
   /** A change the test makes to the directory: recorded as the writes it is, and taken as durable (design 2.3). */
@@ -219,6 +221,7 @@ export class RelayProcess implements World {
       "kill",
       "serve",
       "restart",
+      "restart-same-port",
       "power-cut",
       "disk-fails",
       "after-75",
@@ -264,6 +267,17 @@ export class RelayProcess implements World {
       case "restart":
         await this.end("SIGTERM", 0);
         return this.serve();
+      case "restart-same-port": {
+        // The new process listens where the old one did: a client that dials the address it holds finds it.
+        const port = this.target.port;
+        await this.end("SIGTERM", 0);
+        this.listen = port;
+        try {
+          return await this.serve();
+        } finally {
+          this.listen = 0;
+        }
+      }
       case "power-cut":
         await this.end("SIGKILL", null);
         return this.serve();
