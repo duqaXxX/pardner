@@ -251,6 +251,8 @@ one starting with `~/`) or is not a directory.
    - the relay's address (`RELAY_ADDRESS`), as `host:port`.
    - the relay's public key (`RELAY_KEY`): 130 hex digits that name a point of the P-256 curve.
    - your person id (`RELAY_OWNER`): 64 hex digits.
+   - the bot's name (`PARDNER_BOT_NAME`) and the path of its icon (`PARDNER_BOT_ICON`), each
+     skipped with Enter; a skipped one is not written.
    - the folder your projects live under (`ALLOWED_ROOT`), by the rule the daemon applies when it
      starts.
    - two questions about Claude Code: how long a command may run, in hours
@@ -316,13 +318,15 @@ one starting with `~/`) or is not a directory.
    A file written by hand holds no pairing: the bot refuses to start until the pairing exists, so
    run `pardner setup` for an instance that has no `.env` yet.
 
-The `RELAY_*` variables are the relay chat's; the others belong to the daemon.
+The `RELAY_*` and `PARDNER_BOT_*` variables are the relay chat's; the others belong to the daemon.
 
 | Variable | Value |
 |---|---|
 | `RELAY_ADDRESS` | the relay's address as `host:port` |
 | `RELAY_KEY` | the relay's public key, 130 hex digits |
 | `RELAY_OWNER` | your person id, 64 hex digits; the setup pairs the bot with it and prints the string your device adds |
+| `PARDNER_BOT_NAME` | optional: the name your devices show for this bot, 1 to 32 characters with no `@`; when absent, the Mac's host name up to its first dot, followed by `-<instance>` for a named instance |
+| `PARDNER_BOT_ICON` | optional: the absolute path of the bot's icon, a square PNG or JPEG of 16 to 256 pixels a side and 65,536 bytes at most; none when absent |
 | `ALLOWED_ROOT` | the directory `/bind` accepts paths under, for example `~/code` |
 | `PARDNER_AGENT` | optional: the agent pardner drives; `claude` when absent, the only one this release has |
 | `PARDNER_SHELL` | optional: `on` or `off`, whether `!<command>` runs your shell commands; `on` when absent |
@@ -331,6 +335,14 @@ The `RELAY_*` variables are the relay chat's; the others belong to the daemon.
 pardner does not know stops the start, and the message lists the valid ones. A variable that
 belongs to a module you did not select is not read. The chat is not selected by a variable: the
 relay chat is the only one.
+
+The bot writes its name, its icon and the account of its Claude Code login into each channel it
+reads, encrypted, so the relay reads none of them; the account goes only into a channel where you
+are the only member. It writes them again in every new epoch of a channel and when one of them
+changes; a change of name or icon takes a restart. A name or an icon that does not fit stops the
+start, and the message names the variable and the rule. A relay of an earlier version refuses the
+profile: the bot logs `relay: the relay refused the bot's profile`, goes on, and tries again at its
+next start, so update the relay and restart the bot.
 
 The bot's start is checked against the pairing: `RELAY_OWNER` and `RELAY_KEY` must be the ones the
 bot was paired with, or the start stops and the message says so. A `.env` that no longer matches

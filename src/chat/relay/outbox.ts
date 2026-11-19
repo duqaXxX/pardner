@@ -8,7 +8,7 @@
 import { bytesEqual } from "../../protocol/bytes.ts";
 import { buildEpoch, tickEpoch, whyStart } from "../../protocol/epochs.ts";
 import { deviceId, signedId } from "../../protocol/ids.ts";
-import { messageChecker } from "../../protocol/messages.ts";
+import { KIND_PROFILE, messageChecker } from "../../protocol/messages.ts";
 import {
   build,
   type Draft,
@@ -42,6 +42,11 @@ export interface OutboxOptions {
 }
 
 export class Outbox {
+  /**
+   * A profile of the bot's left the outbox in this run without landing (refused, too large or
+   * unwanted): no other is written before the next start (bot-profile design 3.2, condition 5).
+   */
+  profileDropped = false;
   #o: OutboxOptions;
   #self: Bytes;
   #sent = new Map<string, Set<string>>(); // names given result 0 since the last rest, by channel
@@ -59,6 +64,7 @@ export class Outbox {
     const { platform, pairing, store } = options;
     this.#self = deviceId(platform, pairing.device.signing, pairing.device.receiving);
     this.#dropStarts(); // a start belongs to the run that wrote it (SD 5.8)
+    this.#dropProfiles();
   }
 
   /** Puts a message in the outbox of `channel`, stored before it is built; false for a draft the package refuses. */
@@ -157,6 +163,24 @@ export class Outbox {
     }
   }
 
+  /**
+   * A profile not built yet holds what an earlier run would have written: built now, it would count
+   * as this run's (bot-profile design 3.2, condition 3) and keep a changed name or a newly learned
+   * account out of its epoch. Dropped at start, the writer decides again at rest from this run's
+   * configuration; a built one carries its own run and stays.
+   */
+  #dropProfiles(): void {
+    const stale = (i: OutboxItem) => i.kind === KIND_PROFILE && !i.built;
+    if (![...this.#o.store.saved.outboxes.values()].some((l) => l.some(stale))) return;
+    this.#save((s) => {
+      for (const [key, list] of s.outboxes)
+        s.outboxes.set(
+          key,
+          list.filter((i) => !stale(i)),
+        );
+    });
+  }
+
   #dropStarts(): void {
     const { outboxes } = this.#o.store.saved;
     if (![...outboxes.values()].some((l) => dropStarts(l).length !== l.length)) return;
@@ -174,6 +198,7 @@ export class Outbox {
   /** `item` replaced by `next` in its channel's outbox, or removed when `next` is `undefined`; rejects when the write fails. */
   #put(key: string, item: OutboxItem, next?: OutboxItem): Promise<void> {
     if (!next) this.#dropped.add(toHex(item.name));
+    if (!next && item.kind === KIND_PROFILE) this.profileDropped = true;
     return this.#o.store
       .change((s) =>
         s.outboxes.set(
@@ -266,6 +291,12 @@ export class Outbox {
         // A newer epoch already read: build in it at once, not at the next rest.
         return !bytesEqual(reading.channel(channel)?.epochs.at(-1)?.id ?? at.epoch, at.epoch);
       case 1: {
+        // A relay of an earlier version does not know the kind: not a fault (design 3.2, S2).
+        if (item.kind === KIND_PROFILE) {
+          log("relay: the relay refused the bot's profile");
+          await this.#put(key, item);
+          return true;
+        }
         const verdict = messageChecker(platform, view.epochs, [reading.devices])(
           built.signed,
           built.signature,

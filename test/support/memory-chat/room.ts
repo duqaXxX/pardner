@@ -10,6 +10,7 @@
  * does it, so a test reads it back.
  */
 import {
+  type AgentAccount,
   ChatError,
   type ChatInbound,
   type CommandSuggestion,
@@ -278,6 +279,8 @@ export class Room {
    * that chat's.
    */
   readonly edits: boolean;
+  /** Every account the core handed the chat (`agentAccount`), in order. */
+  readonly accounts: (AgentAccount | null)[] = [];
   #clock: ChatContext["clock"] | null = null;
   #inbound: ChatInbound | null = null;
   #sequence = 0;

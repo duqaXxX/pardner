@@ -70,6 +70,10 @@ export interface ChatContext {
   readonly clock: Clock;
   /** Seconds that only move forward, for what is paced. */
   readonly steady: Clock;
+  /** The instance's name, absent for the default instance (`core/instance.ts`). */
+  readonly instance?: string;
+  /** `AgentWords.brand` of the agent the daemon runs: names the chat's bot may not carry (invariant 6). */
+  readonly brand?: readonly string[];
   /**
    * The core. It exists once the daemon has built its sessions, which is before the first call
    * it makes on the provider it built; `build` itself must not read it.

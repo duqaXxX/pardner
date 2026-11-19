@@ -41,7 +41,7 @@ async function wizard(home: string, answers: (string | null)[], entry: ChatEntry
   );
   return { code, text: out.join("") };
 }
-const full = (home: string) => ["127.0.0.1:4433", GENERATOR, OWNER, home];
+const full = (home: string) => ["127.0.0.1:4433", GENERATOR, OWNER, "", "", home]; // the bot's name and icon skipped
 
 test("the wizard pairs the bot after it wrote .env, and prints the string last", async () => {
   const home = tempDirSync("pardner-home-");

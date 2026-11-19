@@ -110,6 +110,8 @@ export const WORDS: AgentWords = Object.freeze({
   newSession: ["clear", "reset", "new"],
   login: "login",
   logout: "logout",
+  // The Agent SDK's branding guidelines keep "Claude Code" out of a product's or a bot's name.
+  brand: ["Claude Code"],
   terminal: terminalWith(""),
   terminalContinue: continueWith(""),
   trust: trustWith(""),

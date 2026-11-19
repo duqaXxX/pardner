@@ -400,6 +400,8 @@ export async function run(options: RunOptions = {}): Promise<number> {
       configDir,
       clock: wall,
       steady,
+      ...(instance.name !== null && { instance: instance.name }),
+      ...(backend.words.brand && { brand: backend.words.brand }),
       core: () => {
         if (core === null) throw new Error("the core is read before the daemon built it");
         return core;

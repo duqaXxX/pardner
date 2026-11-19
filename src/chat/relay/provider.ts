@@ -9,6 +9,7 @@
 import { refKey } from "../../protocol/device-reader.ts";
 import type { Bytes, Platform } from "../../protocol/platform.ts";
 import {
+  type AgentAccount,
   type ChannelChat,
   type ChatCapabilities,
   ChatError,
@@ -77,6 +78,8 @@ export interface Link {
   start(): void;
   stop(): Promise<void>;
   close(): void;
+  /** The agent's account, for the bot's profile (bot-profile design 4.3). */
+  account?(account: AgentAccount | null): void;
 }
 
 export class RelayProvider implements ChatProvider {
@@ -270,6 +273,11 @@ export class RelayProvider implements ChatProvider {
     this.#inbound.start(inbound);
     this.#link?.start();
   }
+  /** The agent's account, handed to the bot's profile. */
+  agentAccount(account: AgentAccount | null): void {
+    this.#link?.account?.(account);
+  }
+
   /** Nothing reaches the core from here on, and no reply waits on a read-back that cannot come. */
   async stop(): Promise<void> {
     this.#inbound.start(undefined);

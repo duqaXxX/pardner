@@ -27,6 +27,7 @@
  *   agent.sessions;                       // every session started, with `prompts`, `answers`
  */
 import type {
+  AgentAccount,
   AgentBackend,
   AgentContext,
   AgentEntry,
@@ -586,6 +587,8 @@ export interface PlainSessionContext {
   readonly declaredState: boolean;
   /** What the daemon let the session ask of it (`daemonActions`); none when absent. */
   readonly actions?: DaemonActions;
+  /** The account `info` reports. */
+  readonly account: AgentAccount | null;
 }
 
 export class PlainSession implements AgentSession {
@@ -774,7 +777,7 @@ export class PlainSession implements AgentSession {
       models: this.#context.models,
       commands: PLAIN_COMMANDS,
       permissionMode: PLAIN_MODE,
-      account: null,
+      account: this.#context.account,
     };
   }
 
@@ -1066,6 +1069,8 @@ export class PlainSession implements AgentSession {
 export interface PlainAgentOptions {
   /** The agent's record of sessions; a new one when absent. */
   readonly store?: PlainStore;
+  /** The account each session's `info` reports; none (null) when absent. */
+  readonly account?: AgentAccount | null;
   /** The script: one array of steps per turn. A test that shares it across agents shares the rest of it. */
   readonly turns?: PlainStep[][];
   /**
@@ -1165,6 +1170,7 @@ export class PlainAgent implements AgentBackend {
   readonly models: readonly ModelInfo[];
   readonly #namedAtStart: boolean;
   readonly #rewind: PlainAgentOptions["rewind"];
+  readonly #account: AgentAccount | null;
 
   constructor(options: PlainAgentOptions = {}) {
     const words =
@@ -1179,6 +1185,7 @@ export class PlainAgent implements AgentBackend {
     this.loaded = options.loaded ?? null;
     this.models = options.models ?? [];
     this.#namedAtStart = options.namedAtStart === true;
+    this.#account = options.account ?? null;
     this.#rewind = options.rewind;
     if (options.rewind !== undefined) {
       this.capabilities = Object.freeze({
@@ -1289,6 +1296,7 @@ export class PlainAgent implements AgentBackend {
       firstUncuttable: this.#rewind?.firstUncuttable === true,
       promptDuringTurn: this.capabilities.promptDuringTurn,
       declaredState: this.capabilities.declaredState,
+      account: this.#account,
       ...(this.capabilities.daemonActions && actions !== undefined && { actions }),
     });
     if (this.#rewind?.files === true) {

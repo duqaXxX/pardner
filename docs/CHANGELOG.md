@@ -15,6 +15,12 @@ All notable changes to this project are documented here. The format follows
   the messages were opened in. A relay or a device of an earlier version refuses kind 13. The vectors are in
   `test/protocol/vectors/profile.json`.
 - The reading's `message` output carries the message's `position` in the relay's sequence.
+- The bot writes its profile: `PARDNER_BOT_NAME` (the host's name by default, then `-<instance>`) and
+  `PARDNER_BOT_ICON` are read at start and stop it when they do not fit; the profile, with the account of the agent's
+  login in a channel whose one member is the owner, goes into each channel at the start, in every new epoch and once
+  the account is known. A relay that refuses it is not at fault: the bot logs it and writes none until its next
+  start. `ChatProvider.agentAccount`, `ChatContext.instance`, `ChatContext.brand` and `AgentWords.brand` carry what
+  it needs across the seams.
 
 ## [0.17.0] - 2026-11-19
 
