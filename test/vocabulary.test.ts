@@ -67,10 +67,12 @@ const RELAY_PIECES = ["protocol/", "relay/"];
 const RELAY = "relay";
 
 // The files that start the relay's program, which runs as a process of its own (relay design 2.1),
-// name it to do so, and may say `relay` alone: the command's words (`cli.ts`) and the child process
-// with the relay's folder (`host/relay-child.ts`). Each is listed by its path; the core, the seams
-// and `daemon.ts`, which dispatches through `cli.ts`, are never on this list.
-const RELAY_STARTERS = ["cli.ts", "host/relay-child.ts"];
+// name it to do so, and may say `relay` alone: the command's words (`cli.ts`), the child process
+// with the relay's folder (`host/relay-child.ts`) and the relay's LaunchAgent
+// (`host/service/relay.ts`). Each is listed by its path; the core, the seams, `daemon.ts`, which
+// dispatches through `cli.ts`, and `updates-host.ts`, which reaches the relay's jobs as neutral
+// `CopyJobs`, are never on this list.
+const RELAY_STARTERS = ["cli.ts", "host/relay-child.ts", "host/service/relay.ts"];
 
 /** The words of `source`, the file at `file` under `src/` (forward slashes), outside their home. */
 export function strayWords(
@@ -153,12 +155,23 @@ test("the protocol and the relay may say relay and no other module's word", () =
 });
 
 test("the files that start the relay may say relay and no other module's word", () => {
-  for (const file of ["cli.ts", "host/relay-child.ts"]) {
+  for (const file of ["cli.ts", "host/relay-child.ts", "host/service/relay.ts"]) {
     assert.deepEqual(strayWords(file, "const relayDir = 1;"), [], file);
     assert.deepEqual(strayWords(file, 'const agent = "claude";'), ["1: claude"], file);
   }
   // A path is on the list whole: a file beside one, or below a listed name, is not.
-  for (const file of ["daemon.ts", "host/program.ts", "core/cli.ts", "host/relay-child.tsx"]) {
+  for (const file of [
+    "daemon.ts",
+    "updates-host.ts",
+    "host/program.ts",
+    "host/service/seam.ts",
+    "host/service/launchd.ts",
+    "host/service/listing.ts",
+    "core/cli.ts",
+    "core/port/updates.ts",
+    "host/relay-child.tsx",
+    "host/service/relay.tsx",
+  ]) {
     assert.deepEqual(strayWords(file, "const relayDir = 1;"), ["1: relay"], file);
   }
 });

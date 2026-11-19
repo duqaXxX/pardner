@@ -36,6 +36,12 @@ All notable changes to this project are documented here. The format follows
   nothing outside `src/relay/` imports. The parent ignores `SIGINT` (the terminal already sends it to the child),
   forwards `SIGTERM`, and returns 128 plus the signal's number for a child a signal ended. The relay's folder is
   `~/.local/share/pardner-relay[-<name>]`; `PARDNER_INSTANCE` does not apply. `docs/setup.md` has a part on it.
+- `pardner relay service install --listen <host>:<port> [--instance <name>]`, `uninstall` and `list` run the relay as
+  a user LaunchAgent, `local.pardner-relay[.<name>]`, with `KeepAlive`; its log is
+  `~/Library/Logs/pardner/pardner.relay[.<name>].log`. Install refuses a folder `init` did not make, a folder a running
+  relay holds and a loaded job with the label, and prints where the log is; whether the relay serves is read in the log.
+  The daemon's `service list` never shows a relay job, and `relay service list` never a daemon. `uninstall` leaves the
+  relay's folder.
 
 ### Changed
 

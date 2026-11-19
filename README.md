@@ -23,7 +23,7 @@ instead of a terminal.
 ## Status
 
 In development, macOS only. No app reads the bot's messages yet, so a session cannot be started
-from a message today, and the relay runs in the foreground only, not as a service.
+from a message today, and a relay started here has no one to serve.
 [docs/features.md](docs/features.md) lists what is tested and what is still checked by hand, and
 [docs/limits.md](docs/limits.md) what the terminal does and the chat does not.
 

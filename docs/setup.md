@@ -137,7 +137,7 @@ with status 1: install a newer Node, beside the one you have if you like.
 Skip this part when someone else runs your relay: you need only its three values (Part 1). A relay
 is a program of its own, with its own folder and its own process; the commands below start it from
 the `pardner` command. This part has no numbered steps, so the steps of Parts 1 to 6 keep their
-numbers. A relay that starts at login, as a service, is not part of this release.
+numbers.
 
 Make the relay's folder once:
 
@@ -177,6 +177,33 @@ exits with `another relay holds the directory`: find the relay's process with
 `--instance <name>` gives a relay of its own, with the folder `~/.local/share/pardner-relay-<name>`.
 It names a relay only: `PARDNER_INSTANCE`, which picks one of the daemons, does not apply to
 `pardner relay`.
+
+To start the relay at login and keep it running, install it as a service instead of serving it in
+the foreground:
+
+```bash
+pardner relay service install --listen 0.0.0.0:4433
+```
+
+It refuses when the folder holds no relay (run `pardner relay init` first), when a relay is serving
+the folder now, and when a job with the label is loaded. Otherwise it writes the LaunchAgent
+`~/Library/LaunchAgents/local.pardner-relay.plist`, loads it, and prints where the log is. It says
+nothing about whether the relay serves: read the log, `~/Library/Logs/pardner/pardner.relay.log`,
+for `listening on port 4433`. The job restarts the relay whenever it exits, so a cause that does not
+go away (a port in use, a folder another relay holds, a failed Time Machine exclusion) adds a line
+to the log at each start. launchd starts a job at most once every 10 seconds (`man launchd.plist`,
+`ThrottleInterval`), and each start first sets the Time Machine exclusion, which took 11 seconds on
+a Mac mini and is given up after 60. With `--instance <name>` the label is `local.pardner-relay.<name>` and
+the log `pardner.relay.<name>.log`.
+
+`pardner relay service list` shows the relay jobs on the machine, and never a daemon's;
+`pardner service list` shows the daemons, and never a relay job. `pardner relay service uninstall`
+stops the job and removes its plist. It leaves the relay's folder, and prints its path.
+
+To recreate a relay (the machine changed, or the folder was lost or put back by hand), uninstall the
+service, move the old folder away, run `pardner relay init` and install the service again. A
+recreated relay has a new key and a new enrolment secret, so every device is paired again; the old
+history stays readable on the devices that hold it.
 
 The person id (`RELAY_OWNER`) comes from a device, not from the relay. No device can pair until the
 app does, and the app is not released, so today a relay started here has no one to serve.
