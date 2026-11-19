@@ -1,28 +1,22 @@
 /**
- * The bot's connection to the relay (design 3.5): TLS 1.3 with the relay's key pinned from the pairing,
- * the hello, the exporter binding (crypto.md 10), `prove active`, then the reading of 3.4 driven by
- * what the relay sends. It dials again after a drop, backs off, gives its head back on a connection of its own; it stops for good when the relay
- * must be recreated or the reading met a fault, and any other error is a drop. `submit` is the one
- * request it sends for a caller, on a served connection at rest. Shares no code with the scripted device's link.
+ * The bot's connection to the relay (design 3.5): the driver of `Link` (`src/protocol/link.ts`), which
+ * holds the policy: the hello, the exporter binding (crypto.md 10), `prove active`, the reading of 3.4,
+ * the back-off, the refusals, the give-back on a connection of its own, and the request `submit` sends.
+ * This file holds what only Node can do: TLS 1.3 with the relay's key pinned from the pairing, one timer,
+ * the store, the log. Socket events, the timer and `submit` go through one queue, taken one at a time,
+ * so no frame is handled while a store write is in flight. Shares no code with the scripted device's link.
  */
 import { X509Certificate } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { type TLSSocket, connect as tls } from "node:tls";
-import { isDeepStrictEqual } from "node:util";
-import { bytesEqual } from "../../protocol/bytes.ts";
-import { decodeFrame, encodeFrame, type Frame, frameLength } from "../../protocol/frames.ts";
-import { deviceId, relayKeyId } from "../../protocol/ids.ts";
+import { deviceId } from "../../protocol/ids.ts";
 import { EXPORTER_LABEL } from "../../protocol/labels.ts";
+import { type Effect, Link, type Persist } from "../../protocol/link.ts";
 import type { Bytes, Platform } from "../../protocol/platform.ts";
-import { encodeProof, type Proof, type Session } from "../../protocol/proofs.ts";
-import { type Out, Reading, type State } from "../../protocol/reading.ts";
+import type { Out, Reading } from "../../protocol/reading.ts";
 import { type Pairing, RECEIVE, SIGN } from "./pairing.ts";
 import type { Store } from "./store.ts";
 
-const FIRST = 1000; // the first back-off, doubled to MAX, back to FIRST at rest
-const MAX = 60_000;
-const ASK = 10 * 60_000; // a refused bot asks again, and a bot at rest sends a read when it sent nothing for this long (RD 4.6: 15 minutes)
-const PATIENCE = 30_000; // without a frame before rest, or without an answer to a read
 const SPKI = Buffer.from("3059301306072a8648ce3d020106082a8648ce3d030107034200", "hex");
 
 /** Time, for a test to drive: `wait` is a back-off, `idle` a limit on silence. True when the time passed, false when `signal` ended it. */
@@ -49,116 +43,53 @@ export interface ConnectionOptions {
   clock?: Clock;
 }
 
-interface Link {
-  send(frame: Frame): void;
-  next(): Promise<Frame | undefined>;
-  binding(): Bytes;
-  close(): void;
-}
-
-/** A socket as frames: `next` is `undefined` once it is closed or sent bytes that are no frame. Each frame is allocated once, from its length. */
-function framed(socket: TLSSocket): Link {
-  let proven = false;
-  let closed = false;
-  let need = 4;
-  let got = 0;
-  let chunk = Buffer.allocUnsafe(4);
-  const queue: Frame[] = [];
-  let waiter: ((f: Frame | undefined) => void) | undefined;
-  const end = () => {
-    closed = true;
-    socket.destroy();
-    waiter?.(undefined);
-    waiter = undefined;
-  };
-  socket.setKeepAlive(true, 30_000);
-  socket.on("error", end);
-  socket.on("close", end);
-  // A chunk is a string only after `socket.setEncoding()`, never called here.
-  socket.on("data", (received) => {
-    const data = received as Buffer;
-    for (let at = 0; at < data.length && !closed; ) {
-      const take = Math.min(need - got, data.length - at);
-      data.copy(chunk, got, at, at + take);
-      got += take;
-      at += take;
-      if (got < need) return;
-      if (need === 4) {
-        const size = frameLength(chunk, proven);
-        if (!size.ok) return end();
-        need = 4 + size.value;
-        chunk = Buffer.concat([chunk], need);
-        continue;
-      }
-      const frame = decodeFrame(chunk, proven, "device");
-      [need, got, chunk] = [4, 0, Buffer.allocUnsafe(4)];
-      if (!frame.ok) return end();
-      if (waiter) {
-        waiter(frame.value);
-        waiter = undefined;
-      } else queue.push(frame.value);
-    }
-  });
-  return {
-    send(frame) {
-      const bytes = encodeFrame(frame, proven);
-      if (frame.type.startsWith("prove-")) proven = true;
-      if (!closed) socket.write(bytes);
-    },
-    next: () =>
-      new Promise((resolve) => {
-        const held = queue.shift();
-        if (held || closed) resolve(held);
-        else waiter = resolve;
-      }),
-    binding: () =>
-      Uint8Array.from(socket.exportKeyingMaterial(32, EXPORTER_LABEL, Buffer.alloc(0))),
-    close: () => socket.destroy(),
-  };
-}
+type Event = (now: number) => Effect[];
 
 export class Connection {
   readonly reading: Reading;
   #o: ConnectionOptions;
   #clock: Clock;
-  #stop = new AbortController();
-  #run: Promise<void> = Promise.resolve();
-  #link: Link | undefined;
-  #delay = FIRST;
-  #slow = false; // the last refusal asks again every ASK
-  #self: Bytes;
-  #served: Link | undefined; // the link `submit` may use: proven, and read to rest at some time
-  #request = 1; // the last request id of a `submit`
+  #link: Link;
+  #sockets = new Map<number, TLSSocket>();
+  #events: Event[] = [];
+  #wake: (() => void) | undefined; // the loop, asleep until an event comes
+  #run: Promise<void> | undefined;
+  #started = false; // `start` ran: events are taken from then on, a dial's first `closed` included
+  #ended = false; // the loop ended: the link is final
+  #stopped = false; // `stop` was called: a later `start` does nothing
+  #conn = 0; // the last connection dialed
+  #now = 0; // the time handed to the last call of the link
+  #timer = new AbortController();
+  #armed: string | undefined; // the deadline the timer waits for, and how
+  #waitAt = -1; // the deadline of the back-off already logged
   #pending = new Map<number, (code: number | undefined) => void>();
 
   constructor(options: ConnectionOptions) {
     this.#o = options;
     this.#clock = options.clock ?? realClock;
     const { pairing, platform, store } = options;
-    this.#self = deviceId(platform, pairing.device.signing, pairing.device.receiving);
-    this.reading = new Reading(
-      {
+    this.#link = new Link({
+      who: {
         platform,
         relay: pairing.relay,
         person: pairing.person,
-        self: this.#self,
+        self: deviceId(platform, pairing.device.signing, pairing.device.receiving),
         receiving: RECEIVE,
       },
-      structuredClone(store.saved.kept),
-      { incarnation: store.saved.incarnation, fault: store.saved.fault },
-    );
+      keys: pairing.device,
+      sign: SIGN,
+      kept: structuredClone(store.saved.kept),
+      stored: { incarnation: store.saved.incarnation, fault: store.saved.fault },
+    });
+    this.reading = this.#link.reading;
   }
 
   /** Starts dialing; a stored put-back or fault dials nothing, and tells the caller. */
   start(): void {
-    const { log, on } = this.#o;
-    if (this.reading.state === "put-back") {
-      log("relay: it must be recreated, the bot dials no more");
-      on({ do: "put-back" });
-    } else if (this.reading.state === "fault") {
-      log("relay: a fault is stored, the bot dials no more");
-      on({ do: "fault", why: "stored" });
-    } else this.#run = this.#loop();
+    if (this.#started || this.#stopped) return;
+    this.#started = true;
+    this.#events.push((now) => this.#link.start(now));
+    this.#run = this.#loop();
   }
 
   /**
@@ -166,57 +97,200 @@ export class Connection {
    * reading is not at rest) or the connection ended before the answer: the item is then sent again.
    */
   submit(kind: 1 | 2 | 3 | 4, signed: Bytes, sig: Bytes): Promise<number | undefined> {
-    const link = this.#served;
-    if (!link || !this.reading.sendable) return Promise.resolve(undefined);
-    const request = ++this.#request;
-    // No answer within PATIENCE is a drop: the link is closed, and the item is sent again after the next rest.
-    const limit = new AbortController();
-    void this.#clock
-      .idle(PATIENCE, AbortSignal.any([limit.signal, this.#stop.signal]))
-      .then((late) => late && link.close());
-    return new Promise<number | undefined>((resolve) => {
-      this.#pending.set(request, resolve);
-      try {
-        link.send({ type: "submit", request, kind, signed, sig });
-      } catch (error) {
-        this.#pending.delete(request);
-        throw error;
-      }
-    }).finally(() => limit.abort());
+    return new Promise((resolve, reject) => {
+      this.#push((now) => {
+        try {
+          const sent = this.#link.submit(kind, signed, sig, now);
+          if (sent === "busy") resolve(undefined);
+          else this.#pending.set(sent.request, resolve);
+          return sent === "busy" ? [] : sent.effects;
+        } catch (error) {
+          reject(error);
+          return [];
+        }
+      }, resolve);
+    });
   }
 
   /** Ends the connection and the dialing; resolves when the loop has ended. */
   async stop(): Promise<void> {
-    this.#stop.abort();
-    this.#link?.close();
+    this.#stopped = true;
+    this.#push((now) => this.#link.stop(now));
     await this.#run;
   }
 
+  /** Queues an event; `refuse` is called instead when the loop has ended and nothing would take it. */
+  #push(event: Event, refuse?: (code: undefined) => void): void {
+    if (this.#ended || !this.#started) {
+      refuse?.(undefined);
+      return;
+    }
+    this.#events.push(event);
+    this.#wake?.();
+  }
+
   async #loop(): Promise<void> {
-    const r = this.reading;
-    const state = () => r.state as State; // the loop's own awaits move it
-    const final = () => state() === "put-back" || state() === "fault";
-    while (!this.#stop.signal.aborted && !final()) {
-      try {
-        if (state() === "giving-back") await this.#upload();
-        else await this.#active();
-      } catch (error) {
-        // Any error is a drop (a failed store write included): the store writes again with its next change.
-        this.#o.log(`relay: connection error: ${(error as Error).message}`);
-        if (state() === "giving-back")
-          for (const out of r.gaveBack(undefined)) await this.#act(out);
+    // The link's final states: put-back and fault dial no more, stopped ends for good.
+    const final = () => ["put-back", "fault", "stopped"].includes(this.#link.state);
+    do {
+      const next = this.#events.shift();
+      if (!next) {
+        await new Promise<void>((resolve) => (this.#wake = resolve));
+        continue;
       }
-      if (state() !== "giving-back") r.dropped();
-      if (final() || state() === "giving-back") continue;
-      const ms = this.#slow ? ASK : this.#delay;
-      if (!this.#slow) this.#delay = Math.min(this.#delay * 2, MAX);
-      this.#o.log(`relay: connection ended, dialing again in ${ms / 1000} s`);
-      await this.#clock.wait(ms, this.#stop.signal);
+      await this.#run1(next);
+    } while (!final());
+    this.#ended = true;
+    this.#timer.abort();
+    for (const socket of this.#sockets.values()) socket.destroy();
+    // What was queued behind the last event meets the final link: a `submit` is `busy` and settles.
+    for (const next of this.#events.splice(0)) await this.#run1(next);
+    for (const resolve of this.#pending.values()) resolve(undefined);
+    this.#pending.clear();
+  }
+
+  /** One event through the link and its effects; a throw is logged and the loop goes on. */
+  async #run1(event: Event): Promise<void> {
+    try {
+      await this.#perform(event(this.#time()));
+    } catch (error) {
+      this.#o.log(`relay: connection error: ${(error as Error).message}`);
     }
   }
 
-  /** TLS up and the relay's key the pinned one, or `undefined` (nothing is sent to another key). */
-  async #dial(): Promise<{ link: Link; nonce: Bytes } | undefined> {
+  #time(): number {
+    this.#now = Math.max(this.#now, this.#clock.now()); // the link is never given an earlier time
+    return this.#now;
+  }
+
+  /**
+   * Performs the effects in order, each on its own: a throw is logged and the others still run (a
+   * `persist` must be answered, the `wake` armed), then the current connection is dropped. A `persist`
+   * ends its list, so what the store's answer returns follows it.
+   */
+  async #perform(effects: Effect[]): Promise<void> {
+    let failed = false;
+    const conn = this.#conn; // the connection the throw is about: a dial in this list replaces #conn
+    for (const fx of effects) {
+      if (fx.do === "persist") {
+        await this.#perform(this.#link.persisted(await this.#write(fx.what), this.#time()));
+        break;
+      }
+      try {
+        this.#effect(fx);
+      } catch (error) {
+        this.#o.log(`relay: connection error: ${(error as Error).message}`);
+        failed = true;
+        // A dial that threw has no socket to bring its `closed`.
+        if (fx.do === "dial") this.#push((now) => this.#link.closed(fx.conn, now));
+      }
+    }
+    // Destroying the socket brings its `closed` through the queue.
+    if (failed) this.#sockets.get(conn)?.destroy();
+  }
+
+  #effect(fx: Exclude<Effect, { do: "persist" }>): void {
+    switch (fx.do) {
+      case "dial":
+        this.#waitAt = -1;
+        this.#conn = fx.conn;
+        this.#dial(fx.conn, fx.purpose);
+        break;
+      case "send":
+        this.#sockets.get(fx.conn)?.write(fx.bytes);
+        break;
+      case "close":
+        if (fx.why) this.#o.log(`relay: ${fx.why}`);
+        this.#sockets.get(fx.conn)?.destroy();
+        this.#sockets.delete(fx.conn);
+        break;
+      case "wake":
+        this.#arm(fx.at);
+        break;
+      case "deliver":
+        this.#deliver(fx.out);
+        break;
+      case "answer":
+        this.#pending.get(fx.request)?.(fx.code === "unanswered" ? undefined : fx.code);
+        this.#pending.delete(fx.request);
+        break;
+    }
+  }
+
+  /** The one timer: a back-off goes to `wait` and ticks at its deadline, any other deadline to `idle`. */
+  #arm(at: number): void {
+    const waiting = this.#link.state === "waiting";
+    // The link repeats its wake after every call: a timer already waiting for that deadline stays.
+    if (this.#armed === `${waiting} ${at}`) return;
+    this.#armed = `${waiting} ${at}`;
+    this.#timer.abort();
+    this.#timer = new AbortController();
+    const { signal } = this.#timer;
+    const ms = Math.max(at - this.#now, 0); // the time the link was last given, as its deadlines are
+    if (waiting && at !== this.#waitAt) {
+      this.#waitAt = at;
+      this.#o.log(`relay: connection ended, dialing again in ${ms / 1000} s`);
+    }
+    const timer = waiting ? this.#clock.wait(ms, signal) : this.#clock.idle(ms, signal);
+    void timer.then((passed) => {
+      if (!passed || signal.aborted) return; // a timer that is no longer the armed one does nothing
+      this.#armed = undefined;
+      this.#push((now) => {
+        this.#now = Math.max(now, at);
+        return this.#link.tick(this.#now);
+      });
+    });
+  }
+
+  /** Writes what the link asks to store; false when the store did not write. */
+  async #write(what: Persist): Promise<boolean> {
+    const final = "putBack" in what || "fault" in what;
+    try {
+      await this.#o.store.change((s) => {
+        if ("incarnation" in what) s.incarnation = what.incarnation;
+        if ("fault" in what) s.fault = true;
+        s.kept = structuredClone("kept" in what ? what.kept : this.reading.kept);
+      });
+      return true;
+    } catch (error) {
+      // A failed write of put-back or fault is logged and not repeated; any other is a drop, and the store writes again with its next change.
+      const { message } = error as Error;
+      this.#o.log(
+        final
+          ? `relay: the store did not write: ${message}`
+          : `relay: connection error: ${message}`,
+      );
+      return false;
+    }
+  }
+
+  /** Tells the log and the caller of what the reading said, after the store holds what it changed. */
+  #deliver(out: Out): void {
+    const { log, on } = this.#o;
+    switch (out.do) {
+      case "rest":
+        log("relay: read to rest");
+        break;
+      case "refused":
+        log(`relay: refused, reason ${out.reason}`);
+        return;
+      case "put-back":
+        log("relay: it must be recreated, the bot dials no more");
+        break;
+      case "fault":
+        log(
+          out.why === "stored"
+            ? "relay: a fault is stored, the bot dials no more"
+            : `relay: fault, ${out.why}, the bot dials no more`,
+        );
+        break;
+    }
+    on(out);
+  }
+
+  /** TLS up to `conn`; its events go to the queue, `closed` once, and `opened` only when the relay's key is the pinned one. */
+  #dial(conn: number, purpose: "active" | "upload"): void {
+    if (purpose === "upload") this.#o.log("relay: giving back the head held");
     const { host, port } = this.#o.address();
     const socket = tls({
       host,
@@ -225,31 +299,33 @@ export class Connection {
       maxVersion: "TLSv1.3",
       rejectUnauthorized: false,
     });
-    const link = framed(socket);
-    this.#link = link;
-    const limit = new AbortController();
-    void this.#clock
-      .idle(PATIENCE, AbortSignal.any([limit.signal, this.#stop.signal]))
-      .then((late) => late && socket.destroy());
-    let held = false;
-    try {
-      const up = await new Promise<boolean>((resolve) => {
-        socket.once("secureConnect", () => resolve(true));
-        socket.once("close", () => resolve(false));
-      });
-      if (!up) return undefined;
-      if (!this.#pinned(socket)) {
-        this.#o.log("relay: its key is not the one the bot was paired with, nothing sent");
-        return undefined;
+    this.#sockets.set(conn, socket);
+    socket.setKeepAlive(true, 30_000);
+    socket.on("error", () => socket.destroy());
+    socket.on("close", () => {
+      if (this.#sockets.get(conn) === socket) this.#sockets.delete(conn);
+      this.#push((now) => this.#link.closed(conn, now));
+    });
+    socket.once("secureConnect", () => {
+      try {
+        if (!this.#pinned(socket)) {
+          this.#o.log("relay: its key is not the one the bot was paired with, nothing sent");
+          return void socket.destroy();
+        }
+        const binding = Uint8Array.from(
+          socket.exportKeyingMaterial(32, EXPORTER_LABEL, Buffer.alloc(0)),
+        );
+        this.#push((now) => this.#link.opened(conn, binding, now));
+      } catch (error) {
+        // No binding, no proof: a drop.
+        this.#o.log(`relay: connection error: ${(error as Error).message}`);
+        socket.destroy();
       }
-      const hello = await link.next();
-      if (hello?.type !== "hello") return undefined;
-      held = true;
-      return { link, nonce: hello.relayNonce };
-    } finally {
-      limit.abort();
-      if (!held) link.close();
-    }
+    });
+    // A chunk is a string only after `socket.setEncoding()`, never called here.
+    socket.on("data", (chunk) =>
+      this.#push((now) => this.#link.received(conn, chunk as Buffer, now)),
+    );
   }
 
   /** Whether the certificate's key is the pinned one: the key's DER against the pairing's, whatever kind of key it is. */
@@ -263,202 +339,5 @@ export class Connection {
     } catch {
       return false;
     }
-  }
-
-  #session(link: Link, relayNonce: Bytes): Session {
-    const { platform, pairing } = this.#o;
-    return {
-      relay: relayKeyId(platform, pairing.relay),
-      deviceNonce: platform.random(32),
-      relayNonce,
-      binding: link.binding(),
-    };
-  }
-
-  #sign(proof: Proof): Bytes {
-    const sig = this.#o.platform.sign(SIGN, encodeProof(proof));
-    if (!sig.ok) throw new Error("the platform did not sign");
-    return sig.value;
-  }
-
-  async #active(): Promise<void> {
-    const r = this.reading;
-    const clock = this.#clock;
-    const dialed = await this.#dial();
-    if (!dialed) return;
-    const { link, nonce } = dialed;
-    let arming = new AbortController(); // the idle timer of this connection
-    this.#served = link;
-    try {
-      const proof = {
-        ...this.#session(link, nonce),
-        kind: "active" as const,
-        person: this.#o.pairing.person,
-        device: this.#self,
-      };
-      link.send({ type: "prove-active", proof, sig: this.#sign(proof) });
-      // The relay's limit counts what the bot sends (RD 4.6): a read is due ASK after the last frame
-      // sent, however many it received; before rest, or while a read is unanswered, silence is PATIENCE.
-      let sentAt = clock.now();
-      let seenAt = sentAt;
-      let asked = false;
-      const due = () =>
-        r.state === "rest" ? sentAt + (asked ? PATIENCE : ASK) : seenAt + PATIENCE;
-      let armed = 0;
-      let timer: Promise<"idle" | undefined> | undefined;
-      const arm = () => {
-        arming.abort();
-        arming = new AbortController();
-        armed = due();
-        timer = clock
-          .idle(
-            Math.max(armed - clock.now(), 0),
-            AbortSignal.any([arming.signal, this.#stop.signal]),
-          )
-          .then((late) => (late ? "idle" : undefined));
-      };
-      arm();
-      for (;;) {
-        const frame = await Promise.race([link.next(), timer]);
-        if (frame === "idle") {
-          if (clock.now() < due()) arm();
-          else if (r.state === "rest" && !asked) {
-            link.send({ type: "read", from: r.cursor });
-            [sentAt, asked] = [clock.now(), true];
-            arm();
-          } else {
-            this.#o.log("relay: no frame for 30 s, connection dropped");
-            return;
-          }
-          continue;
-        }
-        if (!frame) return;
-        seenAt = clock.now();
-        if (frame.type === "result") {
-          this.#pending.get(frame.request)?.(frame.code);
-          this.#pending.delete(frame.request);
-        }
-        if (frame.type === "position") asked = false;
-        for (const out of r.take(frame)) {
-          if (out.do === "read") sentAt = clock.now();
-          await this.#act(out, link);
-        }
-        if (r.state !== "reading" && r.state !== "rest") return;
-        if (due() < armed) arm(); // a frame that leaves rest shortens the wait
-      }
-    } finally {
-      this.#served = undefined;
-      for (const resolve of this.#pending.values()) resolve(undefined);
-      this.#pending.clear();
-      arming.abort();
-      link.close();
-    }
-  }
-
-  /** Gives the head held on a connection of its own, and tells the reading the answer. */
-  async #upload(): Promise<void> {
-    const r = this.reading;
-    const held = r.kept.head as NonNullable<typeof r.kept.head>;
-    this.#o.log("relay: giving back the head held");
-    let code: number | undefined;
-    let refusal: number | undefined;
-    const dialed = await this.#dial();
-    if (dialed) {
-      const { link, nonce } = dialed;
-      try {
-        const proof = {
-          ...this.#session(link, nonce),
-          kind: "upload" as const,
-          device: this.#o.pairing.device,
-          head: held.head,
-        };
-        link.send({
-          type: "prove-upload",
-          proof,
-          deviceSig: this.#sign(proof),
-          relaySig: held.sig,
-        });
-        link.send({ type: "upload-done", request: 1, head: held.head, sig: held.sig });
-        while (code === undefined && refusal === undefined) {
-          const f = await this.#answer(link);
-          if (!f) break;
-          if (f.type === "result" && f.request === 1) code = f.code;
-          else if (f.type === "refused") refusal = f.reason;
-          else this.#o.log(`relay: give-back answered with ${f.type}`);
-        }
-      } finally {
-        link.close();
-      }
-    }
-    if (this.#stop.signal.aborted) return;
-    if (refusal !== undefined && refusal !== 6) {
-      this.#o.log(`relay: give-back refused, reason ${refusal}`);
-      this.#slow = true;
-    }
-    for (const out of r.gaveBack(code, refusal)) await this.#act(out);
-  }
-
-  /** The next frame within PATIENCE, or `undefined`. */
-  async #answer(link: Link): Promise<Frame | undefined> {
-    const limit = new AbortController();
-    const late = this.#clock
-      .idle(PATIENCE, AbortSignal.any([limit.signal, this.#stop.signal]))
-      .then(() => undefined);
-    try {
-      return await Promise.race([link.next(), late]);
-    } finally {
-      limit.abort();
-    }
-  }
-
-  async #act(out: Out, link?: Link): Promise<void> {
-    const { log, on } = this.#o;
-    switch (out.do) {
-      case "read":
-        link?.send({ type: "read", from: out.from });
-        return;
-      case "incarnation":
-        if (!bytesEqual(this.#o.store.saved.incarnation ?? new Uint8Array(), out.incarnation))
-          await this.#save((s) => Object.assign(s, { incarnation: out.incarnation }));
-        break;
-      case "rest":
-        if (!isDeepStrictEqual(this.reading.kept, this.#o.store.saved.kept))
-          await this.#save(() => {});
-        this.#delay = FIRST;
-        this.#slow = false;
-        log("relay: read to rest");
-        break;
-      case "refused":
-        this.#slow =
-          out.reason === 1 ||
-          out.reason === 5 ||
-          (out.reason === 2 && this.reading.kept.head !== undefined);
-        log(`relay: refused, reason ${out.reason}`);
-        return;
-      case "put-back":
-        await this.#final(() => {});
-        log("relay: it must be recreated, the bot dials no more");
-        break;
-      case "fault":
-        await this.#final((s) => Object.assign(s, { fault: true }));
-        log(`relay: fault, ${out.why}, the bot dials no more`);
-        break;
-      case "give-back":
-        return;
-    }
-    on(out);
-  }
-
-  #final(edit: (s: Store["saved"]) => void): Promise<void> {
-    return this.#save(edit).catch((error: Error) =>
-      this.#o.log(`relay: the store did not write: ${error.message}`),
-    );
-  }
-
-  #save(edit: (s: Store["saved"]) => void): Promise<void> {
-    return this.#o.store.change((s) => {
-      edit(s);
-      s.kept = structuredClone(this.reading.kept);
-    });
   }
 }

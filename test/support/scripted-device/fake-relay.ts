@@ -7,10 +7,10 @@ import type { Bytes, Platform } from "../../../src/protocol/platform.ts";
 import { encodeHead } from "../../../src/protocol/proofs.ts";
 import { makeCertificate } from "../../../src/relay/certificate.ts";
 
-/** `onData` runs for each chunk the device sends; `send` writes frames as a proven relay does. `hello: false` opens with `served`. */
+/** `onData` runs for each chunk the device sends, with the chunk; `send` writes frames as a proven relay does. `hello: false` opens with `served`. */
 export async function fakeRelay(
   platform: Platform,
-  onData: (reply: (...frames: (Frame | Bytes)[]) => void, count: number) => void,
+  onData: (reply: (...frames: (Frame | Bytes)[]) => void, count: number, data: Bytes) => void,
   opts: { hello?: boolean } = {},
 ) {
   const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
@@ -36,10 +36,15 @@ export async function fakeRelay(
           : { type: "hello", relayNonce: platform.random(32) };
       socket.write(encodeFrame(hello, hello.type === "served"));
       let count = 0;
-      socket.on("data", () =>
-        onData((...frames) => {
-          for (const f of frames) socket.write(f instanceof Uint8Array ? f : encodeFrame(f, true));
-        }, ++count),
+      socket.on("data", (data: Buffer) =>
+        onData(
+          (...frames) => {
+            for (const f of frames)
+              socket.write(f instanceof Uint8Array ? f : encodeFrame(f, true));
+          },
+          ++count,
+          data,
+        ),
       );
     },
   );
