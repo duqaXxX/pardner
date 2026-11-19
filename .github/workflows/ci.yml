@@ -79,3 +79,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      # The shell app, signed ad hoc (no identity, no team): built from the package beside it.
+      - run: xcodebuild -project app/Pardner.xcodeproj -scheme Pardner -configuration Release -derivedDataPath "$RUNNER_TEMP/derived" build
