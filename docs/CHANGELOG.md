@@ -18,7 +18,7 @@ All notable changes to this project are documented here. The format follows
   state machine, taking events with the time (opened, received, closed, tick, networkUp, submit, stop, persisted) and
   returning effects (dial, send, close, wake, persist, deliver, answer). Several requests may be in flight, each with
   its own id and deadline (`Requests`), and a `close` names the deadline that passed in its `why`. Its effect and state
-  types are in `src/protocol/link-types.ts`. Nothing uses it yet.
+  types are in `src/protocol/link-types.ts`. The daemon's relay client uses it.
 - `app/`: the Swift package of the macOS app (macOS 15 or later). `Platform` is the protocol package's platform
   interface on CryptoKit; `ProtocolHost` runs the joined protocol script in JavaScriptCore on a thread of its own and
   returns a JavaScript fault as a Swift error. `swift test` in `app/` runs the vector files inside JavaScriptCore. The
@@ -64,6 +64,13 @@ All notable changes to this project are documented here. The format follows
   restarted, with the reason the service manager gave.
 - The relay's Time Machine exclusion (`tmutil addexclusion`) gets 60 seconds instead of 10: it took 11 seconds on a
   Mac mini (macOS 27.2.1, 2026-11-19), so `init` failed and a served relay could never start there.
+- The daemon's relay client (`src/chat/relay/connection.ts`) is driven by `Link`: it keeps the TLS socket, the pin, the
+  timer and the store writes, and `Link` holds the framing, the back-off, the refusals, the give-back and the requests.
+  Several `submit`s stay in flight at once, each answered by its own result. What changed is in the log: a connection
+  closed for a deadline says which one (`relay: no frame for 30 s, connection dropped`, `relay: no answer to a request
+  for 30 s, connection dropped`, `relay: no hello for 30 s, connection dropped`, `relay: no answer to the give-back
+  for 30 s, connection dropped`; a request or a hello that went unanswered logged nothing before), and `relay: give-back
+  answered with <type>` is gone.
 - `test/protocol/jsc.test.ts` runs `swift test` in `app/` and keeps the cross-engine seal check on Node; the Swift
   harness that was in `test/protocol/jsc/` is now in `app/`.
 

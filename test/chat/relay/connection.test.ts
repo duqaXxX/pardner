@@ -9,13 +9,15 @@ import { readFileSync, rmSync } from "node:fs";
 import { createServer, connect as tcp } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
-import { createServer as tlsServer } from "node:tls";
+import { TLSSocket, createServer as tlsServer } from "node:tls";
+import { queryObjects, setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { Connection } from "../../../src/chat/relay/connection.ts";
 import { botPlatform, loadPairing, pair } from "../../../src/chat/relay/pairing.ts";
 import { identityOf, Store, storePath } from "../../../src/chat/relay/store.ts";
 import { decode } from "../../../src/protocol/bytes.ts";
 import { readDevice } from "../../../src/protocol/device-log.ts";
-import { encodeFrame, type Frame } from "../../../src/protocol/frames.ts";
+import { decodeFrame, encodeFrame, type Frame, FrameCutter } from "../../../src/protocol/frames.ts";
 import { deviceId, relayKeyId } from "../../../src/protocol/ids.ts";
 import type { Bytes } from "../../../src/protocol/platform.ts";
 import type { Out } from "../../../src/protocol/reading.ts";
@@ -757,5 +759,232 @@ test("a certificate of a kind of key the pin cannot name is another key, not the
   } finally {
     await b.stop();
     server.close();
+  }
+});
+
+// The Link delivers the reading's `refused`; the daemon logs it and tells the caller nothing, as before the driver.
+test("refused is logged and never passed to `on`", DARWIN, async () => {
+  const r = await rig({ add: false });
+  const b = botOn(r.dir, at(r.hop.port), (n) => {
+    if (n === 1) void b.connection.stop();
+  });
+  try {
+    b.connection.start();
+    await b.until(() => b.delays.length === 1);
+    assert.ok(b.lines.includes("relay: refused, reason 2"));
+    assert.ok(!b.outs.some((o) => o.do === "refused"));
+  } finally {
+    await b.stop();
+    await r.stop();
+  }
+});
+
+const ITEM = [1, new Uint8Array(1), new Uint8Array(64)] as const;
+const within = <T>(p: Promise<T>, what: string) =>
+  Promise.race([
+    p,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${what} never settled`)), 2000).unref(),
+    ),
+  ]);
+
+// A submit that comes after the loop ended, or queued behind the stop, settles with `undefined`.
+test("a submit after a stop, or queued behind it, resolves undefined", DARWIN, async () => {
+  const r = await rig();
+  const b = botOn(r.dir, at(r.hop.port));
+  try {
+    b.connection.start();
+    await b.until(() => b.count("rest") === 1);
+    const stopping = b.connection.stop();
+    const queued = b.connection.submit(...ITEM);
+    await stopping;
+    assert.equal(await within(queued, "a submit queued behind the stop"), undefined);
+    assert.equal(await within(b.connection.submit(...ITEM), "a submit after the stop"), undefined);
+  } finally {
+    await b.stop();
+    await r.stop();
+  }
+});
+
+// A connection stopped before it started never dials.
+test("a start after a stop dials nothing", DARWIN, async () => {
+  const r = await rig();
+  const b = botOn(r.dir, at(r.hop.port));
+  try {
+    await b.connection.stop();
+    b.connection.start();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(r.hop.state.connections, 0);
+  } finally {
+    await b.stop();
+    await r.stop();
+  }
+});
+
+/** A connection on `dir` whose `on` is `tell`, with a clock whose back-offs pass at once, and what it logged. */
+function driven(dir: string, port: number, tell: (out: Out) => void) {
+  const pairing = loadPairing(dir);
+  const held = botPlatform(dir);
+  const store = Store.open(dir, identityOf(held, pairing.device, pairing.relay));
+  const lines: string[] = [];
+  const delays: number[] = [];
+  const connection = new Connection({
+    address: at(port),
+    pairing,
+    platform: held,
+    store,
+    log: (line) => lines.push(line),
+    on: tell,
+    clock: {
+      now: () => 0,
+      wait: async (ms, signal) => {
+        delays.push(ms);
+        return !signal.aborted;
+      },
+      idle: (_ms, signal) =>
+        new Promise((resolve) => signal.addEventListener("abort", () => resolve(false))),
+    },
+  });
+  return { connection, store, lines, delays, held };
+}
+
+/** Frames as one write, so that the bot cuts them all in one call. */
+const oneChunk = (...frames: Frame[]) => Buffer.concat(frames.map((f) => encodeFrame(f, true)));
+
+/** Polls `done` every 10 ms for 2 s; both timers end with the wait, whichever way it goes. */
+const eventually = (done: () => boolean, what: string) =>
+  new Promise<void>((resolve, reject) => {
+    const end = () => (clearInterval(poll), clearTimeout(give));
+    const poll = setInterval(() => done() && (end(), resolve()), 10);
+    const give = setTimeout(() => (end(), reject(new Error(`${what} never came`))), 2000);
+  });
+
+// 2.1 #11: a throw while the effects are performed is a drop, and the rest of the list is still done.
+test("a throwing `on` before a store write: the write is done, and the bot dials again", async () => {
+  const fake = await fakeRelay(platform, (reply, count) => {
+    if (count === 1) reply(oneChunk(SERVED, POSITION, fake.head(0, ZERO)));
+  });
+  let thrown = false;
+  const b = driven(await paired(fake.key), fake.port, (out) => {
+    if (out.do === "incarnation" && !thrown) {
+      thrown = true;
+      throw new Error("boom");
+    }
+  });
+  try {
+    await b.store.change((s) => {
+      s.incarnation = new Uint8Array(16); // the relay's: nothing to write for it, only to tell
+    });
+    b.connection.start();
+    await eventually(() => b.store.saved.kept.head !== undefined, "the write of kept");
+    assert.ok(b.lines.includes("relay: connection error: boom"));
+    assert.ok(b.delays.length >= 1, "the throw was a drop: a back-off followed");
+  } finally {
+    await b.connection.stop();
+    b.held.erase();
+    fake.close();
+  }
+});
+
+// N1: a throw before a `dial upload` in one list drops the connection it was about, not the upload.
+test("a throw while the head is given back does not destroy the upload connection", async () => {
+  let connections = 0;
+  const fake = await fakeRelay(platform, (reply, count) => {
+    if (count !== 1) return;
+    connections += 1;
+    if (connections === 1) reply(oneChunk(SERVED, POSITION, fake.head(0, ZERO)));
+    else reply({ type: "refused", reason: 3 });
+  });
+  const dir = await paired(fake.key);
+  const head = fake.head(0, ZERO) as Frame & { sig: Bytes };
+  const seed = driven(dir, fake.port, () => {});
+  await seed.store.change((s) => {
+    s.incarnation = new Uint8Array(16);
+    s.kept = {
+      ids: [new Uint8Array(32).fill(7)],
+      head: { head: { relay: relayKeyId(platform, fake.key), n: 0, chain: ZERO }, sig: head.sig },
+      putBack: false,
+    };
+  });
+  seed.held.erase();
+  let thrown = false;
+  const b = driven(dir, fake.port, (out) => {
+    if (out.do === "incarnation" && !thrown) {
+      thrown = true;
+      throw new Error("boom");
+    }
+  });
+  try {
+    b.connection.start();
+    await eventually(
+      () => b.lines.includes("relay: give-back refused, reason 3"),
+      "the upload's refusal",
+    );
+    assert.ok(connections >= 2, "the relay saw the upload connection");
+  } finally {
+    await b.connection.stop();
+    b.held.erase();
+    fake.close();
+  }
+});
+
+// I1: a connection the peer closed leaves nothing behind: no socket outlives the redials.
+test("sockets the peer closed are released", async () => {
+  const server = createServer((socket) => socket.destroy());
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const dir = tempDirSync("pardner-chat-");
+  await pair(dir, platform.random(32), new Uint8Array(65).fill(4));
+  const live = () => {
+    setFlagsFromString("--expose-gc");
+    runInNewContext("gc")();
+    return queryObjects(TLSSocket, { format: "count" });
+  };
+  live(); // a first collection frees what earlier tests left, so the baseline is what stays alive
+  const before = live();
+  const b = driven(dir, (server.address() as { port: number }).port, () => {});
+  try {
+    b.connection.start();
+    await eventually(() => b.delays.length >= 20, "twenty redials");
+  } finally {
+    await b.connection.stop();
+    b.held.erase();
+    server.close();
+  }
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.ok(live() <= before, `${live() - before} sockets left`);
+});
+
+// D5: the outbox drains every channel at once, so two submits are in flight together and each gets its own result.
+test("two submits at once both reach the relay and each is answered", DARWIN, async () => {
+  const cutter = new FrameCutter();
+  const seen: number[] = [];
+  const fake = await fakeRelay(platform, (reply, count, data) => {
+    if (count === 1) return reply(oneChunk(SERVED, POSITION, fake.head(0, ZERO)));
+    cutter.push(data);
+    for (let cut = cutter.next(true); cut.ok && cut.value; cut = cutter.next(true)) {
+      const frame = decodeFrame(cut.value, true, "relay");
+      if (frame.ok && frame.value.type === "submit") {
+        seen.push(frame.value.request);
+        reply({
+          type: "result",
+          request: frame.value.request,
+          code: frame.value.request - 2 ? 1 : 0,
+        });
+      }
+    }
+  });
+  const b = botOn(await paired(fake.key), at(fake.port));
+  try {
+    b.connection.start();
+    await b.until(() => b.count("rest") === 1);
+    const both = await within(
+      Promise.all([b.connection.submit(...ITEM), b.connection.submit(...ITEM)]),
+      "two submits",
+    );
+    assert.deepEqual(both, [0, 1], "each submit gets the code of its own request");
+    assert.deepEqual(seen.sort(), [2, 3]);
+  } finally {
+    await b.stop();
+    fake.close();
   }
 });
