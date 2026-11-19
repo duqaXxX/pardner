@@ -297,6 +297,10 @@ export class Connection {
       port,
       minVersion: "TLSv1.3",
       maxVersion: "TLSv1.3",
+      // The relay's certificate is self-signed and made anew at each
+      // start, so no chain can verify it: the bot compares the relay's
+      // key with the one pinned at pairing (#pinned) before it sends a
+      // byte of its own.
       rejectUnauthorized: false,
     });
     this.#sockets.set(conn, socket);
