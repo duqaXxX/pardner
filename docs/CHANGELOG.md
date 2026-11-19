@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `Upload` (`src/protocol/upload.ts`): the give-back upload connection as a pure state machine. After `hello` it
+  sends `prove upload` and `upload done` together; `result` for request 1 or `refused` ends it with an outcome that
+  names the code or the reason and whether the next dial waits `ask`. `Link` will use it.
 - `FrameCutter` (`src/protocol/frames.ts`): cuts a byte stream into whole frames, applying the length limit of the
   state the caller names, and refuses a bad length before the body is read.
 - `app/`: the Swift package of the macOS app (macOS 15 or later). `Platform` is the protocol package's platform

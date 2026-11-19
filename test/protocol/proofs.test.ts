@@ -23,6 +23,8 @@ import {
   type Proof,
   type RelayHead,
   runningHash,
+  sessionOf,
+  signProof,
 } from "../../src/protocol/proofs.ts";
 import { runVectors } from "../../src/protocol/vectors.ts";
 
@@ -364,4 +366,21 @@ test("the vectors of proofs.json and chain.json pass, and a changed expectation 
     changed.cases[0].output = "00";
     assert.deepEqual(runVectors(platform, changed), [changed.cases[0].name]);
   }
+});
+
+test("sessionOf names the relay, draws a fresh nonce and binds the connection", () => {
+  const [a, b] = [
+    sessionOf(platform, relayKey.pub, fill(1), fill(2)),
+    sessionOf(platform, relayKey.pub, fill(1), fill(2)),
+  ];
+  assert.deepEqual(a.relay, relayKeyId(platform, relayKey.pub));
+  assert.deepEqual([a.relayNonce, a.binding], [fill(1), fill(2)]);
+  assert.equal(a.deviceNonce.length, 32);
+  assert.notDeepEqual(a.deviceNonce, b.deviceNonce, "a nonce per session");
+});
+
+test("signProof signs the proof's bytes, and throws when the platform cannot", () => {
+  const sig = signProof(platform, device.name, active);
+  assert.equal(platform.verify(device.pub, encodeProof(active), sig), true);
+  assert.throws(() => signProof(platform, "no such key", active), /did not sign/);
 });
