@@ -347,6 +347,7 @@ test("R1-3: the Sent-by column: an app sends prompts and replies, a bot the rest
     [9, { re }],
     [10, { to: w.bot.id, re: own }],
     [12, {}],
+    [13, {}],
   ];
   for (const [kind, over] of sent) {
     const app = kind === 2 || kind === 10;

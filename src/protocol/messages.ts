@@ -68,7 +68,9 @@ export type MessageVerdict =
 export const KIND_START = 3;
 /** The kind of a build of the app (6.4): the relay keeps the newest of a bot's builds (SD 5.12, point 8). */
 export const KIND_BUILD = 12;
-// By kind, 1 to 12: how 6.4's table treats `to` and `re` (0 none, 1 required, 2 either), and who sends it.
+/** The kind of a bot's profile (6.4, 6.8): it names its sender alone, so it has no `to` and no `re`. */
+export const KIND_PROFILE = 13;
+// By kind, 1 to 13: how 6.4's table treats `to` and `re` (0 none, 1 required, 2 either), and who sends it.
 const KINDS = [
   [0, 2, undefined],
   [1, 0, "app"],
@@ -81,6 +83,7 @@ const KINDS = [
   [0, 1, "bot"],
   [1, 1, "app"],
   [2, 1, undefined],
+  [0, 0, "bot"],
   [0, 0, "bot"],
 ] as const;
 /** A sender never seals past this many messages in an epoch (SD 5.7). */

@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- A bot's profile in the protocol package: message kind 13, sent by a bot alone, with no recipient and no `re`. Its
+  content is UTF-8 JSON with the bot's `name`, an optional `account` and an optional `icon` (a square PNG or JPEG of 16
+  to 256 pixels, 65,536 bytes at most, its size read from the image's own header). `readProfile` and `encodeProfile`
+  (`src/protocol/profile.ts`) read and write it; a field they do not know is ignored. `Profiles` gives the profile a
+  device shows for each bot: the one at the latest place in the relay's sequence, in any channel and whatever order
+  the messages were opened in. A relay or a device of an earlier version refuses kind 13. The vectors are in
+  `test/protocol/vectors/profile.json`.
+- The reading's `message` output carries the message's `position` in the relay's sequence.
+
 ## [0.17.0] - 2026-11-19
 
 ### Added
