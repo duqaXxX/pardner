@@ -5,7 +5,10 @@ import Foundation
 
 struct Derived {
     let use: KeyUse
-    var scalar: Data
+    let scalar: SecretBuffer
+
+    func signingKey() throws -> P256.Signing.PrivateKey { try scalar.withUnsafeBytes { try P256.Signing.PrivateKey(rawRepresentation: $0) } }
+    func agreementKey() throws -> P256.KeyAgreement.PrivateKey { try scalar.withUnsafeBytes { try P256.KeyAgreement.PrivateKey(rawRepresentation: $0) } }
 }
 
 extension CryptoKitPlatform {
@@ -22,8 +25,8 @@ extension CryptoKitPlatform {
     public func publicKey(_ name: String) throws -> Data {
         guard let pair = derived[name] else { return try store.publicKey(name) }
         switch pair.use {
-        case .sign: return try P256.Signing.PrivateKey(rawRepresentation: pair.scalar).publicKey.x963Representation
-        case .receive: return try P256.KeyAgreement.PrivateKey(rawRepresentation: pair.scalar).publicKey.x963Representation
+        case .sign: return try pair.signingKey().publicKey.x963Representation
+        case .receive: return try pair.agreementKey().publicKey.x963Representation
         }
     }
 
@@ -31,33 +34,45 @@ extension CryptoKitPlatform {
     public func sign(_ name: String, _ message: Data) throws -> Data {
         guard let pair = derived[name] else { return try store.sign(name, message) }
         guard pair.use == .sign else { throw Failure.noSuchKey }
-        return try P256.Signing.PrivateKey(rawRepresentation: pair.scalar).signature(for: message).rawRepresentation // r then s
+        return try pair.signingKey().signature(for: message).rawRepresentation // r then s
     }
 
-    /// Opens an HPKE seal with the receiving key `name`: `no-such-key`, `bad-input` for a malformed `enc`, `open-failed`.
+    /// Opens an HPKE seal with the receiving key `name`: `no-such-key`; `bad-input` for an `enc` that is not 65 bytes
+    /// or does not start with 0x04; `open-failed` for one off the curve, a failed check or a short sealed text.
     public func hpkeOpen(_ name: String, _ enc: Data, _ info: Data, _ aad: Data, _ sealed: Data) throws -> Data {
         guard let pair = derived[name] else { return try store.open(name, enc, info, aad, sealed) }
         guard pair.use == .receive else { throw Failure.noSuchKey }
-        return try Self.hpkeOpen(try P256.KeyAgreement.PrivateKey(rawRepresentation: pair.scalar), enc, info, aad, sealed)
+        try Self.checkEnc(enc)
+        return try Self.hpkeOpen(try pair.agreementKey(), enc, info, aad, sealed)
     }
 
-    /// The opening a store does with its own key: the check of `enc`, then HPKE, with no word on which step failed.
-    public static func hpkeOpen(_ key: P256.KeyAgreement.PrivateKey, _ enc: Data, _ info: Data, _ aad: Data, _ sealed: Data) throws -> Data {
+    /// What a remote party sent as `enc`, checked before any key is loaded: `bad-input` for a length other
+    /// than 65 or a prefix other than 0x04, `open-failed` for a well formed one off the curve (not told apart).
+    public static func checkEnc(_ enc: Data) throws {
         guard enc.count == 65, enc[enc.startIndex] == 4 else { throw Failure.badInput }
+        guard (try? P256.KeyAgreement.PublicKey(x963Representation: enc)) != nil else { throw Failure.openFailed }
+    }
+
+    /// The opening a store does with its own key, of any kind, after `checkEnc`. A `CryptoKitError` or an
+    /// `HPKE.Errors` of the recipient or its open (a failed check, a sealed text shorter than its tag) is
+    /// `open-failed`; any other error is the key's own, and goes up (the store makes it a `Fault`).
+    public static func hpkeOpen(_ key: some HPKEDiffieHellmanPrivateKey, _ enc: Data, _ info: Data, _ aad: Data, _ sealed: Data) throws -> Data {
+        try checkEnc(enc)
         do {
             var recipient = try HPKE.Recipient(privateKey: key, ciphersuite: suite, info: info, encapsulatedKey: enc)
             return try recipient.open(sealed, authenticating: aad)
-        } catch { throw Failure.openFailed }
+        } catch is CryptoKitError { throw Failure.openFailed } catch is HPKE.Errors { throw Failure.openFailed }
     }
 
     /// Zeroes a derived pair's scalar and forgets it, or asks the store, whose failure to record the removal is `io-failed`.
     public func deleteKey(_ name: String) throws {
-        if var pair = derived.removeValue(forKey: name) { Self.wipe(&pair.scalar) } else { try store.delete(name) }
+        if let pair = derived.removeValue(forKey: name) { pair.scalar.wipe() } else { try store.delete(name) }
     }
 
     /// The end of this instance's host: every derived scalar is zeroed and forgotten, so a fault
     /// between `enterRecovery` and `deleteKey` leaves no key in memory.
     public func endSession() {
-        for name in Array(derived.keys) { if var pair = derived.removeValue(forKey: name) { Self.wipe(&pair.scalar) } }
+        for pair in derived.values { pair.scalar.wipe() }
+        derived.removeAll()
     }
 }

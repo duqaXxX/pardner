@@ -20,8 +20,7 @@ extension Bridge {
             let b = Bridge.current()
             do {
                 let secret = try b.bytes(a)
-                let person = RecoveryPerson(show: { _ in }, enter: { secret })
-                return b.platform(CryptoKitPlatform(store: SoftwareKeyStore(), person: person))
+                return b.platform(CryptoKitPlatform(store: SoftwareKeyStore(), person: .typing(secret)))
             } catch { return b.fault("\(error)") }
         } as @convention(block) (JSValue) -> JSValue
         return JSValue(object: block, in: context)

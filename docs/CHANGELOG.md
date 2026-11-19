@@ -20,6 +20,13 @@ All notable changes to this project are documented here. The format follows
   registers them for the process; `PardnerFont.ui`, `.display` and `.mono` return a SwiftUI `Font` with the weight set
   on the font's `wght` axis.
 
+- `app/`: `SecureEnclaveKeyStore`, the app's made keys in the Secure Enclave, one blob file per key in
+  `Application Support/<bundle identifier>/keys/`, usable after the first login since the Mac started. A key of one use
+  never serves the other, and an error of the enclave or of a blob is a fault, never an answer about a remote party's
+  seal. The recovery secret, its HKDF outputs and its candidate scalars live in `SecretBuffer`s that are wiped on every
+  path; `RecoveryPerson`'s `show` answers whether the person saw the secret and `enter` the bytes given, or `nil` for a
+  decline.
+
 ### Changed
 
 - `test/protocol/jsc.test.ts` runs `swift test` in `app/` and keeps the cross-engine seal check on Node; the Swift

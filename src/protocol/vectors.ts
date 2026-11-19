@@ -917,7 +917,13 @@ function outcome(
       return refusal(p.hpkeSeal(fromHex(c.public), info, aad, input));
     case "hpke-open-refuses": {
       p.makeKeyPair("vector.receive", "receive");
-      const opened = p.hpkeOpen("vector.receive", fromHex(c.bytes), info, aad, new Uint8Array(32));
+      const opened = p.hpkeOpen(
+        "vector.receive",
+        fromHex(c.bytes),
+        info,
+        aad,
+        c.input === undefined ? new Uint8Array(32) : input,
+      );
       return answer(opened);
     }
     case "make-key-refuses": {
