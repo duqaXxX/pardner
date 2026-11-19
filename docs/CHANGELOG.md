@@ -8,12 +8,17 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - `Requests` (`src/protocol/requests.ts`): the requests a device has in flight on its connection, each with its own id
-  and its own deadline. `Link` will use it.
+  and its own deadline. `Link` uses it.
 - `Upload` (`src/protocol/upload.ts`): the give-back upload connection as a pure state machine. After `hello` it
   sends `prove upload` and `upload done` together; `result` for request 1 or `refused` ends it with an outcome that
-  names the code or the reason and whether the next dial waits `ask`. `Link` will use it.
+  names the code or the reason and whether the next dial waits `ask`. `Link` uses it.
 - `FrameCutter` (`src/protocol/frames.ts`): cuts a byte stream into whole frames, applying the length limit of the
   state the caller names, and refuses a bad length before the body is read.
+- The protocol package's connection policy (`src/protocol/link.ts`): the device's connection to the relay as a pure
+  state machine, taking events with the time (opened, received, closed, tick, networkUp, submit, stop, persisted) and
+  returning effects (dial, send, close, wake, persist, deliver, answer). Several requests may be in flight, each with
+  its own id and deadline (`Requests`), and a `close` names the deadline that passed in its `why`. Its effect and state
+  types are in `src/protocol/link-types.ts`. Nothing uses it yet.
 - `app/`: the Swift package of the macOS app (macOS 15 or later). `Platform` is the protocol package's platform
   interface on CryptoKit; `ProtocolHost` runs the joined protocol script in JavaScriptCore on a thread of its own and
   returns a JavaScript fault as a Swift error. `swift test` in `app/` runs the vector files inside JavaScriptCore. The
