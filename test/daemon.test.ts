@@ -457,6 +457,17 @@ test("the chat saves files in the scratch folder of the instance the daemon was 
   d.start({ scratchDir });
   await d.booted();
   assert.equal(d.context?.scratchDir, scratchDir);
+  assert.equal(d.context?.instance, undefined, "the default instance has no name");
+  await d.stop();
+});
+
+test("the chat is given a named instance's name and the agent's brand words", async (t) => {
+  const d = new Daemon(t);
+  d.start({ instance: { name: "work" }, environment: {} });
+  await d.booted();
+  assert.equal(d.context?.instance, "work");
+  assert.ok(d.backend.words.brand?.length, "the agent declares its brand");
+  assert.deepEqual(d.context?.brand, d.backend.words.brand);
   await d.stop();
 });
 

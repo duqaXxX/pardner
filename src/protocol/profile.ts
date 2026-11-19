@@ -39,6 +39,8 @@ const text = (v: unknown, min: number, max: number): v is string => {
     points.every((p) => !hidden(p.codePointAt(0) as number))
   );
 };
+/** Whether a code point may not stand in a bot's name: what `hidden` names, and `@` (design 3.1). */
+export const refusedInName = (c: number): boolean => hidden(c) || c === 0x40;
 const nameTaken = (name: unknown): name is string =>
   text(name, 1, 32) && !name.includes("@") && !name.startsWith(" ") && !name.endsWith(" ");
 const short = (v: unknown): v is string => text(v, 0, 256);

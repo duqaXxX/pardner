@@ -1384,6 +1384,7 @@ export class ThreadSession {
       this.commands = offered.commands ? [...info.commands] : [];
       this.models = offered.models ? [...info.models] : [];
       this.account = info.account;
+      this.deps.chat.agentAccount?.(info.account);
       const modes = this.deps.agent.capabilities.permissionModes;
       this.nativeMode = info.permissionMode || modes.default;
       // Read once: a Start writing the switch meanwhile must not make the client's mode and

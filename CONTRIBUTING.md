@@ -41,7 +41,7 @@ may find a seam that needs a change: open an issue before writing one.
    `src/core/port.ts` alone. An agent also gives its words (`AgentWords`): what it is called,
    the prefix of its commands (`commandPrefix`), and the names of its own commands that start a new session, log in and log out, which the core
    answers itself, the shell lines that continue a session (null with no terminal) and open the agent to trust a folder,
-   and the commands of its terminal that a session does not offer, which the core answers too, and the tools its terminal shows in words or a preview of its own (`ToolVocabulary`, on the back end and the entry as `tools`; `NO_TOOL_WORDS` when it has none). The rules the core relies on beside the types, and which of them a conformance
+   and the commands of its terminal that a session does not offer, which the core answers too, the names a bot built on it may not carry (`brand`), and the tools its terminal shows in words or a preview of its own (`ToolVocabulary`, on the back end and the entry as `tools`; `NO_TOOL_WORDS` when it has none). The rules the core relies on beside the types, and which of them a conformance
    check holds, are in [docs/architecture.md](docs/architecture.md), under "What an agent must do
    that the types do not say" and "What a chat must do that the types do not say".
 2. Declare the capabilities truthfully (`Capabilities`, `ChatCapabilities`). A capability left

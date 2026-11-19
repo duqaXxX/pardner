@@ -3,6 +3,7 @@ import { type Clock, Connection } from "../../../src/chat/relay/connection.ts";
 import { Inbound } from "../../../src/chat/relay/inbound.ts";
 import { Outbox } from "../../../src/chat/relay/outbox.ts";
 import { botPlatform, loadPairing, pair } from "../../../src/chat/relay/pairing.ts";
+import { ProfileWriter } from "../../../src/chat/relay/profile.ts";
 import { identityOf, Store } from "../../../src/chat/relay/store.ts";
 import type { ChatInbound, InboundMessage, OwnerAnswer } from "../../../src/chat/seam.ts";
 import { decode } from "../../../src/protocol/bytes.ts";
@@ -23,6 +24,7 @@ import {
 } from "../../../src/protocol/messages.ts";
 import { Run } from "../../../src/protocol/outbox.ts";
 import type { Bytes } from "../../../src/protocol/platform.ts";
+import type { Profile } from "../../../src/protocol/profile.ts";
 import type { Out } from "../../../src/protocol/reading.ts";
 import type { Sequence } from "../../../src/relay/sequence.ts";
 import { platform } from "../../relay/support.ts";
@@ -160,6 +162,8 @@ export async function rig() {
       return relayIncarnation;
     },
     port: target.port,
+    /** The relay's public key, as `RELAY_KEY` gives it. */
+    relayKey: target.relay,
     /** The content of a message `held` gave, opened in the first epoch's key, as the device would. */
     body(m: { signed: Bytes }): Record<string, unknown> {
       const d = decodeMessage(m.signed);
@@ -171,6 +175,18 @@ export async function rig() {
       return assert.fail("no epoch's key opens the message");
     },
     close: () => device({ ...addBody(alice, keyed("app", `${tag}-more`)) }),
+    /** A second bot of alice's, paired in a folder of its own and added to her log; an epoch after it is sealed to it too. */
+    async addBot(): Promise<{ dir: string; id: Bytes }> {
+      const other = tempDirSync("pardner-chat-");
+      const paired = decode(
+        Uint8Array.from(Buffer.from(await pair(other, alice.id, target.relay), "hex")),
+        (rd) => ({ device: readDevice(rd), proof: rd.sig() }),
+      );
+      assert.ok(paired.ok);
+      await device({ kind: "add", device: paired.value.device, proof: paired.value.proof });
+      const { signing, receiving } = paired.value.device;
+      return { dir: other, id: deviceId(platform, signing, receiving) };
+    },
     /** What the relay holds, decoded: the epoch entries and the bot's messages. */
     async held() {
       const pass = await as((link) => link.read(0));
@@ -201,11 +217,16 @@ export function botOn(
     clock?: Clock;
     /** What the fake core answers to an answer: false for a request it no longer waits on. */
     taken?: boolean;
+    /** The configured name and icon of a bot that writes its profile; absent, it writes none. */
+    profile?: Omit<Profile, "account">;
+    /** The folder of another bot of alice's (`addBot`); the rig's own by default. */
+    dir?: string;
   } = {},
 ) {
-  const pairing = loadPairing(r.dir);
-  const held = botPlatform(r.dir);
-  const store = Store.open(r.dir, identityOf(held, pairing.device, pairing.relay));
+  const dir = over.dir ?? r.dir;
+  const pairing = loadPairing(dir);
+  const held = botPlatform(dir);
+  const store = Store.open(dir, identityOf(held, pairing.device, pairing.relay));
   const lines: string[] = [];
   const outs: Out[] = [];
   const connection: Connection = new Connection({
@@ -219,6 +240,7 @@ export function botOn(
       outs.push(out);
       outbox.take(out);
       inbound.take(out);
+      profile?.take(out);
     },
   });
   const run = new Run(held);
@@ -240,6 +262,20 @@ export function botOn(
     run,
     log: (l) => lines.push(l),
   });
+  const self = deviceId(held, pairing.device.signing, pairing.device.receiving);
+  const profile =
+    over.profile &&
+    new ProfileWriter({
+      platform: held,
+      self,
+      person: pairing.person,
+      run,
+      reading: connection.reading,
+      outbox,
+      store,
+      configured: over.profile,
+      log: (l) => lines.push(l),
+    });
   const messages: InboundMessage[] = [];
   const answers: [string, OwnerAnswer][] = [];
   const target = {
@@ -260,6 +296,7 @@ export function botOn(
   return {
     connection,
     outbox,
+    profile,
     store,
     inbound,
     messages,

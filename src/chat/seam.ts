@@ -13,6 +13,7 @@
  * The one value declared here is `ChatError`, which names a failed call for the core's log.
  */
 import type {
+  AgentAccount,
   ListedSession,
   ModelInfo,
   PermissionRequest,
@@ -22,7 +23,7 @@ import type {
   UsageLimit,
 } from "../agent/seam.ts";
 
-export type { UsageLimit } from "../agent/seam.ts";
+export type { AgentAccount, UsageLimit } from "../agent/seam.ts";
 
 /**
  * A thread, by the two names its chat gives it. Only the provider that made them can read
@@ -1027,6 +1028,11 @@ export interface ChatProvider {
   statusMark?(status: SessionStatus): string;
   /** The chat's index of the sessions. A chat with none leaves it out, and nothing asks for one. */
   readonly index?: SessionIndex;
+  /**
+   * The account the agent reported when a session connected, null when it does not say. A chat
+   * that shows its bot's account to the bot's members takes it; one that does not leaves it out.
+   */
+  agentAccount?(account: AgentAccount | null): void;
   /**
    * `/open` typed in a session's thread: offers the files of `folder`, or shares the one
    * `target` names, into the thread. Present with `fileUpload`.

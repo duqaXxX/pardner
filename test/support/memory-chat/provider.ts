@@ -13,6 +13,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { Question } from "../../../src/agent/seam.ts";
 import {
   type Activity,
+  type AgentAccount,
   type ChannelChat,
   type ChatCapabilities,
   ChatError,
@@ -850,6 +851,10 @@ export class MemoryProvider implements ChatProvider {
   async threadState(ref: ThreadRef): Promise<Presence> {
     if (this.#room.lookupFails()) return "no answer";
     return this.#room.knowsThread(ref) ? "there" : "gone";
+  }
+
+  agentAccount(account: AgentAccount | null): void {
+    this.#room.accounts.push(account);
   }
 
   async start(inbound: ChatInbound): Promise<void> {

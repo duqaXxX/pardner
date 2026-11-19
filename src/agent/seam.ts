@@ -271,6 +271,11 @@ export interface AgentWords {
   /** The same for the command that logs out. */
   readonly logout: string | null;
   /**
+   * Names a bot built on the agent may not carry (invariant 6): a configured bot name that holds
+   * one, compared without case, spaces, `-`, `_` and `.`, stops the start. Absent: none.
+   */
+  readonly brand?: readonly string[];
+  /**
    * The shell line that continues a session in a terminal; `{directory}` and `{session}` are
    * filled in, each quoted for a shell. Null for an agent with no terminal to continue in: the
    * daemon then offers no move to one, shows no such line, and lets no terminal's hold on a
