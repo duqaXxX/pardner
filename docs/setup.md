@@ -9,7 +9,8 @@ Status: an early release (0.x); [CHANGELOG.md](CHANGELOG.md) lists each one, and
 is the relay chat, which is in development: no app reads its messages yet
 ([relay-provider.md](relay-provider.md)).
 
-The install is one numbered sequence that runs through Parts 0 to 4. Three checkpoints in it say
+The install is one numbered sequence that runs through Parts 0 to 4 ([A relay on this Mac](#a-relay-on-this-mac)
+between Parts 0 and 1 has no numbered steps). Three checkpoints in it say
 what to run and what you should see, so a wrong turn shows up where it happened. Part 5 is the
 security checklist. [Part 6](#part-6-a-second-instance) adds a second daemon on the same Mac, with
 a relay pairing of its own and, if you want, a Claude Code login of its own, and has a checkpoint of
@@ -27,7 +28,7 @@ sequence leaves out.
 - [Node.js](https://nodejs.org/) 26.5.1 or later, which brings `npm`. It does not have to be the
   Node your terminal uses: see [A Node of its own](#a-node-of-its-own).
 - A relay to pair the bot with: its address as `host:port`, its public key, and your person id
-  (Part 1).
+  (Part 1); [A relay on this Mac](#a-relay-on-this-mac) runs one.
 - Full Disk Access for the Node executable that runs pardner, only if your projects
   live in a folder macOS protects, such as `~/Documents` or `~/Desktop`. Without it a session
   there fails to start. The step is under [Folders macOS protects](#folders-macos-protects).
@@ -130,6 +131,55 @@ of Part 2 of this guide, and exit status 1. On a Node older than 26.5.1 the same
 a line that starts `ERROR pardner.main: pardner needs Node 26.5.1 or later and this is Node`,
 followed by the version found and the address of [A Node of its own](#a-node-of-its-own), and also
 with status 1: install a newer Node, beside the one you have if you like.
+
+## A relay on this Mac
+
+Skip this part when someone else runs your relay: you need only its three values (Part 1). A relay
+is a program of its own, with its own folder and its own process; the commands below start it from
+the `pardner` command. This part has no numbered steps, so the steps of Parts 1 to 6 keep their
+numbers. A relay that starts at login, as a service, is not part of this release.
+
+Make the relay's folder once:
+
+```bash
+pardner relay init
+```
+
+It makes `~/.local/share/pardner-relay` (and `~/.local/share` with mode `0700` when that folder
+does not exist), sets the Time Machine exclusion on it, and prints its two values, once, then
+`the relay is made`:
+
+```text
+relay public key: <130 hex digits>
+enrolment secret: <64 hex digits>
+the relay is made
+```
+
+The public key is `RELAY_KEY` of Part 1. The enrolment secret is what the first device presents to
+enrol; the relay keeps only its hash, so keep the printed value: nothing prints it again. `init`
+refuses a folder that already holds a relay. The exclusion call (`tmutil addexclusion`) took 11
+seconds on a Mac mini running macOS 27.2.1 (2026-11-19), so `init` can wait that long before it
+prints.
+
+Serve it in the foreground:
+
+```bash
+pardner relay serve --listen 0.0.0.0:4433
+```
+
+The relay logs to the terminal; `listening on port 4433` says it accepts connections. The address a
+device connects to (`RELAY_ADDRESS` of Part 1) is the one that device can reach: `127.0.0.1` serves
+this Mac alone. `Ctrl-C` or `SIGTERM` to `pardner` stops the relay. If `pardner` is killed with
+`SIGKILL`, the relay keeps serving as an orphan and holds the folder's lock, so a second `serve`
+exits with `another relay holds the directory`: find the relay's process with
+`pgrep -f 'relay/main'` and send it `SIGTERM`.
+
+`--instance <name>` gives a relay of its own, with the folder `~/.local/share/pardner-relay-<name>`.
+It names a relay only: `PARDNER_INSTANCE`, which picks one of the daemons, does not apply to
+`pardner relay`.
+
+The person id (`RELAY_OWNER`) comes from a device, not from the relay. No device can pair until the
+app does, and the app is not released, so today a relay started here has no one to serve.
 
 ## Part 1: the relay's values
 

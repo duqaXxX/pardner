@@ -67,7 +67,7 @@ test("the runner kills a program that outlives its timeout (2-R2-2)", {
 
 test("the real runner is built with its timeout (2-R2-2)", async () => {
   const { EXEC_TIMEOUT_MS, nodeExec } = await import("../../src/relay/exclusion.ts");
-  assert.equal(EXEC_TIMEOUT_MS, 10_000);
+  assert.equal(EXEC_TIMEOUT_MS, 60_000);
   assert.equal(nodeExec.timeout, EXEC_TIMEOUT_MS);
   assert.equal(execWithTimeout(200).timeout, 200);
 });

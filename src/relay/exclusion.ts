@@ -8,7 +8,8 @@ import { errorFields } from "./log.ts";
 /** Runs a program: replaced by a test, so that none calls `tmutil`. */
 export type Exec = (file: string, args: string[]) => void | Promise<void>;
 
-export const EXEC_TIMEOUT_MS = 10_000;
+// `tmutil addexclusion` took 11 s on the Mac mini (macOS 27.2.1, measured 2026-11-19): it waits on Spotlight.
+export const EXEC_TIMEOUT_MS = 60_000;
 
 /** `execFile` with a timeout: the event loop is free while `tmutil` runs. */
 export const execWithTimeout = (timeout: number): Exec & { timeout: number } =>

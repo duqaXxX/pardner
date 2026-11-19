@@ -26,9 +26,16 @@ All notable changes to this project are documented here. The format follows
   seal. The recovery secret, its HKDF outputs and its candidate scalars live in `SecretBuffer`s that are wiped on every
   path; `RecoveryPerson`'s `show` answers whether the person saw the secret and `enter` the bytes given, or `nil` for a
   decline.
+- `pardner relay init [--instance <name>]` and `pardner relay serve --listen <host>:<port> [--instance <name>]` run the
+  relay's own entry file as a child process and return its exit code; the relay stays a program of its own, which
+  nothing outside `src/relay/` imports. The parent ignores `SIGINT` (the terminal already sends it to the child),
+  forwards `SIGTERM`, and returns 128 plus the signal's number for a child a signal ended. The relay's folder is
+  `~/.local/share/pardner-relay[-<name>]`; `PARDNER_INSTANCE` does not apply. `docs/setup.md` has a part on it.
 
 ### Changed
 
+- The relay's Time Machine exclusion (`tmutil addexclusion`) gets 60 seconds instead of 10: it took 11 seconds on a
+  Mac mini (macOS 27.2.1, 2026-11-19), so `init` failed and a served relay could never start there.
 - `test/protocol/jsc.test.ts` runs `swift test` in `app/` and keeps the cross-engine seal check on Node; the Swift
   harness that was in `test/protocol/jsc/` is now in `app/`.
 

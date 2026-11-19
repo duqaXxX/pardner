@@ -19,6 +19,9 @@ pardner service install
 pardner update
 ```
 
+`pardner relay init` and `pardner relay serve --listen <host>:<port>` make and run a relay on this
+Mac, in the foreground ([setup guide](https://github.com/duqaXxX/pardner/blob/v{{VERSION}}/docs/setup.md#a-relay-on-this-mac)).
+
 ## More
 
 - Documentation and source: [github.com/duqaXxX/pardner](https://github.com/duqaXxX/pardner)

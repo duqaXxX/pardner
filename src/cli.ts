@@ -5,7 +5,10 @@
  * which of the machine's daemons a command is about (`core/instance.ts`); this file is the only
  * reader of the variable.
  */
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
+import { dirname, extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   configDirOf,
   DEFAULT_INSTANCE,
@@ -26,6 +29,7 @@ import {
 } from "./host/npm.ts";
 import { type Program, programOf } from "./host/program.ts";
 import { askTerminal, chooseTerminal, readLine } from "./host/prompter.ts";
+import { type RelayProgram, relayDirOf, runRelayChild } from "./host/relay-child.ts";
 import { type RunAsync, runAsync, runCommand } from "./host/run.ts";
 import { Launchd } from "./host/service/launchd.ts";
 import { loadedOn } from "./host/service/listing.ts";
@@ -37,6 +41,8 @@ export const USAGE = [
   `       pardner service <${SERVICE_ACTIONS.join("|")}> [--instance <name>]`,
   "       pardner setup [--instance <name>]",
   "       pardner update [--check] [--yes]",
+  "       pardner relay init [--instance <name>]",
+  "       pardner relay serve --listen <host>:<port> [--instance <name>]",
   "       pardner --version | --help",
   "",
   `--instance picks one of the machine's daemons; ${INSTANCE_VARIABLE} does the same when the flag`,
@@ -44,6 +50,8 @@ export const USAGE = [
   "`setup` asks for the tokens and writes the instance's `.env`; it refuses a file that exists.",
   "`update` installs the latest version of the copy that `npm install -g` replaces and restarts",
   "the services that run it, asking first unless --yes; --check only prints the versions.",
+  "`relay` makes and runs a relay on this machine; its `--instance` names a relay and",
+  `${INSTANCE_VARIABLE} does not apply to it.`,
 ].join("\n");
 
 export type Invocation =
@@ -53,6 +61,8 @@ export type Invocation =
   | { kind: "service"; action: ServiceAction; instance: Instance }
   | { kind: "setup"; instance: Instance }
   | { kind: "update"; check: boolean; yes: boolean }
+  | { kind: "relay"; action: "init"; instance: Instance }
+  | { kind: "relay"; action: "serve"; instance: Instance; listen: string }
   | { kind: "invalid"; reason: string };
 
 type Invalid = Extract<Invocation, { kind: "invalid" }>;
@@ -63,25 +73,53 @@ function isAction(text: string | undefined): text is ServiceAction {
 
 const invalid = (reason: string): Invalid => ({ kind: "invalid", reason });
 
-/** The arguments without `--instance <name>`, and the name when it was given. */
-function takeInstanceFlag(
+/** The arguments without the flag `name` and its value, and the value when it was given. */
+function takeFlag(
   args: readonly string[],
+  name: "--instance" | "--listen",
 ): { rest: string[]; flag: string | undefined } | Invalid {
   const rest: string[] = [];
   let flag: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index] as string;
-    if (argument !== "--instance") {
+    if (argument !== name) {
       rest.push(argument);
       continue;
     }
-    if (flag !== undefined) return invalid("--instance is given twice");
+    if (flag !== undefined) return invalid(`${name} is given twice`);
     const value = args[index + 1];
-    if (value === undefined) return invalid("--instance needs a name");
+    if (value === undefined)
+      return invalid(`${name} needs a ${name === "--listen" ? "value" : "name"}`);
     flag = value;
     index += 1;
   }
   return { rest, flag };
+}
+
+/**
+ * `relay`'s arguments after the word: `init` or `serve`. The instance is the flag's alone
+ * (`PARDNER_INSTANCE` names one of the daemons), and `--listen` is checked as the relay checks it.
+ */
+function parseRelay(args: readonly string[], flag: string | undefined): Invocation {
+  const taken = takeFlag(args, "--listen");
+  if ("kind" in taken) return taken;
+  const [action, ...rest] = taken.rest;
+  if (action !== "init" && action !== "serve") return invalid("relay needs init or serve");
+  if (rest.length > 0) return invalid(`unknown argument ${JSON.stringify(rest[0])}`);
+  const { flag: listen } = taken;
+  const instance = flag === undefined ? DEFAULT_INSTANCE : parseInstanceName(flag);
+  if (action === "init") {
+    if (listen !== undefined) return invalid("relay init takes no --listen");
+    if ("refusal" in instance) return invalid(`--instance: ${instance.refusal}`);
+    return { kind: "relay", action, instance };
+  }
+  // The relay's own check, which this file cannot import (`src/relay/main.ts`, `parse`).
+  const port = /^.+:(\d{1,5})$/.exec(listen ?? "")?.[1];
+  if (listen === undefined || port === undefined || Number(port) > 65535) {
+    return invalid("relay serve needs --listen <host>:<port>");
+  }
+  if ("refusal" in instance) return invalid(`--instance: ${instance.refusal}`);
+  return { kind: "relay", action, instance, listen };
 }
 
 /** The instance the flag names, else the variable, else the default; the refusal says which. */
@@ -128,10 +166,11 @@ export type Env = Readonly<Record<string, string | undefined>>;
 
 /** What the arguments after the command ask for; anything else is `invalid`, with the reason. */
 export function parseArguments(args: readonly string[], env: Env = {}): Invocation {
-  const taken = takeInstanceFlag(args);
+  const taken = takeFlag(args, "--instance");
   if ("kind" in taken) return taken;
   const { rest: positional, flag } = taken;
   const [first, second, ...rest] = positional;
+  if (first === "relay") return parseRelay(positional.slice(1), flag);
   if (first === "update") return parseUpdate([second, ...rest], flag);
   if (first === "setup") {
     if (second !== undefined) return invalid(`unknown argument ${JSON.stringify(second)}`);
@@ -181,6 +220,15 @@ export interface Host {
   updateUnderWay(): boolean;
 }
 
+/**
+ * The relay's entry beside the running command: `relay/main.ts` when this runs from `src/`,
+ * `relay/main.js` from `dist/`, so the sources and an installed copy behave alike.
+ */
+function relayEntry(): string {
+  const here = fileURLToPath(import.meta.url);
+  return realpathSync(join(dirname(here), "relay", `main${extname(here)}`));
+}
+
 /** The commands the agents in `agents` declare. */
 function executablesOf(agents: SetupModules["agents"]): string[] {
   return Object.values(agents).flatMap((agent) => agent.executable ?? []);
@@ -215,7 +263,7 @@ export const machineHost: Host = {
  * `agents` are the registry's, whose commands the service's `PATH` finds.
  */
 export function answer(
-  invocation: Exclude<Invocation, { kind: "run" | "update" | "setup" }>,
+  invocation: Exclude<Invocation, { kind: "run" | "update" | "setup" | "relay" }>,
   output: Output,
   agents: SetupModules["agents"],
   host: Host = machineHost,
@@ -257,6 +305,67 @@ export function answer(
       return report.code;
     }
   }
+}
+
+/** What `relay` needs of the machine: the home its directory is under, and what it runs. */
+export interface RelayHost {
+  home: string;
+  /**
+   * The Node running this command, which passed `main.ts`'s version check, and the relay entry
+   * beside it, resolved to its real path.
+   */
+  relayProgram(): RelayProgram;
+}
+
+export const machineRelayHost: RelayHost = {
+  home: homedir(),
+  relayProgram: () => ({ node: process.execPath, entry: relayEntry() }),
+};
+
+/**
+ * Answers `pardner relay`: `init` and `serve` run the relay's own entry as a child. Returns the
+ * child's exit status, or 1 when it could not be started.
+ */
+export async function answerRelay(
+  invocation: Extract<Invocation, { kind: "relay" }>,
+  output: Output,
+  host: RelayHost = machineRelayHost,
+): Promise<number> {
+  const directory = relayDirOf(invocation.instance.name, host.home);
+  const refuse = (sentence: string): number => {
+    output.err(`pardner relay: ${sentence}\n`);
+    return 1;
+  };
+  try {
+    // `init` makes the directory and not the folder it is in, `~/.local/share`: 0700 when made
+    // here, and `~/.local` with the default mode.
+    const parent = dirname(directory);
+    if (invocation.action === "init" && !existsSync(parent)) {
+      mkdirSync(dirname(parent), { recursive: true });
+      mkdirSync(parent, { mode: 0o700 });
+    }
+    const args =
+      invocation.action === "init"
+        ? ["init", "--dir", directory]
+        : ["serve", "--dir", directory, "--listen", invocation.listen];
+    return await runRelayChild(host.relayProgram(), args, output.err);
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
+ * Answers every invocation but `run` and `setup`, awaiting the ones that run something (`update`,
+ * `relay`), and returns the exit status.
+ */
+export async function answerCommand(
+  invocation: Exclude<Invocation, { kind: "run" | "setup" }>,
+  output: Output,
+  agents: SetupModules["agents"],
+): Promise<number> {
+  if (invocation.kind === "update") return answerUpdate(invocation, output);
+  if (invocation.kind === "relay") return answerRelay(invocation, output);
+  return answer(invocation, output, agents);
 }
 
 /** What `setup` needs of the machine beyond the service: the home and a terminal to ask on. */
