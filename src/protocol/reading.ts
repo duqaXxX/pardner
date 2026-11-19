@@ -46,7 +46,7 @@ export type State = "reading" | "rest" | "giving-back" | "refused" | "put-back" 
 export type Out =
   | { do: "read"; from: number }
   | { do: "incarnation"; incarnation: Bytes; first: boolean; changed: boolean }
-  | { do: "message"; message: Message; place: Place }
+  | { do: "message"; message: Message; place: Place; position: number }
   | { do: "rest"; first: boolean }
   | { do: "give-back"; head: RelayHead; sig: Bytes }
   | { do: "refused"; reason: 1 | 2 | 3 | 5 }
@@ -276,7 +276,7 @@ export class Reading {
     if (had && !bytesEqual(had, id)) return this.#giveBack("read"); // 5.11: not what it read here
     if (position < this.#cursor) return [];
     this.#state = "reading";
-    const out = this.#fold(kind, signed, sig);
+    const out = this.#fold(kind, signed, sig, position);
     if (this.#state !== "reading") return out;
     this.kept.ids[position] = id;
     const previous = this.#chains[position - 1] ?? ZERO;
@@ -311,7 +311,7 @@ export class Reading {
     return [{ do: "rest", first }];
   }
 
-  #fold(kind: number, signed: Bytes, sig: Bytes): Out[] {
+  #fold(kind: number, signed: Bytes, sig: Bytes, position: number): Out[] {
     const { platform, person } = this.#r;
     const bad = (what: string) => this.#fault(`${what} refused`);
     if (kind === 1) {
@@ -343,11 +343,13 @@ export class Reading {
       c.epochs.push(v.value);
       c.check = undefined;
       this.#unlock();
-    } else return this.#message(signed, sig);
+    } else return this.#message(signed, sig, position);
     return [];
   }
 
-  #message(signed: Bytes, sig: Bytes): Out[] {
+  // `position` is the message's place in the relay's sequence, one order across channels: a bot's
+  // profile is read by it (bot-profile design 3.3).
+  #message(signed: Bytes, sig: Bytes, position: number): Out[] {
     const d = decodeMessage(signed);
     const c = d.ok && this.#channels.get(idKey(d.value.header.channel));
     if (!c) return [];
@@ -363,7 +365,7 @@ export class Reading {
       log: this.#log,
       length: this.#log.length,
     };
-    return [{ do: "message", message: v.value.message, place }];
+    return [{ do: "message", message: v.value.message, place, position }];
   }
 
   /** The key of each epoch this device holds: its own seal in the entry, or a history seal another device made (5.3). */

@@ -25,12 +25,13 @@ test("a read folds the logs, gives each message at its place with the epoch key,
   const s = scene();
   const epoch = s.epoch();
   const p = prompt(s, epoch);
-  s.wire.put(4, p);
+  const at = s.wire.put(4, p);
   const r = new Reading(s.who);
   const outs = play(r, [s.wire.served(), ...s.wire.read()]);
   assert.deepEqual(kinds(outs), ["incarnation", "read", "message", "rest"]);
   const message = outs.find((o) => o.do === "message");
   assert.ok(message?.do === "message");
+  assert.equal(message.position, at, "its place in the relay's sequence");
   assert.deepEqual(message.place.key, epoch.key);
   assert.equal(message.place.member, true);
   assert.deepEqual(message.place.epoch, epoch.id);

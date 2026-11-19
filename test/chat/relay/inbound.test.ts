@@ -68,7 +68,7 @@ function rig() {
   /** Feeds what the sequence gained, in order, each at the bot's place. */
   const feed = async (place = bot.place) => {
     for (; fed < seq.items.length; fed++) {
-      inbound.take({ do: "message", message: seq.items[fed] as Message, place });
+      inbound.take({ do: "message", message: seq.items[fed] as Message, place, position: fed });
     }
     await wait();
   };

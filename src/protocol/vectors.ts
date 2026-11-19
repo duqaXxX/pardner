@@ -46,6 +46,7 @@ import {
   unreadName,
 } from "./messages.ts";
 import type { Bytes, Platform } from "./platform.ts";
+import { encodeProfile, type Profile, Profiles, readProfile } from "./profile.ts";
 import {
   checkHead,
   checkProof,
@@ -782,6 +783,49 @@ function structure<T>(
   return same ? then(decoded.value, bytes) : "differs";
 }
 
+/** A `profile-shown` case's message: its place, kind, sender and name (hex), content, and how many files it lists. */
+interface ShownJson {
+  position: number;
+  kind: number;
+  sender: string;
+  name: string;
+  content: string;
+  files?: number;
+}
+
+/**
+ * A `profile.json` case: `profile-read` reads `c.text` and writes the profile back; `profile-encode`
+ * writes `c.inputs` (its icon in hex); `profile-shown` hands `c.values` to a `Profiles` in their
+ * order and names the profile shown for the bot `c.text`, or "none".
+ */
+function profileCase(c: Case): string {
+  switch (c.op) {
+    case "profile-read": {
+      const r = readProfile(c.text ?? "");
+      return r.ok ? encodeProfile(r.value) : `error:${r.error}`;
+    }
+    case "profile-encode": {
+      const j = c.inputs as unknown as Omit<Profile, "icon"> & { icon?: string };
+      return encodeProfile({ ...j, icon: maybe(j.icon) });
+    }
+    default: {
+      const profiles = new Profiles();
+      for (const m of (c.values ?? []) as ShownJson[])
+        profiles.take(
+          m.position,
+          {
+            kind: m.kind,
+            sender: fromHex(m.sender),
+            name: fromHex(m.name),
+            blobs: Array.from({ length: m.files ?? 0 }, (_, i) => new Uint8Array(32).fill(i)),
+          },
+          m.content,
+        );
+      return profiles.of(fromHex(c.text))?.name ?? "none";
+    }
+  }
+}
+
 function outcome(
   p: Platform,
   file: VectorFile,
@@ -824,6 +868,10 @@ function outcome(
     case "cut-name":
     case "unread-name":
       return messageCase(p, file, c);
+    case "profile-read":
+    case "profile-encode":
+    case "profile-shown":
+      return profileCase(c);
     case "blob-open": {
       const opened = openBlob(p, given(c.id), key, input);
       return opened.ok ? toHex(opened.value) : `error:${opened.error}`;
@@ -995,6 +1043,7 @@ const STRUCTURES = [
   "proofs",
   "frames",
   "chain",
+  "profile",
 ];
 
 /**

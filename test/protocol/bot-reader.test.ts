@@ -167,6 +167,16 @@ test("5.8 condition 5: a bot acts only once it has read its own start back [mode
   assert.deepEqual(bot.ran, ["p"]);
 });
 
+test("bot-profile design 3.1: another bot's profile in the sequence makes a bot do nothing", () => {
+  const { app, bot, seq } = world();
+  const other = new Bot(inc).owns(app);
+  other.say({ kind: 13, content: '{"name":"studio"}' });
+  other.flush(seq, E1, inc);
+  settle(seq, app, bot);
+  assert.deepEqual(bot.ran, []);
+  assert.deepEqual(kinds(seq), [13]);
+});
+
 test("5.8: a start of another bot's does not start the bot's run", () => {
   const { app, bot, seq } = world();
   const stranger = new Party(fill(5));

@@ -205,7 +205,12 @@ test("a kind 9 or 11 from another sender leaves what waits unchanged", DARWIN, a
       const decoded = decodeMessage(signed);
       assert.ok(decoded.ok);
       const place = { epoch: fill(2, 32), member: true, key, log: [], length: 0 };
-      b.inbound.take({ do: "message", message: decoded.value, place } as unknown as Out);
+      b.inbound.take({
+        do: "message",
+        message: decoded.value,
+        place,
+        position: name,
+      } as unknown as Out);
     };
     read(9, prompt, { thread: threadOf(r), request: { type: "hold" }, title: "x" }, 60);
     read(
