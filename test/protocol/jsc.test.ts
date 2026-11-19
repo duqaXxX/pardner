@@ -6,7 +6,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, rmSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createNodePlatform } from "../../src/platform-node/platform.ts";
@@ -56,14 +56,21 @@ test("every vector file passes in JavaScriptCore on CryptoKit", {
     const tests = swift(["test"], 450_000, { PARDNER_JOINED_SCRIPT: script });
     assert.equal(tests.status, 0, tests.stdout + tests.stderr);
     // Never zero, and never fewer than the package defines: a run that executes nothing is no pass.
-    const defined = (
-      readFileSync(join(APP, "Tests", "VectorTests", "VectorTests.swift"), "utf8").match(
-        /func test\w+\(/g,
-      ) ?? []
-    ).length;
-    const executed = Number(
-      /Executed (\d+) tests, with 0 failures/.exec(tests.stdout + tests.stderr)?.[1],
-    );
+    // Every test file of every bundle counts, since `executed` below is the total over all of them.
+    const testsDir = join(APP, "Tests");
+    const defined = readdirSync(testsDir, { recursive: true, encoding: "utf8" })
+      .filter((file) => file.endsWith(".swift"))
+      .reduce(
+        (sum, file) =>
+          sum + (readFileSync(join(testsDir, file), "utf8").match(/func test\w+\(/g) ?? []).length,
+        0,
+      );
+    // Each test bundle runs on its own and ends with its own "All tests" line: the total is their sum.
+    const executed = [
+      ...(tests.stdout + tests.stderr).matchAll(
+        /Test Suite 'All tests' passed[^\n]*\n\s*Executed (\d+) tests, with 0 failures/g,
+      ),
+    ].reduce((sum, m) => sum + Number(m[1]), 0);
     assert.ok(defined > 0 && executed >= defined, `executed ${executed} of ${defined} tests`);
     const built = swift(["build", "--product", "vector-tool"], 240_000);
     assert.equal(built.status, 0, built.stdout + built.stderr);

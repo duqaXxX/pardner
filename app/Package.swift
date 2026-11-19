@@ -9,13 +9,17 @@ let package = Package(
     products: [
         .library(name: "Platform", targets: ["Platform"]),
         .library(name: "ProtocolHost", targets: ["ProtocolHost"]),
+        .library(name: "DesignSystem", targets: ["DesignSystem"]),
     ],
     targets: [
         .target(name: "Platform"),
         .target(name: "ProtocolHost", dependencies: ["Platform"]),
+        // The colour tokens: one JSON resource, read at first use.
+        .target(name: "DesignSystem", resources: [.copy("tokens.json")]),
         // Test-only: `seal` for Node to open (the other direction of the cross-engine check).
         .executableTarget(name: "vector-tool", dependencies: ["Platform"], path: "Tools/vector-tool"),
         // Test-only code (the software key store, importKey, withSecret) lives here and ships in no module.
-        .testTarget(name: "VectorTests", dependencies: ["Platform", "ProtocolHost"], path: "Tests"),
+        .testTarget(name: "VectorTests", dependencies: ["Platform", "ProtocolHost"], path: "Tests", exclude: ["DesignSystemTests"]),
+        .testTarget(name: "DesignSystemTests", dependencies: ["DesignSystem"]),
     ]
 )
