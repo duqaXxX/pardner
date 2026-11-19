@@ -23,6 +23,12 @@ All notable changes to this project are documented here. The format follows
   interface on CryptoKit; `ProtocolHost` runs the joined protocol script in JavaScriptCore on a thread of its own and
   returns a JavaScript fault as a Swift error. `swift test` in `app/` runs the vector files inside JavaScriptCore. The
   Xcode project `app/Pardner.xcodeproj` builds an empty macOS window, signed ad hoc, and the macOS CI job builds it.
+- `app/`: the `Relay` library of the Swift package and `RelayConnection`, the app's connection to the relay: TLS 1.3
+  on Network.framework with the relay's key pinned, the exporter binding, TCP keepalive, one timer on `ContinuousClock`,
+  and the path monitor and the Mac's wake as `networkUp`. The policy is the protocol package's `Link`, run inside
+  JavaScriptCore through `AppLink` (`src/protocol/index.ts`), which hands Swift each message as a view without key
+  material. `ProtocolHost` gains `call`, which returns a value (`HostValue`, bytes as `Uint8Array`), and `construct`.
+  `test/protocol/app-relay.test.ts` runs the Swift tests against a real relay on macOS.
 - `app/`: the `DesignSystem` library of the Swift package. `PardnerColor` has one SwiftUI `Color` per token of the app's
   design (25 tokens), each taking its light or dark value from the appearance it is drawn in; the values are the one
   copy in `app/Sources/DesignSystem/tokens.json`. The module sets no theme.
