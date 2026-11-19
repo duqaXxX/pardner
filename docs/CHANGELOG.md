@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `FrameCutter` (`src/protocol/frames.ts`): cuts a byte stream into whole frames, applying the length limit of the
+  state the caller names, and refuses a bad length before the body is read.
 - `app/`: the Swift package of the macOS app (macOS 15 or later). `Platform` is the protocol package's platform
   interface on CryptoKit; `ProtocolHost` runs the joined protocol script in JavaScriptCore on a thread of its own and
   returns a JavaScript fault as a Swift error. `swift test` in `app/` runs the vector files inside JavaScriptCore. The
