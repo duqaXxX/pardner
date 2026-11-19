@@ -11,6 +11,9 @@ All notable changes to this project are documented here. The format follows
   interface on CryptoKit; `ProtocolHost` runs the joined protocol script in JavaScriptCore on a thread of its own and
   returns a JavaScript fault as a Swift error. `swift test` in `app/` runs the vector files inside JavaScriptCore. The
   Xcode project `app/Pardner.xcodeproj` builds an empty macOS window, signed ad hoc, and the macOS CI job builds it.
+- `app/`: the `DesignSystem` library of the Swift package. `PardnerColor` has one SwiftUI `Color` per token of the app's
+  design (25 tokens), each taking its light or dark value from the appearance it is drawn in; the values are the one
+  copy in `app/Sources/DesignSystem/tokens.json`. The module sets no theme.
 
 ### Changed
 
