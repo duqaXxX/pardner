@@ -10,7 +10,7 @@ import {
   writeHead,
   writeProof,
 } from "./proofs.ts";
-import { fail, type Result } from "./result.ts";
+import { fail, ok, type Result } from "./result.ts";
 
 /** The codes of a field that names one of a few (design 6.7); a retired one is left out and never reused. */
 const ALLOWED = {
@@ -160,6 +160,56 @@ export function frameLength(prefix: Bytes, proven: boolean): Result<number> {
   return length.ok && length.value >= 1 && length.value <= limit(proven)
     ? length
     : fail("bad-input");
+}
+
+/** Cuts a byte stream into whole frames, each joined once, so a large frame in small chunks costs a pass. */
+export class FrameCutter {
+  #chunks: Bytes[] = [];
+  #size = 0;
+  #need = 0; // the length of the frame being cut once its prefix is read, else 0
+
+  /** Holds a copy of bytes that arrived, so the caller may reuse its buffer (a socket's chunk often is). */
+  push(bytes: Bytes): void {
+    this.#chunks.push(bytes.slice());
+    this.#size += bytes.length;
+  }
+
+  /** Forgets every byte held. */
+  reset(): void {
+    [this.#chunks, this.#size, this.#need] = [[], 0, 0];
+  }
+
+  /**
+   * The next whole frame with its length prefix, or `undefined` while it is not whole; a length that
+   * is zero or past the limit of `proven` refuses as soon as its prefix is in, before the body.
+   */
+  next(proven: boolean): Result<Bytes | undefined> {
+    if (this.#need === 0) {
+      if (this.#size < 4) return ok(undefined);
+      const size = frameLength(this.#joined().subarray(0, 4), proven);
+      if (!size.ok) return size;
+      this.#need = 4 + size.value;
+    }
+    if (this.#size < this.#need) return ok(undefined);
+    const all = this.#joined();
+    const frame = all.subarray(0, this.#need);
+    const left = all.subarray(this.#need);
+    [this.#chunks, this.#size, this.#need] = [left.length ? [left] : [], left.length, 0];
+    return ok(frame);
+  }
+
+  #joined(): Bytes {
+    if (this.#chunks.length !== 1) {
+      const out = new Uint8Array(this.#size);
+      let at = 0;
+      for (const c of this.#chunks) {
+        out.set(c, at);
+        at += c.length;
+      }
+      this.#chunks = [out];
+    }
+    return this.#chunks[0] as Bytes;
+  }
 }
 
 /** The side that reads a frame: a device reads the relay's types, the relay a device's. */
