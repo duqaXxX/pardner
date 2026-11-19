@@ -14,8 +14,8 @@ let package = Package(
     targets: [
         .target(name: "Platform"),
         .target(name: "ProtocolHost", dependencies: ["Platform"]),
-        // The colour tokens: one JSON resource, read at first use.
-        .target(name: "DesignSystem", resources: [.copy("tokens.json")]),
+        // The colour tokens (one JSON resource, read at first use) and the three bundled font families.
+        .target(name: "DesignSystem", resources: [.copy("tokens.json"), .copy("Fonts")]),
         // Test-only: `seal` for Node to open (the other direction of the cross-engine check).
         .executableTarget(name: "vector-tool", dependencies: ["Platform"], path: "Tools/vector-tool"),
         // Test-only code (the software key store, importKey, withSecret) lives here and ships in no module.

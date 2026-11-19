@@ -14,6 +14,11 @@ All notable changes to this project are documented here. The format follows
 - `app/`: the `DesignSystem` library of the Swift package. `PardnerColor` has one SwiftUI `Color` per token of the app's
   design (25 tokens), each taking its light or dark value from the appearance it is drawn in; the values are the one
   copy in `app/Sources/DesignSystem/tokens.json`. The module sets no theme.
+- `app/`: the `DesignSystem` library bundles the app's three font families, each from its project's own release and under
+  the SIL Open Font License 1.1 (licence texts beside the files): Inter (rsms/inter 4.1), Space Grotesk
+  (floriankarsten/space-grotesk 2.0.0) and JetBrains Mono (JetBrains/JetBrainsMono 2.304). `PardnerFonts.register()`
+  registers them for the process; `PardnerFont.ui`, `.display` and `.mono` return a SwiftUI `Font` with the weight set
+  on the font's `wght` axis.
 
 ### Changed
 
