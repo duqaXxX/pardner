@@ -32,6 +32,12 @@ All notable changes to this project are documented here. The format follows
 - `test/protocol/jsc.test.ts` runs `swift test` in `app/` and keeps the cross-engine seal check on Node; the Swift
   harness that was in `test/protocol/jsc/` is now in `app/`.
 
+### Fixed
+
+- `pardner service install` that fails because `plutil` refuses the plist or launchd does not load it leaves the plist
+  as it was: none, so `service status` and `service list` no longer show a stopped service that was never installed,
+  or the plist `service stop` left, with its text and its stop, so the next login does not start the service.
+
 ## [0.16.0] - 2026-11-18
 
 ### Added

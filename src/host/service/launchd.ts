@@ -296,6 +296,26 @@ export class Launchd implements ServiceManager {
     this.#launchctl(["bootstrap", `gui/${this.#options.uid}`, this.#plist]);
   }
 
+  /** Leaves the plist as it was before an install wrote it: its old text, or no file. */
+  #putBack(written: string | null): void {
+    if (written === null) rmSync(this.#plist, { force: true });
+    else writeFileSync(this.#plist, written);
+  }
+
+  /**
+   * Undoes an install whose load failed, unless another install loaded the job meanwhile: that
+   * job runs from the plist. `#load()` has run `enable`, which clears a stop's `disable`, so a
+   * plist that was there (a stopped service: install refuses a loaded one) is disabled again, or a
+   * login would start the service the owner stopped. `start` and `install` enable before loading.
+   */
+  #undoLoad(written: string | null): void {
+    const listed = this.#attempt(() => this.#job());
+    // A launchd that cannot say whether the job is loaded leaves the plist as the failure left it.
+    if (!("done" in listed) || listed.done !== null) return;
+    this.#putBack(written);
+    if (written !== null) this.#attempt(() => this.#launchctl(["disable", this.#target]));
+  }
+
   install(program: Program): Report {
     return this.#guarded(() => {
       const text = plistFor(program, this.#log, this.#options.instance);
@@ -314,9 +334,15 @@ export class Launchd implements ServiceManager {
       writeFileSync(this.#plist, text);
       const lint = this.#options.run("plutil", ["-lint", this.#plist]);
       if (lint.status !== 0) {
+        this.#putBack(written);
         return failed(1, [`plutil refused ${this.#plist}: ${(lint.stdout || lint.stderr).trim()}`]);
       }
-      this.#load();
+      try {
+        this.#load();
+      } catch (error) {
+        this.#undoLoad(written);
+        throw error;
+      }
       const copy = copyOf(program.main);
       const version = packageVersion(join(copy, "package.json"));
       return ok([

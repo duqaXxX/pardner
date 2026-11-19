@@ -335,6 +335,7 @@ test("install stops when plutil refuses the plist, and loads nothing", (t) => {
   assert.equal(report.code, 1);
   assert.deepEqual(report.err, [`plutil refused ${plistPath(path, null)}: bad plist`]);
   assert.ok(!run.calls.some((call) => call.args[0] === "bootstrap"));
+  assert.ok(!existsSync(plistPath(path, null)), "the plist it wrote is gone");
 });
 
 test("a failed bootstrap is reported with what launchctl said", (t) => {
@@ -347,6 +348,88 @@ test("a failed bootstrap is reported with what launchctl said", (t) => {
   assert.deepEqual(report.err, [
     "launchctl bootstrap failed: Bootstrap failed: 5: Input/output error",
   ]);
+  assert.ok(!existsSync(plistPath(path, null)), "the plist it wrote is gone");
+});
+
+test("a failed enable removes the plist the install wrote", (t) => {
+  const path = home(t);
+  const run = fakeRun(ABSENT, { "launchctl enable": { status: 1, stderr: "refused" } });
+  assert.equal(manager(path, run).install(PROGRAM).code, 1);
+  assert.ok(!existsSync(plistPath(path, null)));
+});
+
+/** The plist of a stopped service, in place before an install. */
+function stoppedPlist(path: string): string {
+  const plist = plistPath(path, null);
+  mkdirSync(join(plist, ".."), { recursive: true });
+  writeFileSync(plist, "a stopped service's plist");
+  return plist;
+}
+
+test("a plist plutil refuses over a stopped service's puts its text back, enabling nothing", (t) => {
+  const path = home(t);
+  const plist = stoppedPlist(path);
+  const run = fakeRun(ABSENT, { "plutil -lint": { status: 1, stdout: "bad plist" } });
+  assert.equal(manager(path, run).install(PROGRAM).code, 1);
+  assert.equal(readFileSync(plist, "utf8"), "a stopped service's plist");
+  const verbs = run.calls.filter((call) => call.command === "launchctl").map((c) => c.args[0]);
+  assert.deepEqual(verbs, ["list"]);
+});
+
+test("a failed bootstrap over a stopped service puts its plist back and disables it again", (t) => {
+  const path = home(t);
+  const plist = stoppedPlist(path);
+  const run = fakeRun(ABSENT, { "launchctl bootstrap": { status: 5, stderr: "failed" } });
+  const report = manager(path, run).install(PROGRAM);
+  assert.deepEqual(report.err, ["launchctl bootstrap failed: failed"]);
+  assert.equal(readFileSync(plist, "utf8"), "a stopped service's plist");
+  const launchctl = run.calls.filter((call) => call.command === "launchctl");
+  assert.deepEqual(
+    launchctl.map((c) => c.args.join(" ")),
+    [
+      "list",
+      `enable gui/${UID}/${LABEL}`,
+      `bootstrap gui/${UID} ${plist}`,
+      "list",
+      `disable gui/${UID}/${LABEL}`,
+    ],
+  );
+});
+
+test("a failed bootstrap leaves the plist of a job another install loaded meanwhile", (t) => {
+  const path = home(t);
+  const calls: string[] = [];
+  // The other install bootstraps the job between this one's first look and its own bootstrap.
+  const run: Run = (command, args) => {
+    calls.push(`${command} ${args[0]}`);
+    if (args[0] === "list") {
+      const loaded = calls.includes("launchctl bootstrap");
+      return { status: 0, stdout: loaded ? RUNNING : ABSENT, stderr: "" };
+    }
+    if (args[0] === "bootstrap") return { status: 5, stdout: "", stderr: "already loaded" };
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  assert.equal(manager(path, run).install(PROGRAM).code, 1);
+  assert.ok(existsSync(plistPath(path, null)));
+  assert.ok(!calls.includes("launchctl disable"));
+});
+
+test("a failed bootstrap followed by a failed list leaves the plist as it is", (t) => {
+  const path = home(t);
+  let lists = 0;
+  const run: Run = (_command, args) => {
+    if (args[0] === "list") {
+      lists += 1;
+      return lists === 1
+        ? { status: 0, stdout: ABSENT, stderr: "" }
+        : { status: 1, stdout: "", stderr: "list failed" };
+    }
+    if (args[0] === "bootstrap") return { status: 5, stdout: "", stderr: "failed" };
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  const report = manager(path, run).install(PROGRAM);
+  assert.deepEqual(report.err, ["launchctl bootstrap failed: failed"]);
+  assert.ok(existsSync(plistPath(path, null)));
 });
 
 test("uninstall boots the job out, removes the plist and names what it leaves", (t) => {
