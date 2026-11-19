@@ -215,6 +215,26 @@
       "fails": "bad-input"
     },
     {
+      "name": "hpke open answers open-failed for an off-curve enc",
+      "op": "hpke-open-refuses",
+      "bytes": "0400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001",
+      "fails": "open-failed"
+    },
+    {
+      "name": "hpke open answers open-failed for a sealed text shorter than its tag (0 bytes)",
+      "op": "hpke-open-refuses",
+      "bytes": "04abc7e49a4c6b3566d77d0304addc6ed0e98512ffccf505e6a8e3eb25c685136f853148544876de76c0f2ef99cdc3a05ccf5ded7860c7c021238f9e2073d2356c",
+      "input": "",
+      "fails": "open-failed"
+    },
+    {
+      "name": "hpke open answers open-failed for a sealed text shorter than its tag (15 bytes)",
+      "op": "hpke-open-refuses",
+      "bytes": "04abc7e49a4c6b3566d77d0304addc6ed0e98512ffccf505e6a8e3eb25c685136f853148544876de76c0f2ef99cdc3a05ccf5ded7860c7c021238f9e2073d2356c",
+      "input": "000000000000000000000000000000",
+      "fails": "open-failed"
+    },
+    {
       "name": "a key pair is made for sign or receive alone, before the name is looked at",
       "op": "make-key-refuses",
       "text": "other",

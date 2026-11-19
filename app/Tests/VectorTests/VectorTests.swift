@@ -61,8 +61,8 @@ final class VectorTests: XCTestCase {
     func testDeriveKeyPairGivesRFC9180PrivateKey() throws {
         let data = try Data(contentsOf: Self.vectors.appendingPathComponent("hpke-rfc9180.json"))
         let rfc = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])["vector"] as! [String: Any]
-        let derived = try CryptoKitPlatform.deriveKeyPair(hex(rfc["ikmR"] as! String))
-        XCTAssertEqual(derived.map { String(format: "%02x", $0) }.joined(), rfc["skRm"] as? String)
+        let derived = try CryptoKitPlatform.deriveKeyPair(SecretBuffer(hex(rfc["ikmR"] as! String)))
+        XCTAssertEqual(derived.withUnsafeBytes { $0.map { String(format: "%02x", $0) }.joined() }, rfc["skRm"] as? String)
     }
 
     // The boundary of DeriveKeyPair's acceptance, which no ikm reaches: 0, 1, n-1, n, 2^256-1.
@@ -70,7 +70,7 @@ final class VectorTests: XCTestCase {
         let n = "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551"
         let nMinus1 = "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632550"
         let cases = [String(repeating: "0", count: 64), String(repeating: "0", count: 63) + "1", nMinus1, n, String(repeating: "f", count: 64)]
-        XCTAssertEqual(cases.map { CryptoKitPlatform.acceptsScalar(hex($0)) }, [false, true, true, false, false])
+        XCTAssertEqual(cases.map { CryptoKitPlatform.acceptsScalar(SecretBuffer(hex($0))) }, [false, true, true, false, false])
     }
 
     func testJavaScriptFaultIsAnErrorAndEndsTheHost() async throws {
@@ -125,7 +125,7 @@ final class VectorTests: XCTestCase {
 
     func testMadeKeyBlocksRecoveryUnderTheSameNameBeforeThePersonIsAsked() async throws {
         let flag = Flag()
-        let host = try await makeHost(person: RecoveryPerson(show: { _ in }, enter: { flag.value = true; return Data(count: 32) }))
+        let host = try await makeHost(person: RecoveryPerson.typing(Data(count: 32), onAsk: { flag.value = true }))
         try await host.perform { state in
             _ = try state.platform.makeKeyPair("owner.sign", "sign")
             XCTAssertThrowsError(try state.platform.enterRecovery("owner", Data([1]), Data([2]))) { XCTAssertEqual($0 as? Failure, .keyExists) }
@@ -136,7 +136,7 @@ final class VectorTests: XCTestCase {
 
     func testDerivedKeysDieWithAFaultedHostAndTheRecoveryEntersAgain() async throws {
         let secret = Data((0..<32).map { UInt8($0) })
-        let person = RecoveryPerson(show: { _ in }, enter: { secret })
+        let person = RecoveryPerson.typing(secret)
         let store = SoftwareKeyStore()
         let first = try await makeHost(person: person, store: store)
         try await first.perform { _ = try $0.platform.enterRecovery("owner", Data([1]), Data([2])) }
@@ -153,7 +153,7 @@ final class VectorTests: XCTestCase {
     }
 
     func testDerivedKeysDieWithAHostThatIsDropped() async throws {
-        let person = RecoveryPerson(show: { _ in }, enter: { Data(count: 32) + Data() })
+        let person = RecoveryPerson.typing(Data(count: 32))
         var host: ProtocolHost? = try await makeHost(person: person)
         let platform = host!.state.platform
         try await host!.perform { _ = try $0.platform.enterRecovery("owner", Data([1]), Data([2])) }
@@ -164,7 +164,7 @@ final class VectorTests: XCTestCase {
     }
 
     func testRecoveryNameBlocksAMadeKeyOfTheSameName() async throws {
-        let host = try await makeHost(person: RecoveryPerson(show: { _ in }, enter: { Data(count: 32) }))
+        let host = try await makeHost(person: RecoveryPerson.typing(Data(count: 32)))
         try await host.perform { state in
             _ = try state.platform.enterRecovery("owner", Data([1]), Data([2]))
             XCTAssertThrowsError(try state.platform.makeKeyPair("owner.sign", "sign")) { XCTAssertEqual($0 as? Failure, .keyExists) }
@@ -218,7 +218,7 @@ final class VectorTests: XCTestCase {
     }
 }
 
-final class Flag { var value = false }
+final class Flag: @unchecked Sendable { var value = false } // set on the host thread, read after it answered
 
 func hex(_ string: String) -> Data {
     Data((0..<string.count / 2).map { UInt8(string.dropFirst($0 * 2).prefix(2), radix: 16)! })

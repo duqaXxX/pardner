@@ -1,7 +1,6 @@
 // The platform interface of the protocol package (src/protocol/platform.ts) on CryptoKit.
-// Limit: this code erases what it owns (its own variables), but a `Data` shared with the person's
-// screen or with the JavaScriptCore bridge is another holder's copy, and no code here can erase it.
-// 6.2 solves that with storage the platform allocates and wipes, before any screen reaches recovery.
+// The recovery secret and what derives from it live in `SecretBuffer`s the platform wipes; the
+// limits of that are stated in SecretBuffer.swift.
 import CryptoKit
 import Foundation
 
@@ -20,12 +19,16 @@ public struct Fault: Error {
     public init(message: String) { self.message = message }
 }
 
-/// The person's side of the recovery secret: a screen that shows it and a prompt that takes it back.
+/// The person's side of the recovery secret. Both closures run on the host thread, which waits for
+/// them, so the screen must answer from another thread and on every way it goes away (dismissed,
+/// closed, the app quitting): a screen gone without an answer is a decline, never a wait.
 public struct RecoveryPerson {
-    public let show: (Data) -> Void
-    public let enter: () -> Data
+    /// Shows the secret; whether the person saw it. The pointer is valid only during the call: the screen copies what it shows.
+    public let show: @Sendable (UnsafeRawBufferPointer) -> Bool
+    /// Takes the secret into the buffer (32 bytes); the number of bytes the person gave, `nil` for a decline.
+    public let enter: @Sendable (SecretBuffer) -> Int?
     /// A person made of a screen that shows the secret and a prompt that takes it back.
-    public init(show: @escaping (Data) -> Void, enter: @escaping () -> Data) {
+    public init(show: @escaping @Sendable (UnsafeRawBufferPointer) -> Bool, enter: @escaping @Sendable (SecretBuffer) -> Int?) {
         self.show = show
         self.enter = enter
     }
@@ -38,6 +41,10 @@ public final class CryptoKitPlatform {
     let person: RecoveryPerson?
     /// The pairs `enterRecovery` computes, by name; only that function writes here.
     var derived: [String: Derived] = [:]
+    #if DEBUG
+    /// Test-only: which candidate scalars the curve accepts; the curve's own rule in the app.
+    var accepts: (SecretBuffer) -> Bool = CryptoKitPlatform.acceptsScalar
+    #endif
 
     /// A platform whose made keys are in `store` and whose recovery secret comes from `person`.
     public init(store: KeyStore, person: RecoveryPerson? = nil) {
@@ -50,9 +57,14 @@ public final class CryptoKitPlatform {
 
     /// HKDF-SHA256 with an empty salt; a fault outside `info` 1,024 bytes or `length` 1 to 8,160.
     public func hkdf(_ ikm: Data, _ info: Data, _ length: Int) throws -> Data {
-        guard info.count <= 1024, (1...8160).contains(length) else { throw Fault(message: "hkdf: info over 1,024 bytes, or a length outside 1 to 8,160") }
+        try Self.checkHkdf(info, length)
         return HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: ikm), salt: Data(), info: info, outputByteCount: length)
             .withUnsafeBytes { Data($0) }
+    }
+
+    /// The limits of `hkdf`, kept by every use of it.
+    static func checkHkdf(_ info: Data, _ length: Int) throws {
+        guard info.count <= 1024, (1...8160).contains(length) else { throw Fault(message: "hkdf: info over 1,024 bytes, or a length outside 1 to 8,160") }
     }
 
     /// AES-256-GCM: the ciphertext with its 16-byte tag after it; a fault on a key or nonce of the wrong size.
@@ -96,9 +108,13 @@ public final class CryptoKitPlatform {
     public func random(_ length: Int) throws -> Data {
         if length == 0 { return Data() }
         var out = Data(count: length)
-        let status = out.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, length, $0.baseAddress!) }
-        guard status == errSecSuccess else { throw Fault(message: "random: the system generator failed") }
+        try out.withUnsafeMutableBytes { try Self.fillRandom($0) }
         return out
+    }
+
+    /// Fills `bytes` from the system generator.
+    static func fillRandom(_ bytes: UnsafeMutableRawBufferPointer) throws {
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, bytes.baseAddress!) == errSecSuccess else { throw Fault(message: "random: the system generator failed") }
     }
 
     /// Milliseconds since 1970-01-01 UTC.

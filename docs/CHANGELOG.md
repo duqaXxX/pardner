@@ -15,6 +15,13 @@ All notable changes to this project are documented here. The format follows
   design (25 tokens), each taking its light or dark value from the appearance it is drawn in; the values are the one
   copy in `app/Sources/DesignSystem/tokens.json`. The module sets no theme.
 
+- `app/`: `SecureEnclaveKeyStore`, the app's made keys in the Secure Enclave, one blob file per key in
+  `Application Support/<bundle identifier>/keys/`, usable after the first login since the Mac started. A key of one use
+  never serves the other, and an error of the enclave or of a blob is a fault, never an answer about a remote party's
+  seal. The recovery secret, its HKDF outputs and its candidate scalars live in `SecretBuffer`s that are wiped on every
+  path; `RecoveryPerson`'s `show` answers whether the person saw the secret and `enter` the bytes given, or `nil` for a
+  decline.
+
 ### Changed
 
 - `test/protocol/jsc.test.ts` runs `swift test` in `app/` and keeps the cross-engine seal check on Node; the Swift

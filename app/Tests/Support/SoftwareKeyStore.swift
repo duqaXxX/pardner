@@ -4,7 +4,7 @@ import CryptoKit
 import Foundation
 import Platform
 
-final class SoftwareKeyStore: KeyStore {
+final class SoftwareKeyStore: KeyStore, @unchecked Sendable { // one test thread at a time
     private var signing: [String: P256.Signing.PrivateKey] = [:]
     private var receiving: [String: P256.KeyAgreement.PrivateKey] = [:]
 
