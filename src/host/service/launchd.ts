@@ -67,7 +67,7 @@ export function logPath(home: string, instance: string | null): string {
   return join(home, "Library", "Logs", "pardner", `${instance ?? "pardner"}.log`);
 }
 
-function xml(text: string): string {
+export function xml(text: string): string {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
@@ -117,7 +117,7 @@ export interface ListedJob {
 }
 
 /** The jobs `launchctl list` prints, one per row of three columns; the header and noise are skipped. */
-function listedRows(output: string): Array<ListedJob & { label: string }> {
+export function listedRows(output: string): Array<ListedJob & { label: string }> {
   const number = (text: string): number | null => (/^-?\d+$/.test(text) ? Number(text) : null);
   return output.split("\n").flatMap((line) => {
     const columns = line.trim().split(/\s+/);
@@ -157,8 +157,8 @@ function listedInstances(output: string): Array<string | null> {
 
 class LaunchctlError extends Error {}
 
-const ok = (out: string[]): Report => ({ code: 0, out, err: [] });
-const failed = (code: number, err: string[]): Report => ({ code, out: [], err });
+export const ok = (out: string[]): Report => ({ code: 0, out, err: [] });
+export const failed = (code: number, err: string[]): Report => ({ code, out: [], err });
 
 // The files that may be a pardner service: `local.pardner.plist` and `local.pardner.<...>.plist`.
 // Which instance one is comes from what it says inside (`inspected`), not from this name.
@@ -167,13 +167,13 @@ const OWN_PLIST = /^local\.pardner(?:\..+)?\.plist$/;
 const NOT_MANAGEABLE = "not a pardner instance it can manage";
 
 /** What `service list` reads of a plist: its Label (null when it has none) and its arguments. */
-interface PlistFacts {
+export interface PlistFacts {
   label: string | null;
   args: string[];
 }
 
 /** The Label and program arguments of the plist at `file`, or null when `plutil` cannot read them. */
-function plistFacts(run: Run, file: string): PlistFacts | null {
+export function plistFacts(run: Run, file: string): PlistFacts | null {
   const result = run("plutil", ["-convert", "json", "-o", "-", file]);
   if (result.status !== 0) return null;
   try {

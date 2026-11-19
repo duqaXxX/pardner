@@ -33,10 +33,13 @@ function cellsOf(row: InstanceRow): Row {
 }
 
 /** The report of `service list`: the table, then the definitions that are no instance's. */
-export function listReport(listing: InstanceListing): Report {
+export function listReport(
+  listing: InstanceListing,
+  none = "No pardner service is installed.",
+): Report {
   if ("failure" in listing) return { code: 1, out: [], err: [listing.failure] };
   if (listing.rows.length === 0 && listing.refused.length === 0) {
-    return { code: 0, out: ["No pardner service is installed."], err: [] };
+    return { code: 0, out: [none], err: [] };
   }
   const header: Row = ["INSTANCE", "STATE", "COPY", "VERSION"];
   return {
