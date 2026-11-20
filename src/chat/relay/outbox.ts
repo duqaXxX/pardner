@@ -6,8 +6,9 @@
  * run, so no sender key and counter is used twice (crypto.md 1). A reply's parts are split at 64 KiB by the provider (3.8).
  */
 import { bytesEqual } from "../../protocol/bytes.ts";
-import { buildEpoch, tickEpoch, whyStart } from "../../protocol/epochs.ts";
+import { buildEpoch, type HistorySeal, tickEpoch } from "../../protocol/epochs.ts";
 import { deviceId, signedId } from "../../protocol/ids.ts";
+import { makeSeal, sealKey, seals, startOf } from "../../protocol/keeper.ts";
 import { KIND_PROFILE, messageChecker } from "../../protocol/messages.ts";
 import {
   build,
@@ -36,6 +37,8 @@ export interface OutboxOptions {
   reading: Reading;
   /** `Connection.submit`: the relay's result code, or `undefined` when none came. */
   submit: (kind: 3 | 4, signed: Bytes, sig: Bytes) => Promise<number | undefined>;
+  /** `Connection.giveSeal`: the relay's result code, or `undefined` when none came. */
+  giveSeal: (seal: HistorySeal, sig: Bytes) => Promise<number | undefined>;
   log: (line: string) => void;
   /** The run of the bot, shared with its `BotReader`: a start read back is of this run (SD 5.8). */
   run: Run;
@@ -55,6 +58,9 @@ export class Outbox {
   #dirty = new Set<string>();
   #durable = new Set<string>(); // the ids of built bytes a write of the store is known to hold (crypto.md 4: ids, never signatures)
   #unbuildable = new Set<string>(); // channels whose epoch build failed, logged once
+  #unsealable = new Set<string>(); // `sealKey` of each seal whose make failed, logged once
+  #sealing = false;
+  #again = false; // a rest came while seals were given
   #released = false;
   #dropped = new Set<string>(); // names that left the outbox without being read back: refused, too large or unwanted
   #landing = new Set<{ names: Bytes[]; done: (landed: boolean) => void }>();
@@ -99,6 +105,7 @@ export class Outbox {
       this.#sent.clear(); // what the pass did not read back is sent again, as the same bytes
       this.#waiting.clear();
       this.pump();
+      void this.#seal();
     }
   }
 
@@ -238,7 +245,7 @@ export class Outbox {
       await store.change((s) => s.clocks.set(key, clock));
       return true; // the reading may have moved during the write: start again on a fresh view
     }
-    const why = whyStart(view, clock, now, false);
+    const why = startOf(reading, channel, store.saved.clocks.get(key), now);
     if (why) return this.#start(channel, key, why);
     const sent = this.#sent.get(key) ?? new Set<string>();
     const item = (store.saved.outboxes.get(key) ?? []).find((i) => !sent.has(toHex(i.name)));
@@ -347,6 +354,45 @@ export class Outbox {
     else if (code !== undefined && code !== 2)
       log(`relay: an epoch entry was answered with ${code}`); // 2: the heads moved, the push that follows is read
     return false;
+  }
+
+  /**
+   * The history seals the keeper says the bot owes (design 3.11), given one at a time at each rest,
+   * what is owed read again after every answer: a removal read while one is given stops the rest
+   * (SD 5.10). The relay's list is what says a seal is given, so a seal answered is not sent again
+   * until the next rest; a rest that comes while this runs makes it run once more.
+   */
+  async #seal(): Promise<void> {
+    const { platform, reading, giveSeal, log } = this.#o;
+    if (this.#sealing) this.#again = true;
+    if (this.#sealing || !reading.sendable) return;
+    this.#sealing = true;
+    try {
+      do {
+        this.#again = false;
+        const tried = new Set<string>();
+        while (reading.sendable) {
+          const owed = seals(platform, reading, this.#self).find((o) => !tried.has(sealKey(o)));
+          if (!owed) break;
+          tried.add(sealKey(owed));
+          const made = makeSeal(platform, reading, owed, SIGN, this.#self);
+          if (!made.ok) {
+            if (!this.#unsealable.has(sealKey(owed)))
+              log(`relay: a history seal could not be made (${made.error})`);
+            this.#unsealable.add(sealKey(owed));
+            continue;
+          }
+          this.#unsealable.delete(sealKey(owed));
+          const code = await giveSeal(made.value.seal, made.value.sig);
+          if (code !== undefined && code !== 0)
+            log(`relay: a history seal was answered with ${code}`);
+        }
+      } while (this.#again);
+    } catch (error) {
+      log(`relay: giving seals stopped: ${(error as Error).message}`);
+    } finally {
+      this.#sealing = false;
+    }
   }
 
   /** The relay refused what the bot built at the heads it read: the channel stops, across restarts (row N2). */

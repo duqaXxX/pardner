@@ -318,6 +318,7 @@ export function relayChat(): ChatEntry {
           reading: connection.reading,
           run,
           submit: (kind, signed, sig) => connection.submit(kind, signed, sig),
+          giveSeal: (seal, sig) => connection.giveSeal(seal, sig),
           log,
         });
         const inbound = new Inbound({ platform, self, store, outbox, run, log });

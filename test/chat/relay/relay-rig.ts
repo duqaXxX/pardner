@@ -244,6 +244,7 @@ export function botOn(
     reading: connection.reading,
     run,
     submit: over.submit?.(real) ?? real,
+    giveSeal: (seal, sig) => connection.giveSeal(seal, sig),
     log: (l) => lines.push(l),
   });
   const inbound = new Inbound({

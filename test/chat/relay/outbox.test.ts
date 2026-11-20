@@ -12,7 +12,7 @@ import { Outbox } from "../../../src/chat/relay/outbox.ts";
 import { botPlatform, loadPairing, pair } from "../../../src/chat/relay/pairing.ts";
 import { identityOf, Store } from "../../../src/chat/relay/store.ts";
 import { checkDeviceEntry, idKey, type LoggedEntry } from "../../../src/protocol/device-log.ts";
-import type { LoggedEpoch } from "../../../src/protocol/epochs.ts";
+import type { HistorySeal, LoggedEpoch } from "../../../src/protocol/epochs.ts";
 import { deviceId, signedId } from "../../../src/protocol/ids.ts";
 import { checkMemberEntry, type LoggedMember } from "../../../src/protocol/member-log.ts";
 import { decodeMessage } from "../../../src/protocol/messages.ts";
@@ -30,6 +30,7 @@ import { tempDirSync } from "../../support/temp.ts";
 
 const hex = (b: Bytes) => Buffer.from(b).toString("hex");
 type Submit = (kind: 3 | 4, signed: Bytes, sig: Bytes) => Promise<number | undefined>;
+type GiveSeal = (seal: HistorySeal, sig: Bytes) => Promise<number | undefined>;
 const text = { kind: 1, content: "{}" };
 
 let counter = 0;
@@ -98,13 +99,21 @@ async function rig() {
     alice,
     port: target.port,
     epoch,
-    close: () => device({ ...addBody(alice, keyed("app", `${tag}-more`)) }),
+    /** alice adds a device of her own, and starts no epoch; the device comes back. */
+    close: async () => {
+      const more = keyed("app", `${tag}-more`);
+      await device({ ...addBody(alice, more) });
+      return more;
+    },
+    /** alice removes `device` from her log. */
+    remove: (other: { id: Bytes }) => device({ kind: "remove", device: other.id }),
     /** What the relay holds, decoded: the epoch entries and the bot's messages. */
     async held() {
       const pass = await as((link) => link.read(0));
       assert.equal(pass.type, "pass");
       const items = (pass as { items: { kind: number; signed: Bytes }[] }).items;
       return {
+        seals: (pass as unknown as { seals: { seal: HistorySeal }[] }).seals.map((s) => s.seal),
         epochs: items.filter((i) => i.kind === 3).map((i) => signedId(platform, i.signed)),
         messages: items
           .filter((i) => i.kind === 4)
@@ -124,6 +133,7 @@ function botOn(
   r: Awaited<ReturnType<typeof rig>>,
   over: {
     submit?: (real: Submit) => Submit;
+    giveSeal?: (real: GiveSeal) => GiveSeal;
     now?: () => number;
     port?: number;
     clock?: Clock;
@@ -147,6 +157,7 @@ function botOn(
     },
   });
   const real: Submit = (k, s, g) => connection.submit(k, s, g);
+  const realSeal: GiveSeal = (seal, sig) => connection.giveSeal(seal, sig);
   const outbox: Outbox = new Outbox({
     platform: over.now ? { ...held, now: over.now } : held,
     pairing,
@@ -154,6 +165,7 @@ function botOn(
     reading: connection.reading,
     run: new Run(held),
     submit: over.submit?.(real) ?? real,
+    giveSeal: over.giveSeal?.(realSeal) ?? realSeal,
     log: (l) => lines.push(l),
   });
   const until = async (done: () => boolean | Promise<boolean>) => {
@@ -169,6 +181,7 @@ function botOn(
     connection,
     outbox,
     store,
+    self: deviceId(held, pairing.device.signing, pairing.device.receiving),
     lines,
     outs,
     until,
@@ -253,6 +266,132 @@ test("a closed channel with nothing queued gets a new epoch at rest", DARWIN, as
     await r.stop();
   }
 });
+
+test(
+  "a device added after an epoch gets the bot's history seal of it, and the relay holds one",
+  DARWIN,
+  async () => {
+    const r = await rig();
+    const given: HistorySeal[] = [];
+    const b = botOn(r, {
+      giveSeal: (real) => async (seal, sig) => {
+        given.push(seal);
+        return real(seal, sig);
+      },
+    });
+    try {
+      b.connection.start();
+      await b.rested();
+      const more = await r.close();
+      await b.until(async () => (await r.held()).epochs.length === 2);
+      const held = await r.held();
+      await b.until(async () => (await r.held()).seals.length === 1);
+      const [seal] = (await r.held()).seals;
+      assert.deepEqual(seal?.epoch, held.epochs[0], "the first epoch, which the new device lacks");
+      assert.deepEqual(seal?.recipient, more.id);
+      assert.deepEqual(seal?.maker, b.self);
+      // The relay's list, which every pass brings up to date, holds the seal: the bot gives no more.
+      await b.until(() => b.connection.reading.seals.length === 1);
+      const gave = given.length;
+      await b.outbox.queue(r.channel, text); // another rest
+      await b.until(() => b.queued().length === 0);
+      assert.equal(given.length, gave, "the list holds the seal, so it is not given again");
+    } finally {
+      await b.stop();
+      await r.stop();
+    }
+  },
+);
+
+test(
+  "SD 5.10: a removal read while a seal is given stops the seals to that device",
+  DARWIN,
+  async () => {
+    const r = await rig();
+    await r.epoch(); // two epochs the bot holds, so two seals are owed to a new device
+    const given: HistorySeal[] = [];
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const b = botOn(r, {
+      giveSeal: (real) => async (seal, sig) => {
+        given.push(seal);
+        if (given.length === 1) await gate; // the removal is read while the first seal is given
+        return real(seal, sig);
+      },
+    });
+    try {
+      b.connection.start();
+      await b.rested();
+      const more = await r.close();
+      await b.until(() => given.length === 1);
+      const rests = b.outs.filter((o) => o.do === "rest").length;
+      await r.remove(more);
+      await b.until(() => b.outs.filter((o) => o.do === "rest").length > rests);
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      assert.equal(given.length, 1, "no seal to a device whose removal the bot has read");
+    } finally {
+      release();
+      await b.stop();
+      await r.stop();
+    }
+  },
+);
+
+test("a seal with no answer is given again at the next rest", DARWIN, async () => {
+  const r = await rig();
+  let calls = 0;
+  // The relay is never reached by the first call: the seal stays owed and the next rest gives it again.
+  const b = botOn(r, {
+    giveSeal: (real) => async (seal, sig) => (++calls === 1 ? undefined : real(seal, sig)),
+  });
+  try {
+    b.connection.start();
+    await b.rested();
+    await r.close();
+    await b.until(() => calls >= 2);
+    await b.until(async () => (await r.held()).seals.length === 1);
+  } finally {
+    await b.stop();
+    await r.stop();
+  }
+});
+
+test(
+  "the bot answers in an epoch the app started, and starts none of its own",
+  DARWIN,
+  async () => {
+    const r = await rig();
+    let gate: Promise<void> | undefined;
+    const b = botOn(r, {
+      // The app's epoch reaches the relay before the bot's own start is sent: the bot's is refused at its position.
+      submit: (real) => async (kind, signed, sig) => {
+        if (kind === 3 && !gate) gate = r.epoch();
+        await gate;
+        return real(kind, signed, sig);
+      },
+    });
+    try {
+      b.connection.start();
+      await b.rested();
+      await r.close();
+      await b.until(async () => (await r.held()).epochs.length === 2);
+      await b.outbox.queue(r.channel, text);
+      await b.until(() => b.queued().length === 0);
+      const held = await r.held();
+      assert.equal(held.epochs.length, 2, "the app's epoch is the only one");
+      assert.deepEqual(
+        held.messages[0]?.epoch,
+        held.epochs[1],
+        "built in the epoch the app started",
+      );
+      assert.ok(!b.lines.some((l) => l.startsWith("relay: an epoch was started")));
+    } finally {
+      await b.stop();
+      await r.stop();
+    }
+  },
+);
 
 test("an epoch 30 days old starts the next, by the clock the store keeps", DARWIN, async () => {
   const r = await rig();

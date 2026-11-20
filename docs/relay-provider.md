@@ -41,6 +41,26 @@ turn that took it ends (`Turn.done`), or, for a word, a drop or a refusal, when 
 The memory chat does not set it. The relay's inbound sets it and writes the answer and the decision in one store write. A prompt whose work in the core ends after the provider was stopped is not answered, so the next
 start reads it as cut.
 
+
+## Epochs and history seals
+
+The outbox takes its epoch decisions from the keeper (`src/protocol/keeper.ts`), the function the app runs
+too, so the two never disagree. At each rest it asks `startOf` of each channel whether it needs a new epoch: none yet,
+closed by the relay, no key held for the current one, 30 days old by the clock the store keeps, or a sender
+out of counters (`rollover`, reported by the build). The bot builds the entry, submits it and reads the answer
+back; an epoch another device started first is refused at its position, and the bot then answers in that one.
+
+The bot also gives history seals. For each epoch, the current one included, whose key it holds, and each active device of its
+owner and the owner's current recovery key, it makes one seal when no seal counts: an epoch entry's seal or a
+history seal counts only while the device that made it is not removed. So a device added after an epoch gets
+that epoch's key from the bot, and after the owner removes a device the bot seals again what only that device
+had sealed. The seals go through `Connection.giveSeal` at each rest. One seal is given at a time, and what is owed is
+worked out again after each answer, so a removal read meanwhile stops the seals to that device. A seal
+is not given again while its answer is pending; after any answer, or none, it is owed again at the next
+rest unless the relay's list of seals, which every pass brings up to date, holds it, and the relay
+answers a repeat `accepted`. The bot logs `relay: a history seal was answered with <code>` for any
+answer but `accepted`.
+
 ## The bot's profile
 
 `configuredProfile` reads `PARDNER_BOT_NAME` and `PARDNER_BOT_ICON` before the store opens, and a

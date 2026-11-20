@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The bot's outbox takes its epoch decision from the keeper and gives the history seals it owes
+  (`Connection.giveSeal`), one at a time, computing again after each answer what is owed, so a removal read meanwhile
+  stops the seals to that device. A seal that cannot be made is logged once.
 - The keeper: one function in the protocol package (`src/protocol/keeper.ts`) that finds what a device owes its person's
   channels at a rest. It names the channels that need a new epoch (no epoch, closed, no key, 30 days old) and the
   history seals the device owes: for each epoch, the current one included, whose key it holds, a seal to each active

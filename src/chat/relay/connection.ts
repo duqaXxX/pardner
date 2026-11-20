@@ -9,6 +9,7 @@
 import { X509Certificate } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { type TLSSocket, connect as tls } from "node:tls";
+import type { HistorySeal } from "../../protocol/epochs.ts";
 import { deviceId } from "../../protocol/ids.ts";
 import { EXPORTER_LABEL } from "../../protocol/labels.ts";
 import { type Effect, Link, type Persist } from "../../protocol/link.ts";
@@ -97,10 +98,19 @@ export class Connection {
    * reading is not at rest) or the connection ended before the answer: the item is then sent again.
    */
   submit(kind: 1 | 2 | 3 | 4, signed: Bytes, sig: Bytes): Promise<number | undefined> {
+    return this.#ask((now) => this.#link.submit(kind, signed, sig, now));
+  }
+
+  /** Gives the relay a history seal this device made: its result code, or `undefined` as `submit` answers it. */
+  giveSeal(seal: HistorySeal, sig: Bytes): Promise<number | undefined> {
+    return this.#ask((now) => this.#link.giveSeal(seal, sig, now));
+  }
+
+  #ask(send: (now: number) => ReturnType<Link["submit"]>): Promise<number | undefined> {
     return new Promise((resolve, reject) => {
       this.#push((now) => {
         try {
-          const sent = this.#link.submit(kind, signed, sig, now);
+          const sent = send(now);
           if (sent === "busy") resolve(undefined);
           else this.#pending.set(sent.request, resolve);
           return sent === "busy" ? [] : sent.effects;
