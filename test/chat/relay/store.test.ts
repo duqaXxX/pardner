@@ -30,7 +30,7 @@ const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
 
 /** A paired directory and the identity its store belongs to. */
 async function paired(relay = relayA, dir = tempDirSync("pardner-store-")) {
-  await pair(dir, person, relay);
+  await pair(dir, person, relay, "alice");
   const pairing = loadPairing(dir);
   return { dir, pairing, who: identityOf(platform, pairing.device, pairing.relay) };
 }
@@ -145,7 +145,7 @@ test("C14: a crash between the pairing files and the store finishes the reset at
     s.outboxes.set(channel, [{ name: new Uint8Array(16), kind: 1, content: "old", files: [] }]);
   });
   await assert.rejects(
-    pair(dir, person, relayB, {
+    pair(dir, person, relayB, "alice", {
       stored: () => {
         throw new Error("crash");
       },
@@ -172,7 +172,7 @@ test("a crash after the new keys and before the pairing file leaves the old stor
   const { dir, who } = await paired(relayA);
   await Store.open(dir, who).change((s) => s.decided.set("ref-1", "done"));
   await assert.rejects(
-    pair(dir, person, relayB, {
+    pair(dir, person, relayB, "alice", {
       between: () => {
         throw new Error("crash");
       },
@@ -375,7 +375,7 @@ test("a pairing returns its string when the store's reset fails: the start finis
   const { dir } = await paired(relayA);
   rmSync(join(dir, "store.json"));
   mkdirSync(join(dir, "store.json")); // cannot be read: a failure that is not a parse
-  const string = await pair(dir, person, relayB);
+  const string = await pair(dir, person, relayB, "alice");
   assert.match(string, /^[0-9a-f]+$/);
   assert.equal(hex(loadPairing(dir).relay), hex(relayB));
 });

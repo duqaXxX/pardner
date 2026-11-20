@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import type { Check, ModuleSetup } from "../../module-setup.ts";
 import { AgentConfigError, type AgentEntry } from "../seam.ts";
-import { ClaudeBackend, type ClaudeBackendOptions } from "./backend.ts";
+import { ClaudeBackend, type ClaudeBackendOptions, WORDS } from "./backend.ts";
 import { TOOL_NAMES, TOOLS } from "./tools.ts";
 import { MODULE_WORDS } from "./words.ts";
 
@@ -125,6 +125,7 @@ export function claudeAgent(options: ClaudeBackendOptions = {}): AgentEntry {
     toolNames: TOOL_NAMES,
     limitsHeading: LIMITS_HEADING,
     words: MODULE_WORDS,
+    ...(WORDS.brand && { brand: WORDS.brand }),
     executable: "claude",
     setup: () => claudeSetup(options.home ?? homedir()),
     build: (context) => {

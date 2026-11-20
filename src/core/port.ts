@@ -107,7 +107,7 @@ export interface ChatEntry {
    * What `pardner setup` asks the owner to write the module's variables into `.env`. Absent, the
    * module offers no setup and the owner writes the file by hand; no substitute is invented.
    */
-  setup?(instance: Instance): ModuleSetup;
+  setup?(instance: Instance, brand?: readonly string[]): ModuleSetup;
 }
 
 // ---- the core's values a provider's own code works with

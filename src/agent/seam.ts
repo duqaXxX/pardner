@@ -1277,6 +1277,8 @@ export interface AgentEntry {
    * declares empty lists. `test/vocabulary.test.ts` fails on each outside the module.
    */
   readonly words: ModuleWords;
+  /** `AgentWords.brand`, readable without building a back end: `pardner setup` keeps it out of the bot's name (invariant 6). */
+  readonly brand?: readonly string[];
   /**
    * The agent's own command, as the owner's terminal runs it. The service's `PATH` holds its
    * folder, so a session's commands find it as the terminal's do. Absent, nothing is added.

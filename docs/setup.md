@@ -223,8 +223,10 @@ for them and pairs the bot with them.
      nobody else.
 
 After the file is written, the setup makes the bot's own keys, pairs the bot with the relay and
-the person id, and prints the string your device adds on its side. The bot's keys stay in the
-instance's configuration folder (Part 2).
+the person id, and prints the string your device adds on its side. The string carries the bot's
+keys, a proof that the bot holds them and the bot's name, so the setup also prints the name and a
+short form of the bot's id, and you compare both with what your device shows before you confirm.
+The bot's keys stay in the instance's configuration folder (Part 2).
 
 ## Part 2: configuration
 
@@ -285,8 +287,14 @@ one starting with `~/`) or is not a directory.
 
    It then writes `~/.config/pardner/.env` readable by you only (a named instance writes its
    own folder: `pardner setup --instance work`, see [Part 6](#part-6-a-second-instance)),
-   pairs the bot with the relay and prints `Paired. Add this device on your side with:` and the
-   string your device adds, and on macOS asks whether to install the service now (a list: Yes, No), which is `pardner service install` for that
+   pairs the bot with the relay and prints `Paired. Add this device on your side with:`, the
+   string your device adds, and two lines to check against what your device shows when it reads
+   the string: `Name: <the bot's name>` and `Device: <four groups of four hex digits>`, the
+   first 8 bytes of the bot's device id. The name is `PARDNER_BOT_NAME`, or the default below when
+   it is empty; it travels in the string, takes 64 bytes of UTF-8 at most and holds no control,
+   format or line-separator character, and a name that does not fit is refused at the question.
+   Setting the bot up again makes new keys, and so a new device: the old bot device stays in your
+   device list until you remove it there. On macOS the setup then asks whether to install the service now (a list: Yes, No), which is `pardner service install` for that
    instance. Ctrl-C, or Ctrl-D on an empty line, at any question before the write ends it with nothing written; at
    the service question the file is already written and stays.
 
@@ -325,7 +333,7 @@ The `RELAY_*` and `PARDNER_BOT_*` variables are the relay chat's; the others bel
 | `RELAY_ADDRESS` | the relay's address as `host:port` |
 | `RELAY_KEY` | the relay's public key, 130 hex digits |
 | `RELAY_OWNER` | your person id, 64 hex digits; the setup pairs the bot with it and prints the string your device adds |
-| `PARDNER_BOT_NAME` | optional: the name your devices show for this bot, 1 to 32 characters with no `@`; when absent, the Mac's host name up to its first dot, followed by `-<instance>` for a named instance |
+| `PARDNER_BOT_NAME` | optional: the name your devices show for this bot, 1 to 32 characters (64 bytes of UTF-8 at most) with no `@`; when absent, the Mac's host name up to its first dot, followed by `-<instance>` for a named instance |
 | `PARDNER_BOT_ICON` | optional: the absolute path of the bot's icon, a square PNG or JPEG of 16 to 256 pixels a side and 65,536 bytes at most; none when absent |
 | `ALLOWED_ROOT` | the directory `/bind` accepts paths under, for example `~/code` |
 | `PARDNER_AGENT` | optional: the agent pardner drives; `claude` when absent, the only one this release has |

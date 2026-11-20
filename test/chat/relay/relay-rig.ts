@@ -6,13 +6,7 @@ import { botPlatform, loadPairing, pair } from "../../../src/chat/relay/pairing.
 import { ProfileWriter } from "../../../src/chat/relay/profile.ts";
 import { identityOf, Store } from "../../../src/chat/relay/store.ts";
 import type { ChatInbound, InboundMessage, OwnerAnswer } from "../../../src/chat/seam.ts";
-import { decode } from "../../../src/protocol/bytes.ts";
-import {
-  checkDeviceEntry,
-  idKey,
-  type LoggedEntry,
-  readDevice,
-} from "../../../src/protocol/device-log.ts";
+import { checkDeviceEntry, idKey, type LoggedEntry } from "../../../src/protocol/device-log.ts";
 import type { LoggedEpoch } from "../../../src/protocol/epochs.ts";
 import { deviceId, signedId } from "../../../src/protocol/ids.ts";
 import { checkMemberEntry, type LoggedMember } from "../../../src/protocol/member-log.ts";
@@ -23,6 +17,7 @@ import {
   sealMessage,
 } from "../../../src/protocol/messages.ts";
 import { Run } from "../../../src/protocol/outbox.ts";
+import { decodePairingString } from "../../../src/protocol/pairing-string.ts";
 import type { Bytes } from "../../../src/protocol/platform.ts";
 import type { Profile } from "../../../src/protocol/profile.ts";
 import type { Out } from "../../../src/protocol/reading.ts";
@@ -53,11 +48,8 @@ export async function rig() {
   const target = await relay.open();
   const alice = person(keyed("app", `${tag}-app`), keyed("app", `${tag}-sheet`));
   const dir = tempDirSync("pardner-chat-");
-  const string = await pair(dir, alice.id, target.relay);
-  const bot = decode(Uint8Array.from(Buffer.from(string, "hex")), (r) => ({
-    device: readDevice(r),
-    proof: r.sig(),
-  }));
+  const string = await pair(dir, alice.id, target.relay, "alice");
+  const bot = decodePairingString(platform, string);
   assert.ok(bot.ok);
   const log: LoggedEntry[] = [];
   const everyKey: Bytes[] = []; // the key of every epoch of every channel, for `body`
@@ -178,9 +170,9 @@ export async function rig() {
     /** A second bot of alice's, paired in a folder of its own and added to her log; an epoch after it is sealed to it too. */
     async addBot(): Promise<{ dir: string; id: Bytes }> {
       const other = tempDirSync("pardner-chat-");
-      const paired = decode(
-        Uint8Array.from(Buffer.from(await pair(other, alice.id, target.relay), "hex")),
-        (rd) => ({ device: readDevice(rd), proof: rd.sig() }),
+      const paired = decodePairingString(
+        platform,
+        await pair(other, alice.id, target.relay, "alice"),
       );
       assert.ok(paired.ok);
       await device({ kind: "add", device: paired.value.device, proof: paired.value.proof });

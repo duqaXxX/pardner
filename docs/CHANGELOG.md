@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The pairing string carries the device's name, and the device-log entry builders exist. `encodePairingString`,
+  `decodePairingString`, `checkPairingName`, `shortForm` and `checkPairingProof` (`src/protocol/pairing-string.ts`) write
+  and read the string (the device, its proof of possession and a name of 1 to 64 bytes of UTF-8 with no control, format
+  or line-separator character), give the short form of a device id (`3f3f-a1b2-c3d4-e5f6`) and check the proof for a
+  person id. `buildGenesis`, `buildAdd` and `buildRemove` (`src/protocol/device-builders.ts`) sign an entry once and
+  check it against the log before returning it; `buildRemove` refuses to remove the device that signs. `pardner setup`
+  prints the bot's name and short form under the string, to compare with what the approving device shows, and refuses
+  a name past 64 bytes at its question.
 - A bot's profile in the protocol package: message kind 13, sent by a bot alone, with no recipient and no `re`. Its
   content is UTF-8 JSON with the bot's `name`, an optional `account` and an optional `icon` (a square PNG or JPEG of 16
   to 256 pixels, 65,536 bytes at most, its size read from the image's own header). `readProfile` and `encodeProfile`

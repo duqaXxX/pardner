@@ -55,7 +55,7 @@ may find a seam that needs a change: open an issue before writing one.
    `src/agent/claude/module.ts`); without it the owner writes them by hand. A module's setup must
    ask or set every variable it declares, and ask for no other: `test/setup-coverage.test.ts`
    fails otherwise, and a question whose check sets other variables names them in `sets`. An
-   `AgentEntry` may also give `executable`, the agent's own command line program: `pardner service
+   `AgentEntry` gives its `brand` again, readable without a back end, for `pardner setup`, and may also give `executable`, the agent's own command line program: `pardner service
    install` puts the folder where the owner's terminal finds it on the service's `PATH`. `src/agent/claude/module.ts` and the relay chat's module are the two
    that exist.
 4. Run the conformance suite against it. In `test/conformance/agent.test.ts`, call

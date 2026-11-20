@@ -11,18 +11,13 @@ import { type Clock, Connection } from "../../../src/chat/relay/connection.ts";
 import { Outbox } from "../../../src/chat/relay/outbox.ts";
 import { botPlatform, loadPairing, pair } from "../../../src/chat/relay/pairing.ts";
 import { identityOf, Store } from "../../../src/chat/relay/store.ts";
-import { decode } from "../../../src/protocol/bytes.ts";
-import {
-  checkDeviceEntry,
-  idKey,
-  type LoggedEntry,
-  readDevice,
-} from "../../../src/protocol/device-log.ts";
+import { checkDeviceEntry, idKey, type LoggedEntry } from "../../../src/protocol/device-log.ts";
 import type { LoggedEpoch } from "../../../src/protocol/epochs.ts";
 import { deviceId, signedId } from "../../../src/protocol/ids.ts";
 import { checkMemberEntry, type LoggedMember } from "../../../src/protocol/member-log.ts";
 import { decodeMessage } from "../../../src/protocol/messages.ts";
 import { Run } from "../../../src/protocol/outbox.ts";
+import { decodePairingString } from "../../../src/protocol/pairing-string.ts";
 import type { Bytes } from "../../../src/protocol/platform.ts";
 import type { Out } from "../../../src/protocol/reading.ts";
 import type { Sequence } from "../../../src/relay/sequence.ts";
@@ -45,11 +40,8 @@ async function rig() {
   const target = await relay.open();
   const alice = person(keyed("app", `${tag}-app`), keyed("app", `${tag}-sheet`));
   const dir = tempDirSync("pardner-chat-");
-  const string = await pair(dir, alice.id, target.relay);
-  const bot = decode(Uint8Array.from(Buffer.from(string, "hex")), (r) => ({
-    device: readDevice(r),
-    proof: r.sig(),
-  }));
+  const string = await pair(dir, alice.id, target.relay, "alice");
+  const bot = decodePairingString(platform, string);
   assert.ok(bot.ok);
   const log: LoggedEntry[] = [];
   const members: LoggedMember[] = [];

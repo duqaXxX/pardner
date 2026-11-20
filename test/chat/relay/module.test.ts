@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { relayChat } from "../../../src/chat/relay/module.ts";
+import { pairingName, relayChat } from "../../../src/chat/relay/module.ts";
 import { loadPairing } from "../../../src/chat/relay/pairing.ts";
 import { configDirOf, DEFAULT_INSTANCE } from "../../../src/core/instance.ts";
 import type { ChatContext, ChatEntry } from "../../../src/core/port.ts";
 import { ConfigError, singleInstance } from "../../../src/core/port.ts";
 import { answerWizard } from "../../../src/core/wizard.ts";
 import type { ModuleSetup } from "../../../src/module-setup.ts";
+import { createNodePlatform } from "../../../src/platform-node/platform.ts";
+import { decodePairingString, shortForm } from "../../../src/protocol/pairing-string.ts";
 import { tempDirSync } from "../../support/temp.ts";
 
 const RELAY = `04${"ab".repeat(64)}`;
@@ -18,14 +20,19 @@ const GENERATOR =
 const OWNER = "cd".repeat(32);
 
 /** Runs the wizard for the relay chat, answering `answers` in order; null ends it. */
-async function wizard(home: string, answers: (string | null)[], entry: ChatEntry = relayChat()) {
+async function wizard(
+  home: string,
+  answers: (string | null)[],
+  entry: ChatEntry = relayChat(),
+  brand?: readonly string[],
+) {
   const out: string[] = [];
   let next = 0;
   const code = await answerWizard(
     DEFAULT_INSTANCE,
     {
       chat: entry,
-      agents: { plain: {} },
+      agents: { plain: brand ? { brand } : {} },
       defaults: { agent: "plain" },
     },
     { out: (text) => out.push(text), err: (text) => out.push(text) },
@@ -52,8 +59,50 @@ test("the wizard pairs the bot after it wrote .env, and prints the string last",
   assert.equal(Buffer.from(loadPairing(dir).person).toString("hex"), OWNER);
   assert.match(
     text,
-    /Wrote .*\.env[\s\S]*Paired\. Add this device on your side with:\n[0-9a-f]{200,}\n/,
+    /Wrote .*\.env[\s\S]*Paired\. Add this device on your side with:\n[0-9a-f]{200,}\nName: .+\nDevice: [0-9a-f]{4}(-[0-9a-f]{4}){3}\n/,
   );
+});
+
+test("setup prints the name and the short form that the string carries", async () => {
+  const home = tempDirSync("pardner-home-");
+  const answers = ["127.0.0.1:4433", GENERATOR, OWNER, "Studio Mac", "", home];
+  const { code, text } = await wizard(home, answers);
+  assert.equal(code, 0, text);
+  const string = /with:\n([0-9a-f]+)\n/.exec(text)?.[1] as string;
+  const decoded = decodePairingString(createNodePlatform(), string);
+  assert.ok(decoded.ok);
+  assert.equal(decoded.value.name, "Studio Mac");
+  const short = shortForm(createNodePlatform(), decoded.value.device);
+  assert.ok(text.includes("Name: Studio Mac\n"));
+  assert.ok(text.includes(`Device: ${short}\n`));
+});
+
+test("a bot name past 64 bytes is refused at the question, not at the end", async () => {
+  const home = tempDirSync("pardner-home-");
+  const long = "é".repeat(32); // 32 characters, 64 bytes: the limit
+  const tooLong = "漢".repeat(32); // 32 characters, 96 bytes
+  const { code, text } = await wizard(home, [
+    "127.0.0.1:4433",
+    GENERATOR,
+    OWNER,
+    tooLong,
+    long,
+    "",
+    home,
+  ]);
+  assert.equal(code, 0, text);
+  assert.match(text, /64 bytes/);
+  assert.ok(text.includes(`Name: ${long}\n`));
+});
+
+test("a bot name holding the agent's brand is refused at the question, as the start refuses it", async () => {
+  const home = tempDirSync("pardner-home-");
+  const answers = ["127.0.0.1:4433", GENERATOR, OWNER, "Acme Agent Mac", "Studio Mac", "", home];
+  const { code, text } = await wizard(home, answers, relayChat(), ["Acme Agent"]);
+  assert.equal(code, 0, text);
+  assert.match(text, /may not hold "Acme Agent"/);
+  assert.ok(text.includes("Name: Studio Mac\n"));
+  assert.ok(!text.includes("Name: Acme Agent Mac"));
 });
 
 test("a wizard ended before .env is written leaves no keys and no pairing", async () => {
@@ -189,4 +238,20 @@ test("a configuration directory that cannot be made is reported as a write failu
   const { code, text } = await wizard(home, full(home));
   assert.equal(code, 1);
   assert.match(text, /could not write .*\.env: /);
+});
+
+test("a default name the pairing string cannot carry is refused, naming what to do", () => {
+  assert.equal(pairingName({}, undefined, [], "studio.local"), "studio");
+  assert.equal(pairingName({ PARDNER_BOT_NAME: "Studio Mac" }, undefined, [], "x"), "Studio Mac");
+  assert.equal(pairingName({}, undefined, ["Acme Agent"], "acme-agent-mini.local"), "bot");
+  for (const host of [`${"日".repeat(40)}.local`, "Mac\u200bmini.local"]) {
+    assert.throws(
+      () => pairingName({}, undefined, [], host),
+      (error: unknown) => {
+        assert.ok(error instanceof ConfigError);
+        assert.match(error.message, /^PARDNER_BOT_NAME: .*type a name\.$/);
+        return true;
+      },
+    );
+  }
 });

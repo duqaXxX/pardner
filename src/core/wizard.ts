@@ -66,9 +66,19 @@ export const CORE_VARIABLES: readonly string[] = [...SELECTORS, VARIABLE_ALLOWED
 
 /** The one chat, and the agents the owner picks from by name, with the one listed first. */
 export interface SetupModules {
-  readonly chat: { readonly name: string; readonly setup?: (instance: Instance) => ModuleSetup };
+  readonly chat: {
+    readonly name: string;
+    readonly setup?: (instance: Instance, brand?: readonly string[]) => ModuleSetup;
+  };
   readonly agents: Readonly<
-    Record<string, { readonly setup?: () => ModuleSetup; readonly executable?: string }>
+    Record<
+      string,
+      {
+        readonly setup?: () => ModuleSetup;
+        readonly executable?: string;
+        readonly brand?: readonly string[];
+      }
+    >
   >;
   readonly defaults: { readonly agent: string };
 }
@@ -331,8 +341,9 @@ export async function answerWizard(
   if (chat.setup === undefined) {
     return refuse(`the chat ${chat.name} offers no setup; write .env by hand (docs/setup.md).`);
   }
-  const chatSetup = chat.setup(instance);
-  const agentSetup = (modules.agents[agentName] as SetupModules["agents"][string]).setup?.();
+  const agent = modules.agents[agentName] as SetupModules["agents"][string];
+  const chatSetup = chat.setup(instance, agent.brand);
+  const agentSetup = agent.setup?.();
   output.out("\n");
   for (const line of chatSetup.intro) output.out(`${line}\n`);
   output.out("\n");
