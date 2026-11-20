@@ -8,12 +8,21 @@ import Platform
 @testable import Relay
 import XCTest
 
-private final class FakeLink: RelayLinking, @unchecked Sendable { // one test thread at a time
+final class FakeLink: RelayLinking, @unchecked Sendable { // one test thread at a time
     let events: AsyncStream<RelayEvent>
     private let out: AsyncStream<RelayEvent>.Continuation
     var started = false, stopped = false
     var retyped: [Enrolment] = []
     var submitOutcome = SubmitOutcome.code(0)
+    /// The device acts the controller asked for, and what each is answered: `buildOutcomes` in order, then busy; a check is `checkOutcome`.
+    var builds: [DeviceAct] = []
+    var buildOutcomes: [BuildOutcome] = []
+    var checkOutcome = BuildOutcome.checked
+    var buildGate: Latch?
+    /// The items sent, with what was answered: `submitOutcomes` in order, then `submitOutcome`. `onSubmit` runs as one is sent.
+    var submitted: [(kind: UInt8, signed: Data, sig: Data)] = []
+    var submitOutcomes: [SubmitOutcome] = []
+    var onSubmit: (() -> Void)?
     private let putBack: Bool
     var stopGate: Latch?
 
@@ -29,11 +38,21 @@ private final class FakeLink: RelayLinking, @unchecked Sendable { // one test th
     }
     func stop() async { await stopGate?.wait(); stopped = true; out.finish() }
     func enrol(_ enrolment: Enrolment) async -> Bool { retyped.append(enrolment); return true }
-    func submit(kind: UInt8, signed: Data, sig: Data) async throws -> SubmitOutcome { submitOutcome }
+    func submit(kind: UInt8, signed: Data, sig: Data) async throws -> SubmitOutcome {
+        submitted.append((kind, signed, sig))
+        onSubmit?()
+        return submitOutcomes.isEmpty ? submitOutcome : submitOutcomes.removeFirst()
+    }
+    func build(_ act: DeviceAct) async throws -> BuildOutcome {
+        await buildGate?.wait()
+        builds.append(act)
+        if case .check = act { return checkOutcome }
+        return buildOutcomes.isEmpty ? .refused("busy") : buildOutcomes.removeFirst()
+    }
 }
 
 /// Holds a host's making until the test lets it go, so a cancel can land at a known point of the setup.
-private actor Latch {
+actor Latch {
     private var isOpen = false
     private var waiting: [CheckedContinuation<Void, Never>] = []
     func wait() async { if !isOpen { await withCheckedContinuation { waiting.append($0) } } }
@@ -272,7 +291,8 @@ final class PairingControllerTests: XCTestCase {
     func testServedAfterARestartMovesToPairedOnTheFirstDevicesEffect() async throws {
         let rig = try rig(keys: true, state: stored(.enrolling))
         await rig.controller.launch()
-        rig.harness.link.emit(.devices(.object([:])))
+        let id = Data(repeating: 7, count: 32)
+        rig.harness.link.emit(.devices(.object(["person": .bytes(id), "length": .number(1), "last": .bytes(id), "self": .bytes(id), "devices": .array([])])))
         _ = await wait(rig.controller, "never paired") { $0 == .paired }
         XCTAssertEqual(try rig.pairing.load()?.stage, .paired)
     }
@@ -669,14 +689,30 @@ final class PairingControllerTests: XCTestCase {
         XCTAssertEqual(rig.harness.hostsMade, 2, "the faulted host was dropped")
     }
 
-    func testAStoreAtJoiningOffersPairAgain() async throws {
+    func testAStoreAtJoiningResumesTheJoinWithTheProofAlone() async throws {
         var state = stored(.joining)
         (state.proof, state.name) = (Data(repeating: 3, count: 64), "this Mac")
         let rig = try rig(keys: true, state: state)
         await rig.controller.launch()
-        let done = await rig.controller.pairAgain()
-        XCTAssertTrue(done)
+        guard case .joining(let info) = await rig.controller.phase else { return XCTFail("not joining") }
+        XCTAssertFalse(info.waiting)
+        XCTAssertEqual(rig.harness.links.count, 1)
+        XCTAssertEqual(rig.harness.enrolments.count, 1)
+        XCTAssertNil(rig.harness.enrolments[0], "a join carries no enrolment")
+        let cancelled = await rig.controller.cancel()
+        XCTAssertEqual(cancelled, .erased)
         XCTAssertNil(try rig.pairing.load())
+        XCTAssertFalse(rig.keys.has("device.sign"))
+    }
+
+    func testAStoreAtJoiningWhoseKeysAreGoneIsKeysMissing() async throws {
+        var state = stored(.joining)
+        (state.proof, state.name) = (Data(repeating: 3, count: 64), "this Mac")
+        let rig = try rig(state: state)
+        await rig.controller.launch()
+        let phase = await rig.controller.phase
+        XCTAssertEqual(phase, .keysMissing)
+        XCTAssertNotNil(try rig.pairing.load(), "nothing is erased")
     }
 
     func testALinkFaultOffersPairAgainAndRefusesRetry() async throws {

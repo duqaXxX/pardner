@@ -24,6 +24,7 @@ import {
   SIGN,
 } from "../../src/protocol/index.ts";
 import { KIND_PROFILE, sealMessage } from "../../src/protocol/messages.ts";
+import { shortForm } from "../../src/protocol/pairing-string.ts";
 import type { Bytes, Platform } from "../../src/protocol/platform.ts";
 import { encodeProfile } from "../../src/protocol/profile.ts";
 import { platform } from "../relay/support.ts";
@@ -476,6 +477,7 @@ test("device pairing 4.2 the devices effect: every device the log names, at the 
         addedBy: null,
         position: 0,
         onlyHolder: [],
+        short: shortForm(platform, s.alice.first.keys),
       },
       {
         id: s.bot.id,
@@ -484,6 +486,7 @@ test("device pairing 4.2 the devices effect: every device the log names, at the 
         addedBy: s.alice.first.id,
         position: 1,
         onlyHolder: [],
+        short: shortForm(platform, s.bot.keys),
       },
     ],
   });
@@ -515,6 +518,7 @@ test("device pairing 4.2 the devices effect comes again only when the log change
     addedBy: s.alice.first.id,
     position: 2,
     onlyHolder: [],
+    short: shortForm(platform, other.keys),
   });
 });
 
@@ -686,4 +690,28 @@ test("device pairing 3.9 the devices effect names the epochs a device alone hold
       [true, [{ channel: s.channel, epoch: s.epochs[0]?.id }]],
     ],
   );
+});
+
+test("device pairing 3.4 checkPairing says what addDevice would refuse, without signing", () => {
+  const s = scene();
+  const r = rig(s);
+  assert.deepEqual(r.link.checkPairing({ device: keyed().device, proof: fill(1, 64) }, 5), {
+    ok: false,
+    error: "busy",
+  });
+  r.connect();
+  const other = keyed();
+  const proof = makeProof(platform, other.sign, s.alice.id, other.device);
+  assert.deepEqual(r.link.checkPairing({ device: other.device, proof }, 5), { ok: true });
+  const stranger = makeProof(platform, other.sign, fill(8), other.device);
+  assert.deepEqual(r.link.checkPairing({ device: other.device, proof: stranger }, 5), {
+    ok: false,
+    error: "proof",
+  });
+  const own = makeProof(platform, s.bot.sign, s.alice.id, s.bot.device);
+  assert.deepEqual(r.link.checkPairing({ device: s.bot.device, proof: own }, 5), {
+    ok: false,
+    error: "named",
+  });
+  assert.deepEqual(r.link.checkPairing({} as never, 5), { ok: false, error: "bad-input" });
 });

@@ -54,7 +54,7 @@ public final class PairingModel {
 
     /// The screen a phase draws (the form is the first screen's second page).
     public enum Screen: Equatable {
-        case starting, first, form, settingUp, enrolling, paired, removed, keysMissing, putBack, linkFaulted, malformedStore, newerStore, needsNewPairing, failed
+        case starting, first, form, settingUp, enrolling, joining, paired, removed, keysMissing, putBack, linkFaulted, malformedStore, newerStore, needsNewPairing, joinUnmade, failed
     }
 
     public var screen: Screen {
@@ -63,6 +63,7 @@ public final class PairingModel {
         case .unpaired: showForm ? .form : .first
         case .settingUp, .showingSheet: .settingUp
         case .enrolling: .enrolling
+        case .joining: .joining
         case .paired: .paired
         case .removed: .removed
         case .keysMissing: .keysMissing
@@ -70,7 +71,8 @@ public final class PairingModel {
         case .linkFaulted: .linkFaulted
         case .fault(.malformedStore, _): .malformedStore
         case .fault(.newerStore, _): .newerStore
-        case .fault(.keysWithoutStore, _), .fault(.joinUnsupported, _): .needsNewPairing
+        case .fault(.keysWithoutStore, _), .fault(.joinMismatch, _): .needsNewPairing
+        case .fault(.joinUnmade, _): .joinUnmade
         case .fault(.failed, _): .failed
         }
     }
@@ -84,16 +86,19 @@ public final class PairingModel {
     }
 
     /// The one action a notice offers. Each is one the controller allows in that phase (`pairAgain()` in removed, keysMissing, putBack,
-    /// linkFaulted and the faults of a pairing file that does not read, keys with no store and a join; `retry()` in `fault(.failed)`).
+    /// linkFaulted and the faults of a pairing file that does not read, keys with no store and a join that did not hold this Mac; `retry()` in `fault(.failed)`).
     public enum Exit: Equatable { case pairAgain, retry }
 
     public var exit: Exit? {
         switch screen {
-        case .removed, .keysMissing, .putBack, .linkFaulted, .malformedStore, .needsNewPairing: .pairAgain
+        case .removed, .keysMissing, .putBack, .linkFaulted, .malformedStore, .needsNewPairing, .joinUnmade: .pairAgain
         case .failed: storesOpen ? .retry : nil
         default: nil
         }
     }
+
+    /// A pairing string that could not be made also allows Retry, beside Pair again (the controller's `retry()` accepts `fault(.joinUnmade)`).
+    public var offersRetryToo: Bool { screen == .joinUnmade && storesOpen }
 
     /// Follows the controller's phases and runs its launch.
     public func start() {

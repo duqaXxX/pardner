@@ -8,6 +8,7 @@ import {
   checkDeviceEntry,
   type DeviceEntry,
   type DeviceKeys,
+  decodeDeviceEntry,
   encodeDeviceEntry,
   type LoggedEntry,
   type PublicKeys,
@@ -92,4 +93,36 @@ export function buildRemove(
   const at = next(log);
   if (!at || bytesEqual(target, signer)) return fail("bad-input");
   return seal(platform, signName, log, () => ({ ...at, kind: "remove", device: target, signer }));
+}
+
+/**
+ * What an add or a remove the app kept does (design 3.6): the app reads its pending entry back to see whether the log holds its
+ * effect, and rebuilds an add from its keys and proof. `device` is the id of the device named or removed.
+ */
+export function readDeviceEntry(
+  platform: Platform,
+  signed: Bytes,
+): Result<{
+  kind: "add" | "remove";
+  seq: number;
+  prev: Bytes;
+  signer: Bytes;
+  device: Bytes;
+  keys?: DeviceKeys;
+  proof?: Bytes;
+}> {
+  const read = decodeDeviceEntry(signed);
+  if (!read.ok) return read;
+  const e = read.value;
+  if (!e.prev || (e.kind !== "add" && e.kind !== "remove")) return fail("bad-input");
+  const at = { seq: e.seq, prev: e.prev, signer: e.signer };
+  return e.kind === "add"
+    ? ok({
+        kind: "add",
+        ...at,
+        device: deviceId(platform, e.device.signing, e.device.receiving),
+        keys: e.device,
+        proof: e.proof,
+      })
+    : ok({ kind: "remove", ...at, device: e.device });
 }

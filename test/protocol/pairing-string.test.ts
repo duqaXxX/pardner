@@ -9,6 +9,9 @@ import {
   checkPairingProof,
   decodePairingString,
   encodePairingString,
+  inspectPairingString,
+  makePairingProof,
+  pairingString,
   shortForm,
 } from "../../src/protocol/pairing-string.ts";
 import { makeProof } from "./proof.ts";
@@ -138,4 +141,67 @@ test("the proof checks for the person it was made for, and for no other person o
   assert.ok(!checkPairingProof(platform, m.person, other.device, m.proof));
   assert.ok(!checkPairingProof(platform, m.person, { ...m.device, kind: "bot" }, m.proof));
   assert.ok(!checkPairingProof(platform, m.person, m.device, m.proof.slice(0, 63)));
+});
+
+test("inspecting a string gives the short form, and names which of the two refusals it is (design 3.4)", () => {
+  const m = made();
+  const text = encodePairingString(platform, m.device, m.proof, "Mac");
+  const seen = inspectPairingString(platform, text);
+  assert.ok(seen.ok);
+  assert.equal(seen.value.name, "Mac");
+  assert.equal(seen.value.short, shortForm(platform, m.device));
+  assert.deepEqual(inspectPairingString(platform, "zz"), { ok: false, error: "not-a-string" });
+  assert.deepEqual(inspectPairingString(platform, text.slice(0, 2 * (1 + 130 + 63))), {
+    ok: false,
+    error: "not-a-string",
+  });
+  assert.deepEqual(inspectPairingString(platform, raw(m, Uint8Array.of(0xe2, 0x80, 0x8b))), {
+    ok: false,
+    error: "bad-name",
+  });
+  assert.deepEqual(inspectPairingString(platform, raw(m, new Uint8Array(0))), {
+    ok: false,
+    error: "bad-name",
+  });
+});
+
+test("a joining device signs its proof once and writes its string, a bad name is a failure and not a throw (design 3.7)", () => {
+  const m = made();
+  const made1 = makePairingProof(platform, m.name, m.person, m.device);
+  assert.ok(made1.ok);
+  assert.ok(checkPairingProof(platform, m.person, m.device, made1.value));
+  const text = pairingString(platform, m.device, made1.value, "Mac");
+  assert.ok(text.ok);
+  assert.equal(text.value, encodePairingString(platform, m.device, made1.value, "Mac"));
+  assert.deepEqual(pairingString(platform, m.device, made1.value, " Mac"), {
+    ok: false,
+    error: "bad-input",
+  });
+  assert.deepEqual(makePairingProof(platform, "no.such.key", m.person, m.device), {
+    ok: false,
+    error: "no-such-key",
+  });
+});
+
+test("a malformed value across the boundary is a failure and not a throw (crypto rule 9)", () => {
+  const m = made();
+  const proof = makePairingProof(platform, m.name, m.person, m.device);
+  assert.ok(proof.ok);
+  const short = { ...m.device, signing: new Uint8Array(3) };
+  assert.deepEqual(makePairingProof(platform, m.name, new Uint8Array(5), m.device), {
+    ok: false,
+    error: "bad-input",
+  });
+  assert.deepEqual(makePairingProof(platform, m.name, m.person, short), {
+    ok: false,
+    error: "bad-input",
+  });
+  assert.deepEqual(pairingString(platform, short, proof.value, "Mac"), {
+    ok: false,
+    error: "bad-input",
+  });
+  assert.deepEqual(pairingString(platform, m.device, new Uint8Array(3), "Mac"), {
+    ok: false,
+    error: "bad-input",
+  });
 });

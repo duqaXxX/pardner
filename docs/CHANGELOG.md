@@ -7,6 +7,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The devices of a person in the app's pairing controller, with no screen yet. `PairingController` publishes `deviceList`
+  (every device the log names, newest first, with its name from the pairing string, short form, who added it or "added by a
+  removed device", position, whether it is active and whether it is this Mac, the time this Mac first read its add, how many
+  epochs it alone holds and whether it joined a removal in progress) and `handoffValues()` (the relay's address and key and the
+  person id, to copy to a new device). `inspect(pairingString:)` runs the checks before the confirmation and refuses with a
+  sentence for each reason; `confirmAdd` signs the entry once, writes it pending with the device's name (flushed) and sends it.
+  At every rest and launch a pending entry the log holds is dropped, one it does not hold is sent again with the same bytes, one
+  whose position is taken is rebuilt, a refused one is dropped with a message and an answer of removed ends this Mac. Joining as
+  a new device (`join`) writes `keys-made`, makes the keys and signs the proof once, shows the pairing string and short form
+  and waits for the other device's add, which makes it paired only when the served log holds this device; Cancel erases the keys
+  first and the store last, and a store at `joining` resumes at launch with the same string. A removal (`removalChoices`,
+  `confirmRemoval`) is the person's choice from every active device but this Mac: it is stored with the log's length, runs the
+  clicked device first and the rest newest first, one pending entry at a time, takes in devices added meanwhile, resumes after a
+  restart and ends only on a log read back that shows none of its devices active; confirming it drops a pending add not yet read
+  back. All of it takes turns on one queue. The joined script exports `inspectPairingString`, `makePairingProof`,
+  `pairingString`, `checkPairingName` and `readDeviceEntry`, and `AppLink.checkPairing` says what an add
+  would refuse before it signs. Each device of the `devices` effect carries its short form, and the app shows that one.
 - The app's first-device screens, which drive the pairing controller. With no pairing the window shows what Pardner needs
   (a relay of your own) and Set up a new relay; the form takes the relay's address, its public key and the enrolment
   secret and shows each refusal beside its field. The recovery sheet shows the person id and the relay's address and key
