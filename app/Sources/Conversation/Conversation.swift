@@ -1,0 +1,234 @@
+// The reading model (app data design, 6): the link's deliveries folded into channels, threads and
+// sessions for the screens. A value: no socket, no store. Every state is derived from the messages, in
+// the relay's order; nothing is held aside, since every `re` but a part's names an earlier message.
+import Foundation
+import ProtocolHost
+
+/// Where a prompt of the owner's stands.
+public enum PromptStatus: Sendable, Equatable {
+    case sent, running, answered, cut, notRead
+}
+
+/// Where a request to the owner stands.
+public enum RequestStatus: Sendable, Equatable {
+    case open, replied, withdrawn, answered
+    case rewritten(markdown: String)
+}
+
+/// A session's state, as the Sessions tab shows it.
+public enum SessionState: Sendable, Equatable {
+    case idle, running, waiting
+}
+
+/// A bot's answer to a prompt: its parts joined as they are written, replaced by the answer once it lands.
+public struct AnswerGroup: Sendable, Equatable {
+    /// The bot and the answer's name: what each part's `re` names.
+    public let ref: MessageRef
+    /// The position of its first part, or of the answer when no part came.
+    public let position: Int
+    public internal(set) var markdown: String
+    public internal(set) var done: Bool
+    /// The prompt it answers, once the answer names it.
+    public internal(set) var prompt: MessageRef?
+}
+
+/// One entry of a thread, in position order.
+public enum Item: Sendable, Equatable {
+    case message(Message)
+    case answer(AnswerGroup)
+
+    /// Where the entry sits in the relay's sequence.
+    public var position: Int {
+        switch self {
+        case .message(let m): m.position
+        case .answer(let a): a.position
+        }
+    }
+}
+
+/// A thread: opened by a message of the channel, a session when that message is a prompt to a bot.
+public struct MessageThread: Sendable, Equatable {
+    /// The hex of the opening message's reference, as every body of the thread names it.
+    public let key: String
+    /// The opening message, once read.
+    public internal(set) var root: Message?
+    /// The bot the opening prompt mentions: the session's bot.
+    public var bot: Data? { root?.kind == 2 ? root?.to : nil }
+    public internal(set) var items: [Item] = []
+    public internal(set) var prompts: [MessageRef: PromptStatus] = [:]
+    public internal(set) var requests: [MessageRef: RequestStatus] = [:]
+    /// The time of the newest message of the session's bot: the Sessions tab's order.
+    public internal(set) var lastReply: Date?
+    // The devices whose prompts the bot started here: its owner's, the only ones whose reply it takes (SD 5.8).
+    var owners: Set<Data> = []
+
+    /// Waiting for the owner while a request is open; running while a prompt runs; idle otherwise.
+    public var state: SessionState {
+        if requests.values.contains(.open) { return .waiting }
+        if prompts.values.contains(.running) { return .running }
+        return .idle
+    }
+
+    init(key: String) { self.key = key }
+}
+
+public struct Channel: Sendable, Equatable {
+    public let id: Data
+    /// Every message read, in position order.
+    public internal(set) var messages: [Message] = []
+    /// The positions of the channel's own messages, those of no thread, in order.
+    public internal(set) var timeline: [Int] = []
+    public internal(set) var threads: [String: MessageThread] = [:]
+    // Which thread a message belongs to, by its reference: how a start, a cut or a reply finds its thread.
+    var threadOf: [MessageRef: String] = [:]
+
+    /// The sessions, by their last reply, newest first (first-screens decision 8); the key breaks a tie.
+    public var sessions: [MessageThread] {
+        threads.values.filter { $0.bot != nil }.sorted {
+            let a = $0.lastReply ?? $0.root?.time ?? .distantPast, b = $1.lastReply ?? $1.root?.time ?? .distantPast
+            return a != b ? a > b : $0.key < $1.key
+        }
+    }
+
+    init(id: Data) { self.id = id }
+
+    mutating func fold(_ m: Message) {
+        messages.append(m)
+        let key: String?
+        switch m.body {
+        case .prompt where m.thread == nil, .text where m.thread == nil:
+            key = m.ref.hex
+            threads[key!, default: MessageThread(key: key!)].root = m
+            timeline.append(m.position)
+        case .start, .cut, .notRead, .reply, .edit:
+            key = m.re.flatMap { threadOf[$0] } ?? m.thread
+        case .unreadable where m.thread == nil:
+            key = nil
+            timeline.append(m.position) // its thread is in the body it lacks: shown in its place
+        default:
+            key = m.thread
+        }
+        guard let key else { return }
+        threadOf[m.ref] = key
+        threads[key, default: MessageThread(key: key)].take(m)
+    }
+}
+
+extension MessageThread {
+    // A start, cut, not-read, answer, part, request or edit counts only from the session's bot (invariant 1: the
+    // other bots of a channel act on nothing here); a reply only from a device whose prompt the bot started.
+    mutating func take(_ m: Message) {
+        let fromBot = bot != nil && m.sender == bot
+        switch m.body {
+        case .prompt:
+            prompts[m.ref] = .sent
+            if m.thread != nil { items.append(.message(m)) }
+        case .start where fromBot:
+            if let re = m.re, prompts[re] != nil {
+                prompts[re] = .running
+                owners.insert(re.device)
+            }
+        case .cut where fromBot: if let re = m.re, prompts[re] != nil { prompts[re] = .cut }
+        case .notRead where fromBot: if let re = m.re, prompts[re] != nil { prompts[re] = .notRead }
+        case .part(let markdown) where fromBot:
+            guard let re = m.re, re.device == m.sender else { return }
+            if let i = answerIndex(re), case .answer(var a) = items[i] {
+                a.markdown += markdown
+                items[i] = .answer(a)
+            } else {
+                items.append(.answer(AnswerGroup(ref: re, position: m.position, markdown: markdown, done: false)))
+            }
+        case .answer(let markdown) where fromBot:
+            if let re = m.re, prompts[re] != nil { prompts[re] = .answered }
+            if let i = answerIndex(m.ref), case .answer(var a) = items[i] {
+                // An empty answer keeps the text its parts already showed.
+                (a.markdown, a.done, a.prompt) = (markdown.isEmpty ? a.markdown : markdown, true, m.re)
+                items[i] = .answer(a)
+            } else if !markdown.isEmpty {
+                items.append(.answer(AnswerGroup(ref: m.ref, position: m.position, markdown: markdown, done: true, prompt: m.re)))
+            }
+        case .request where fromBot:
+            requests[m.ref] = .open
+            items.append(.message(m))
+        case .reply:
+            if let re = m.re, requests[re] == .open, owners.contains(m.sender) { requests[re] = .replied }
+            items.append(.message(m))
+        case .edit(let withdrawn, let answered, let markdown) where fromBot:
+            guard let re = m.re, requests[re] != nil else { return }
+            if withdrawn { requests[re] = .withdrawn } else if answered { requests[re] = .answered } else if let markdown { requests[re] = .rewritten(markdown: markdown) }
+        case .text, .unreadable:
+            if m.thread != nil { items.append(.message(m)) } // the opening message is the thread's root, not an item
+        default:
+            return
+        }
+        if fromBot { lastReply = max(lastReply ?? .distantPast, m.time) }
+    }
+
+    private func answerIndex(_ ref: MessageRef) -> Int? {
+        items.firstIndex { if case .answer(let a) = $0 { a.ref == ref } else { false } }
+    }
+}
+
+/// A bot as the screens name it: its profile, when one reads (BP 3.3).
+public struct BotProfile: Sendable, Equatable {
+    public let name: String
+    public let account: String?
+    public let plan: String?
+    public let icon: Data?
+
+    /// A profile as the link tells it; `account` and `plan` are the agent's login, shown beside the name.
+    public init(name: String, account: String?, plan: String?, icon: Data?) {
+        (self.name, self.account, self.plan, self.icon) = (name, account, plan, icon)
+    }
+}
+
+/// The channels and the bots' profiles, as the link delivered them.
+public struct ReadingModel: Sendable, Equatable {
+    public private(set) var channels: [Data: Channel] = [:]
+    public private(set) var profiles: [Data: BotProfile] = [:]
+
+    /// An empty model, before the link's first delivery.
+    public init() {}
+
+    /// One `deliver` of the link: `take(views:)` with one view.
+    public mutating func take(view: HostValue) { take(views: [view]) }
+
+    /// The `deliver`s of one batch, in order. A relay recreated empties the channels: every position comes again. A
+    /// message delivered again, or at a place already passed, rebuilds its channel in position order, once per batch.
+    public mutating func take(views: [HostValue]) {
+        var rebuild: [Data: [Int: Message]] = [:] // by channel: the messages that replace or join a place passed
+        for view in views {
+            if view["do"]?.stringValue == "incarnation", view["changed"] == .bool(true) {
+                channels = [:]
+                rebuild = [:]
+            }
+            guard let m = Message(view: view) else { continue }
+            let passed = channels[m.channel]?.messages.last.map { $0.position >= m.position } ?? false
+            if rebuild[m.channel] != nil || passed {
+                rebuild[m.channel, default: [:]][m.position] = m
+            } else {
+                channels[m.channel, default: Channel(id: m.channel)].fold(m)
+            }
+        }
+        for (id, changed) in rebuild {
+            var all = Dictionary(uniqueKeysWithValues: (channels[id]?.messages ?? []).map { ($0.position, $0) })
+            all.merge(changed) { _, new in new }
+            var c = Channel(id: id)
+            for position in all.keys.sorted() { c.fold(all[position]!) }
+            channels[id] = c
+        }
+    }
+
+    /// One `profile` effect of the link: the profile shown for a bot, or none.
+    public mutating func take(profile: HostValue) {
+        guard let bot = profile["bot"]?.bytesValue else { return }
+        let p = profile["profile"]
+        guard let name = p?["name"]?.stringValue else {
+            profiles[bot] = nil
+            return
+        }
+        profiles[bot] = BotProfile(
+            name: name, account: p?["account"]?["name"]?.stringValue, plan: p?["account"]?["plan"]?.stringValue,
+            icon: p?["icon"]?.bytesValue)
+    }
+}
