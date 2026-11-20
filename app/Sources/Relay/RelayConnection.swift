@@ -20,12 +20,33 @@ public struct RelayEndpoint: Sendable {
     public init(host: String, port: UInt16, pin: Data) { (self.host, self.port, self.pin) = (host, port, pin) }
 }
 
+/// The first device's entry 0 and the relay's enrolment secret: the link sends them before its proof on every connection until the relay first serves it (device pairing design 3.5).
+/// The link tells the owner when that happened (`RelayEvent.enrolled`), and the owner stops passing the secret from then on: it is not kept past the first `served` of one process, and a restart connects with the proof alone.
+public struct Enrolment: Sendable, CustomStringConvertible, CustomDebugStringConvertible {
+    public let secret: Data
+    public let signed: Data
+    public let sig: Data
+
+    public init(secret: Data, signed: Data, sig: Data) { (self.secret, self.signed, self.sig) = (secret, signed, sig) }
+
+    /// Hides the secret from a log or a debugger's print.
+    public var description: String { "Enrolment(secret: <hidden>, signed: \(signed.count) bytes, sig: \(sig.count) bytes)" }
+    public var debugDescription: String { description }
+}
+
 /// What the connection tells its owner: each dial, what the link delivers (its `View`, as a value), a bot's shown profile, and the end.
 public enum RelayEvent: Sendable {
     case dialing
     case delivered(HostValue)
     /// The profile shown for a bot changed: the link's `profile` effect, with `bot` and `profile`, `profile` null when none reads (app data design, 5).
     case profile(HostValue)
+    /// The device log the link reads changed: the link's `devices` effect, with `person`, `length`, `last`, `devices` and `self` (device pairing design 4.2).
+    case devices(HostValue)
+    /// The relay first served a link given an `Enrolment`: entry 0 was placed, and the owner stops passing the secret (device pairing design 3.5).
+    case enrolled
+    /// The relay refused the secret on a connection that carried it (reason 2): the link dropped it. The owner types it again and the
+    /// app builds a new connection with that `Enrolment` (device pairing design 3.5); a setter on a running connection comes with the app's first-device flow.
+    case enrolRefused
     /// The host faulted: the connection is over for the life of the host, and does not retry.
     case faulted(String)
 }
@@ -148,7 +169,7 @@ public final class RelayConnection: @unchecked Sendable {
     private let queue = DispatchQueue(label: "pardner.relay")
     private let host: ProtocolHost
     private let endpoint: RelayEndpoint
-    private let options: [String: HostValue]
+    private var options: [String: HostValue] // `run` removes the enrolment secret once the link holds it
     private let linkStore: LinkStore
     private let claimed = OSAllocatedUnfairLock(initialState: true) // this connection holds the store's claim
     // A store write flushes to the drive: it runs here, off the task's cooperative thread, and the task awaits it.
@@ -178,12 +199,12 @@ public final class RelayConnection: @unchecked Sendable {
     /// `store` holds the device's keys as `device.sign` and `device.receive`, and `host` was made on that store; `person`
     /// is the id the device was paired for. `linkStore` is the process's one store of the link's state (design 3.2: its
     /// lock lives as long as the process holds it), for the same keys and relay; a store that cannot be read now throws.
-    public convenience init(host: ProtocolHost, store: KeyStore, person: Data, endpoint: RelayEndpoint, linkStore: LinkStore) throws {
-        try self.init(host: host, store: store, person: person, endpoint: endpoint, linkStore: linkStore, constants: [:])
+    public convenience init(host: ProtocolHost, store: KeyStore, person: Data, endpoint: RelayEndpoint, linkStore: LinkStore, enrol: Enrolment? = nil) throws {
+        try self.init(host: host, store: store, person: person, endpoint: endpoint, linkStore: linkStore, constants: [:], enrol: enrol)
     }
 
     /// For tests, through `@testable import`: `constants` shortens the link's `first`, `max`, `patience` and `ask`.
-    init(host: ProtocolHost, store: KeyStore, person: Data, endpoint: RelayEndpoint, linkStore: LinkStore, constants: [String: HostValue]) throws {
+    init(host: ProtocolHost, store: KeyStore, person: Data, endpoint: RelayEndpoint, linkStore: LinkStore, constants: [String: HostValue], enrol: Enrolment? = nil) throws {
         self.host = host
         self.endpoint = endpoint
         let signing = try store.publicKey("device.sign"), receiving = try store.publicKey("device.receive")
@@ -201,6 +222,7 @@ public final class RelayConnection: @unchecked Sendable {
             linkStore.release() // `deinit` does not run for an init that throws
             throw error
         }
+        if let enrol { options["enrol"] = .object(["secret": .bytes(enrol.secret), "signed": .bytes(enrol.signed), "sig": .bytes(enrol.sig)]) }
         if !constants.isEmpty { options["constants"] = .object(constants) }
         self.options = options
         (events, out) = AsyncStream.makeStream(of: RelayEvent.self)
@@ -259,6 +281,7 @@ public final class RelayConnection: @unchecked Sendable {
     private func run() async {
         do {
             link = try await host.construct("appLink", [.object(options)])
+            options["enrol"] = nil
             // An exporter under another label gives a binding no relay accepts: fail loudly, never dial.
             guard let exporter = try await host.call(link!, "exporterLabel").stringValue, !exporter.isEmpty else {
                 throw HostError.faulted("the protocol script gave no exporter label")
@@ -337,6 +360,9 @@ public final class RelayConnection: @unchecked Sendable {
                 if ["put-back", "fault"].contains(view["do"]?.stringValue) { final = true }
                 out.yield(.delivered(view))
             case "profile": out.yield(.profile(fx))
+            case "devices": out.yield(.devices(fx))
+            case "enrolled": out.yield(.enrolled)
+            case "enrol-refused": out.yield(.enrolRefused)
             case "persist":
                 // A `persist` ends its list: the write first, then what the link gives once it is answered.
                 var written = true

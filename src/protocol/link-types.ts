@@ -16,6 +16,8 @@ export type Effect =
   | { do: "wake"; at: number } // the one timer: it replaces any earlier wake
   | { do: "persist"; what: Persist }
   | { do: "deliver"; out: Out }
+  | { do: "enrolled" } // the first `served` of a link given an `enrol`: entry 0 was placed, the app stops passing the secret
+  | { do: "enrol-refused" } // refusal 2 on a connection that carried `enrol`: the link dropped it, `enrol` hands it a retyped one
   | { do: "answer"; request: number; code: number | "unanswered" };
 
 /** Where the connection is, `unstarted` before `start`; the three steps of an upload connection all show as `uploading`. */

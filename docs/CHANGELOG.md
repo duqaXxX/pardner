@@ -7,6 +7,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The app's link enrols a first device and keeps the device log. `AppLinkOptions.enrol` (the enrolment secret and entry 0;
+  a value that cannot be framed throws a `RangeError`) makes the link send the `enrol` frame before the proof on every
+  connection until the first `served`, then never again within that process: the link tells the app once with an
+  `enrolled` effect, and the app stops passing the secret, so after a restart the link connects with the proof alone.
+  A refusal 2 on a connection that carried `enrol` drops the secret (sent again on the back-off it would earn the
+  relay's ban) and delivers an `enrol-refused` effect; `AppLink.enrol(secret, signed, sig)` hands the link a retyped
+  one, and answers `bad-input` to a value that cannot be framed. A link given none sends the proof alone as before. At
+  the first rest, and at each later rest after the log changed, `AppLink` delivers a `devices` effect with the log's
+  length and last id, this device's id and every device the log names, removed ones included, each with its kind,
+  whether it is active, the device that added it (`null` for entry 0's device and for a device a reset named) and its
+  entry's position. `AppLink.addDevice` checks a pairing's proof for the person and refuses a device the log already
+  names, and `AppLink.removeDevice` refuses this device; both answer `busy` while the log is not at rest, and
+  `addDevice` answers `bad-input` to a pairing of the wrong shape. Each builds and signs the entry against the log
+  the link holds and returns it without sending it, for the app to keep and `submit`. The Swift `RelayConnection`
+  passes `devices`, `enrolled` and `enrolRefused` to its owner, takes an optional `enrol` and does not keep the secret
+  once the link holds it.
 - The pairing string carries the device's name, and the device-log entry builders exist. `encodePairingString`,
   `decodePairingString`, `checkPairingName`, `shortForm` and `checkPairingProof` (`src/protocol/pairing-string.ts`) write
   and read the string (the device, its proof of possession and a name of 1 to 64 bytes of UTF-8 with no control, format

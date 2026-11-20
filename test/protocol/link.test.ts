@@ -1315,3 +1315,126 @@ test("P: a failed write of another incarnation, then the stored one served again
   const rest = again.find((e) => e.do === "deliver" && e.out.do === "rest");
   assert.equal(rest?.do === "deliver" && rest.out.do === "rest" && rest.out.first, true);
 });
+
+const ENROL = { secret: fill(3), signed: fill(1, 40), sig: fill(2, 64) };
+const enrolFrame: Frame = { type: "enrol", ...ENROL };
+
+test("device pairing 3.5.7 enrol goes before the proof on every connection until the first served, and never after", () => {
+  const a = rig({ enrol: ENROL });
+  a.link.start(0);
+  assert.deepEqual(
+    sends(a.hello(0)).map((f) => f.type),
+    ["enrol", "prove-active"],
+  );
+  assert.deepEqual(
+    sends(a.log).find((f) => f.type === "enrol"),
+    enrolFrame,
+  );
+  // The connection drops before any answer: the next one sends it again.
+  a.link.closed(1, 10);
+  a.link.tick(1010);
+  assert.deepEqual(
+    sends(a.hello(1010, 2)).map((f) => f.type),
+    ["enrol", "prove-active"],
+  );
+  a.give(2, [a.s.wire.served(), ...a.read()], 1020);
+  a.link.closed(2, 1030);
+  a.link.tick(2030);
+  assert.deepEqual(
+    sends(a.hello(2030, 3)).map((f) => f.type),
+    ["prove-active"],
+    "served: the secret is never sent again",
+  );
+});
+
+test("device pairing 3.5.7 a link given no enrol sends the proof alone", () => {
+  const a = rig();
+  a.link.start(0);
+  assert.deepEqual(
+    sends(a.hello(0)).map((f) => f.type),
+    ["prove-active"],
+  );
+});
+
+test("device pairing 3.5.7 a refusal 2 on a connection that carried enrol drops it and says so; a drop with no answer keeps it", () => {
+  const a = rig({ enrol: ENROL });
+  a.link.start(0);
+  a.hello(0);
+  const fx = a.give(1, [{ type: "refused", reason: 2 }], 10);
+  assert.equal(fx.filter((e) => e.do === "enrol-refused").length, 1);
+  a.link.tick(10 + 1000);
+  assert.deepEqual(
+    sends(a.hello(1010, 2)).map((f) => f.type),
+    ["prove-active"],
+    "the refused secret is not sent again",
+  );
+  // The setter hands a retyped secret to the running link: the next connection sends it again.
+  assert.deepEqual(a.link.enrol(ENROL), { ok: true, value: undefined });
+  a.link.closed(2, 1020);
+  a.link.tick(3020);
+  assert.deepEqual(
+    sends(a.hello(3020, 3)).map((f) => f.type),
+    ["enrol", "prove-active"],
+  );
+  // A drop with no answer keeps it.
+  a.link.closed(3, 3030);
+  a.link.tick(65_000);
+  assert.deepEqual(
+    sends(a.hello(65_000, 4)).map((f) => f.type),
+    ["enrol", "prove-active"],
+  );
+});
+
+test("device pairing 3.5.7 a secret set while a connection proves without it waits for the next one, and that connection's refusal keeps it", () => {
+  const a = rig();
+  a.link.start(0);
+  assert.deepEqual(
+    sends(a.hello(0)).map((f) => f.type),
+    ["prove-active"],
+  );
+  assert.deepEqual(a.link.enrol(ENROL), { ok: true, value: undefined });
+  const fx = a.give(1, [{ type: "refused", reason: 2 }], 10);
+  assert.equal(
+    fx.filter((e) => e.do === "enrol-refused").length,
+    0,
+    "this connection carried no secret",
+  );
+  assert.ok(
+    fx.some((e) => e.do === "deliver"),
+    "the refusal itself is delivered",
+  );
+  a.link.tick(1010);
+  assert.deepEqual(
+    sends(a.hello(1010, 2)).map((f) => f.type),
+    ["enrol", "prove-active"],
+  );
+});
+
+test("device pairing 3.5.7 the first served that clears enrol says so once", () => {
+  const a = rig({ enrol: ENROL });
+  a.link.start(0);
+  a.hello(0);
+  const fx = a.give(1, [a.s.wire.served(), ...a.read()], 10);
+  assert.equal(fx.filter((e) => e.do === "enrolled").length, 1);
+  a.link.closed(1, 20);
+  a.link.tick(1020);
+  a.hello(1020, 2);
+  assert.equal(
+    a.give(2, [a.s.wire.served(), ...a.read()], 1030).filter((e) => e.do === "enrolled").length,
+    0,
+  );
+});
+
+test("device pairing 3.5.7 an enrol that cannot be framed is refused at construction and in the setter", () => {
+  const bad = [
+    { ...ENROL, secret: fill(3, 31) },
+    { ...ENROL, sig: fill(2, 63) },
+    { ...ENROL, signed: fill(1, 5000) },
+    { ...ENROL, signed: "x" },
+  ];
+  for (const enrol of bad) {
+    assert.throws(() => rig({ enrol: enrol as never }), RangeError);
+    const a = rig();
+    assert.deepEqual(a.link.enrol(enrol as never), { ok: false, error: "bad-input" });
+  }
+});
