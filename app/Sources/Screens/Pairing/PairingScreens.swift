@@ -46,13 +46,14 @@ public struct PairingScreen: View {
             if case .unpaired(let note) = model.phase { FirstScreen(model: model, note: note) }
         case .form:
             RelayForm(model: model)
+        case .joinForm:
+            JoinForm(model: model)
         case .settingUp:
             SettingUp(model: model)
         case .enrolling:
             if case .enrolling(let asksSecret) = model.phase { Enrolling(model: model, asksSecret: asksSecret) }
         case .joining:
-            // The joining screen is the next pull request's; until then the person sees that the join runs.
-            Page(title: "Joining") { Text("Joining the relay…").foregroundStyle(PardnerColor.muted) }
+            if case .joining(let info) = model.phase { Joining(model: model, info: info) }
         case .paired:
             EmptyView()
         case .removed:
@@ -131,8 +132,14 @@ struct FirstScreen: View {
                     .background(PardnerColor.agentSoft, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
                     .foregroundStyle(PardnerColor.agentText)
             }
-            Button("Set up a new relay") { model.showForm = true }
-                .buttonStyle(PardnerButton(prominent: true)).accessibilityLabel("Set up a new relay")
+            Text("Already paired another device? Join as a new device with the three values its Add a device screen shows.")
+                .foregroundStyle(PardnerColor.muted)
+            HStack {
+                Button("Set up a new relay") { model.showForm = true }
+                    .buttonStyle(PardnerButton(prominent: true)).accessibilityLabel("Set up a new relay")
+                Button("Join as a new device") { model.openJoin() }
+                    .buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Join as a new device")
+            }
         }
     }
 }
@@ -170,23 +177,95 @@ struct RelayForm: View {
         // Not when the model itself empties the field after the controller has had the secret: that would take back the error it just set.
         .onChange(of: model.enrolmentSecret) { if !model.enrolmentSecret.isEmpty { model.edited() } }
     }
+}
 
-    private struct Field<Control: View>: View {
-        let title: String, hint: String, error: String?
-        @ViewBuilder let control: Control
+/// The form of a Mac that joins devices already paired: the three values the approving device gives, and this Mac's name.
+struct JoinForm: View {
+    @Bindable var model: PairingModel
 
-        var body: some View {
+    var body: some View {
+        Page(title: "Join as a new device", showsMark: false) {
+            Field(title: "Relay address", hint: "The first value on the other device's Add a device screen, as host:port.",
+                  error: model.refused == .address ? "Enter host:port, with a port from 1 to 65535. No scheme, no path." : nil) {
+                TextField("relay.example.net:7443", text: $model.joinAddress).accessibilityLabel("Relay address")
+            }
+            Field(title: "Relay public key", hint: "The second value: 130 hexadecimal characters.",
+                  error: model.refused == .relayKey ? "The relay key must be 130 hexadecimal characters that make a P-256 public key." : nil) {
+                TextField("04…", text: $model.joinKey).font(PardnerFont.mono(size: 12, weight: .regular)).accessibilityLabel("Relay public key")
+            }
+            Field(title: "Person id", hint: "The third value: 64 hexadecimal characters.",
+                  error: model.refused == .person ? "The person id is 64 hexadecimal characters." : nil) {
+                TextField("", text: $model.joinPerson).font(PardnerFont.mono(size: 12, weight: .regular)).accessibilityLabel("Person id")
+            }
+            Field(title: "This Mac's name", hint: "Your other device shows it when you add this Mac. Change it if you like.",
+                  error: model.refused == .name ? "A name is 1 to 64 bytes, with no hidden character and no space at either end." : nil) {
+                TextField("Name of this Mac", text: $model.joinName).accessibilityLabel("This Mac's name")
+            }
+            if let problem = model.problem {
+                Text(problem).foregroundStyle(PardnerColor.delText).font(PardnerFont.ui(size: 13, weight: .regular))
+            }
+            HStack {
+                Button("Back") { model.back() }
+                    .buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Back to the first screen")
+                Button("Join") { model.join() }
+                    .buttonStyle(PardnerButton(prominent: true)).disabled(model.working)
+                    .keyboardShortcut(.defaultAction).accessibilityLabel("Join with these values")
+            }
+        }
+        .onChange(of: model.joinAddress) { model.edited() }
+        .onChange(of: model.joinKey) { model.edited() }
+        .onChange(of: model.joinPerson) { model.edited() }
+        .onChange(of: model.joinName) { model.edited() }
+    }
+}
+
+/// This Mac's pairing string and short form, to give to the device that adds it (design 3.7).
+struct Joining: View {
+    let model: PairingModel
+    let info: JoiningInfo
+
+    var body: some View {
+        Page(title: "Add this Mac from your other device") {
+            Text("On your other device, open Devices, choose Add a device and paste this pairing string.").foregroundStyle(PardnerColor.muted)
+            VStack(alignment: .leading, spacing: PardnerMetrics.gap) {
+                Text(info.pairingString)
+                    .font(PardnerFont.mono(size: 11, weight: .regular)).textSelection(.enabled).lineLimit(5).truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(PardnerMetrics.gap * 1.5).card()
+                    .accessibilityLabel("Pairing string")
+                Button("Copy") { Clipboard.copy(info.pairingString) }
+                    .buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Copy the pairing string")
+            }
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(PardnerFont.ui(size: 13, weight: .semibold))
-                control.textFieldStyle(.plain)
-                    .padding(.horizontal, PardnerMetrics.gap * 1.25).padding(.vertical, 7)
-                    .background(PardnerColor.surface, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
-                    .overlay(RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius).stroke(error == nil ? PardnerColor.line : PardnerColor.delText))
-                if let error {
-                    Text(error).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.delText)
-                } else {
-                    Text(hint).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
-                }
+                if !info.name.isEmpty { NameText(name: info.name, font: PardnerFont.ui(size: 16, weight: .semibold)) }
+                Text(info.shortForm).font(PardnerFont.mono(size: 18, weight: .medium)).textSelection(.enabled)
+                Text(info.name.isEmpty ? "Check that your other device shows this short form before it adds this Mac."
+                                       : "Check that your other device shows this name and this short form.")
+                    .font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+            }
+            Text(info.waiting ? PairingPhase.joinWaiting : "Connecting to your relay…").foregroundStyle(PardnerColor.agentText)
+            Button("Cancel") { model.cancel() }
+                .buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Cancel joining")
+        }
+    }
+}
+
+/// A labelled field with its hint, or its error in place of the hint.
+struct Field<Control: View>: View {
+    let title: String, hint: String, error: String?
+    @ViewBuilder let control: Control
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(PardnerFont.ui(size: 13, weight: .semibold))
+            control.textFieldStyle(.plain)
+                .padding(.horizontal, PardnerMetrics.gap * 1.25).padding(.vertical, 7)
+                .background(PardnerColor.surface, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
+                .overlay(RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius).stroke(error == nil ? PardnerColor.line : PardnerColor.delText))
+            if let error {
+                Text(error).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.delText)
+            } else {
+                Text(hint).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
             }
         }
     }
@@ -197,10 +276,12 @@ struct SettingUp: View {
     let model: PairingModel
 
     var body: some View {
-        Page(title: "Setting up") {
-            Text("Making this Mac's keys and your recovery key. The recovery sheet opens when they are ready.").foregroundStyle(PardnerColor.muted)
+        // A join makes this Mac's keys and shows no recovery sheet: the first device's text would promise one.
+        Page(title: model.isJoinSetUp ? "Joining" : "Setting up") {
+            Text(model.isJoinSetUp ? "Making this Mac's keys…" : "Making this Mac's keys and your recovery key. The recovery sheet opens when they are ready.")
+                .foregroundStyle(PardnerColor.muted)
             Button("Cancel") { model.cancel() }
-                .buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Cancel the setup")
+                .buttonStyle(PardnerButton(prominent: false)).accessibilityLabel(model.isJoinSetUp ? "Cancel joining" : "Cancel the setup")
         }
     }
 }

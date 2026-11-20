@@ -84,13 +84,21 @@ struct PardnerApp: App {
         Window("Pardner", id: "main") {
             // The pairing screens until this Mac is paired; then the main window, which shows its empty state until the
             // reading model takes the link's events (step-6 plan, screen 3.9).
-            PairingRoot(model: delegate.pairing) { MainWindow(model: ReadingModel()) }
+            PairingRoot(model: delegate.pairing) { MainWindow(model: ReadingModel(), devices: delegate.pairing.devices) }
                 .frame(minWidth: MainWindow.minimumWidth, minHeight: 560)
                 .task { delegate.pairing.start() }
                 .onAppear { delegate.showWindow = { openWindow(id: "main") } }
                 .onChange(of: theme) { _, value in (Theme(rawValue: value) ?? .light).apply() }
         }
         .commands {
+            // The Devices sheet over the main window, once this Mac is paired.
+            CommandGroup(after: .newItem) {
+                Button("Devices…") {
+                    delegate.pairing.devices.open()
+                    delegate.showWindow?() // the window may be closed: the sheet opens over the window the Dock would show
+                }
+                    .keyboardShortcut("d", modifiers: [.command, .shift]).disabled(delegate.pairing.screen != .paired)
+            }
             CommandGroup(after: .toolbar) {
                 Picker("Appearance", selection: $theme) {
                     ForEach(Theme.allCases, id: \.rawValue) { Text($0.rawValue).tag($0.rawValue) }

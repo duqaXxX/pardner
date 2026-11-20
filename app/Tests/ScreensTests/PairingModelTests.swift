@@ -48,6 +48,47 @@ final class PairingModelTests: XCTestCase {
             XCTAssertEqual(model.exit, exit, "\(phase)")
         }
         XCTAssertEqual(PairingModel(phase: .unpaired(nil), form: true).screen, .form)
+        XCTAssertEqual(PairingModel(phase: .unpaired(nil), join: true).screen, .joinForm)
+    }
+
+    // MARK: joining as a new device
+
+    func testTheJoinFormStartsAtTheFirstPageWhenThePhaseMovesOn() {
+        let model = PairingModel(phase: .removed, join: true)
+        model.apply(.unpaired(nil)) // Pair again
+        XCTAssertEqual(model.screen, .first)
+        model.showJoin = true
+        model.back()
+        XCTAssertEqual(model.screen, .first)
+        let stopped = PairingModel(phase: .settingUp, join: true)
+        stopped.apply(.unpaired(nil)) // a join that was stopped stays on its form, with its message
+        stopped.finishJoin(nil, unpaired: true)
+        XCTAssertEqual(stopped.screen, .joinForm)
+        XCTAssertNotNil(stopped.problem)
+    }
+
+    func testAJoinRefusedForAFieldNamesTheFieldAndKeepsTheForm() {
+        let model = PairingModel(phase: .unpaired(nil), join: true)
+        model.joinPerson = "ab"
+        model.finishJoin(PairingInputError.person, unpaired: true)
+        XCTAssertEqual(model.refused, .person)
+        XCTAssertEqual(model.joinPerson, "ab")
+        XCTAssertFalse(model.working)
+        model.finishJoin(PairingInputError.notReady, unpaired: true)
+        XCTAssertNotNil(model.problem)
+        model.finishJoin(CocoaError(.fileWriteUnknown), unpaired: true)
+        XCTAssertTrue(model.problem?.hasPrefix("Joining failed") == true)
+        model.edited()
+        XCTAssertNil(model.refused)
+    }
+
+    func testLeavingThePairingResetsTheDevicesSheet() {
+        let devices = DevicesModel(state: DevicesState(), page: .add, pasted: "00")
+        devices.isOpen = true
+        let model = PairingModel(phase: .paired, devices: devices)
+        model.apply(.removed)
+        XCTAssertFalse(devices.isOpen)
+        XCTAssertEqual(devices.pasted, "")
     }
 
     func testTheMessageIsTheControllersText() {
@@ -183,5 +224,63 @@ final class PairingModelTests: XCTestCase {
         XCTAssertEqual(model.retypeProblem, "Pardner is not waiting for the secret now.")
         model.finishRetype(.failure(PairingInputError.enrolmentSecret))
         XCTAssertEqual(model.retypeProblem, "The enrolment secret is 64 hexadecimal characters.")
+    }
+
+    // MARK: the Devices screen follows the pairing
+
+    func testTheDevicesSurviveAFaultAndRetryBecauseTheControllerPublishesOnlyAChange() {
+        var list = DevicesState()
+        list.rows = [DeviceRow(id: Data(repeating: 1, count: 32), kind: .app, label: nil, shortForm: "0101-0101-0101-0101", adder: .none, position: 0, active: true,
+                               isThisMac: true, seenAt: nil, onlyHolderEpochs: 0, addedWhileRemoving: false),
+                     DeviceRow(id: Data(repeating: 2, count: 32), kind: .bot, label: nil, shortForm: "0202-0202-0202-0202", adder: .device(Data(repeating: 1, count: 32)), position: 2,
+                               active: true, isThisMac: false, seenAt: nil, onlyHolderEpochs: 0, addedWhileRemoving: false)]
+        let model = PairingModel(phase: .paired, devices: DevicesModel(state: list))
+        model.devices.isOpen = true
+        model.apply(.fault(.failed, "the relay's address did not resolve"))
+        XCTAssertFalse(model.devices.isOpen, "the sheet does not outlive the pairing")
+        model.apply(.paired) // Retry: the same list, so the controller publishes nothing
+        XCTAssertEqual(model.devices.rows.count, 2)
+        XCTAssertTrue(model.devices.canAdd)
+        XCTAssertTrue(model.devices.canRemove(list.rows[1]))
+    }
+
+    // MARK: the join form
+
+    func testTheComputersNameIsCutThenTrimmedAndAnEmptyOneLeavesTheField() {
+        XCTAssertEqual(PairingModel.fitName("  Studio Mac \n"), "Studio Mac")
+        XCTAssertEqual(PairingModel.fitName(String(repeating: "a", count: 63) + " b"), String(repeating: "a", count: 63), "cut at 64 bytes, then the space at the end goes")
+        XCTAssertEqual(PairingModel.fitName(String(repeating: "a", count: 63) + "\u{E9}"), String(repeating: "a", count: 63), "a letter of two bytes is not cut in half")
+        XCTAssertEqual(PairingModel.fitName(String(repeating: "a", count: 64)).utf8.count, 64)
+        XCTAssertEqual(PairingModel.fitName("   "), "")
+    }
+
+    func testTheComputersNameIsReadWhenTheJoinFormOpensAndKeepsWhatWasTyped() {
+        let model = PairingModel(phase: .unpaired(nil))
+        XCTAssertEqual(model.joinName, "", "nothing is read at launch")
+        model.computerName = { "  Mac A " }
+        model.openJoin()
+        XCTAssertTrue(model.showJoin)
+        XCTAssertEqual(model.joinName, "Mac A")
+        model.joinName = "My Mac"
+        model.back()
+        model.computerName = { "Mac B" }
+        model.openJoin()
+        XCTAssertEqual(model.joinName, "My Mac", "a name the person typed stays")
+        model.joinName = ""
+        model.back()
+        model.openJoin()
+        XCTAssertEqual(model.joinName, "Mac B")
+        model.joinName = ""
+        model.back()
+        model.computerName = { "   " }
+        model.openJoin()
+        XCTAssertEqual(model.joinName, "", "the placeholder shows")
+    }
+
+    func testTheSetupOfAJoinIsToldApartFromTheSetupOfAFirstDevice() {
+        XCTAssertTrue(PairingModel(phase: .settingUp, join: true).isJoinSetUp)
+        XCTAssertFalse(PairingModel(phase: .settingUp, form: true).isJoinSetUp)
+        XCTAssertFalse(PairingModel(phase: .showingSheet(request())).isJoinSetUp)
+        XCTAssertFalse(PairingModel(phase: .unpaired(nil), join: true).isJoinSetUp, "the form is not the setup")
     }
 }

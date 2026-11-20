@@ -8,6 +8,8 @@ import SwiftUI
 /// The window's content for a reading model; `channel` and `thread` start the selection.
 public struct MainWindow: View {
     let model: ReadingModel
+    /// The Devices sheet's model; nil in the samples, which have no pairing.
+    let devices: DevicesModel?
     @State private var channel: Data?
     @State private var thread: String?
     @State private var tab: Tab = .conversation
@@ -15,8 +17,9 @@ public struct MainWindow: View {
     enum Tab: String, CaseIterable { case conversation = "Conversation", sessions = "Sessions" }
 
     /// The window over `model`, with a channel and a thread open when given.
-    public init(model: ReadingModel, channel: Data? = nil, thread: String? = nil) {
+    public init(model: ReadingModel, devices: DevicesModel? = nil, channel: Data? = nil, thread: String? = nil) {
         self.model = model
+        self.devices = devices
         _channel = State(initialValue: channel)
         _thread = State(initialValue: thread)
     }
@@ -37,7 +40,7 @@ public struct MainWindow: View {
         // a PNG or a JPEG of at most 256 pixels a side, read from its own header).
         let icons = model.profiles.compactMapValues { $0.icon.flatMap(NSImage.init(data:)) }
         HStack(spacing: 0) {
-            Sidebar(model: model, icons: icons, selected: shown?.id, choose: { channel = $0 })
+            Sidebar(model: model, icons: icons, selected: shown?.id, choose: { channel = $0 }, openDevices: devices.map { devices in { devices.open() } })
                 .frame(width: 248)
             Divider().overlay(PardnerColor.line)
             if let c = shown {
@@ -53,6 +56,9 @@ public struct MainWindow: View {
             }
         }
         .onChange(of: shown?.id) { thread = nil }
+        .sheet(isPresented: Binding(get: { devices?.isOpen ?? false }, set: { if !$0 { devices?.close() } })) {
+            if let devices { DevicesSheet(model: devices) }
+        }
         .font(PardnerFont.ui(size: 14, weight: .regular))
         .foregroundStyle(PardnerColor.text)
         .background(PardnerColor.bg)
@@ -64,7 +70,7 @@ struct Empty: View {
     var body: some View {
         VStack(spacing: PardnerMetrics.gap) {
             Text("No channels yet").font(PardnerFont.ui(size: 17, weight: .semibold))
-            Text("This device is not paired with a relay. Pairing comes with the Devices screen.")
+            Text("Channels come with a later version of Pardner.")
                 .foregroundStyle(PardnerColor.muted)
         }
         .padding(PardnerMetrics.gap * 3)
@@ -100,6 +106,8 @@ struct Sidebar: View {
     let icons: [Data: NSImage]
     let selected: Data?
     let choose: (Data) -> Void
+    /// Opens the Devices sheet; nil where the window has no pairing.
+    var openDevices: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: PardnerMetrics.gap * 1.5) {
@@ -140,6 +148,13 @@ struct Sidebar: View {
                 }
             }
             Spacer()
+            if let openDevices {
+                Button(action: openDevices) {
+                    Text("Devices…").frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, PardnerMetrics.gap).padding(.vertical, 6)
+                }
+                .buttonStyle(.plain).accessibilityLabel("Open the devices")
+            }
         }
         .padding(PardnerMetrics.gap * 1.5)
         .frame(maxHeight: .infinity, alignment: .top)

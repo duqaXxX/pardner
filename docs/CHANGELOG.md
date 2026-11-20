@@ -7,14 +7,28 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The app's Devices screen, a sheet over the main window opened by Devices… in the sidebar or Shift-Command-D once this Mac
+  is paired. It lists the active devices newest first: the name in quotes or the kind, the short form, "This Mac", who added
+  it, its position, when this Mac first read the add (with one line when it read several in one go) and Remove for each other
+  device. Add a device gives the three values to copy (relay address, key and person id, as `pardner setup` asks them), takes
+  the pairing string, refuses it in place or shows the kind, the name and the short form to check, and the list says "Adding
+  ..." until the log shows it. Remove opens one confirmation listing every active device but this Mac, the clicked one chosen,
+  with a warning for a device that alone holds keys, and the list shows "Removing... N left" until the act ends, also after a
+  restart. A name another device gave is drawn in a line of its own between its quotes, cut in the middle when long, so that
+  it cannot pass for part of the app's sentence. The first screen has Join as a new device: a form for the three values and
+  this Mac's name (read from the computer when the form opens), then the pairing string with Copy, this Mac's name, the short
+  form and "Waiting for your other device to add this one", with Cancel; a join whose log does not hold this Mac offers Pair
+  again.
 - The devices of a person in the app's pairing controller, with no screen yet. `PairingController` publishes `deviceList`
   (every device the log names, newest first, with its name from the pairing string, short form, who added it or "added by a
   removed device", position, whether it is active and whether it is this Mac, the time this Mac first read its add, how many
-  epochs it alone holds and whether it joined a removal in progress) and `handoffValues()` (the relay's address and key and the
+  epochs it alone holds and whether it joined a removal in progress, and `pendingAddName`, the name of the device a pending
+  add names) and `handoffValues()` (the relay's address and key and the
   person id, to copy to a new device). `inspect(pairingString:)` runs the checks before the confirmation and refuses with a
-  sentence for each reason; `confirmAdd` signs the entry once, writes it pending with the device's name (flushed) and sends it.
+  sentence for each reason; `confirmAdd` checks the name again, signs the entry once, writes it pending with the device's name
+  (flushed) and sends it. The joining name, this Mac's own, is carried in `JoiningInfo`.
   At every rest and launch a pending entry the log holds is dropped, one it does not hold is sent again with the same bytes, one
-  whose position is taken is rebuilt, a refused one is dropped with a message and an answer of removed ends this Mac. Joining as
+  whose position is taken is rebuilt, a refused one is dropped with a message that names the device by its name, else by its kind and short form, and an answer of removed ends this Mac. Joining as
   a new device (`join`) writes `keys-made`, makes the keys and signs the proof once, shows the pairing string and short form
   and waits for the other device's add, which makes it paired only when the served log holds this device; Cancel erases the keys
   first and the store last, and a store at `joining` resumes at launch with the same string. A removal (`removalChoices`,

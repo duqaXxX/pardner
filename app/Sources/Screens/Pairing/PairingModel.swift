@@ -1,6 +1,7 @@
 // What the pairing screens read and do (device pairing design 3.5, 3.10, 4.1): the controller's phase as the views draw it, the
 // form, and one method for each action the controller allows. The controller decides; this holds only what a view needs between two
 // phases (the form's text and its errors, the cancel's second question, the recovery sheet's model).
+import Foundation
 import Observation
 import Platform
 import Relay
@@ -12,9 +13,16 @@ public final class PairingModel {
     public private(set) var sheet: RecoverySheetModel?
     /// The form's page, which is the view's own choice (the first screen has one action).
     public var showForm = false
+    /// The first screen's third page: the form of a Mac that joins devices already paired (design 3.7); `openJoin()` opens it.
+    public var showJoin = false
     public var address = ""
     public var relayKey = ""
     public var enrolmentSecret = ""
+    /// The join form: the three values the approving device gives, and this Mac's name.
+    public var joinAddress = ""
+    public var joinKey = ""
+    public var joinPerson = ""
+    public var joinName = ""
     /// The field the controller's check refused.
     public private(set) var refused: PairingInputError?
     /// A failure that belongs to no field.
@@ -32,12 +40,38 @@ public final class PairingModel {
     /// False when the data folders could not be opened at launch: no controller exists, so Retry would do nothing and is not offered.
     private let storesOpen: Bool
     private var watching: Task<Void, Never>?
+    /// The Devices screen's model, over the same controller; it follows the phase (closed unless paired).
+    public let devices: DevicesModel
 
-    public init(controller: PairingController) { (self.controller, storesOpen) = (controller, true) }
+    public init(controller: PairingController) {
+        (self.controller, storesOpen, devices) = (controller, true, DevicesModel(controller: controller))
+    }
+
+    /// This Mac's name as System Settings shows it. Read when the join form opens: the lookup can wait on the network, so it is not made at launch.
+    @ObservationIgnored var computerName: () -> String = { Host.current().localizedName ?? "" }
+
+    /// A device name is 1 to 64 bytes with no space at either end: cut to 64 bytes, then trimmed; nothing left is an empty field with its placeholder.
+    static func fitName(_ raw: String) -> String {
+        var name = raw
+        while name.utf8.count > 64 { name.removeLast() }
+        return name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The first screen's Join as a new device: the form opens with this Mac's name, unless the person has typed one.
+    public func openJoin() {
+        showJoin = true
+        if joinName.isEmpty { joinName = Self.fitName(computerName()) }
+    }
+
+    /// The setup is a join's, which makes keys and no recovery sheet; a first device's is the one with the sheet.
+    public var isJoinSetUp: Bool {
+        if case .settingUp = phase { showJoin } else { false }
+    }
 
     /// A model with a fixed phase and no controller: what the screenshot tool and the previews draw.
-    public init(phase: PairingPhase, form: Bool = false, refused: PairingInputError? = nil, note: CancelNote? = nil, storesOpen: Bool = true) {
-        (controller, self.phase, showForm, self.refused, cancelNote, self.storesOpen) = (nil, phase, form, refused, note, storesOpen)
+    public init(phase: PairingPhase, form: Bool = false, join: Bool = false, refused: PairingInputError? = nil, note: CancelNote? = nil, storesOpen: Bool = true,
+                devices: DevicesModel = DevicesModel()) {
+        (controller, self.phase, showForm, showJoin, self.refused, cancelNote, self.storesOpen, self.devices) = (nil, phase, form, join, refused, note, storesOpen, devices)
     }
 
     /// The model over this Mac's own stores. A folder that cannot be opened (another Pardner holds it, a link where a folder
@@ -54,13 +88,13 @@ public final class PairingModel {
 
     /// The screen a phase draws (the form is the first screen's second page).
     public enum Screen: Equatable {
-        case starting, first, form, settingUp, enrolling, joining, paired, removed, keysMissing, putBack, linkFaulted, malformedStore, newerStore, needsNewPairing, joinUnmade, failed
+        case starting, first, form, joinForm, settingUp, enrolling, joining, paired, removed, keysMissing, putBack, linkFaulted, malformedStore, newerStore, needsNewPairing, joinUnmade, failed
     }
 
     public var screen: Screen {
         switch phase {
         case .starting: .starting
-        case .unpaired: showForm ? .form : .first
+        case .unpaired: showJoin ? .joinForm : showForm ? .form : .first
         case .settingUp, .showingSheet: .settingUp
         case .enrolling: .enrolling
         case .joining: .joining
@@ -106,6 +140,7 @@ public final class PairingModel {
         watching = Task { [weak self] in
             for await phase in controller.phases { self?.apply(phase) }
         }
+        devices.start()
         Task { await controller.launch() }
     }
 
@@ -123,7 +158,8 @@ public final class PairingModel {
             // A note belongs to the phase it was made in; a return to the first screen starts at its first page (design 3.10), except
             // from a setup that ended unpaired (a declined sheet, a failure): it stays on the form, where its message is drawn.
             cancelNote = nil
-            if case .unpaired = next, !phase.isUnpaired, !phase.isSettingUp { showForm = false }
+            if case .unpaired = next, !phase.isUnpaired, !phase.isSettingUp { (showForm, showJoin) = (false, false) }
+            if case .paired = next {} else { devices.reset() } // the Devices sheet and its half-made acts do not outlive the pairing
             if case .enrolling = next {} else { (retypedSecret, retypeProblem) = ("", nil) }
             phase = next
         }
@@ -172,9 +208,39 @@ public final class PairingModel {
         working = false
     }
 
+    // MARK: joining as a new device (design 3.7)
+
+    public func join() {
+        guard let controller, !working else { return }
+        (working, refused, problem) = (true, nil, nil)
+        let (address, key, person, name) = (joinAddress, joinKey, joinPerson, joinName)
+        Task {
+            var failure: Error?
+            do {
+                try await controller.join(address: address, relayKey: key, person: person, name: name)
+            } catch {
+                failure = error
+            }
+            finishJoin(failure, unpaired: await controller.phase.isUnpaired)
+        }
+    }
+
+    func finishJoin(_ failure: Error?, unpaired: Bool) {
+        switch failure {
+        case nil:
+            if unpaired { problem = "Joining was stopped before it finished. Nothing was kept; start again." }
+        case let error as PairingInputError:
+            refused = error
+            if error == .notReady { problem = "Joining cannot start now." }
+        case let error?:
+            problem = "Joining failed: \(error)"
+        }
+        working = false
+    }
+
     /// The form's Back: the first screen again, with no secret kept.
     public func back() {
-        showForm = false
+        (showForm, showJoin) = (false, false)
         enrolmentSecret = ""
         edited()
     }
