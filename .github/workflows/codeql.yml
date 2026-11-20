@@ -1,0 +1,66 @@
+# CodeQL in advanced setup, in place of default setup: default setup's Swift autobuild built both
+# architectures and took 18 to 21 min a pull request; a manual one-architecture build took about 10
+# (trials of 2026-11-20). Each category is the one default setup used; whether the alerts on main
+# keep their history across the switch is not documented and is checked on main after it.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+# A newer push cancels a pull request's older run; on main a running analysis is never cancelled
+# (a run still waiting can be replaced by a newer one: a group keeps one pending run).
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+            runner: ubuntu-latest
+          - language: javascript-typescript
+            build-mode: none
+            runner: ubuntu-latest
+          - language: swift
+            build-mode: manual
+            # Pinned: the Xcode of the image decides the Swift version, which the CodeQL bundle must
+            # support (GitHub changelog, 2026-10-19: no traced Swift extraction with Xcode 27).
+            runner: macos-26
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      # The app's scheme in Release, the code that ships (Debug compiles the `#if DEBUG` branches in
+      # its place), which builds the package's libraries with it; one architecture, as the CodeQL
+      # build docs recommend, since Release builds every architecture otherwise. The two settings
+      # are the ones CodeQL's own Swift autobuilder passes (github/codeql, swift/swift-autobuilder).
+      # The package's two developer tools are not in the scheme and are not analysed.
+      - if: matrix.language == 'swift'
+        run: >-
+          xcodebuild -project app/Pardner.xcodeproj -scheme Pardner -configuration Release
+          -arch arm64 -derivedDataPath "$RUNNER_TEMP/derived"
+          CODE_SIGNING_ALLOWED=NO SWIFT_USE_INTEGRATED_DRIVER=NO build
+      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          category: /language:${{ matrix.language }}
