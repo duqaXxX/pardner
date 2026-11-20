@@ -36,6 +36,10 @@ All notable changes to this project are documented here. The format follows
   its parts as they are written and replaced by the whole answer once it lands; a session runs from its start, waits
   while a question or an approval is open, and the Sessions tab orders sessions by the bot's last reply. A body that
   did not open or does not read is shown in its place as unreadable, and moves to its thread when it opens.
+- The app's main window (`Screens`, in `app/Sources/Screens/`): the sidebar of channels and bots, the channel as a
+  conversation with a thread's summary under the message that opened it and a Sessions tab, and the thread panel,
+  in Light or Dark (View > Appearance). The radii and the base gap are tokens beside the colours. Until a device is
+  paired the window says so; `swift run screens-snapshot <dir>` renders it over a synthetic conversation.
 
 ### Fixed
 
