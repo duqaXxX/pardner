@@ -21,6 +21,19 @@ All notable changes to this project are documented here. The format follows
   the account is known. A relay that refuses it is not at fault: the bot logs it and writes none until its next
   start. `ChatProvider.agentAccount`, `ChatContext.instance`, `ChatContext.brand` and `AgentWords.brand` carry what
   it needs across the seams.
+- The app's link (`src/protocol/index.ts`) hands each store write to its driver, as the daemon's `Link` does, and
+  takes the stored state back at construction; every write carries `kept`, with only the ids after those the
+  store confirmed. A message view carries its position, header fields and files (without their keys), opened with its own
+  epoch's key; one whose key arrives later, through a history seal, is delivered again once it opens. The link tells
+  its driver the profile shown for each bot when it changes. `Reading.key` gives the key of any epoch the device
+  holds.
+
+### Fixed
+
+- A relay connection whose store write failed delivered the next incarnation without `changed`, and the next first
+  rest without `first`, so what resets on them (the bot's reader, outbox and profile writer) did not: `Link` now
+  reads those flags from the incarnation its store confirmed and from the rests it delivered, not from the reading,
+  which moves before the write.
 
 ## [0.17.0] - 2026-11-19
 

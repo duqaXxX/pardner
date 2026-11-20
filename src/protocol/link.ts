@@ -63,6 +63,9 @@ export class Link {
   #reqs: Requests; // the requests in flight, each with its own deadline
   #incarnation: Bytes | undefined; // what the driver's store holds
   #saved: string; // `snap` of the `kept` the driver's store holds
+  // A rest was delivered in this run under the incarnation delivered last: the next is not `first`.
+  // With `#incarnation`, what the flags of an incarnation or a rest are read from (app data design, 3.4).
+  #rested = false;
 
   constructor(options: LinkOptions) {
     const { who, kept, stored = {}, constants } = options;
@@ -298,11 +301,12 @@ export class Link {
 
   /** Acts on `outs` in order, then `done`; a `persist` ends the list, and the rest runs once it is stored. */
   #perform(outs: Out[], now: number, fx: Effect[], done: Then): void {
-    for (const [i, out] of outs.entries()) {
+    for (const [i, raw] of outs.entries()) {
+      const out = this.#settle(raw);
       if (!this.#act(out, now, fx)) continue;
       (this.#held as Held).next = (later, at) => {
         if (out.do === "rest") [this.#delay, this.#slow] = [this.#c.first, false]; // the write held
-        later.push({ do: "deliver", out });
+        later.push(this.#deliver(out));
         this.#perform(outs.slice(i + 1), at, later, done);
       };
       return;
@@ -315,6 +319,30 @@ export class Link {
     const step = up.frame(f, now);
     if (step && "send" in step) for (const g of step.send) this.#send(g, fx);
     else if (step) this.#end(now, fx, true, step.done);
+  }
+
+  /**
+   * An incarnation's or a rest's flags, read from what the store confirmed and what was delivered rather
+   * than from the Reading, which moves before the write: a failed write leaves them as they were.
+   */
+  #settle(out: Out): Out {
+    const stored = this.#incarnation;
+    if (out.do === "incarnation")
+      return {
+        ...out,
+        first: stored === undefined,
+        // The Reading's own `changed` too: it rewound, though the relay serves again what the store holds.
+        changed: stored !== undefined && (out.changed || !bytesEqual(stored, out.incarnation)),
+      };
+    if (out.do === "rest") return { ...out, first: !this.#rested };
+    return out;
+  }
+
+  /** The deliver of `out`, once nothing is left to store for it. */
+  #deliver(out: Out): Effect {
+    if (out.do === "incarnation" && (out.first || out.changed)) this.#rested = false;
+    if (out.do === "rest") this.#rested = true;
+    return { do: "deliver", out };
   }
 
   /** Acts on one output; true when it emitted a `persist`, whose `deliver` waits for the write. */
@@ -343,7 +371,7 @@ export class Link {
       case "fault":
         return this.#persist(out.do === "fault" ? { fault: true } : { putBack: true }, fx);
     }
-    fx.push({ do: "deliver", out });
+    fx.push(this.#deliver(out));
     return false;
   }
 
