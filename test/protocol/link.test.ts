@@ -1449,6 +1449,21 @@ test("device pairing 3.5.7 the first served that clears enrol says so once", () 
   );
 });
 
+test("device pairing 3.5.7 the setter refuses once the link has told enrolled, and changes nothing", () => {
+  const a = rig({ enrol: ENROL });
+  a.link.start(0);
+  a.hello(0);
+  a.give(1, [a.s.wire.served(), ...a.read()], 10);
+  assert.deepEqual(a.link.enrol(ENROL), { ok: false, error: "bad-input" });
+  a.link.closed(1, 20);
+  a.link.tick(1020);
+  assert.deepEqual(
+    sends(a.hello(1020, 2)).map((f) => f.type),
+    ["prove-active"],
+    "the refused setter left nothing for the next connection to send",
+  );
+});
+
 test("device pairing 3.5.7 an enrol that cannot be framed is refused at construction and in the setter", () => {
   const bad = [
     { ...ENROL, secret: fill(3, 31) },

@@ -147,7 +147,7 @@ final class LinkStoreTests: XCTestCase {
     func testASecondStoreOnTheSameFolderIsBusy() throws {
         let place = folder()
         var first: LinkStore? = try LinkStore(folder: place, identity: identity)
-        XCTAssertThrowsError(try LinkStore(folder: place, identity: identity)) { XCTAssertTrue($0 is LinkStoreBusy) }
+        XCTAssertThrowsError(try LinkStore(folder: place, identity: identity)) { XCTAssertTrue($0 is StoreBusy) }
         XCTAssertNotNil(first)
         first = nil
         XCTAssertNoThrow(try LinkStore(folder: place, identity: identity), "the lock goes with the store")
@@ -214,7 +214,7 @@ extension LinkStoreTests {
     func testOneConnectionAtATimeClaimsTheStore() throws {
         let store = try LinkStore(folder: folder(), identity: identity)
         try store.claim()
-        XCTAssertThrowsError(try store.claim()) { XCTAssertTrue($0 is LinkStoreBusy) }
+        XCTAssertThrowsError(try store.claim()) { XCTAssertTrue($0 is StoreClaimed, "\($0)") }
         store.release()
         XCTAssertNoThrow(try store.claim())
     }

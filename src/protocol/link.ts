@@ -69,6 +69,7 @@ export class Link {
   #count = 0;
   #proven = false; // a proof was sent on it: the frames now decode and encode as proven
   #binding: Bytes = new Uint8Array();
+  #enrolled = false; // the link told `enrolled`: the setter takes nothing more
   #enrol: Enrol | undefined; // dropped at the first `served` (entry 0 was placed) or a refusal 2 that followed it
   #carried = false; // the current connection sent it
   #cutter = new FrameCutter();
@@ -105,9 +106,9 @@ export class Link {
     this.reading = new Reading(who, kept, stored);
   }
 
-  /** The enrolment secret again, after the relay refused it: the next connection sends it. A value that cannot be framed changes nothing. */
+  /** The enrolment secret again, after the relay refused it: the next connection sends it. A value that cannot be framed changes nothing, and neither does one after the link told `enrolled`: entry 0 is placed. */
   enrol(value: Enrol): Result<undefined> {
-    if (!framable(value)) return fail("bad-input");
+    if (this.#enrolled || !framable(value)) return fail("bad-input");
     this.#enrol = value;
     return ok(undefined);
   }
@@ -345,6 +346,7 @@ export class Link {
     this.#seen = now;
     if (f.type === "served" && this.#enrol) {
       this.#enrol = undefined;
+      this.#enrolled = true;
       fx.push({ do: "enrolled" });
     }
     if (f.type === "result" && this.#reqs.answer(f.request))

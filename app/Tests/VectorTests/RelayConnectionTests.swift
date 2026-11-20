@@ -1,6 +1,7 @@
 // The app's connection against a real relay: test/protocol/app-relay.test.ts starts the relay, enrols
 // the device, runs this file with `swift test --filter RelayConnectionTests` and keeps step with it by
 // files: `<dir>/<name>.step` created by this side, then the wait for `<dir>/<name>.done`. Run alone, the tests fail on the missing environment: none passes on nothing.
+import CryptoKit
 import Foundation
 import Platform
 @testable import ProtocolHost
@@ -136,7 +137,7 @@ final class RelayConnectionTests: XCTestCase {
         let rested = await log.wait(from: 0, seconds: 30) { isDelivered($0, "rest") }
         XCTAssertNotNil(rested, "the first run reaches rest")
         XCTAssertThrowsError(try LinkStore(folder: folder, identity: LinkIdentity(signing: Data(), receiving: Data(), relay: Data()))) {
-            XCTAssertTrue($0 is LinkStoreBusy, "the first run holds the store")
+            XCTAssertTrue($0 is StoreBusy, "the first run holds the store")
         }
         await first!.stop()
         first = nil // the store's lock goes with the connection, as it goes with the process
@@ -165,6 +166,49 @@ final class RelayConnectionTests: XCTestCase {
         let held = await connection.socketCount()
         XCTAssertLessThanOrEqual(held, 1, "only the dial in progress holds a socket")
         await connection.stop()
+    }
+
+    /// F1 of the app-link ledger: the setter on a running link gives the secret again and dials at once, cutting the back-off short.
+    func testEnrolOnARunningConnectionDialsAtOnce() async throws {
+        let connection = try await makeLonelyConnection(constants: ["first": .number(20_000), "max": .number(40_000)])
+        let log = Log(connection)
+        connection.start()
+        let first = await log.wait(from: 0, seconds: 20) { isDialing($0) }
+        XCTAssertNotNil(first, "the first dial")
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(log.entries(from: 0).filter { isDialing($0.event) }.count, 1, "the back-off holds the next dial for 20 s")
+        let refusedSecret = await connection.enrol(Enrolment(secret: Data(count: 5), signed: Data(count: 120), sig: Data(count: 64)))
+        XCTAssertFalse(refusedSecret, "a secret that is not 32 bytes cannot be framed and changes nothing")
+        let taken = await connection.enrol(Enrolment(secret: Data(count: 32), signed: Data(count: 120), sig: Data(count: 64)))
+        XCTAssertTrue(taken)
+        let second = await log.wait(from: 0, seconds: 5) { _ in log.entries(from: 0).filter { isDialing($0.event) }.count >= 2 }
+        XCTAssertNotNil(second, "the link dials at once, not after the back-off")
+        await connection.stop()
+        let afterStop = await connection.enrol(Enrolment(secret: Data(count: 32), signed: Data(count: 120), sig: Data(count: 64)))
+        XCTAssertFalse(afterStop, "an ended connection takes nothing")
+    }
+
+    /// CR4 of the app-link ledger: entry 0 through the real joined script, signed with the store's `device.sign`.
+    func testBuildGenesisThroughTheJoinedScript() async throws {
+        let store = SoftwareKeyStore()
+        for (name, use) in [("device.sign", KeyUse.sign), ("device.receive", .receive), ("recovery.sign", .sign), ("recovery.receive", .receive)] { _ = try store.make(name, use) }
+        let host = try await ProtocolHost(scriptPath: try env("PARDNER_JOINED_SCRIPT"), store: store)
+        let entry = try await host.buildGenesis(signing: try store.publicKey("device.sign"), receiving: try store.publicKey("device.receive"),
+                                                recoverySigning: try store.publicKey("recovery.sign"), recoveryReceiving: try store.publicKey("recovery.receive"))
+        XCTAssertEqual(entry.sig.count, 64)
+        XCTAssertEqual(entry.id.count, 32)
+        XCTAssertFalse(entry.signed.isEmpty)
+        let verifier = try P256.Signing.PublicKey(x963Representation: try store.publicKey("device.sign"))
+        XCTAssertTrue(verifier.isValidSignature(try P256.Signing.ECDSASignature(rawRepresentation: entry.sig), for: entry.signed), "signed with device.sign")
+        XCTAssertEqual(entry.id, Data(SHA256.hash(data: entry.signed)), "the id is the hash of the signed bytes")
+
+        do {
+            _ = try await host.buildGenesis(signing: Data(count: 3), receiving: try store.publicKey("device.receive"),
+                                            recoverySigning: try store.publicKey("recovery.sign"), recoveryReceiving: try store.publicKey("recovery.receive"))
+            XCTFail("a key of the wrong length is refused")
+        } catch let refused as EntryRefused {
+            XCTAssertEqual(refused.reason, "bad-input")
+        }
     }
 
     func testStopBeforeStartEndsTheConnectionForGood() async throws {

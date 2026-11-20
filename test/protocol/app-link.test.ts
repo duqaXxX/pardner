@@ -394,7 +394,7 @@ test("device pairing 3.5.7 enrol goes before the proof until the first served, t
   assert.deepEqual(frameTypes(r.connect(2000)).slice(0, 2), ["prove-active", "read"]);
 });
 
-test("device pairing 3.5 AppLink.enrol hands a retyped secret to the running link, and refuses one that cannot be framed", () => {
+test("device pairing 3.5 AppLink.enrol refuses a secret that cannot be framed, and any once served has cleared it", () => {
   const s = scene();
   const enrol = { secret: fill(3), signed: s.alice.genesis.signed, sig: s.alice.genesis.sig };
   const r = rig(s, { enrol });
@@ -406,15 +406,27 @@ test("device pairing 3.5 AppLink.enrol hands a retyped secret to the running lin
     error: "bad-input",
   });
   assert.deepEqual(r.link.enrol(enrol.secret, enrol.signed, enrol.sig), {
-    ok: true,
-    value: undefined,
+    ok: false,
+    error: "bad-input",
   });
   r.drop(10);
   assert.deepEqual(
     frameTypes(r.connect(2000)).slice(0, 2),
-    ["enrol", "prove-active"],
-    "the next connection carries the secret the setter gave",
+    ["prove-active", "read"],
+    "served cleared the enrolment: the setter does not bring it back",
   );
+});
+
+test("device pairing 3.5 AppLink.enrol on a link not yet served hands the secret to the next connection", () => {
+  const s = scene();
+  s.epoch();
+  const enrol = { secret: fill(3), signed: s.alice.genesis.signed, sig: s.alice.genesis.sig };
+  const r = rig(s);
+  assert.deepEqual(r.link.enrol(enrol.secret, enrol.signed, enrol.sig), {
+    ok: true,
+    value: undefined,
+  });
+  assert.deepEqual(frameTypes(r.connect()).slice(0, 2), ["enrol", "prove-active"]);
 });
 
 test("device pairing 3.6 addDevice and removeDevice are busy until the log is at rest", () => {
