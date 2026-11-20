@@ -7,11 +7,13 @@ import { createECDH } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { hostname } from "node:os";
 import { isAbsolute } from "node:path";
-import { type ChatContext, type ChatEntry, ConfigError } from "../../core/port.ts";
+import { type ChatContext, type ChatEntry, ConfigError, type Instance } from "../../core/port.ts";
 import { getLogger } from "../../log.ts";
 import type { Check, ModuleSetup, SetupQuestion } from "../../module-setup.ts";
+import { createNodePlatform } from "../../platform-node/platform.ts";
 import { deviceId } from "../../protocol/ids.ts";
 import { Run } from "../../protocol/outbox.ts";
+import { checkPairingName, decodePairingString, shortForm } from "../../protocol/pairing-string.ts";
 import type { Bytes } from "../../protocol/platform.ts";
 import { encodeProfile, type Profile, refusedInName } from "../../protocol/profile.ts";
 import type { ChatProvider } from "../seam.ts";
@@ -111,11 +113,12 @@ export function configuredProfile(
   return { name, icon };
 }
 
-/**
- * A question for the bot's name or icon, which an empty answer skips. Its check is the start's but
- * for the agent's brand, which the setup's seam does not carry: the start refuses that name, saying so.
- */
-function profileQuestion(variable: string, message: string): SetupQuestion {
+/** A question for the bot's name or icon, which an empty answer skips. Its check is the start's, the agent's brand included. */
+function profileQuestion(
+  variable: string,
+  message: string,
+  brand: readonly string[],
+): SetupQuestion {
   return {
     variable,
     message,
@@ -123,7 +126,7 @@ function profileQuestion(variable: string, message: string): SetupQuestion {
     optional: true,
     async check(answer): Promise<Check> {
       try {
-        configuredProfile({ variables: { [variable]: answer } });
+        configuredProfile({ variables: { [variable]: answer }, brand });
         return {};
       } catch (error) {
         return { refusal: (error as Error).message.replace(`${variable}: `, "") };
@@ -132,8 +135,47 @@ function profileQuestion(variable: string, message: string): SetupQuestion {
   };
 }
 
+/** The bot's name question: the profile's check, and then the pairing string's, so that `finish` meets no typed name it cannot carry. */
+function nameQuestion(message: string, brand: readonly string[]): SetupQuestion {
+  const question = profileQuestion("PARDNER_BOT_NAME", message, brand);
+  return {
+    ...question,
+    async check(answer): Promise<Check> {
+      const checked = await question.check(answer);
+      if ("refusal" in checked || checkPairingName(createNodePlatform(), answer)) return checked;
+      return {
+        refusal: "the name travels in the pairing string, which takes 64 bytes of text at most.",
+      };
+    },
+  };
+}
+
+/**
+ * The name the pairing string carries: the bot's name as the start reads it (the brand included),
+ * the host's default when none was typed. A default the string cannot carry (a host name past 64
+ * bytes, or with an invisible character) is refused here, naming what to do, before `pair` runs.
+ */
+export function pairingName(
+  values: Readonly<Record<string, string>>,
+  instance: string | undefined,
+  brand: readonly string[],
+  host = hostname(),
+): string {
+  const typed = values.PARDNER_BOT_NAME;
+  const name = configuredProfile(
+    { variables: typed === undefined ? {} : { PARDNER_BOT_NAME: typed }, instance, brand },
+    host,
+  ).name;
+  if (!checkPairingName(createNodePlatform(), name)) {
+    throw new ConfigError(
+      "PARDNER_BOT_NAME: this Mac's name cannot travel in the pairing string (64 bytes at most, no invisible character). Move .env away, then run setup again and type a name.",
+    );
+  }
+  return name;
+}
+
 /** Setup of the pairing: `finish` pairs the bot once the wizard has written `.env`, so ending it earlier leaves no keys. */
-function relaySetup(): ModuleSetup {
+function relaySetup(instance: Instance, brand: readonly string[] = []): ModuleSetup {
   const questions: SetupQuestion[] = [
     {
       variable: "RELAY_ADDRESS",
@@ -173,13 +215,11 @@ function relaySetup(): ModuleSetup {
         return {};
       },
     },
-    profileQuestion(
-      "PARDNER_BOT_NAME",
-      "The bot's name as your devices show it (Enter for this Mac's name):",
-    ),
+    nameQuestion("The bot's name as your devices show it (Enter for this Mac's name):", brand),
     profileQuestion(
       "PARDNER_BOT_ICON",
       "The absolute path of the bot's icon, a square PNG or JPEG (Enter for none):",
+      brand,
     ),
   ];
   return {
@@ -190,13 +230,27 @@ function relaySetup(): ModuleSetup {
     questions,
     async finish(configDir, values) {
       const warnings: string[] = [];
+      const name = pairingName(values, instance.name ?? undefined, brand);
       const string = await pair(
         configDir,
         fromHex(values.RELAY_OWNER ?? ""),
         fromHex(values.RELAY_KEY ?? ""),
+        name,
         { warn: (line) => warnings.push(line) },
       );
-      return ["Paired. Add this device on your side with:", string, ...warnings];
+      // From the string itself, not from the files `pair` wrote: a read that fails now would lose the string.
+      const platform = createNodePlatform();
+      const decoded = decodePairingString(platform, string);
+      if (!decoded.ok) throw new Error("the pairing string does not decode");
+      const short = shortForm(platform, decoded.value.device);
+      return [
+        "Paired. Add this device on your side with:",
+        string,
+        `Name: ${name}`,
+        `Device: ${short}`,
+        "Check that your device shows this name and this device before you confirm.",
+        ...warnings,
+      ];
     },
   };
 }

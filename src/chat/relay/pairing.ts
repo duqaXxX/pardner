@@ -8,8 +8,8 @@ import { join } from "node:path";
 import { ConfigError } from "../../core/port.ts";
 import { writeFileAtomic } from "../../platform-node/key-file.ts";
 import { createNodePlatform, type NodePlatform } from "../../platform-node/platform.ts";
-import { Writer } from "../../protocol/bytes.ts";
-import { type DeviceKeys, encodeDevicePossession, writeDevice } from "../../protocol/device-log.ts";
+import { type DeviceKeys, encodeDevicePossession } from "../../protocol/device-log.ts";
+import { checkPairingName, encodePairingString } from "../../protocol/pairing-string.ts";
 import type { Bytes } from "../../protocol/platform.ts";
 import { AGAIN, fromHex, toHex } from "./hex.ts";
 import { identityOf, resetStore, storePath } from "./store.ts";
@@ -34,8 +34,8 @@ export const botPlatform = (directory: string): NodePlatform =>
 /**
  * Pairs the bot with the relay `relay` for `person`, under the instance lock that the caller holds
  * (the wizard, through `finish`): removes the old pairing and keys, makes new keys, and writes the
- * pairing file last. Returns the hex string the approving device adds: the bot's kind, its two
- * public keys and the proof of possession, which is signed once and not kept. `between` runs after
+ * pairing file last. Returns the pairing string the approving device adds: the bot's kind, its two
+ * public keys, the proof of possession (signed once and not kept) and `name`. `between` runs after
  * the keys and before the pairing file, and `stored` after the pairing file and before the store's
  * reset, for a test to stand where a crash would. `warn` is told when the reset failed. The store is reset last, keeping only `decided`
  * (row I1). The platform's keys are zeroed before it returns.
@@ -44,6 +44,7 @@ export async function pair(
   directory: string,
   person: Bytes,
   relay: Bytes,
+  name: string,
   hooks: {
     between?: () => void | Promise<void>;
     stored?: () => void | Promise<void>;
@@ -52,6 +53,8 @@ export async function pair(
 ): Promise<string> {
   if (person.length !== 32) throw new Error("the person id is not 32 bytes");
   if (relay.length !== 65) throw new Error("the relay key is not 65 bytes");
+  // Before the old pairing is removed: a name the string cannot carry must not cost the keys.
+  if (!checkPairingName(createNodePlatform(), name)) throw new RangeError("not a device name");
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   let platform: NodePlatform | undefined;
   try {
@@ -81,7 +84,7 @@ export async function pair(
         `The store at ${storePath(directory)} could not be reset. Remove it, then start the bot.`,
       );
     }
-    return toHex(writeDevice(new Writer(), device).sig(proof.value).bytes());
+    return encodePairingString(platform, device, proof.value, name);
   } finally {
     platform?.erase();
   }

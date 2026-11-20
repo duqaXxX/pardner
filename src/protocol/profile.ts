@@ -23,7 +23,7 @@ const MAX_ICON_TEXT = 4 * Math.ceil(MAX_ICON / 3); // its base64, refused before
 // a C0 or C1 control, a line or paragraph separator, or a lone surrogate, which Swift turns into
 // U+FFFD so that two strings that differ would look alike. Iterating by code point leaves a lone
 // surrogate as one unit in U+D800 to U+DFFF.
-const hidden = (c: number) =>
+export const hidden = (c: number): boolean =>
   c <= 0x1f ||
   (c >= 0x7f && c <= 0x9f) ||
   c === 0x2028 ||

@@ -15,10 +15,9 @@ import { runInNewContext } from "node:vm";
 import { Connection } from "../../../src/chat/relay/connection.ts";
 import { botPlatform, loadPairing, pair } from "../../../src/chat/relay/pairing.ts";
 import { identityOf, Store, storePath } from "../../../src/chat/relay/store.ts";
-import { decode } from "../../../src/protocol/bytes.ts";
-import { readDevice } from "../../../src/protocol/device-log.ts";
 import { decodeFrame, encodeFrame, type Frame, FrameCutter } from "../../../src/protocol/frames.ts";
 import { deviceId, relayKeyId } from "../../../src/protocol/ids.ts";
+import { decodePairingString } from "../../../src/protocol/pairing-string.ts";
 import type { Bytes } from "../../../src/protocol/platform.ts";
 import type { Out } from "../../../src/protocol/reading.ts";
 import { DARWIN } from "../../relay/process-support.ts";
@@ -71,11 +70,8 @@ async function rig(options: { add?: boolean; copyBeforeAdd?: boolean } = {}) {
   let target = await relay.open();
   const alice = person(keyed("app", `${tag}-app`), keyed("app", `${tag}-sheet`));
   const dir = tempDirSync("pardner-chat-");
-  const string = await pair(dir, alice.id, target.relay);
-  const bot = decode(Uint8Array.from(Buffer.from(string, "hex")), (r) => ({
-    device: readDevice(r),
-    proof: r.sig(),
-  }));
+  const string = await pair(dir, alice.id, target.relay, "alice");
+  const bot = decodePairingString(platform, string);
   assert.ok(bot.ok);
   const log: { id: Bytes }[] = [{ id: alice.id }];
   const ids = () => log.map((e) => hex(e.id));
@@ -407,7 +403,7 @@ test("a fault stops the bot: it dials no more", async () => {
     } as never);
   });
   relayKey = fake.key;
-  await pair(dir, platform.random(32), relayKey);
+  await pair(dir, platform.random(32), relayKey, "alice");
   const b = botOn(dir, at(fake.port));
   try {
     b.connection.start();
@@ -424,7 +420,7 @@ test("a fault stops the bot: it dials no more", async () => {
     assert.equal(again.count("fault"), 1);
     assert.equal(again.connection.reading.state, "fault");
     assert.equal(connections, 1);
-    await pair(dir, platform.random(32), relayKey);
+    await pair(dir, platform.random(32), relayKey, "alice");
     const paired = loadPairing(dir);
     const held = botPlatform(dir);
     assert.equal(Store.open(dir, identityOf(held, paired.device, paired.relay)).saved.fault, false);
@@ -441,7 +437,7 @@ test("a relay with another key is sent no frame and is dialed again", async () =
   const fake = await fakeRelay(platform, () => {
     received += 1;
   });
-  await pair(dir, platform.random(32), new Uint8Array(65).fill(4)); // not the fake's key
+  await pair(dir, platform.random(32), new Uint8Array(65).fill(4), "alice"); // not the fake's key
   const b = botOn(dir, at(fake.port), (n) => {
     if (n === 2) void b.connection.stop();
   });
@@ -460,7 +456,7 @@ test("a relay with another key is sent no frame and is dialed again", async () =
 /** A paired folder for a bot talking to a fake relay with `key`. */
 async function paired(key: Bytes) {
   const dir = tempDirSync("pardner-chat-");
-  await pair(dir, platform.random(32), key);
+  await pair(dir, platform.random(32), key, "alice");
   return dir;
 }
 
@@ -933,7 +929,7 @@ test("sockets the peer closed are released", async () => {
   const server = createServer((socket) => socket.destroy());
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const dir = tempDirSync("pardner-chat-");
-  await pair(dir, platform.random(32), new Uint8Array(65).fill(4));
+  await pair(dir, platform.random(32), new Uint8Array(65).fill(4), "alice");
   const live = () => {
     setFlagsFromString("--expose-gc");
     runInNewContext("gc")();

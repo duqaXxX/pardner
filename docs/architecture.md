@@ -205,7 +205,7 @@ clock). `AgentEntry.executable`, when a module gives it, names the agent's own c
 sessions may start under, the instance's scratch folder (`ChatContext.scratchDir`), two clocks, the instance's name (`ChatContext.instance`), the agent's `AgentWords.brand` (`ChatContext.brand`), and `ChatContext.core`, which returns the `CorePort` once
 the daemon has built its sessions. The chat is built before the sessions exist, so `build` must
 not call `core`; a provider calls it when it first needs the core. `ChatEntry.setup` and `AgentEntry.setup`, when a module gives them, are what `pardner setup`
-asks for that module (`ModuleSetup`, in `src/module-setup.ts` since both seams use it: intro
+asks for that module; the chat's takes the picked agent's `AgentEntry.brand`, the names a bot may not carry, so that the setup checks the bot's name as the start does (`ModuleSetup`, in `src/module-setup.ts` since both seams use it: intro
 lines and questions, each with its check and the variables it may set, `sets`); the core runs the
 flow and writes the file. It takes `SetupModules` (`chats` and `agents` by name, as the registry
 holds them, and the `defaults`), asks which chat and which agent through `Prompter.choose` (a
