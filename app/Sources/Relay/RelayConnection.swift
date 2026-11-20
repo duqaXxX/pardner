@@ -72,6 +72,22 @@ public enum SubmitOutcome: Sendable, Equatable {
     case ended
 }
 
+/// An entry the device builds, or a pairing it only checks, against the log the link holds (device pairing design 3.4, 3.6, 3.9).
+public enum DeviceAct: Sendable, Equatable {
+    /// What an add would refuse, before anything is signed.
+    case check(device: HostValue, proof: Data)
+    case add(device: HostValue, proof: Data)
+    case remove(target: Data)
+}
+
+/// What `build` came to.
+public enum BuildOutcome: Sendable, Equatable {
+    case checked
+    case built(SignedEntry)
+    /// The package's reason: `busy` (the log is not at rest), `proof` (the string was made for another person id), `named` (the device is in the log already), or the builder's own (`bad-input`, `no-such-key`).
+    case refused(String)
+}
+
 enum Event: Sendable {
     case opened(Int, Data)
     case received(Int, Data)
@@ -81,6 +97,7 @@ enum Event: Sendable {
     case submit(UInt8, Data, Data, CheckedContinuation<SubmitOutcome, Error>)
     case count(CheckedContinuation<Int, Never>)
     case enrol(Enrolment, CheckedContinuation<Bool, Never>)
+    case build(DeviceAct, CheckedContinuation<BuildOutcome, Error>)
     case stop
 }
 
@@ -270,6 +287,14 @@ public final class RelayConnection: @unchecked Sendable {
         }
     }
 
+    /// Builds and signs an entry against the log the link holds and sends nothing; the caller keeps it pending, then `submit`s it
+    /// (design 3.6). `.refused("ended")` when the connection has ended.
+    public func build(_ act: DeviceAct) async throws -> BuildOutcome {
+        try await withCheckedThrowingContinuation { continuation in
+            if case .terminated = feed.yield(.build(act, continuation)) { continuation.resume(returning: .refused("ended")) }
+        }
+    }
+
     /// Ends the connection and the dialing; returns when the task has ended. Before `start()` it ends the connection for good.
     public func stop() async {
         let task = lifecycle.withLock { state -> Task<Void, Never>? in
@@ -336,6 +361,11 @@ public final class RelayConnection: @unchecked Sendable {
             guard taken["ok"] == .bool(true) else { continuation.resume(returning: false); return }
             continuation.resume(returning: true)
             try await perform(try await call("networkUp")) // a back-off cut short, as when the network returns
+        case .build(let act, let continuation):
+            do { continuation.resume(returning: try await built(act)) } catch {
+                continuation.resume(throwing: error)
+                throw error
+            }
         case .networkUp: try await perform(try await call("networkUp"))
         case .timer(let at):
             guard armed == at else { return } // a timer that is no longer the armed one does nothing
@@ -362,6 +392,23 @@ public final class RelayConnection: @unchecked Sendable {
                 try await perform(effects)
             }
         }
+    }
+
+    private func built(_ act: DeviceAct) async throws -> BuildOutcome {
+        func pairing(_ device: HostValue, _ proof: Data) -> HostValue { .object(["device": device, "proof": .bytes(proof)]) }
+        let answer: HostValue
+        switch act {
+        case .check(let device, let proof): answer = try await call("checkPairing", [pairing(device, proof)])
+        case .add(let device, let proof): answer = try await call("addDevice", [pairing(device, proof)])
+        case .remove(let target): answer = try await call("removeDevice", [.bytes(target)])
+        }
+        guard case .bool(let made)? = answer["ok"] else { throw HostError.faulted("the link answered a device act with no result") }
+        guard made else { return .refused(answer["error"]?.stringValue ?? "unknown") }
+        if case .check = act { return .checked }
+        guard let value = answer["value"], let signed = value["signed"]?.bytesValue, let sig = value["sig"]?.bytesValue, let id = value["id"]?.bytesValue else {
+            throw HostError.faulted("the link built a malformed entry")
+        }
+        return .built(SignedEntry(signed: signed, sig: sig, id: id))
     }
 
     /// A call of the link, with the time: the clock, and never before a deadline the timer fired for.
@@ -492,6 +539,7 @@ public final class RelayConnection: @unchecked Sendable {
             case .submit(_, _, _, let continuation): continuation.resume(returning: .ended)
             case .count(let continuation): continuation.resume(returning: 0)
             case .enrol(_, let continuation): continuation.resume(returning: false)
+            case .build(_, let continuation): continuation.resume(returning: .refused("ended"))
             default: break
             }
         }

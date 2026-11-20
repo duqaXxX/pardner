@@ -6,12 +6,14 @@ import {
   buildAdd,
   buildGenesis,
   buildRemove,
+  readDeviceEntry,
   type SignedEntry,
 } from "../../src/protocol/device-builders.ts";
 import {
   checkDeviceEntry,
   type DeviceKeys,
   decodeDeviceEntry,
+  encodeDeviceEntry,
   type LoggedEntry,
   type PublicKeys,
 } from "../../src/protocol/device-log.ts";
@@ -152,4 +154,42 @@ test("a builder given a value outside its field returns a failure and does not t
     ),
   ];
   for (const [i, r] of results.entries()) assert.ok(!r.ok, `case ${i}`);
+});
+
+test("a pending entry reads back as what it does, for the app that kept it (design 3.6)", () => {
+  const { first, log } = started();
+  const second = party();
+  const person = log[0]?.id as Uint8Array;
+  const proof = makeProof(platform, second.name, person, second.device);
+  const add = buildAdd(platform, first.name, log, first.id, second.device, proof);
+  assert.ok(add.ok);
+  const read = readDeviceEntry(platform, add.value.signed);
+  assert.ok(read.ok);
+  assert.equal(read.value.kind, "add");
+  assert.equal(read.value.seq, 1);
+  assert.deepEqual(read.value.prev, log[0]?.id);
+  assert.deepEqual(read.value.signer, first.id);
+  assert.deepEqual(read.value.device, second.id);
+  assert.deepEqual(read.value.keys, second.device);
+  assert.deepEqual(read.value.proof, proof);
+  append(log, add);
+  const remove = buildRemove(platform, first.name, log, first.id, second.id);
+  assert.ok(remove.ok);
+  const gone = readDeviceEntry(platform, remove.value.signed);
+  assert.ok(gone.ok);
+  assert.equal(gone.value.kind, "remove");
+  assert.equal(gone.value.seq, 2);
+  assert.deepEqual(gone.value.device, second.id);
+  assert.equal(gone.value.keys, undefined);
+});
+
+test("bytes that are no add or remove do not read back", () => {
+  const { log } = started();
+  assert.deepEqual(readDeviceEntry(platform, Uint8Array.of(1, 2, 3)), {
+    ok: false,
+    error: "bad-input",
+  });
+  const genesis = log[0];
+  assert.ok(genesis);
+  assert.equal(readDeviceEntry(platform, encodeDeviceEntry(genesis.entry)).ok, false);
 });

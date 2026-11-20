@@ -15,6 +15,7 @@ public protocol RelayLinking: AnyObject, Sendable {
     func stop() async
     func enrol(_ enrolment: Enrolment) async -> Bool
     func submit(kind: UInt8, signed: Data, sig: Data) async throws -> SubmitOutcome
+    func build(_ act: DeviceAct) async throws -> BuildOutcome
 }
 
 extension RelayConnection: RelayLinking {}
@@ -32,8 +33,10 @@ public enum PairingFaultKind: Sendable, Equatable {
     case newerStore
     /// The keys are here and no pairing says they are this Mac's: the only action is Pair again (design 4.1).
     case keysWithoutStore
-    /// A store at `joining`, which a later pull request handles (design 3.7).
-    case joinUnsupported
+    /// The log the relay served for a join does not hold this device's add (design 3.7, step 4): the connection is stopped, and the action is Pair again.
+    case joinMismatch
+    /// This Mac could not make its pairing string for a join (design 3.7): `joining` is on disk, so Retry resumes it, and Pair again starts over.
+    case joinUnmade
     case failed
 }
 
@@ -47,6 +50,8 @@ public enum PairingPhase: Sendable, Equatable {
     case showingSheet(RecoverySheetRequest)
     /// Entry 0 is sent on every connection until the relay places it. `asksSecret`: the relay did not take the enrolment secret, or none is held after a restart (design 3.5 step 7).
     case enrolling(asksSecret: Bool)
+    /// The join waits for the other device's add (design 3.7).
+    case joining(JoiningInfo)
     case paired
     /// This device was removed (design 3.10): the only action is `pairAgain()`.
     case removed
@@ -61,7 +66,23 @@ public enum PairingPhase: Sendable, Equatable {
     case fault(PairingFaultKind, String)
 }
 
+/// What the joining screen shows: this Mac's pairing string and its short form, to copy to the approving device (design 3.7).
+public struct JoiningInfo: Sendable, Equatable {
+    public let pairingString: String
+    public let shortForm: String
+    /// The relay refused this device as not yet known (refusal 2): "Waiting for your other device to add this one".
+    public var waiting: Bool
+
+    public init(pairingString: String, shortForm: String, waiting: Bool = false) { (self.pairingString, self.shortForm, self.waiting) = (pairingString, shortForm, waiting) }
+}
+
 extension PairingPhase {
+    /// What the person is told while a join waits for the other device.
+    public static let joinWaiting = "Waiting for your other device to add this one"
+    /// What the person is told when the log a join was served does not hold this device.
+    public static let joinMismatchAdvice = "The relay did not serve a log that holds this Mac. Pair again starts over; remove any entry this attempt left from another of your devices."
+    /// What the person is told when this Mac cannot make its pairing string.
+    public static let joinUnmadeAdvice = "This Mac cannot make its pairing string. Pair again to start over."
     /// What the person is told when the relay was put back (security design 5.11).
     public static let putBackAdvice = "This relay was put back. Set up a new relay with pardner relay init under a new --instance name, or after moving the old relay's folder away, then pair this Mac again."
     /// What the person is told when the link faulted.
@@ -80,6 +101,10 @@ public enum PairingInputError: Error, Equatable {
     case relayKey
     /// 64 hex characters.
     case enrolmentSecret
+    /// 64 hex characters.
+    case person
+    /// A name a device may not carry: 1 to 64 bytes with no hidden character, no space at either end (design 3.4).
+    case name
     /// The controller is in no phase that takes this.
     case notReady
 }
@@ -106,14 +131,14 @@ public actor PairingController {
 
     static let signName = "device.sign", receiveName = "device.receive", recoveryName = "recovery"
 
-    private let keys: any KeyStore & Sendable
-    private let pairing: PairingStore
+    let keys: any KeyStore & Sendable
+    let pairing: PairingStore
     private let linkFolder: URL
     private let makeHost: MakeHost
     private let connect: Connect
 
     /// The state the views draw; every change is also yielded on `phases`.
-    public private(set) var phase: PairingPhase = .starting { didSet { phaseOut.yield(phase) } }
+    public internal(set) var phase: PairingPhase = .starting { didSet { phaseOut.yield(phase) } }
     /// Only the newest phase is kept: a view that reads late draws the state now, not the road to it.
     public nonisolated let phases: AsyncStream<PairingPhase>
     /// What the connection tells, after the controller has read it: the reading model's input. Nothing reads it yet; the bound keeps
@@ -122,14 +147,14 @@ public actor PairingController {
     private let phaseOut: AsyncStream<PairingPhase>.Continuation
     private let eventOut: AsyncStream<RelayEvent>.Continuation
 
-    private var host: ProtocolHost?
-    private var link: (any RelayLinking)?
+    var host: ProtocolHost?
+    var link: (any RelayLinking)?
     private var eventTask: Task<Void, Never>?
-    private var connectionID = 0
-    private var stored: PairingState?
-    private var cancelRequested = false
+    var connectionID = 0
+    var stored: PairingState?
+    var cancelRequested = false
     private var launching = false
-    private var isShutDown = false
+    var isShutDown = false
     // What a cancel while enrolling reads. A refusal stands until the person types the secret again (or a new attempt starts): a
     // dial does not clear it, since no later dial carries `enrol`. A refusal that arrives after a retype and before the next dial
     // answers a connection that never carried the new secret, so it is ignored.
@@ -138,10 +163,24 @@ public actor PairingController {
     private var secretRetyped = false
     // Whether a connection reached the relay since the last answer (design 3.5: wait while it can be reached).
     private var reachable = true
+    // The join's screen, kept to say a refusal 2 on it (design 3.7).
+    var joiningScreen: JoiningInfo?
+    // The devices of the person (design 3.6, 3.9), in PairingController+Devices.swift.
+    let clock: @Sendable () -> Date
+    var snapshot: DeviceSnapshot?
+    var acceptedOn: Int?
+    var heldAtLength: Int?
+    var gate = Gate()
+    /// What the Devices screen reads; every change is also yielded on `deviceStates`.
+    public internal(set) var deviceList = DevicesState() { didSet { deviceOut.yield(deviceList) } }
+    public nonisolated let deviceStates: AsyncStream<DevicesState>
+    let deviceOut: AsyncStream<DevicesState>.Continuation
 
     public init(keys: any KeyStore & Sendable, pairing: PairingStore, linkFolder: URL,
-                makeHost: @escaping MakeHost = PairingController.bundledHost, connect: @escaping Connect = PairingController.relayConnection) {
-        (self.keys, self.pairing, self.linkFolder, self.makeHost, self.connect) = (keys, pairing, linkFolder, makeHost, connect)
+                makeHost: @escaping MakeHost = PairingController.bundledHost, connect: @escaping Connect = PairingController.relayConnection,
+                clock: @escaping @Sendable () -> Date = { Date() }) {
+        (self.keys, self.pairing, self.linkFolder, self.makeHost, self.connect, self.clock) = (keys, pairing, linkFolder, makeHost, connect, clock)
+        (deviceStates, deviceOut) = AsyncStream.makeStream(of: DevicesState.self, bufferingPolicy: .bufferingNewest(1))
         (phases, phaseOut) = AsyncStream.makeStream(of: PairingPhase.self, bufferingPolicy: .bufferingNewest(1))
         (relayEvents, eventOut) = AsyncStream.makeStream(of: RelayEvent.self, bufferingPolicy: .bufferingNewest(256))
     }
@@ -176,14 +215,23 @@ public actor PairingController {
                 // No sheet and no secret survive the stop (keys first, the store last): the attempt starts over.
                 try await eraseAll()
                 phase = .unpaired(intent == .enrol ? .staleSheet : nil)
-            case .joining:
-                phase = .fault(.joinUnsupported, "This Mac was joining a relay; joining is not in this version. Pair again starts over.")
-            case .enrolling, .paired:
+            case .enrolling, .joining, .paired:
                 guard keys.has(Self.signName), keys.has(Self.receiveName) else { return phase = .keysMissing }
                 stored = state
+                // The string is made again from the kept proof (signed once) before the connection starts: nothing it tells can land during this wait.
+                let joining: JoiningInfo?
+                if state.stage == .joining {
+                    do { joining = try await joiningInfo(state) } catch {
+                        return phase = .fault(.joinUnmade, PairingPhase.joinUnmadeAdvice) // `joining` stays on disk: Retry resumes it, Pair again starts over
+                    }
+                } else { joining = nil }
                 try await startConnection(state, enrolment: nil) // a restart holds no enrolment secret: the proof decides
                 guard !isShutDown else { return }
-                phase = state.stage == .paired ? .paired : .enrolling(asksSecret: false)
+                switch state.stage {
+                case .paired: phase = .paired
+                case .joining: phase = .joining(joining!) // no await since the connection started: its first event finds this phase
+                default: phase = .enrolling(asksSecret: false)
+                }
             }
         } catch let fault as PairingFault {
             phase = fault.isNewerVersion
@@ -263,6 +311,8 @@ public actor PairingController {
             cancelRequested = true
             request.answer(false)
             return .abandoning
+        case .joining:
+            return await eraseForCancel() // the add that lands later names a device nobody holds: the person removes it (design 3.7, step 5)
         case .enrolling:
             if refused { return await eraseForCancel() }
             guard !reachable else { return .waitForAnswer }
@@ -286,13 +336,13 @@ public actor PairingController {
     // MARK: removed, and pairing again (design 3.10, 4.1)
 
     /// Erases the keys, the link's state and the pairing, in that order, and returns to the first screen. Only from `removed`,
-    /// `keysMissing`, a put-back relay (security design 5.11), a link fault, a pairing file that does not read (not one of a newer app), keys with no pairing and a store at `joining` (design 4.1); false otherwise, and false with the fault shown
+    /// `keysMissing`, a put-back relay (security design 5.11), a link fault, a pairing file that does not read (not one of a newer app), keys with no pairing and a join whose log did not hold this Mac (design 4.1); false otherwise, and false with the fault shown
     /// when an erase failed. A transient fault never offers it (the relay may hold the device): it offers `retry()`.
     /// Nothing is erased without this call.
     @discardableResult
     public func pairAgain() async -> Bool {
         switch phase {
-        case .removed, .keysMissing, .putBack, .linkFaulted, .fault(.malformedStore, _), .fault(.keysWithoutStore, _), .fault(.joinUnsupported, _): break
+        case .removed, .keysMissing, .putBack, .linkFaulted, .fault(.malformedStore, _), .fault(.keysWithoutStore, _), .fault(.joinMismatch, _), .fault(.joinUnmade, _): break
         default: return false
         }
         do {
@@ -310,7 +360,11 @@ public actor PairingController {
     /// Refused from `putBack` (the link store keeps the mark, so a new link ends at once) and from `linkFaulted` (the relay's fault would come again).
     @discardableResult
     public func retry() async -> Bool {
-        guard case .fault(.failed, _) = phase, !launching else { return false }
+        switch phase {
+        case .fault(.failed, _), .fault(.joinUnmade, _): break
+        default: return false
+        }
+        guard !launching else { return false }
         launching = true // claimed before the first await: a second retry meets it
         defer { launching = false }
         await stopConnection()
@@ -337,6 +391,7 @@ public actor PairingController {
         await stopConnection()
         phaseOut.finish()
         eventOut.finish()
+        deviceOut.finish()
     }
 
     // MARK: the connection's events
@@ -351,25 +406,33 @@ public actor PairingController {
         case .enrolled: await becomePaired()
         // The link gives `enrol-refused` and then the delivered `refused 2`: the person is asked once (the app-link ledger, "For P3").
         case .enrolRefused: askForSecret()
-        case .devices:
+        case .devices(let effect):
             reachable = true
             await becomePaired() // a restart never gets `enrolled`: the first reading effect says entry 0 was placed
+            await devicesRead(effect)
         case .delivered(let view):
             reachable = true
             switch (view["do"]?.stringValue, view["reason"]?.numberValue.map(Int.init)) {
-            case ("rest", _): await becomePaired()
+            case ("rest", _):
+                await becomePaired()
+                await settle() // every rest: a pending entry is read back, sent again or rebuilt (design 3.6)
             case ("refused", 2?) where stored?.stage == .enrolling: askForSecret()
-            case ("refused", 1?) where stored?.stage == .paired: await markRemoved()
+            case ("refused", 2?) where stored?.stage == .joining: waitForAdd()
+            case ("refused", 1?) where stored?.stage == .paired || stored?.stage == .joining: await markRemoved()
             case ("put-back", _): await linkEnded(.putBack(PairingPhase.putBackAdvice))
             case ("fault", _): await linkEnded(.linkFaulted(PairingPhase.linkFaultAdvice))
             default: break
             }
-        case .faulted(let message):
-            host = nil // a faulted host is over for good: the next action makes a new one
-            await stopConnection()
-            phase = .fault(.failed, message)
+        case .faulted(let message): await hostFaulted(message)
         case .profile: break
         }
+    }
+
+    /// A host that faulted is over for good: the next action makes a new one.
+    func hostFaulted(_ message: String) async {
+        host = nil
+        await stopConnection()
+        phase = .fault(.failed, message)
     }
 
     /// The link delivered a final view and ended: nothing is erased.
@@ -400,14 +463,14 @@ public actor PairingController {
         phase = .paired
     }
 
-    private func markRemoved() async {
+    func markRemoved() async {
         await stopConnection()
         phase = .removed
     }
 
     // MARK: the pieces
 
-    private func hostMade() async throws -> ProtocolHost {
+    func hostMade() async throws -> ProtocolHost {
         if let host { return host }
         // Both closures run on the host's thread. `show` blocks it until the view answers, so the request goes to the actor from a task.
         let person = RecoveryPerson(show: { [weak self] secret, context in
@@ -428,7 +491,7 @@ public actor PairingController {
         phase = .showingSheet(request)
     }
 
-    private func startConnection(_ state: PairingState, enrolment: Enrolment?) async throws {
+    func startConnection(_ state: PairingState, enrolment: Enrolment?) async throws {
         guard let person = state.person else { throw PairingFault(description: "the pairing holds no person") }
         let host = try await hostMade()
         guard !isShutDown else { return } // the app quit while the host was made: no connection starts after the streams finished
@@ -439,13 +502,14 @@ public actor PairingController {
         let id = connectionID
         link = connection
         (refused, secretRetyped, reachable) = (false, false, true)
+        (snapshot, acceptedOn, heldAtLength) = (nil, nil, nil)
         let events = connection.events
         eventTask = Task { [weak self] in for await event in events { await self?.handle(event, id) } }
         connection.start()
     }
 
     /// The connection ended and its store given back, so the link's files can be erased.
-    private func stopConnection() async {
+    func stopConnection() async {
         connectionID += 1
         eventTask?.cancel()
         eventTask = nil
@@ -457,7 +521,7 @@ public actor PairingController {
     /// A decline, a cancel or a stop before step 6: the held secret wiped, then the keys, the link's state and the pairing (design 3.5).
     /// After `shutdown()` only the held secret is wiped: the process is exiting, so the keys and the store stay for the next launch, which
     /// erases them and says the sheet opens nothing (3.5).
-    private func abandon() async {
+    func abandon() async {
         try? await host?.deleteKey(Self.recoveryName)
         guard !isShutDown else { return }
         do {
@@ -468,13 +532,17 @@ public actor PairingController {
         }
     }
 
-    /// Keys first, the link's state, the pairing last: a stop between leaves a store that the next launch reads again.
-    private func eraseAll() async throws {
-        await stopConnection()
-        for name in [Self.signName, Self.receiveName] where keys.has(name) { try keys.delete(name) }
-        try LinkStore.erase(folder: linkFolder)
-        try pairing.erase()
-        stored = nil
+    /// Keys first, the link's state, the pairing last: a stop between leaves a store that the next launch reads again. It takes its turn
+    /// on the devices queue, so an act that copied the store and waits on the link cannot write it back after the erase.
+    func eraseAll() async throws {
+        try await serially {
+            await stopConnection()
+            for name in [Self.signName, Self.receiveName] where keys.has(name) { try keys.delete(name) }
+            try LinkStore.erase(folder: linkFolder)
+            try pairing.erase()
+            stored = nil
+            (snapshot, joiningScreen, deviceList) = (nil, nil, DevicesState())
+        }
     }
 
     // MARK: the form's checks (design 3.5 step 1)
@@ -511,7 +579,7 @@ public actor PairingController {
         return bytes
     }
 
-    private static func hexBytes(_ text: String, _ count: Int) -> Data? {
+    static func hexBytes(_ text: String, _ count: Int) -> Data? {
         let digits = Array(text.trimmingCharacters(in: .whitespacesAndNewlines).utf8)
         guard digits.count == count * 2 else { return nil }
         var out = Data()

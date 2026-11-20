@@ -79,15 +79,19 @@ export function encodePairingString(
   return toHex(w.bytes()) + toHex(platform.utf8Encode(name));
 }
 
-/** What the string says; the proof is for `checkPairingProof`, and the name is only for the eye. */
-export function decodePairingString(
+/** Why a pasted string is refused: it is no pairing string, or it is one whose name may not travel (design 3.4). */
+export type PairingRefusal = "not-a-string" | "bad-name";
+
+function parse(
   platform: Platform,
   text: string,
-): Result<{ device: DeviceKeys; proof: Bytes; name: string }> {
+):
+  | { ok: true; value: { device: DeviceKeys; proof: Bytes; name: string } }
+  | { ok: false; error: PairingRefusal } {
   const trimmed = text.trim();
   // Refused by its length before any work: a pasted text of megabytes is not scanned.
   if (trimmed.length > 2 * (FIXED_BYTES + MAX_NAME_BYTES) || !HEX.test(trimmed)) {
-    return fail("bad-input");
+    return { ok: false, error: "not-a-string" };
   }
   const bytes = fromHex(trimmed);
   const head = decode(bytes, (r: Reader) => ({
@@ -95,10 +99,68 @@ export function decodePairingString(
     proof: r.sig(),
     name: r.raw(Math.max(0, bytes.length - FIXED_BYTES)),
   }));
-  if (!head.ok) return head;
+  if (!head.ok) return { ok: false, error: "not-a-string" };
   const name = platform.utf8Decode(head.value.name);
-  if (!name.ok || !checkPairingName(platform, name.value)) return fail("bad-input");
-  return ok({ device: head.value.device, proof: head.value.proof, name: name.value });
+  if (!name.ok || !checkPairingName(platform, name.value)) return { ok: false, error: "bad-name" };
+  return {
+    ok: true,
+    value: { device: head.value.device, proof: head.value.proof, name: name.value },
+  };
+}
+
+/** What the string says; the proof is for `checkPairingProof`, and the name is only for the eye. */
+export function decodePairingString(
+  platform: Platform,
+  text: string,
+): Result<{ device: DeviceKeys; proof: Bytes; name: string }> {
+  const read = parse(platform, text);
+  return read.ok ? read : fail("bad-input");
+}
+
+/** `decodePairingString` for the approving app: the refusal says which it is, and the short form comes with the keys. */
+export function inspectPairingString(
+  platform: Platform,
+  text: string,
+):
+  | { ok: true; value: { device: DeviceKeys; proof: Bytes; name: string; short: string } }
+  | { ok: false; error: PairingRefusal } {
+  const read = parse(platform, text);
+  return read.ok
+    ? { ok: true, value: { ...read.value, short: shortForm(platform, read.value.device) } }
+    : read;
+}
+
+/** The proof of possession a joining device makes once, with its own signing key, for the person it joins (design 3.7). */
+export function makePairingProof(
+  platform: Platform,
+  signName: string,
+  person: Bytes,
+  device: DeviceKeys,
+): Result<Bytes> {
+  let possession: Bytes;
+  try {
+    possession = encodeDevicePossession(person, device);
+  } catch {
+    // A person or a key of the wrong length: a refusal for the caller across JavaScriptCore, never a throw. No `instanceof` here.
+    return fail("bad-input");
+  }
+  return platform.sign(signName, possession);
+}
+
+/** `encodePairingString` for a caller that cannot catch: a name that may not travel is a failure. */
+export function pairingString(
+  platform: Platform,
+  device: DeviceKeys,
+  proof: Bytes,
+  name: string,
+): Result<string> {
+  if (!checkPairingName(platform, name)) return fail("bad-input");
+  try {
+    return ok(encodePairingString(platform, device, proof, name));
+  } catch {
+    // A key or a proof of the wrong length: only the encoding throws, and a caller across JavaScriptCore cannot catch.
+    return fail("bad-input");
+  }
 }
 
 /** The first 8 bytes of the device's id in four groups of four hex digits; its first 8 digits are the window's short id. */

@@ -50,6 +50,9 @@ public struct PairingScreen: View {
             SettingUp(model: model)
         case .enrolling:
             if case .enrolling(let asksSecret) = model.phase { Enrolling(model: model, asksSecret: asksSecret) }
+        case .joining:
+            // The joining screen is the next pull request's; until then the person sees that the join runs.
+            Page(title: "Joining") { Text("Joining the relay…").foregroundStyle(PardnerColor.muted) }
         case .paired:
             EmptyView()
         case .removed:
@@ -68,9 +71,18 @@ public struct PairingScreen: View {
             notice("Update Pardner", text)
         case .needsNewPairing:
             notice("This Mac needs a new pairing", text)
+        case .joinUnmade:
+            joinUnmadeNotice(text)
         case .failed:
             notice("Something went wrong", text)
         }
+    }
+
+    /// Pair again, and Retry beside it while a controller exists to retry.
+    private func joinUnmadeNotice(_ text: String) -> Notice {
+        var second: (label: String, run: () -> Void)?
+        if model.offersRetryToo { second = ("Retry", model.retry) }
+        return Notice(title: "This Mac cannot join yet", text: text, action: ("Pair again", model.pairAgain), second: second)
     }
 
     /// A notice with the action the model offers for the phase, if any.
@@ -260,6 +272,7 @@ struct Notice: View {
     let title: String
     let text: String
     let action: (label: String, run: () -> Void)?
+    var second: (label: String, run: () -> Void)?
 
     var body: some View {
         Page(title: title) {
@@ -267,6 +280,9 @@ struct Notice: View {
             if let action {
                 Button(action.label, action: action.run)
                     .buttonStyle(PardnerButton(prominent: true)).accessibilityLabel(action.label)
+            }
+            if let second {
+                Button(second.label, action: second.run).buttonStyle(PardnerButton(prominent: false)).accessibilityLabel(second.label)
             }
         }
     }

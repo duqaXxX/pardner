@@ -19,14 +19,21 @@ import {
   openMessage,
   type Reference,
 } from "./messages.ts";
-import { checkPairingProof } from "./pairing-string.ts";
+import { checkPairingProof, shortForm } from "./pairing-string.ts";
 import type { Bytes, Platform } from "./platform.ts";
 import { encodeProfile, type Profile, Profiles } from "./profile.ts";
 import type { Kept, Out } from "./reading.ts";
 import type { PlatformError, Result } from "./result.ts";
 
 // The first device's entry 0 (design 3.5): the app calls it through `ProtocolHost.callExported`, before any `AppLink` exists.
-export { buildGenesis } from "./device-builders.ts";
+export { buildGenesis, readDeviceEntry } from "./device-builders.ts";
+// What a pasted or a made pairing string says and the proof a joining device signs (design 3.4, 3.7): plain functions of the platform.
+export {
+  checkPairingName,
+  inspectPairingString,
+  makePairingProof,
+  pairingString,
+} from "./pairing-string.ts";
 // The recovery key's two halves (design 3.5 steps 3 and 5): made before entry 0 and shown after it, the app calls both the same way.
 export { createRecoveryKey, showRecoveryKey } from "./recovery.ts";
 export { EXPORTER_LABEL };
@@ -107,6 +114,8 @@ export interface DeviceView {
   position: number;
   /** The epochs this device is the only active one holding a counting seal for: what a removal of the others would lose (design 3.9). */
   onlyHolder: { channel: Bytes; epoch: Bytes }[];
+  /** The id's first 8 bytes in four groups of four hex digits (design 3.2): the one form the person compares. */
+  short: string;
 }
 
 /** Why `addDevice` or `removeDevice` built nothing: the log is not at rest, the proof is not for this person, the log names the device already, or the builder's own refusal. */
@@ -271,16 +280,32 @@ export class AppLink {
    * and not sent: the app keeps it pending, then `submit`s kind 1 (design 3.6). `busy` while the log is not at rest, as `submit`
    * answers, since a partial log would sign an entry the relay refuses. `now` is for symmetry with the other calls.
    */
-  addDevice(pairing: { device: DeviceKeys; proof: Bytes }, _now: number): DeviceAct {
+  addDevice(pairing: { device: DeviceKeys; proof: Bytes }, now: number): DeviceAct {
+    const refused = this.checkPairing(pairing, now);
+    if (!refused.ok) return refused;
+    return buildAdd(
+      this.#platform,
+      SIGN,
+      this.#link.reading.devices,
+      this.#self,
+      pairing.device,
+      pairing.proof,
+    );
+  }
+  /** What `addDevice` would refuse before it signs: the app shows the person the reason before the confirmation (design 3.4). */
+  checkPairing(
+    pairing: { device: DeviceKeys; proof: Bytes },
+    _now: number,
+  ): { ok: true } | { ok: false; error: DeviceActError } {
     if (!this.#link.reading.sendable) return { ok: false, error: "busy" };
     if (!shaped(pairing)) return { ok: false, error: "bad-input" };
     const { device, proof } = pairing;
-    const log = this.#link.reading.devices;
     if (!checkPairingProof(this.#platform, this.#person, device, proof))
       return { ok: false, error: "proof" };
     const id = deviceId(this.#platform, device.signing, device.receiving);
-    if (namedDevices(this.#platform, log).has(idKey(id))) return { ok: false, error: "named" };
-    return buildAdd(this.#platform, SIGN, log, this.#self, device, proof);
+    if (namedDevices(this.#platform, this.#link.reading.devices).has(idKey(id)))
+      return { ok: false, error: "named" };
+    return { ok: true };
   }
   /** The remove of `target`, built and signed and not sent, as `addDevice`'s; this device is refused (design 3.9). */
   removeDevice(target: Bytes, _now: number): DeviceAct {
@@ -493,7 +518,17 @@ export class AppLink {
       const addedBy = e.kind === "add" ? e.signer : null;
       const on = active.has(idKey(id));
       const onlyHolder = on ? (sole.get(idKey(id)) ?? []) : [];
-      return [{ id, kind: named.kind, active: on, addedBy, position: e.seq, onlyHolder }];
+      return [
+        {
+          id,
+          kind: named.kind,
+          active: on,
+          addedBy,
+          position: e.seq,
+          onlyHolder,
+          short: shortForm(this.#platform, named),
+        },
+      ];
     });
     return [
       {

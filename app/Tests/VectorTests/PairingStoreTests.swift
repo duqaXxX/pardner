@@ -32,7 +32,7 @@ final class PairingStoreTests: XCTestCase {
         paired.pending = entry(2)
         paired.labels = [Data(repeating: 8, count: 32): "Studio", Data(repeating: 9, count: 32): "Laptop"]
         paired.seen = [Data(repeating: 8, count: 32): 1_790_000_000.5]
-        paired.removal = PairingRemoval(devices: [Data(repeating: 8, count: 32), Data(repeating: 9, count: 32)], length: 6)
+        paired.removal = PairingRemoval(devices: [Data(repeating: 8, count: 32), Data(repeating: 9, count: 32)], length: 6, left: [Data(repeating: 7, count: 32)])
         return [
             PairingState(stage: .keysMade(.enrol), relay: relay),
             PairingState(stage: .keysMade(.join), relay: relay, person: person),
@@ -176,6 +176,9 @@ final class PairingStoreTests: XCTestCase {
         add("empty name", all[3]) { $0.name = "" }
         add("short id", all[5]) { $0.pending = SignedEntry(signed: Data([1]), sig: Data(count: 64), id: Data(count: 31)) }
         add("empty removal", all[5]) { $0.removal = PairingRemoval(devices: [], length: 3) }
+        add("a removal that left twice", all[5]) { $0.removal = PairingRemoval(devices: [Data(count: 32)], length: 3, left: [Data(repeating: 1, count: 32), Data(repeating: 1, count: 32)]) }
+        add("a device both in the act and left", all[5]) { $0.removal = PairingRemoval(devices: [Data(count: 32)], length: 3, left: [Data(count: 32)]) }
+        add("a short device that left", all[5]) { $0.removal = PairingRemoval(devices: [Data(count: 32)], length: 3, left: [Data(count: 31)]) }
         add("removal length 0", all[5]) { $0.removal = PairingRemoval(devices: [Data(count: 32)], length: 0) }
         add("a time that is not a number", all[5]) { $0.seen = [Data(count: 32): .nan] }
         add("an infinite time", all[5]) { $0.seen = [Data(count: 32): .infinity] }

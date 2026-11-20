@@ -59,9 +59,17 @@ test("every vector file passes in JavaScriptCore on CryptoKit", {
         timeout,
         env: { ...process.env, ...env },
       });
-    // RelayConnectionTests and FirstDeviceRelayTests need a relay: app-relay.test.ts and app-first-device.test.ts run them.
+    // RelayConnectionTests, FirstDeviceRelayTests and DevicesRelayTests need a relay: app-relay.test.ts, app-first-device.test.ts and app-devices.test.ts run them.
     const tests = swift(
-      ["test", "--skip", "RelayConnectionTests", "--skip", "FirstDeviceRelayTests"],
+      [
+        "test",
+        "--skip",
+        "RelayConnectionTests",
+        "--skip",
+        "FirstDeviceRelayTests",
+        "--skip",
+        "DevicesRelayTests",
+      ],
       450_000,
       {
         PARDNER_JOINED_SCRIPT: script,
@@ -77,7 +85,8 @@ test("every vector file passes in JavaScriptCore on CryptoKit", {
         (file) =>
           file.endsWith(".swift") &&
           !file.endsWith("RelayConnectionTests.swift") &&
-          !file.endsWith("FirstDeviceRelayTests.swift"),
+          !file.endsWith("FirstDeviceRelayTests.swift") &&
+          !file.endsWith("DevicesRelayTests.swift"),
       )
       .reduce(
         (sum, file) =>

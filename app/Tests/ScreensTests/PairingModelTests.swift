@@ -29,6 +29,7 @@ final class PairingModelTests: XCTestCase {
             (.showingSheet(sheet), .settingUp, nil),
             (.enrolling(asksSecret: false), .enrolling, nil),
             (.enrolling(asksSecret: true), .enrolling, nil),
+            (.joining(JoiningInfo(pairingString: "00", shortForm: "0000-0000-0000-0000")), .joining, nil),
             (.paired, .paired, nil),
             (.removed, .removed, .pairAgain),
             (.keysMissing, .keysMissing, .pairAgain),
@@ -37,7 +38,8 @@ final class PairingModelTests: XCTestCase {
             (.fault(.malformedStore, PairingPhase.malformedStoreWarning), .malformedStore, .pairAgain),
             (.fault(.newerStore, PairingPhase.newerStoreAdvice), .newerStore, nil),
             (.fault(.keysWithoutStore, "x"), .needsNewPairing, .pairAgain),
-            (.fault(.joinUnsupported, "x"), .needsNewPairing, .pairAgain),
+            (.fault(.joinMismatch, "x"), .needsNewPairing, .pairAgain),
+            (.fault(.joinUnmade, PairingPhase.joinUnmadeAdvice), .joinUnmade, .pairAgain),
             (.fault(.failed, "x"), .failed, .retry),
         ]
         for (phase, screen, exit) in table {
@@ -52,6 +54,12 @@ final class PairingModelTests: XCTestCase {
         XCTAssertEqual(PairingModel(phase: .linkFaulted(PairingPhase.linkFaultAdvice)).message, PairingPhase.linkFaultAdvice)
         XCTAssertEqual(PairingModel(phase: .fault(.newerStore, PairingPhase.newerStoreAdvice)).message, PairingPhase.newerStoreAdvice)
         XCTAssertNil(PairingModel(phase: .removed).message)
+    }
+
+    func testAJoiningStringThatCannotBeMadeOffersRetryToo() {
+        XCTAssertTrue(PairingModel(phase: .fault(.joinUnmade, "x")).offersRetryToo)
+        XCTAssertFalse(PairingModel(phase: .fault(.joinUnmade, "x"), storesOpen: false).offersRetryToo)
+        XCTAssertFalse(PairingModel(phase: .fault(.joinMismatch, "x")).offersRetryToo)
     }
 
     func testNoRetryWhereNoControllerExists() {

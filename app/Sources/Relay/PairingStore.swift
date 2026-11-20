@@ -51,11 +51,13 @@ public struct PairingRelay: Sendable, Equatable {
 }
 
 /// A removal in progress (design 3.9): the devices chosen, in the order they go, and the log's length when it began.
+/// `left`: devices the log refused to remove. They left `devices` and stay known to the act, so that no rest takes them in again.
 public struct PairingRemoval: Sendable, Equatable {
     public var devices: [Data]
     public var length: Int
+    public var left: [Data]
 
-    public init(devices: [Data], length: Int) { (self.devices, self.length) = (devices, length) }
+    public init(devices: [Data], length: Int, left: [Data] = []) { (self.devices, self.length, self.left) = (devices, length, left) }
 }
 
 public struct PairingState: Sendable, Equatable {
@@ -162,7 +164,7 @@ public final class PairingStore: @unchecked Sendable {
         if let proof = s.proof { o["proof"] = hex(proof) }
         if let name = s.name { o["name"] = name }
         if let pending = s.pending { o["pending"] = entry(pending) }
-        if let removal = s.removal { o["removal"] = ["devices": removal.devices.map(hex), "length": removal.length] }
+        if let removal = s.removal { o["removal"] = ["devices": removal.devices.map(hex), "length": removal.length, "left": removal.left.map(hex)] }
         return try JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])
     }
 
@@ -226,9 +228,11 @@ public final class PairingStore: @unchecked Sendable {
             s.seen[device] = time
         }
         if let removal = o["removal"] {
-            guard let m = removal as? [String: Any], Set(m.keys) == ["devices", "length"], let list = m["devices"] as? [Any], !list.isEmpty,
-                  let length = int(m["length"]), length > 0 else { throw refuse("a malformed removal") }
-            s.removal = PairingRemoval(devices: try list.map { try bytes($0, 32, "removal device") }, length: length)
+            guard let m = removal as? [String: Any], Set(m.keys) == ["devices", "length", "left"], let list = m["devices"] as? [Any], !list.isEmpty,
+                  let leftList = m["left"] as? [Any], let length = int(m["length"]), length > 0 else { throw refuse("a malformed removal") }
+            let devices = try list.map { try bytes($0, 32, "removal device") }, left = try leftList.map { try bytes($0, 32, "removal device that left") }
+            guard Set(left).count == left.count, Set(left).isDisjoint(with: devices) else { throw refuse("a malformed removal") }
+            s.removal = PairingRemoval(devices: devices, length: length, left: left)
         }
         try shape(s, refuse)
         return s

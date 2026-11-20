@@ -94,3 +94,13 @@ test("the platform on Node names no product either", () => {
   assert.equal(naming('const m = "Pardner";'), true);
   assert.equal(naming("// allaboard in a comment"), false);
 });
+
+test("the joined script exports no builder of an add or a remove: entries are signed through AppLink (design 4.2)", () => {
+  const entry = blank(readFileSync(join(PACKAGE, "index.ts"), "utf8"));
+  const exported = [...entry.matchAll(/export\s*\{([^}]*)\}\s*from/g)].flatMap((m) =>
+    (m[1] ?? "").split(","),
+  );
+  assert.ok(exported.some((n) => n.trim() === "buildGenesis"));
+  for (const name of ["buildAdd", "buildRemove"])
+    assert.ok(!exported.some((n) => n.trim() === name), name);
+});
