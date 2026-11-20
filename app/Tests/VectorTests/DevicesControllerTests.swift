@@ -23,7 +23,6 @@ private final class Once: @unchecked Sendable {
 final class DevicesControllerTests: XCTestCase {
     private let relayKey = P256.Signing.PrivateKey().publicKey.x963Representation
 
-    private static func hold(_ gate: DispatchSemaphore) { _ = gate.wait(timeout: .now() + 20) } // a wait that cannot be async
 
     private func hex(_ data: Data) -> String { data.map { String(format: "%02x", $0) }.joined() }
 
@@ -835,39 +834,26 @@ final class DevicesControllerTests: XCTestCase {
         await until("not waiting") { if case .joining(let info) = await again.phase { return info.waiting } else { return false } }
     }
 
-    /// Waits for a semaphore on a dispatch queue, so that no task's thread blocks on it.
-    private static func waitOffTheTasks(_ semaphore: DispatchSemaphore) async {
-        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-            DispatchQueue.global().async {
-                hold(semaphore)
-                done.resume()
-            }
-        }
-    }
-
     func testACancelDuringTheJoinsAwaitsErasesTheAttempt() async throws {
         let rig = try joinRig()
         await rig.controller.launch()
         let once = Once()
-        let (entered, release) = (DispatchSemaphore(value: 0), DispatchSemaphore(value: 0))
+        let gate = JoinGate()
         rig.keys.onPublicKey = { _ in // the gate holds the string's making until the cancel is in
             guard (try? rig.pairing.load())?.stage == .joining, once.first() else { return }
-            entered.signal() // once for the canceller, once for the releaser
-            entered.signal()
-            Self.hold(release)
+            gate.holdWhileTheCancelQueues()
         }
         let controller = rig.controller
-        // Two plain tasks made here, none inside another (the Swift of the CI runner refuses a Task made inside a
-        // detached one), and the blocking wait on a dispatch queue, off the tasks' threads: the cancel queues behind the
-        // join on the actor; the gate opens a little later.
+        // Each task captures the actor and the gate alone: the Swift of the CI runner stops on other captures in a
+        // task's closure ("pattern that the region-based isolation checker does not understand how to check").
         let canceller = Task {
-            await Self.waitOffTheTasks(entered)
+            await gate.entered()
             return await controller.cancel()
         }
         let releaser = Task {
-            await Self.waitOffTheTasks(entered)
+            await gate.entered()
             try? await Task.sleep(nanoseconds: 100_000_000) // lets the cancel reach the actor's queue before the string is made
-            release.signal()
+            gate.open()
         }
         try await form(rig)
         await releaser.value
@@ -944,4 +930,31 @@ final class DevicesControllerTests: XCTestCase {
     private func host(_ rig: Rig) async throws -> ProtocolHost {
         try await ProtocolHost(scriptPath: try XCTUnwrap(ProcessInfo.processInfo.environment["PARDNER_APP_SCRIPT"]), store: rig.keys)
     }
+}
+
+/// A gate for one test: the code under test holds inside it, two waiters learn that it did, and one opens it. The
+/// blocking waits run on a dispatch queue, never on a task's thread.
+private final class JoinGate: @unchecked Sendable {
+    private let inside = DispatchSemaphore(value: 0)
+    private let release = DispatchSemaphore(value: 0)
+
+    /// Called by the code under test: says it is inside (to two waiters), then waits to be opened (20 s at most).
+    func holdWhileTheCancelQueues() {
+        inside.signal()
+        inside.signal()
+        _ = release.wait(timeout: .now() + 20)
+    }
+
+    /// Returns once the code under test is inside the gate (20 s at most).
+    func entered() async {
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async { [inside] in
+                _ = inside.wait(timeout: .now() + 20)
+                done.resume()
+            }
+        }
+    }
+
+    /// Lets the code under test go on.
+    func open() { release.signal() }
 }
