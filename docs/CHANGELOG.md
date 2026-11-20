@@ -31,6 +31,11 @@ All notable changes to this project are documented here. The format follows
   relay's newest head, the incarnation, a put-back and a fault, in `link` beside the key store's folder (mode 0700), with no key
   and no content. The ids are appended to one file and the rest is written whole under a temporary name; a lock held
   for the life of the process keeps a second copy of the app from writing, and that copy does not connect.
+- The app's reading model (`Conversation`, in `app/Sources/Conversation/`): the link's deliveries folded into
+  channels, threads and sessions for the screens. A prompt that names a bot opens a session; an answer is drawn from
+  its parts as they are written and replaced by the whole answer once it lands; a session runs from its start, waits
+  while a question or an approval is open, and the Sessions tab orders sessions by the bot's last reply. A body that
+  did not open or does not read is shown in its place as unreadable, and moves to its thread when it opens.
 
 ### Fixed
 
