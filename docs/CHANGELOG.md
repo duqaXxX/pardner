@@ -27,6 +27,10 @@ All notable changes to this project are documented here. The format follows
   epoch's key; one whose key arrives later, through a history seal, is delivered again once it opens. The link tells
   its driver the profile shown for each bot when it changes. `Reading.key` gives the key of any epoch the device
   holds.
+- The app keeps its link's state between launches (`LinkStore`, in `app/Sources/Relay/`): the ids it read, the
+  relay's newest head, the incarnation, a put-back and a fault, in `link` beside the key store's folder (mode 0700), with no key
+  and no content. The ids are appended to one file and the rest is written whole under a temporary name; a lock held
+  for the life of the process keeps a second copy of the app from writing, and that copy does not connect.
 
 ### Fixed
 

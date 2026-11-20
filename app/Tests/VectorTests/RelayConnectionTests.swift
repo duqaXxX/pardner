@@ -70,12 +70,25 @@ final class RelayConnectionTests: XCTestCase {
         return store
     }
 
-    func makeConnection(pin: Data? = nil, constants: [String: HostValue]) async throws -> RelayConnection {
+    /// The link's store for these keys and relay in `folder`.
+    func linkStore(_ folder: URL, _ store: KeyStore, _ endpoint: RelayEndpoint) throws -> LinkStore {
+        try LinkStore(folder: folder, identity: LinkIdentity(
+            signing: try store.publicKey("device.sign"), receiving: try store.publicKey("device.receive"), relay: endpoint.pin))
+    }
+
+    /// A fresh folder for a connection's store, removed when the test ends.
+    func storeFolder() throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("pardner-store-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        return folder
+    }
+
+    func makeConnection(pin: Data? = nil, folder: URL? = nil, constants: [String: HostValue]) async throws -> RelayConnection {
         let store = try makeStore()
         let host = try await ProtocolHost(scriptPath: try env("PARDNER_JOINED_SCRIPT"), store: store)
         let held = hex(try env("PARDNER_RELAY_PIN"))
         let endpoint = RelayEndpoint(host: "127.0.0.1", port: UInt16(try env("PARDNER_RELAY_PORT"))!, pin: pin ?? held)
-        return try RelayConnection(host: host, store: store, person: hex(try env("PARDNER_PERSON")), endpoint: endpoint, constants: constants)
+        return try RelayConnection(host: host, store: store, person: hex(try env("PARDNER_PERSON")), endpoint: endpoint, linkStore: try linkStore(folder ?? storeFolder(), store, endpoint), constants: constants)
     }
 
     /// Tells the Node side a step was reached, and waits for it to say its part is done.
@@ -109,10 +122,38 @@ final class RelayConnectionTests: XCTestCase {
         _ = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.getsockname(probe, $0, &length) } }
         Darwin.close(probe)
         let endpoint = RelayEndpoint(host: "127.0.0.1", port: UInt16(bigEndian: address.sin_port), pin: Data(repeating: 4, count: 65))
-        return try RelayConnection(host: host, store: store, person: Data(repeating: 1, count: 32), endpoint: endpoint, constants: constants)
+        return try RelayConnection(host: host, store: store, person: Data(repeating: 1, count: 32), endpoint: endpoint, linkStore: try linkStore(storeFolder(), store, endpoint), constants: constants)
     }
 
     // MARK: tests
+
+    /// App data design 3: what one run stored, the next run is given; a second process on the same store is refused.
+    func testARunGivesTheNextOneItsStoredState() async throws {
+        let folder = try storeFolder()
+        var first: RelayConnection? = try await makeConnection(folder: folder, constants: [:])
+        let log = Log(first!)
+        first!.start()
+        let rested = await log.wait(from: 0, seconds: 30) { isDelivered($0, "rest") }
+        XCTAssertNotNil(rested, "the first run reaches rest")
+        XCTAssertThrowsError(try LinkStore(folder: folder, identity: LinkIdentity(signing: Data(), receiving: Data(), relay: Data()))) {
+            XCTAssertTrue($0 is LinkStoreBusy, "the first run holds the store")
+        }
+        await first!.stop()
+        first = nil // the store's lock goes with the connection, as it goes with the process
+        let json = try JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("link.json"))) as? [String: Any]
+        let count = try XCTUnwrap(json?["count"] as? Int)
+        XCTAssertGreaterThan(count, 0, "the ids read are stored")
+        let second = try await makeConnection(folder: folder, constants: [:])
+        let again = Log(second)
+        second.start()
+        let rest = await again.wait(from: 0, seconds: 30) { isDelivered($0, "rest") }
+        XCTAssertNotNil(rest, "the next run reads under the stored state and reaches rest")
+        let incarnation = again.entries(from: 0).first { isDelivered($0.event, "incarnation") }
+        if let incarnation, case .delivered(let view) = incarnation.event {
+            XCTAssertEqual(view["first"], .bool(false), "the stored incarnation was given back")
+        } else { XCTFail("no incarnation delivered") }
+        await second.stop()
+    }
 
     /// A dial that ends on its own (a refused connection) leaves no socket behind.
     func testFailedDialsLeaveNoSocket() async throws {

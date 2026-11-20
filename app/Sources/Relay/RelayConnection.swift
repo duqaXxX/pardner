@@ -149,6 +149,10 @@ public final class RelayConnection: @unchecked Sendable {
     private let host: ProtocolHost
     private let endpoint: RelayEndpoint
     private let options: [String: HostValue]
+    private let linkStore: LinkStore
+    private let claimed = OSAllocatedUnfairLock(initialState: true) // this connection holds the store's claim
+    // A store write flushes to the drive: it runs here, off the task's cooperative thread, and the task awaits it.
+    private let writes = DispatchQueue(label: "pardner.relay.store")
     private let origin = ContinuousClock.now
     private let lifecycle = OSAllocatedUnfairLock(initialState: Lifecycle())
 
@@ -169,25 +173,42 @@ public final class RelayConnection: @unchecked Sendable {
     private var final = false
     private var watch: PathWatch?
     private var wakeObserver: NSObjectProtocol?
+    private let log = Logger(subsystem: "io.github.duqaxxx.pardner", category: "relay")
 
-    /// `store` holds the device's keys as `device.sign` and `device.receive`, and `host` was made on that store; `person` is the id the device was paired for.
-    public convenience init(host: ProtocolHost, store: KeyStore, person: Data, endpoint: RelayEndpoint) throws {
-        try self.init(host: host, store: store, person: person, endpoint: endpoint, constants: [:])
+    /// `store` holds the device's keys as `device.sign` and `device.receive`, and `host` was made on that store; `person`
+    /// is the id the device was paired for. `linkStore` is the process's one store of the link's state (design 3.2: its
+    /// lock lives as long as the process holds it), for the same keys and relay; a store that cannot be read now throws.
+    public convenience init(host: ProtocolHost, store: KeyStore, person: Data, endpoint: RelayEndpoint, linkStore: LinkStore) throws {
+        try self.init(host: host, store: store, person: person, endpoint: endpoint, linkStore: linkStore, constants: [:])
     }
 
     /// For tests, through `@testable import`: `constants` shortens the link's `first`, `max`, `patience` and `ask`.
-    init(host: ProtocolHost, store: KeyStore, person: Data, endpoint: RelayEndpoint, constants: [String: HostValue]) throws {
+    init(host: ProtocolHost, store: KeyStore, person: Data, endpoint: RelayEndpoint, linkStore: LinkStore, constants: [String: HostValue]) throws {
         self.host = host
         self.endpoint = endpoint
+        let signing = try store.publicKey("device.sign"), receiving = try store.publicKey("device.receive")
+        guard linkStore.identity == LinkIdentity(signing: signing, receiving: receiving, relay: endpoint.pin) else {
+            throw LinkStoreMismatch(description: "the link's store belongs to other keys or another relay")
+        }
+        try linkStore.claim()
+        self.linkStore = linkStore
         var options: [String: HostValue] = [
-            "relay": .bytes(endpoint.pin), "person": .bytes(person),
-            "signing": .bytes(try store.publicKey("device.sign")), "receiving": .bytes(try store.publicKey("device.receive")),
+            "relay": .bytes(endpoint.pin), "person": .bytes(person), "signing": .bytes(signing), "receiving": .bytes(receiving),
         ]
+        do {
+            if let stored = try linkStore.load() { options["stored"] = stored }
+        } catch {
+            linkStore.release() // `deinit` does not run for an init that throws
+            throw error
+        }
         if !constants.isEmpty { options["constants"] = .object(constants) }
         self.options = options
         (events, out) = AsyncStream.makeStream(of: RelayEvent.self)
         (inbox, feed) = AsyncStream.makeStream(of: Event.self)
     }
+
+    // A connection made and never started or stopped gives the store back when it goes.
+    deinit { giveBack() }
 
     /// Starts dialing, and watching the network and the Mac's wake; after `stop()` it does nothing.
     public func start() {
@@ -317,14 +338,38 @@ public final class RelayConnection: @unchecked Sendable {
                 out.yield(.delivered(view))
             case "profile": out.yield(.profile(fx))
             case "persist":
-                // A `persist` ends its list. Until the app's store (app data design, 3; pull request D2) every
-                // write is answered as stored, which is what the host did in 6.3.
-                try await perform(try await call("persisted", [.bool(true)]))
+                // A `persist` ends its list: the write first, then what the link gives once it is answered.
+                var written = true
+                do { try await write(fx["what"] ?? .null) } catch let mismatch as LinkStoreMismatch {
+                    // The joined script and this store disagree: asking again would fail again, for good.
+                    throw HostError.faulted("the link asked the store for a write it cannot make: \(mismatch)")
+                } catch {
+                    written = false
+                    log.error("the link's store write failed: \(String(describing: error), privacy: .public)")
+                }
+                try await perform(try await call("persisted", [.bool(written)]))
             case "answer":
                 guard let request = fx["request"]?.numberValue else { break }
                 let outcome = fx["code"]?.numberValue.map { SubmitOutcome.code(Int($0)) } ?? .unanswered
                 pending.removeValue(forKey: Int(request))?.resume(returning: outcome)
             default: throw HostError.faulted("the link answered an effect this driver does not know")
+            }
+        }
+    }
+
+    /// The store's claim given back once, whichever end comes first: a second release would free a later connection's.
+    private func giveBack() {
+        if claimed.withLock({ held in defer { held = false }; return held }) { linkStore.release() }
+    }
+
+    private func write(_ what: HostValue) async throws {
+        let (store, writes) = (linkStore, writes)
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+            writes.async {
+                do {
+                    try store.write(what)
+                    done.resume()
+                } catch { done.resume(throwing: error) }
             }
         }
     }
@@ -380,6 +425,7 @@ public final class RelayConnection: @unchecked Sendable {
 
     /// Ends the streams; a `submit` or a count queued behind the end is answered, as one made after it is.
     private func finish() async {
+        giveBack()
         feed.finish()
         for await event in inbox {
             switch event {
