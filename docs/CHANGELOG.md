@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The app's pairing store and the first device's tools, with no screen yet. `pairing/pairing.json` under the app's
+  data folder keeps how far this Mac has got (`keys-made`, `enrolling`, `joining`, `paired`), the relay, the person, entry
+  0 or the proof while they wait, the device entry not yet read back, the names and first-read times of devices and a
+  removal in progress. It holds no secret, is written like the link's store, and a file that does not read is a fault
+  the app names. The pairing and link folders are excluded from backup. The recovery secret has a text form (the 32
+  bytes as 52 Crockford base32 digits and a check symbol, in groups of four) that is made and read in buffers the caller
+  wipes, never a `String`. The joined script exports `buildGenesis`, which the app calls through
+  `ProtocolHost.callExported`, and `RelayConnection.enrol` gives a running link its enrolment again and dials at once, until the link has told `enrolled`.
 - The bot's outbox takes its epoch decision from the keeper and gives the history seals it owes
   (`Connection.giveSeal`), one at a time, computing again after each answer what is owed, so a removal read meanwhile
   stops the seals to that device. A seal that cannot be made is logged once.

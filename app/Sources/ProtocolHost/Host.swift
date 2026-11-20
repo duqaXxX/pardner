@@ -214,4 +214,15 @@ public final class ProtocolHost: @unchecked Sendable { // sound: immutable field
             return Handle(owner: owner, token: state.store(made), state: state, thread: thread)
         }
     }
+
+    /// Calls the plain function `name` exported by the package, with the host's platform first, and returns what it answers as a value: for a function that makes a value once and keeps no object (a `Result` is an object with `ok`). A JavaScript exception faults the host.
+    public func callExported(_ name: String, _ arguments: [HostValue] = []) async throws -> HostValue {
+        try await perform { state in
+            let bridge = Bridge(state.context!)
+            let target = state.context!.objectForKeyedSubscript("protocol")!
+            let answer = target.invokeMethod(name, withArguments: [state.platformObject!] + arguments.map(bridge.jsValue))
+            guard state.box.message == nil, let answer else { return HostValue.null }
+            return try bridge.hostValue(answer)
+        }
+    }
 }

@@ -25,6 +25,8 @@ import { encodeProfile, type Profile, Profiles } from "./profile.ts";
 import type { Kept, Out } from "./reading.ts";
 import type { PlatformError, Result } from "./result.ts";
 
+// The first device's entry 0 (design 3.5): the app calls it through `ProtocolHost.callExported`, before any `AppLink` exists.
+export { buildGenesis } from "./device-builders.ts";
 export { EXPORTER_LABEL };
 
 /** The platform's names for the device's two keys: the app's key store holds them under these. */

@@ -15,11 +15,11 @@ public final class SecretBuffer {
     nonisolated(unsafe) static var onCreate: ((SecretBuffer) -> Void)?
     #endif
 
-    /// `count` zero bytes.
-    public init(count: Int) {
+    /// `count` zero bytes, at an address a multiple of `alignment`.
+    public init(count: Int, alignment: Int = 1) {
         precondition(count > 0)
         self.count = count
-        storage = .allocate(byteCount: count, alignment: 1)
+        storage = .allocate(byteCount: count, alignment: alignment)
         storage.initializeMemory(as: UInt8.self, repeating: 0)
         #if DEBUG
         Self.onCreate?(self)

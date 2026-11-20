@@ -76,6 +76,7 @@ enum Event: Sendable {
     case networkUp
     case submit(UInt8, Data, Data, CheckedContinuation<SubmitOutcome, Error>)
     case count(CheckedContinuation<Int, Never>)
+    case enrol(Enrolment, CheckedContinuation<Bool, Never>)
     case stop
 }
 
@@ -255,6 +256,15 @@ public final class RelayConnection: @unchecked Sendable {
         }
     }
 
+    /// Gives the running link its enrolment again (the person typed the secret again after `enrolRefused`, design 3.5) and
+    /// dials at once, so a back-off in progress does not keep the person waiting. False when the link cannot frame it or the
+    /// connection has ended: nothing changed then.
+    public func enrol(_ enrolment: Enrolment) async -> Bool {
+        await withCheckedContinuation { continuation in
+            if case .terminated = feed.yield(.enrol(enrolment, continuation)) { continuation.resume(returning: false) }
+        }
+    }
+
     /// Ends the connection and the dialing; returns when the task has ended. Before `start()` it ends the connection for good.
     public func stop() async {
         let task = lifecycle.withLock { state -> Task<Void, Never>? in
@@ -308,6 +318,15 @@ public final class RelayConnection: @unchecked Sendable {
             sockets.removeValue(forKey: conn) // the dial is over, whoever ended it: a failed one leaves nothing behind
             try await perform(try await call("closed", [.number(Double(conn))]))
         case .count(let continuation): continuation.resume(returning: sockets.count)
+        case .enrol(let enrolment, let continuation):
+            let taken: HostValue
+            do { taken = try await call("enrol", [.bytes(enrolment.secret), .bytes(enrolment.signed), .bytes(enrolment.sig)]) } catch {
+                continuation.resume(returning: false)
+                throw error
+            }
+            guard taken["ok"] == .bool(true) else { continuation.resume(returning: false); return }
+            continuation.resume(returning: true)
+            try await perform(try await call("networkUp")) // a back-off cut short, as when the network returns
         case .networkUp: try await perform(try await call("networkUp"))
         case .timer(let at):
             guard armed == at else { return } // a timer that is no longer the armed one does nothing
@@ -457,6 +476,7 @@ public final class RelayConnection: @unchecked Sendable {
             switch event {
             case .submit(_, _, _, let continuation): continuation.resume(returning: .ended)
             case .count(let continuation): continuation.resume(returning: 0)
+            case .enrol(_, let continuation): continuation.resume(returning: false)
             default: break
             }
         }

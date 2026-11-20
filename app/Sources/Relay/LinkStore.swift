@@ -17,18 +17,9 @@ public struct LinkIdentity: Sendable, Equatable {
     public init(signing: Data, receiving: Data, relay: Data) { (self.signing, self.receiving, self.relay) = (signing, receiving, relay) }
 }
 
-public struct LinkStoreError: Error, CustomStringConvertible {
-    public let description: String
-}
-
 /// A write the store cannot have come from the link it answers: a fault of the host, never retried.
 public struct LinkStoreMismatch: Error, CustomStringConvertible {
     public let description: String
-}
-
-/// Another process of the app holds the store: it is the one that reads the relay.
-public struct LinkStoreBusy: Error, CustomStringConvertible {
-    public var description: String { "another copy of Pardner is running and holds the relay's store" }
 }
 
 /// Reads and writes the link's state in one folder: one per process (the lock), claimed by one connection at a
@@ -62,29 +53,17 @@ public final class LinkStore: @unchecked Sendable {
     /// The store's folder of this app's set: `link` beside the key store's `keys`, under the running app's bundle identifier.
     public static func defaultFolder() throws -> URL {
         guard let identifier = Bundle.main.bundleIdentifier, !identifier.isEmpty else {
-            throw LinkStoreError(description: "the running app has no bundle identifier")
+            throw StoreError(description: "the running app has no bundle identifier")
         }
         let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         return support.appendingPathComponent(identifier).appendingPathComponent("link")
     }
 
-    /// Takes the store's lock, making the folder `0700` if absent; `LinkStoreBusy` when another process holds it. A
+    /// Takes the store's lock, making the folder `0700` if absent; `StoreBusy` when another process holds it. A
     /// folder that is a symbolic link, belongs to another owner or has other permissions is refused, as the key store's.
     public init(folder: URL, identity: LinkIdentity) throws {
         (self.folder, self.identity, state) = (folder, identity, State())
-        try FileManager.default.createDirectory(at: folder.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if mkdir(folder.path, 0o700) != 0 && Darwin.errno != EEXIST { throw Self.errno("create the store's folder") }
-        var info = stat()
-        guard lstat(folder.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR, info.st_uid == getuid(), info.st_mode & 0o777 == 0o700 else {
-            throw LinkStoreError(description: "the store's folder is a link, belongs to another owner or has permissions other than 0700")
-        }
-        let fd = open(folder.appendingPathComponent("lock").path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o600)
-        guard fd >= 0 else { throw Self.errno("open the store's lock") }
-        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
-            close(fd)
-            throw LinkStoreBusy()
-        }
-        lock = fd
+        lock = try StoreDisk.lock(folder)
     }
 
     deinit { if lock >= 0 { close(lock) } } // closing the descriptor releases the lock
@@ -93,14 +72,14 @@ public final class LinkStore: @unchecked Sendable {
     private var idsPath: String { folder.appendingPathComponent("link-ids").path }
 
     /// Taken by a connection before its first load, released when it ends: two connections on one store would cut
-    /// each other's ids, as two processes would. `LinkStoreBusy` while another holds it.
+    /// each other's ids, as two processes would. `StoreClaimed` while another holds it.
     public func claim() throws {
         let taken = claims.withLock { held in
             if held { return false }
             held = true
             return true
         }
-        if !taken { throw LinkStoreBusy() }
+        if !taken { throw StoreClaimed() }
     }
 
     public func release() { claims.withLock { $0 = false } }
@@ -113,7 +92,7 @@ public final class LinkStore: @unchecked Sendable {
     public func load() throws -> HostValue? {
         state = State()
         let data: Data
-        do { data = try read(jsonPath) } catch Missing.file { return nil }
+        do { data = try StoreDisk.read(jsonPath) } catch StoreDisk.Missing.file { return nil }
         do {
             let (read, ids) = try readStore(data)
             state = read
@@ -132,14 +111,13 @@ public final class LinkStore: @unchecked Sendable {
         }
     }
 
-    private enum Missing: Error { case file }
     private struct Unreadable: Error { let why: String }
 
     private func readStore(_ data: Data) throws -> (State, [Data]) {
         let refuse = { (why: String) in Unreadable(why: why) }
         guard let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { throw refuse("not an object") }
         guard o["version"] as? Int == Self.version else { throw refuse("another version") }
-        guard hex(o["signing"]) == identity.signing, hex(o["receiving"]) == identity.receiving, hex(o["relay"]) == identity.relay else {
+        guard StoreDisk.hex(o["signing"]) == identity.signing, StoreDisk.hex(o["receiving"]) == identity.receiving, StoreDisk.hex(o["relay"]) == identity.relay else {
             throw refuse("another pairing")
         }
         var s = State()
@@ -149,12 +127,12 @@ public final class LinkStore: @unchecked Sendable {
         }
         (s.count, s.putBack, s.fault) = (count, putBack, fault)
         if !(o["incarnation"] is NSNull) {
-            guard let incarnation = hex(o["incarnation"]), incarnation.count == 16 else { throw refuse("a malformed incarnation") }
+            guard let incarnation = StoreDisk.hex(o["incarnation"]), incarnation.count == 16 else { throw refuse("a malformed incarnation") }
             s.incarnation = incarnation
         }
         if !(o["head"] is NSNull) {
             guard let head = o["head"] as? [String: Any], let n = head["n"] as? Int, n >= 0,
-                  let chain = hex(head["chain"]), chain.count == 32, let sig = hex(head["sig"]), sig.count == 64 else {
+                  let chain = StoreDisk.hex(head["chain"]), chain.count == 32, let sig = StoreDisk.hex(head["sig"]), sig.count == 64 else {
                 throw refuse("a malformed head")
             }
             s.head = Head(n: n, chain: chain, sig: sig)
@@ -162,22 +140,13 @@ public final class LinkStore: @unchecked Sendable {
         // A file shorter than `count`, or none, gives the whole ids it holds (design 3.5): the rest of the store stays.
         var bytes = Data()
         if count > 0 {
-            do { bytes = try read(idsPath, upTo: count * Self.idSize) } catch Missing.file {}
+            do { bytes = try StoreDisk.read(idsPath, upTo: count * Self.idSize) } catch StoreDisk.Missing.file {}
         }
         let whole = bytes.count / Self.idSize
         if whole < count { log.error("the ids file holds \(whole) of \(count) ids") }
         s.count = whole
         let ids = (0..<whole).map { Data(bytes[($0 * Self.idSize)..<(($0 + 1) * Self.idSize)]) }
         return (s, ids)
-    }
-
-    /// At most `length` bytes of the file; `Missing.file` when there is none, any other failure as itself.
-    private func read(_ path: String, upTo length: Int = Int.max) throws -> Data {
-        let fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
-        if fd < 0 && Darwin.errno == ENOENT { throw Missing.file }
-        guard fd >= 0 else { throw errno("open \((path as NSString).lastPathComponent)") }
-        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-        return try handle.read(upToCount: length) ?? Data()
     }
 
     // MARK: writing
@@ -214,7 +183,7 @@ public final class LinkStore: @unchecked Sendable {
         try writeJSON(next)
         // Renamed: the disk holds `next` from here on, whatever the folder's flush says, so a later write starts from it.
         state = next
-        try syncFolder()
+        try StoreDisk.syncFolder(folder)
     }
 
     /// A count that crossed from JavaScript: a whole number a file of ids can hold, or nil.
@@ -227,90 +196,26 @@ public final class LinkStore: @unchecked Sendable {
     /// would fill the gap with zeros, read later as ids the relay never gave: refused (design 3.5).
     private func appendIds(from: Int, _ bytes: Data) throws {
         let fd = open(idsPath, O_WRONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o600)
-        guard fd >= 0 else { throw errno("open the ids file") }
+        guard fd >= 0 else { throw StoreDisk.errno("open the ids file") }
         defer { close(fd) }
         var info = stat()
-        guard fstat(fd, &info) == 0 else { throw errno("read the ids file's size") }
-        guard Int(info.st_size) >= from * Self.idSize else { throw LinkStoreError(description: "a cut past the ids file's end") }
-        guard ftruncate(fd, off_t(from * Self.idSize)) == 0 else { throw errno("cut the ids file") }
-        guard lseek(fd, 0, SEEK_END) >= 0 else { throw errno("seek the ids file") }
-        try writeAll(fd, bytes)
-        try flush(fd)
+        guard fstat(fd, &info) == 0 else { throw StoreDisk.errno("read the ids file's size") }
+        guard Int(info.st_size) >= from * Self.idSize else { throw StoreError(description: "a cut past the ids file's end") }
+        guard ftruncate(fd, off_t(from * Self.idSize)) == 0 else { throw StoreDisk.errno("cut the ids file") }
+        guard lseek(fd, 0, SEEK_END) >= 0 else { throw StoreDisk.errno("seek the ids file") }
+        try StoreDisk.writeAll(fd, bytes)
+        try StoreDisk.flush(fd)
     }
 
     /// `link.json` whole, under a temporary name, flushed and renamed; the caller flushes the folder.
     private func writeJSON(_ s: State) throws {
         var o: [String: Any] = [
             "version": Self.version, "count": s.count, "putBack": s.putBack, "fault": s.fault,
-            "signing": hex(identity.signing), "receiving": hex(identity.receiving), "relay": hex(identity.relay),
-            "incarnation": s.incarnation.map(hex) ?? NSNull(), "head": NSNull(),
+            "signing": StoreDisk.hex(identity.signing), "receiving": StoreDisk.hex(identity.receiving), "relay": StoreDisk.hex(identity.relay),
+            "incarnation": s.incarnation.map(StoreDisk.hex) ?? NSNull(), "head": NSNull(),
         ]
-        if let head = s.head { o["head"] = ["n": head.n, "chain": hex(head.chain), "sig": hex(head.sig)] }
+        if let head = s.head { o["head"] = ["n": head.n, "chain": StoreDisk.hex(head.chain), "sig": StoreDisk.hex(head.sig)] }
         let data = try JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])
-        let temporary = jsonPath + ".tmp"
-        unlink(temporary)
-        let fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
-        guard fd >= 0 else { throw errno("open the temporary store") }
-        do {
-            try writeAll(fd, data)
-            try flush(fd)
-            close(fd)
-        } catch {
-            close(fd)
-            unlink(temporary)
-            throw error
-        }
-        guard rename(temporary, jsonPath) == 0 else {
-            let failure = errno("rename the store")
-            unlink(temporary)
-            throw failure
-        }
+        try StoreDisk.replace(jsonPath, with: data)
     }
-
-    /// The folder's entries to the disk, as the key store flushes its own (`F_FULLFSYNC` on the folder).
-    private func syncFolder() throws {
-        let dir = open(folder.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
-        guard dir >= 0 else { throw errno("open the store's folder") }
-        defer { close(dir) }
-        try flush(dir)
-    }
-
-    private func writeAll(_ fd: Int32, _ data: Data) throws {
-        try data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) in
-            var done = 0
-            while done < buffer.count {
-                let n = Darwin.write(fd, buffer.baseAddress! + done, buffer.count - done)
-                if n < 0 && Darwin.errno == EINTR { continue }
-                guard n > 0 else { throw errno("write") }
-                done += n
-            }
-        }
-    }
-
-    // `F_FULLFSYNC` asks the drive to flush its cache too, as the relay's `fs.fsync` does on macOS (AD 4.2).
-    private func flush(_ fd: Int32) throws {
-        if fcntl(fd, F_FULLFSYNC) == 0 { return }
-        guard fsync(fd) == 0 else { throw errno("flush") }
-    }
-
-    private func errno(_ what: String) -> LinkStoreError { Self.errno(what) }
-
-    private static func errno(_ what: String) -> LinkStoreError {
-        LinkStoreError(description: "\(what): \(String(cString: strerror(Darwin.errno)))")
-    }
-}
-
-private func hex(_ data: Data) -> String { data.map { String(format: "%02x", $0) }.joined() }
-
-private func hex(_ value: Any?) -> Data? {
-    guard let s = value as? String, s.count % 2 == 0, s.allSatisfy(\.isHexDigit), s == s.lowercased() else { return nil }
-    var data = Data(capacity: s.count / 2)
-    var i = s.startIndex
-    while i < s.endIndex {
-        let j = s.index(i, offsetBy: 2)
-        guard let byte = UInt8(s[i..<j], radix: 16) else { return nil }
-        data.append(byte)
-        i = j
-    }
-    return data
 }
