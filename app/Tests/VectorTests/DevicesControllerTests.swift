@@ -835,6 +835,16 @@ final class DevicesControllerTests: XCTestCase {
         await until("not waiting") { if case .joining(let info) = await again.phase { return info.waiting } else { return false } }
     }
 
+    /// Waits for a semaphore on a dispatch queue, so that no task's thread blocks on it.
+    private static func waitOffTheTasks(_ semaphore: DispatchSemaphore) async {
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async {
+                hold(semaphore)
+                done.resume()
+            }
+        }
+    }
+
     func testACancelDuringTheJoinsAwaitsErasesTheAttempt() async throws {
         let rig = try joinRig()
         await rig.controller.launch()
@@ -842,18 +852,25 @@ final class DevicesControllerTests: XCTestCase {
         let (entered, release) = (DispatchSemaphore(value: 0), DispatchSemaphore(value: 0))
         rig.keys.onPublicKey = { _ in // the gate holds the string's making until the cancel is in
             guard (try? rig.pairing.load())?.stage == .joining, once.first() else { return }
+            entered.signal() // once for the canceller, once for the releaser
             entered.signal()
             Self.hold(release)
         }
         let controller = rig.controller
-        let canceller = Task.detached { // asks the cancel once the join is inside the gate; the cancel queues behind the join on the actor
-            Self.hold(entered)
-            let asked = Task { await controller.cancel() }
+        // Two plain tasks made here, none inside another (the Swift of the CI runner refuses a Task made inside a
+        // detached one), and the blocking wait on a dispatch queue, off the tasks' threads: the cancel queues behind the
+        // join on the actor; the gate opens a little later.
+        let canceller = Task {
+            await Self.waitOffTheTasks(entered)
+            return await controller.cancel()
+        }
+        let releaser = Task {
+            await Self.waitOffTheTasks(entered)
             try? await Task.sleep(nanoseconds: 100_000_000) // lets the cancel reach the actor's queue before the string is made
             release.signal()
-            return await asked.value
         }
         try await form(rig)
+        await releaser.value
         let outcome = await canceller.value
         XCTAssertEqual(outcome, .abandoning, "the join was still making its string")
         XCTAssertNil(try rig.pairing.load(), "the cancel was honoured")
