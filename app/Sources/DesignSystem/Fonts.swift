@@ -77,6 +77,11 @@ public enum PardnerFont {
         Font(ctFont(file: "JetBrainsMono[wght].ttf", size: size, weight: weight.rawValue))
     }
 
+    /// JetBrains Mono as a `CTFont`, for drawing glyphs by hand (the recovery key is never given to a `Text`).
+    public static func monoCT(size: CGFloat, weight: MonoWeight) -> CTFont {
+        ctFont(file: "JetBrainsMono[wght].ttf", size: size, weight: weight.rawValue)
+    }
+
     /// The `wght` axis identifier, the four characters of the tag.
     static let weightAxis = 0x7767_6874
 
