@@ -5,9 +5,9 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { recipientsOf } from "../../src/protocol/device-log.ts";
+import { checkDeviceEntry, recipientsOf } from "../../src/protocol/device-log.ts";
 import { sealEpochKey } from "../../src/protocol/epochs.ts";
-import { encodeFrame, type Frame } from "../../src/protocol/frames.ts";
+import { decodeFrame, encodeFrame, type Frame } from "../../src/protocol/frames.ts";
 import {
   type AppEffect,
   type AppLinkOptions,
@@ -21,7 +21,8 @@ import { KIND_PROFILE, sealMessage } from "../../src/protocol/messages.ts";
 import type { Bytes, Platform } from "../../src/protocol/platform.ts";
 import { encodeProfile } from "../../src/protocol/profile.ts";
 import { platform } from "../relay/support.ts";
-import { fill, message, signedBy } from "../relay/world.ts";
+import { fill, keyed, message, signedBy } from "../relay/world.ts";
+import { makeProof } from "./proof.ts";
 import { historySeal, prompt, receivingOf, type Scene, scene } from "./reading-world.ts";
 
 const BINDING = fill(9);
@@ -363,4 +364,162 @@ test("a relay recreated empties the waiting list: a message is delivered again o
     [[false, "{}"]],
     "the new pass opens it at once; the old waiting entry is gone",
   );
+});
+
+type Devices = Extract<AppEffect, { do: "devices" }>;
+const devicesOf = (fx: AppEffect[]): Devices[] =>
+  fx.flatMap((e) => (e.do === "devices" ? [e] : []));
+const frameTypes = (fx: AppEffect[]) =>
+  fx.flatMap((e) => {
+    if (e.do !== "send") return [];
+    const f = decodeFrame(e.bytes, false, "relay");
+    const g = f.ok ? f : decodeFrame(e.bytes, true, "relay");
+    assert.ok(g.ok);
+    return [g.value.type];
+  });
+
+test("device pairing 3.5.7 enrol goes before the proof until the first served, then never", () => {
+  const s = scene();
+  const enrol = { secret: fill(3), signed: s.alice.genesis.signed, sig: s.alice.genesis.sig };
+  const r = rig(s, { enrol });
+  assert.deepEqual(frameTypes(r.connect()), ["enrol", "prove-active", "read"]);
+  r.drop(10);
+  assert.deepEqual(frameTypes(r.connect(2000)).slice(0, 2), ["prove-active", "read"]);
+});
+
+test("device pairing 3.5 AppLink.enrol hands a retyped secret to the running link, and refuses one that cannot be framed", () => {
+  const s = scene();
+  const enrol = { secret: fill(3), signed: s.alice.genesis.signed, sig: s.alice.genesis.sig };
+  const r = rig(s, { enrol });
+  const first = r.connect();
+  assert.equal(first.filter((e) => e.do === "enrolled").length, 1, "served tells the app once");
+  assert.throws(() => rig(s, { enrol: { ...enrol, secret: fill(3, 31) } }), RangeError);
+  assert.deepEqual(r.link.enrol(fill(3, 31), enrol.signed, enrol.sig), {
+    ok: false,
+    error: "bad-input",
+  });
+  assert.deepEqual(r.link.enrol(enrol.secret, enrol.signed, enrol.sig), {
+    ok: true,
+    value: undefined,
+  });
+  r.drop(10);
+  assert.deepEqual(
+    frameTypes(r.connect(2000)).slice(0, 2),
+    ["enrol", "prove-active"],
+    "the next connection carries the secret the setter gave",
+  );
+});
+
+test("device pairing 3.6 addDevice and removeDevice are busy until the log is at rest", () => {
+  const s = scene();
+  const r = rig(s);
+  const other = keyed();
+  const proof = makeProof(platform, other.sign, s.alice.id, other.device);
+  assert.deepEqual(r.link.addDevice({ device: other.device, proof }, 5), {
+    ok: false,
+    error: "busy",
+  });
+  assert.deepEqual(r.link.removeDevice(s.alice.first.id, 5), { ok: false, error: "busy" });
+});
+
+test("device pairing 3.6 addDevice answers bad-input to a pairing of the wrong shape, never throws", () => {
+  const s = scene();
+  const r = rig(s);
+  r.connect();
+  const other = keyed();
+  const proof = makeProof(platform, other.sign, s.alice.id, other.device);
+  const cases = [
+    { device: { ...other.device, kind: "robot" }, proof },
+    { device: { ...other.device, signing: fill(1, 64) }, proof },
+    { device: other.device, proof: "x" },
+    { device: other.device, proof: fill(1, 63) },
+    {},
+  ];
+  for (const bad of cases)
+    assert.deepEqual(r.link.addDevice(bad as never, 5), { ok: false, error: "bad-input" });
+});
+
+test("device pairing 4.2 the devices effect: every device the log names, at the first rest", () => {
+  const s = scene();
+  const fx = devicesOf(rig(s).connect());
+  assert.equal(fx.length, 1);
+  assert.deepEqual(fx[0], {
+    do: "devices",
+    person: s.alice.id,
+    length: 2,
+    last: s.log[1]?.id,
+    self: s.bot.id,
+    devices: [
+      { id: s.alice.first.id, kind: "app", active: true, addedBy: null, position: 0 },
+      { id: s.bot.id, kind: "bot", active: true, addedBy: s.alice.first.id, position: 1 },
+    ],
+  });
+});
+
+test("device pairing 4.2 the devices effect comes again only when the log changed, removed devices kept", () => {
+  const s = scene();
+  const r = rig(s);
+  r.connect();
+  let n = s.wire.items.length;
+  s.wire.put(4, prompt(s, s.epoch()));
+  assert.deepEqual(devicesOf(r.give(s.wire.push(n), 1)), [], "no change in the log, no effect");
+  const other = keyed();
+  n = s.wire.items.length;
+  s.entry(s.alice.add(s.log, other));
+  const added = devicesOf(r.give(s.wire.push(n), 2));
+  assert.equal(added.length, 1);
+  assert.equal(added[0]?.length, 3);
+  assert.equal(added[0]?.devices.at(-1)?.active, true);
+  n = s.wire.items.length;
+  s.entry(s.alice.remove(s.log, other));
+  const removed = devicesOf(r.give(s.wire.push(n), 3));
+  assert.equal(removed[0]?.length, 4);
+  assert.deepEqual(removed[0]?.devices.at(-1), {
+    id: other.id,
+    kind: "app",
+    active: false,
+    addedBy: s.alice.first.id,
+    position: 2,
+  });
+});
+
+test("device pairing 3.4, 3.6 addDevice builds an entry the log accepts and sends nothing", () => {
+  const s = scene();
+  const r = rig(s);
+  r.connect();
+  const other = keyed();
+  const proof = makeProof(platform, other.sign, s.alice.id, other.device);
+  const built = r.link.addDevice({ device: other.device, proof }, 5);
+  assert.ok(built.ok);
+  const verdict = checkDeviceEntry(platform, s.log, built.value.signed, built.value.sig);
+  assert.ok(verdict.ok);
+  assert.deepEqual(verdict.value.id, built.value.id);
+  assert.equal((verdict.value.entry as { signer: Bytes }).signer.join(), s.bot.id.join());
+});
+
+test("device pairing 3.4 addDevice refuses a proof for another person and a device already named", () => {
+  const s = scene();
+  const r = rig(s);
+  r.connect();
+  const other = keyed();
+  const stranger = makeProof(platform, other.sign, fill(8), other.device);
+  assert.deepEqual(r.link.addDevice({ device: other.device, proof: stranger }, 5), {
+    ok: false,
+    error: "proof",
+  });
+  const own = makeProof(platform, s.bot.sign, s.alice.id, s.bot.device);
+  assert.deepEqual(r.link.addDevice({ device: s.bot.device, proof: own }, 5), {
+    ok: false,
+    error: "named",
+  });
+});
+
+test("device pairing 3.9 removeDevice builds a remove the log accepts, and refuses this device", () => {
+  const s = scene();
+  const r = rig(s);
+  r.connect();
+  assert.deepEqual(r.link.removeDevice(s.bot.id, 5), { ok: false, error: "bad-input" });
+  const built = r.link.removeDevice(s.alice.first.id, 5);
+  assert.ok(built.ok);
+  assert.ok(checkDeviceEntry(platform, s.log, built.value.signed, built.value.sig).ok);
 });

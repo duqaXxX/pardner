@@ -12,9 +12,22 @@ import type { Bytes } from "./platform.ts";
 import { type Proof, sessionOf, signProof } from "./proofs.ts";
 import { type Kept, type Out, Reading, type Who } from "./reading.ts";
 import { Requests } from "./requests.ts";
+import { fail, ok, type Result } from "./result.ts";
 import { type Outcome, Upload } from "./upload.ts";
 
 export type { Effect, LinkState, Persist } from "./link-types.ts";
+
+export type Enrol = { secret: Bytes; signed: Bytes; sig: Bytes };
+
+// Whether the `enrol` frame can be cut before a proof: a 32-byte secret, a 64-byte signature and entry 0 within the unproven limit.
+const framable = (enrol: unknown): boolean => {
+  try {
+    encodeFrame({ type: "enrol", ...(enrol as Enrol) }, false);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 /** What a link is built from: the device, its stored state, and the constants tests shorten. */
 export interface LinkOptions {
@@ -23,6 +36,11 @@ export interface LinkOptions {
   sign: string; // the platform's name for the signing key
   kept: Kept;
   stored?: { incarnation?: Bytes; fault?: boolean };
+  /**
+   * The first device's entry 0 and the relay's enrolment secret: sent before the proof on every connection until the first `served`
+   * or a refusal 2 on a connection that carried it (device pairing design 3.5). A value that cannot be framed throws a `RangeError`.
+   */
+  enrol?: Enrol;
   /** Tests shorten these; the drivers never do. */
   constants?: Partial<{ first: number; max: number; patience: number; ask: number }>;
 }
@@ -42,7 +60,7 @@ const snap = (k: Kept) =>
 export class Link {
   /** The Reading the link drives, for the driver and its logs to read and never to change. */
   readonly reading: Reading;
-  #o: LinkOptions;
+  #o: Omit<LinkOptions, "enrol">; // the secret is kept in `#enrol` alone, which `served` empties
   #c: Required<NonNullable<LinkOptions["constants"]>>;
   #s: LinkState = "unstarted";
   #up: Upload | undefined; // the give-back connection while the link is `uploading`
@@ -50,6 +68,8 @@ export class Link {
   #count = 0;
   #proven = false; // a proof was sent on it: the frames now decode and encode as proven
   #binding: Bytes = new Uint8Array();
+  #enrol: Enrol | undefined; // dropped at the first `served` (entry 0 was placed) or a refusal 2 that followed it
+  #carried = false; // the current connection sent it
   #cutter = new FrameCutter();
   // A `persist` waits for `persisted`: no frame is cut meanwhile, and `next` is the rest of the call
   // that emitted it.
@@ -68,14 +88,27 @@ export class Link {
   #rested = false;
 
   constructor(options: LinkOptions) {
-    const { who, kept, stored = {}, constants } = options;
-    this.#o = options;
+    const { enrol, ...rest } = options;
+    const { who, kept, stored = {}, constants } = rest;
+    if (enrol && !framable(enrol))
+      throw new RangeError(
+        "enrol: a 32-byte secret, entry 0, and a 64-byte signature in one frame",
+      );
+    this.#o = rest;
+    this.#enrol = enrol;
     this.#c = { first: 1000, max: 60_000, patience: 30_000, ask: 600_000, ...constants };
     this.#delay = this.#c.first;
     this.#reqs = new Requests(this.#c.patience);
     this.#incarnation = stored.incarnation;
     this.#saved = snap(kept);
     this.reading = new Reading(who, kept, stored);
+  }
+
+  /** The enrolment secret again, after the relay refused it: the next connection sends it. A value that cannot be framed changes nothing. */
+  enrol(value: Enrol): Result<undefined> {
+    if (!framable(value)) return fail("bad-input");
+    this.#enrol = value;
+    return ok(undefined);
   }
 
   /** Where the link is now. */
@@ -213,7 +246,7 @@ export class Link {
   }
 
   #dial(purpose: "active" | "upload", now: number, fx: Effect[]): void {
-    [this.#conn, this.#proven] = [++this.#count, false];
+    [this.#conn, this.#proven, this.#carried] = [++this.#count, false, false];
     this.#s = purpose === "upload" ? "uploading" : "dialing";
     this.#until = now + this.#c.patience;
     if (purpose === "upload") {
@@ -280,6 +313,9 @@ export class Link {
   #prove(relayNonce: Bytes, now: number, fx: Effect[]): void {
     const { who, sign } = this.#o;
     const session = sessionOf(who.platform, who.relay, relayNonce, this.#binding);
+    // The relay never answers `enrol`: the proof that follows says whether entry 0 was placed.
+    if (this.#enrol) this.#send({ type: "enrol", ...this.#enrol }, fx);
+    this.#carried = !!this.#enrol;
     const proof: Proof = { ...session, kind: "active", person: who.person, device: who.self };
     this.#send({ type: "prove-active", proof, sig: signProof(who.platform, sign, proof) }, fx);
     this.#s = "proving";
@@ -290,6 +326,10 @@ export class Link {
     const r = this.reading;
     if (this.#s === "hello" && f.type === "hello") return void this.#prove(f.relayNonce, now, fx);
     this.#seen = now;
+    if (f.type === "served" && this.#enrol) {
+      this.#enrol = undefined;
+      fx.push({ do: "enrolled" });
+    }
     if (f.type === "result" && this.#reqs.answer(f.request))
       fx.push({ do: "answer", request: f.request, code: f.code });
     if (f.type === "position") this.#asked = false;
@@ -366,6 +406,11 @@ export class Link {
       }
       case "refused":
         this.#slow = [1, 5].includes(out.reason) || (out.reason === 2 && !!this.reading.kept.head);
+        // The secret did not hold (3.5): sent again on the back-off it would earn a ban, so the app is asked for it.
+        if (out.reason === 2 && this.#carried) {
+          [this.#enrol, this.#carried] = [undefined, false];
+          fx.push({ do: "enrol-refused" });
+        }
         break;
       case "put-back":
       case "fault":

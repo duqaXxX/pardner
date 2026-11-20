@@ -3,7 +3,9 @@
  * through `ProtocolHost`. It holds one `AppLink`, the shared `Link` with what must not cross into
  * Swift taken out of its effects: no epoch key, file key or log ever leaves it.
  */
-import { idKey } from "./device-log.ts";
+import { isBytes } from "./bytes.ts";
+import { buildAdd, buildRemove, type SignedEntry } from "./device-builders.ts";
+import { type DeviceKeys, foldLog, idKey, namedDevices } from "./device-log.ts";
 import { encodeFrame } from "./frames.ts";
 import { deviceId, relayKeyId } from "./ids.ts";
 import { EXPORTER_LABEL } from "./labels.ts";
@@ -15,9 +17,11 @@ import {
   openMessage,
   type Reference,
 } from "./messages.ts";
+import { checkPairingProof } from "./pairing-string.ts";
 import type { Bytes, Platform } from "./platform.ts";
 import { encodeProfile, type Profile, Profiles } from "./profile.ts";
 import type { Kept, Out } from "./reading.ts";
+import type { PlatformError, Result } from "./result.ts";
 
 export { EXPORTER_LABEL };
 
@@ -83,12 +87,36 @@ export interface MessageView {
 
 export type View = MessageView | Exclude<Out, { do: "message" }>;
 
+/**
+ * A device the log names (device pairing design 3.9): `addedBy` is the signer of the entry that named it, `null` for entry 0's
+ * device and also for a device a reset named, which no device added.
+ */
+export interface DeviceView {
+  id: Bytes;
+  kind: "app" | "bot";
+  active: boolean;
+  addedBy: Bytes | null;
+  position: number;
+}
+
+/** Why `addDevice` or `removeDevice` built nothing: the log is not at rest, the proof is not for this person, the log names the device already, or the builder's own refusal. */
+export type DeviceActError = "busy" | "proof" | "named" | PlatformError;
+export type DeviceAct = { ok: true; value: SignedEntry } | { ok: false; error: DeviceActError };
+
 /** `Link`'s effects with `deliver` reduced to a `View` and `persist` to what the store writes, and the shown profile of a bot when it changes (design 5). */
 export type AppEffect =
   | Exclude<Effect, { do: "deliver" | "persist" }>
   | { do: "deliver"; out: View }
   | { do: "persist"; what: AppPersist }
-  | { do: "profile"; bot: Bytes; profile: Profile | null };
+  | { do: "profile"; bot: Bytes; profile: Profile | null }
+  | {
+      do: "devices";
+      person: Bytes;
+      length: number;
+      last: Bytes;
+      devices: DeviceView[];
+      self: Bytes;
+    };
 
 /** The device and the relay it is paired with: the public keys of the device's own keys, the relay's pinned key, and what the store holds. */
 export interface AppLinkOptions {
@@ -98,7 +126,24 @@ export interface AppLinkOptions {
   receiving: Bytes;
   stored?: Stored;
   constants?: LinkOptions["constants"];
+  /** The first device's entry 0 and the relay's enrolment secret (device pairing design 3.5): see `LinkOptions.enrol`; a value that cannot be framed throws a `RangeError`. */
+  enrol?: LinkOptions["enrol"];
 }
+
+// A pairing's shape, without `instanceof` (design 2.3: realms differ): the host's value is its own to get wrong.
+const shaped = (p: { device?: Partial<DeviceKeys>; proof?: unknown } | undefined): boolean => {
+  const key = (k: unknown) => isBytes(k) && k.length === 65;
+  const d = p?.device;
+  const proof = p?.proof;
+  return (
+    !!d &&
+    (d.kind === "app" || d.kind === "bot") &&
+    key(d.signing) &&
+    key(d.receiving) &&
+    isBytes(proof) &&
+    proof.length === 64
+  );
+};
 
 /**
  * The device's connection to the relay for the app: `Link`'s calls, with effects a driver in Swift
@@ -107,6 +152,10 @@ export interface AppLinkOptions {
 export class AppLink {
   #link: Link;
   #platform: Platform;
+  #person: Bytes;
+  #self: Bytes;
+  #rested = false; // a rest was delivered in this call
+  #listed = ""; // the device log last told to Swift, by length and last id
   #saved: number; // the ids the store confirmed
   #held: AppPersist | undefined;
   // Delivered unopened, by channel and epoch, in position order: no key of their epoch yet (4.2).
@@ -118,6 +167,8 @@ export class AppLink {
 
   constructor(platform: Platform, o: AppLinkOptions) {
     this.#platform = platform;
+    this.#person = o.person;
+    this.#self = deviceId(platform, o.signing, o.receiving);
     const s = o.stored;
     const head = s?.head && {
       head: { relay: relayKeyId(platform, o.relay), n: s.head.n, chain: s.head.chain },
@@ -130,7 +181,7 @@ export class AppLink {
         platform,
         relay: o.relay,
         person: o.person,
-        self: deviceId(platform, o.signing, o.receiving),
+        self: this.#self,
         receiving: RECEIVE,
       },
       keys: { kind: "app", signing: o.signing, receiving: o.receiving },
@@ -138,6 +189,7 @@ export class AppLink {
       kept,
       stored: { ...(s?.incarnation && { incarnation: s.incarnation }), fault: s?.fault ?? false },
       ...(o.constants && { constants: o.constants }),
+      ...(o.enrol && { enrol: o.enrol }),
     });
   }
 
@@ -187,6 +239,36 @@ export class AppLink {
     return sent === "busy" ? sent : { request: sent.request, effects: this.#view(sent.effects) };
   }
 
+  /**
+   * The enrolment secret again, after an `enrol-refused` effect: the next connection sends it with entry 0 (design 3.5).
+   * A value that cannot be framed is `bad-input` and changes nothing.
+   */
+  enrol(secret: Bytes, signed: Bytes, sig: Bytes): Result<undefined> {
+    return this.#link.enrol({ secret, signed, sig });
+  }
+
+  /**
+   * The add of the device a pairing string names, built and signed against the log this link holds,
+   * and not sent: the app keeps it pending, then `submit`s kind 1 (design 3.6). `busy` while the log is not at rest, as `submit`
+   * answers, since a partial log would sign an entry the relay refuses. `now` is for symmetry with the other calls.
+   */
+  addDevice(pairing: { device: DeviceKeys; proof: Bytes }, _now: number): DeviceAct {
+    if (!this.#link.reading.sendable) return { ok: false, error: "busy" };
+    if (!shaped(pairing)) return { ok: false, error: "bad-input" };
+    const { device, proof } = pairing;
+    const log = this.#link.reading.devices;
+    if (!checkPairingProof(this.#platform, this.#person, device, proof))
+      return { ok: false, error: "proof" };
+    const id = deviceId(this.#platform, device.signing, device.receiving);
+    if (namedDevices(this.#platform, log).has(idKey(id))) return { ok: false, error: "named" };
+    return buildAdd(this.#platform, SIGN, log, this.#self, device, proof);
+  }
+  /** The remove of `target`, built and signed and not sent, as `addDevice`'s; this device is refused (design 3.9). */
+  removeDevice(target: Bytes, _now: number): DeviceAct {
+    if (!this.#link.reading.sendable) return { ok: false, error: "busy" };
+    return buildRemove(this.#platform, SIGN, this.#link.reading.devices, this.#self, target);
+  }
+
   /** The label the connection's exporter is taken under. */
   exporterLabel(): string {
     return EXPORTER_LABEL;
@@ -197,7 +279,7 @@ export class AppLink {
   #view(effects: Effect[]): AppEffect[] {
     const out = effects.flatMap((fx) => this.#reduce(fx));
     const tail = out.at(-1)?.do === "persist" ? out.splice(-1) : [];
-    return [...out, ...this.#retry(), ...this.#told(), ...tail];
+    return [...out, ...this.#retry(), ...this.#told(), ...this.#listing(), ...tail];
   }
 
   #reduce(fx: Effect): AppEffect[] {
@@ -212,6 +294,7 @@ export class AppLink {
       for (const [k, { bot }] of this.#shown) this.#recheck.set(k, bot);
     }
     if (out.do === "rest") {
+      this.#rested = true;
       for (const [k, bot] of this.#recheck) this.#touched.set(k, bot);
       this.#recheck.clear();
     }
@@ -285,6 +368,42 @@ export class AppLink {
     }
     this.#touched.clear();
     return fx;
+  }
+
+  // At a rest, the devices the log names when it is not the one last told (design 4.2).
+  #listing(): AppEffect[] {
+    const rested = this.#rested;
+    this.#rested = false;
+    const log = this.#link.reading.devices;
+    const last = log.at(-1);
+    if (!rested || !last) return [];
+    const at = `${log.length} ${idKey(last.id)}`;
+    if (at === this.#listed) return [];
+    this.#listed = at;
+    const { active } = foldLog(this.#platform, log);
+    const devices = log.flatMap(({ entry: e }): DeviceView[] => {
+      // An entry of the recovery key names its new device too, with no device as the adder.
+      const named =
+        "newDevice" in e
+          ? e.newDevice?.device
+          : e.kind === "add" || e.kind === "genesis"
+            ? e.device
+            : undefined;
+      if (!named) return [];
+      const id = deviceId(this.#platform, named.signing, named.receiving);
+      const addedBy = e.kind === "add" ? e.signer : null;
+      return [{ id, kind: named.kind, active: active.has(idKey(id)), addedBy, position: e.seq }];
+    });
+    return [
+      {
+        do: "devices",
+        person: this.#person,
+        length: log.length,
+        last: last.id,
+        devices,
+        self: this.#self,
+      },
+    ];
   }
 
   #message(
