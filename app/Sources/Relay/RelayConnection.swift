@@ -20,10 +20,12 @@ public struct RelayEndpoint: Sendable {
     public init(host: String, port: UInt16, pin: Data) { (self.host, self.port, self.pin) = (host, port, pin) }
 }
 
-/// What the connection tells its owner: each dial, what the link delivers (its `View`, as a value), and the end.
+/// What the connection tells its owner: each dial, what the link delivers (its `View`, as a value), a bot's shown profile, and the end.
 public enum RelayEvent: Sendable {
     case dialing
     case delivered(HostValue)
+    /// The profile shown for a bot changed: the link's `profile` effect, with `bot` and `profile`, `profile` null when none reads (app data design, 5).
+    case profile(HostValue)
     /// The host faulted: the connection is over for the life of the host, and does not retry.
     case faulted(String)
 }
@@ -297,7 +299,7 @@ public final class RelayConnection: @unchecked Sendable {
         return try await host.call(link!, method, arguments + [.number(last)])
     }
 
-    /// The effects in order. `AppLink` answers every `persist` itself in 6.3, so none arrives here.
+    /// The effects in order.
     private func perform(_ effects: HostValue) async throws { try await perform(effects.arrayValue ?? []) }
 
     private func perform(_ effects: [HostValue]) async throws {
@@ -313,6 +315,11 @@ public final class RelayConnection: @unchecked Sendable {
                 guard let view = fx["out"] else { break }
                 if ["put-back", "fault"].contains(view["do"]?.stringValue) { final = true }
                 out.yield(.delivered(view))
+            case "profile": out.yield(.profile(fx))
+            case "persist":
+                // A `persist` ends its list. Until the app's store (app data design, 3; pull request D2) every
+                // write is answered as stored, which is what the host did in 6.3.
+                try await perform(try await call("persisted", [.bool(true)]))
             case "answer":
                 guard let request = fx["request"]?.numberValue else { break }
                 let outcome = fx["code"]?.numberValue.map { SubmitOutcome.code(Int($0)) } ?? .unanswered

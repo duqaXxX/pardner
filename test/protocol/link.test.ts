@@ -1191,3 +1191,127 @@ test("a held continuation takes the time persisted is given, not the emitting ca
     "the back-off",
   );
 });
+
+test("P: a changed incarnation whose write failed is still delivered changed, at the next connection [app data design 3.4]", () => {
+  const a = rig({}, 1);
+  a.toRest(0);
+  a.link.closed(1, 10);
+  a.s.wire.incarnation = fill(8, 16); // the relay was recreated
+  a.link.tick(2000);
+  a.hello(2000, 2);
+  const first = a.chunk(2, [a.s.wire.served(), ...a.s.wire.read()], 2001);
+  assert.ok(first.some((e) => e.do === "persist" && "incarnation" in e.what));
+  a.link.persisted(false, 2002);
+  assert.equal(a.link.state, "waiting");
+  a.link.tick(10_000);
+  a.hello(10_000, 3);
+  const again = a.give(3, [a.s.wire.served(), ...a.s.wire.read()], 10_001);
+  const out = again.find((e) => e.do === "deliver" && e.out.do === "incarnation");
+  assert.ok(out?.do === "deliver" && out.out.do === "incarnation");
+  assert.equal(
+    out.out.changed,
+    true,
+    "the Reading says false: the link carries the flag a failed write owed",
+  );
+});
+
+test("P: a first rest whose write failed is still delivered first, at the next connection [app data design 3.4]", () => {
+  const a = rig({}, 1);
+  a.link.start(0);
+  a.hello(0);
+  a.chunk(1, [a.s.wire.served(), ...a.read()], 1);
+  const held = a.link.persisted(true, 1); // the incarnation is stored; the rest's kept write ends the call
+  assert.ok(held.at(-1)?.do === "persist");
+  a.link.persisted(false, 2);
+  assert.equal(a.link.state, "waiting");
+  a.link.tick(2000);
+  a.hello(2000, 2);
+  const again = a.give(2, [a.s.wire.served(), ...a.s.wire.read()], 2001);
+  const rest = again.find((e) => e.do === "deliver" && e.out.do === "rest");
+  assert.ok(rest?.do === "deliver" && rest.out.do === "rest");
+  assert.equal(
+    rest.out.first,
+    true,
+    "the Reading says false: the link carries the flag a failed write owed",
+  );
+});
+
+test("P: an owed flag survives a second failed write [app data design 3.4]", () => {
+  const a = rig({}, 1);
+  a.toRest(0);
+  a.link.closed(1, 10);
+  a.s.wire.incarnation = fill(8, 16);
+  for (const [at, conn] of [
+    [2000, 2],
+    [10_000, 3],
+  ] as const) {
+    a.link.tick(at);
+    a.hello(at, conn);
+    a.chunk(conn, [a.s.wire.served(), ...a.s.wire.read()], at + 1);
+    a.link.persisted(false, at + 2);
+  }
+  a.link.tick(80_000);
+  a.hello(80_000, 4);
+  const again = a.give(4, [a.s.wire.served(), ...a.s.wire.read()], 80_001);
+  const out = again.find((e) => e.do === "deliver" && e.out.do === "incarnation");
+  assert.ok(out?.do === "deliver" && out.out.do === "incarnation" && out.out.changed);
+});
+
+test("P: the flags are read from what the store holds: a failed first write then another incarnation is first, not changed", () => {
+  const a = rig({}, 1);
+  a.link.start(0);
+  a.hello(0);
+  a.chunk(1, [a.s.wire.served(), ...a.read()], 1);
+  a.link.persisted(false, 2); // the store still holds no incarnation
+  a.s.wire.incarnation = fill(8, 16);
+  a.link.tick(2000);
+  a.hello(2000, 2);
+  const again = a.give(2, [a.s.wire.served(), ...a.s.wire.read()], 2001);
+  const out = again.find((e) => e.do === "deliver" && e.out.do === "incarnation");
+  assert.ok(out?.do === "deliver" && out.out.do === "incarnation");
+  assert.deepEqual([out.out.first, out.out.changed], [true, false]);
+});
+
+test("P: only the first rest of a run, and the first under a new incarnation, is first", () => {
+  const a = rig({}, 1);
+  const rests = (fx: Effect[]) =>
+    fx.flatMap((e) => (e.do === "deliver" && e.out.do === "rest" ? [e.out.first] : []));
+  assert.deepEqual(rests(a.toRest(0)), [true]);
+  const n = a.s.wire.items.length;
+  a.s.wire.put(4, prompt(a.s, a.epoch, fill(60, 16), 2));
+  assert.deepEqual(
+    rests(a.give(1, a.s.wire.push(n), 10)),
+    [false],
+    "a later rest of the same pass",
+  );
+  a.link.closed(1, 20);
+  a.s.wire.incarnation = fill(8, 16);
+  a.link.tick(2000);
+  a.hello(2000, 2);
+  assert.deepEqual(
+    rests(a.give(2, [a.s.wire.served(), ...a.s.wire.read()], 2001)),
+    [true],
+    "the first rest under a relay recreated",
+  );
+});
+
+test("P: a failed write of another incarnation, then the stored one served again, is changed: the reading rewound", () => {
+  const a = rig({}, 1);
+  a.toRest(0);
+  const stored = a.s.wire.incarnation;
+  a.link.closed(1, 10);
+  a.s.wire.incarnation = fill(8, 16);
+  a.link.tick(2000);
+  a.hello(2000, 2);
+  a.chunk(2, [a.s.wire.served(), ...a.s.wire.read()], 2001);
+  a.link.persisted(false, 2002);
+  a.s.wire.incarnation = stored;
+  a.link.tick(10_000);
+  a.hello(10_000, 3);
+  const again = a.give(3, [a.s.wire.served(), ...a.s.wire.read()], 10_001);
+  const out = again.find((e) => e.do === "deliver" && e.out.do === "incarnation");
+  assert.ok(out?.do === "deliver" && out.out.do === "incarnation");
+  assert.deepEqual([out.out.first, out.out.changed], [false, true]);
+  const rest = again.find((e) => e.do === "deliver" && e.out.do === "rest");
+  assert.equal(rest?.do === "deliver" && rest.out.do === "rest" && rest.out.first, true);
+});

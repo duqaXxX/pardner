@@ -152,6 +152,11 @@ export class Reading {
     };
   }
 
+  /** The key of `epoch` in `channel`, when this device holds it: a message opens with its own epoch's key. */
+  key(channel: Bytes, epoch: Bytes): Bytes | undefined {
+    return this.#channels.get(idKey(channel))?.keys.get(idKey(epoch));
+  }
+
   /** The device's own log of its person, every entry checked. */
   get devices(): readonly LoggedEntry[] {
     return this.#log;
