@@ -27,6 +27,8 @@ import type { PlatformError, Result } from "./result.ts";
 
 // The first device's entry 0 (design 3.5): the app calls it through `ProtocolHost.callExported`, before any `AppLink` exists.
 export { buildGenesis } from "./device-builders.ts";
+// The recovery key's two halves (design 3.5 steps 3 and 5): made before entry 0 and shown after it, the app calls both the same way.
+export { createRecoveryKey, showRecoveryKey } from "./recovery.ts";
 export { EXPORTER_LABEL };
 
 /** The platform's names for the device's two keys: the app's key store holds them under these. */

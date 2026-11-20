@@ -218,4 +218,13 @@ extension LinkStoreTests {
         store.release()
         XCTAssertNoThrow(try store.claim())
     }
+
+    /// One store is claimed by one connection at a time and closed once, at its end: a closed store never takes a claim.
+    func testAClosedStoreTakesNoClaim() throws {
+        let store = try LinkStore(folder: folder(), identity: identity)
+        try store.claim()
+        store.release()
+        store.close()
+        XCTAssertThrowsError(try store.claim()) { XCTAssertTrue($0 is StoreClaimed, "\($0)") }
+    }
 }

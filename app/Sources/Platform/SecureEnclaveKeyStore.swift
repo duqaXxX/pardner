@@ -7,7 +7,7 @@
 import CryptoKit
 import Foundation
 
-public final class SecureEnclaveKeyStore: KeyStore {
+public final class SecureEnclaveKeyStore: KeyStore, Sendable {
     private let folder: String
     /// The folder's descriptor, locked exclusively for the store's lifetime: one store per folder.
     private let lock: Int32

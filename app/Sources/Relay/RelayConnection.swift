@@ -47,6 +47,10 @@ public enum RelayEvent: Sendable {
     /// The relay refused the secret on a connection that carried it (reason 2): the link dropped it. The owner types it again and the
     /// app builds a new connection with that `Enrolment` (device pairing design 3.5); a setter on a running connection comes with the app's first-device flow.
     case enrolRefused
+    /// A connection became ready: the relay was reached over TLS with its pinned key, before anything it answered.
+    case reached
+    /// A dial ended without ever becoming ready: nothing reached the relay on it.
+    case unreached
     /// The host faulted: the connection is over for the life of the host, and does not retry.
     case faulted(String)
 }
@@ -193,6 +197,7 @@ public final class RelayConnection: @unchecked Sendable {
     private var armed: Double?
     private var last = 0.0 // the time the link was last given: it is never given an earlier one
     private var final = false
+    private var readyConnections: Set<Int> = [] // the dials that became ready and have not ended
     private var watch: PathWatch?
     private var wakeObserver: NSObjectProtocol?
     private let log = Logger(subsystem: "io.github.duqaxxx.pardner", category: "relay")
@@ -312,10 +317,14 @@ public final class RelayConnection: @unchecked Sendable {
 
     private func handle(_ event: Event) async throws {
         switch event {
-        case .opened(let conn, let binding): try await perform(try await call("opened", [.number(Double(conn)), .bytes(binding)]))
+        case .opened(let conn, let binding):
+            if sockets[conn] != nil { readyConnections.insert(conn); out.yield(.reached) }
+            try await perform(try await call("opened", [.number(Double(conn)), .bytes(binding)]))
         case .received(let conn, let bytes): try await perform(try await call("received", [.number(Double(conn)), .bytes(bytes)]))
         case .closed(let conn):
-            sockets.removeValue(forKey: conn) // the dial is over, whoever ended it: a failed one leaves nothing behind
+            // The dial is over, whoever ended it: a failed one leaves nothing behind. One that the `close` effect already ended was told then.
+            let known = sockets.removeValue(forKey: conn) != nil
+            if readyConnections.remove(conn) == nil, known { out.yield(.unreached) }
             try await perform(try await call("closed", [.number(Double(conn))]))
         case .count(let continuation): continuation.resume(returning: sockets.count)
         case .enrol(let enrolment, let continuation):
@@ -372,7 +381,12 @@ public final class RelayConnection: @unchecked Sendable {
             case "send":
                 if let conn = fx["conn"]?.numberValue, let bytes = fx["bytes"]?.bytesValue { sockets[Int(conn)]?.send(bytes) }
             case "close":
-                if let conn = fx["conn"]?.numberValue { sockets.removeValue(forKey: Int(conn))?.connection.cancel() }
+                if let conn = fx["conn"]?.numberValue, let socket = sockets.removeValue(forKey: Int(conn)) {
+                    socket.connection.cancel()
+                    // A cancel before `.ready` goes preparing to cancelled, which the socket's handler ignores: no `closed` ever
+                    // comes for it, so the dial that never reached the relay is told here (a relay that drops packets).
+                    if !readyConnections.contains(Int(conn)) { out.yield(.unreached) }
+                }
             case "wake": if let at = fx["at"]?.numberValue { arm(at) }
             case "deliver":
                 guard let view = fx["out"] else { break }
@@ -470,6 +484,7 @@ public final class RelayConnection: @unchecked Sendable {
 
     /// Ends the streams; a `submit` or a count queued behind the end is answered, as one made after it is.
     private func finish() async {
+        linkStore.close() // closed before the claim is given back, so no claim lands on a store about to close; the folder's lock goes now, not when the last reference does: the owner may erase the store at once
         giveBack()
         feed.finish()
         for await event in inbox {
