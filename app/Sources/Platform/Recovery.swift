@@ -40,29 +40,39 @@ extension CryptoKitPlatform {
         throw Fault(message: "DeriveKeyPairError")
     }
 
-    /// Makes a recovery secret, shows it to the person and returns the two public keys; it holds no private key.
-    /// A person who did not see it (`show` false) is `bad-input`.
+    /// Makes a recovery secret, keeps it in this instance's memory under `name` until `showRecovery`, `deleteKey` or the end of the
+    /// host wipes it, and returns the two public keys; it shows nothing and holds no private key.
     public func createRecovery(_ name: String, _ signInfo: Data, _ receiveInfo: Data) throws -> (signing: Data, receiving: Data) {
-        guard let person else { throw Failure.badInput }
+        guard person != nil else { throw Failure.badInput }
         guard signInfo != receiveInfo else { throw Failure.badInput } // RFC 9180, 9.2.3
-        guard !taken(name) else { throw Failure.keyExists } // before the person is shown a secret
+        guard !taken(name), !has(name) else { throw Failure.keyExists }
         let secret = SecretBuffer(count: 32)
-        defer { secret.wipe() }
+        var kept = false
+        defer { if !kept { secret.wipe() } }
         try secret.withUnsafeMutableBytes { try Self.fillRandom($0) }
-        let (signScalar, receiveScalar) = try scalars(secret, signInfo, receiveInfo) // before the person sees it
+        let (signScalar, receiveScalar) = try scalars(secret, signInfo, receiveInfo)
         defer { signScalar.wipe(); receiveScalar.wipe() }
         let keys = (
             try Derived(use: .sign, scalar: signScalar).signingKey().publicKey.x963Representation,
             try Derived(use: .receive, scalar: receiveScalar).agreementKey().publicKey.x963Representation)
-        guard secret.withUnsafeBytes({ person.show($0) }) else { throw Failure.badInput }
+        secrets[name] = secret
+        kept = true
         return keys
+    }
+
+    /// Shows the held secret with the sheet's `context`, then wipes it whatever the answer. A person who did not see it, or a
+    /// name with no held secret, is `bad-input`.
+    public func showRecovery(_ name: String, _ context: String) throws {
+        guard let person, let secret = secrets.removeValue(forKey: name) else { throw Failure.badInput }
+        defer { secret.wipe() }
+        guard secret.withUnsafeBytes({ person.show($0, context) }) else { throw Failure.badInput }
     }
 
     /// Holds the two pairs in this instance's memory under `<name>.sign` and `<name>.receive`; `deleteKey` or the end of the host removes them.
     /// A person who declines, or gives other than 32 bytes, is `bad-input`.
     public func enterRecovery(_ name: String, _ signInfo: Data, _ receiveInfo: Data) throws -> (signing: Data, receiving: Data) {
         guard signInfo != receiveInfo else { throw Failure.badInput }
-        guard !taken(name) else { throw Failure.keyExists } // before the person types a secret
+        guard !taken(name), !has(name) else { throw Failure.keyExists } // before the person types a secret
         let secret = SecretBuffer(count: 32)
         defer { secret.wipe() }
         guard let person, person.enter(secret) == 32 else { throw Failure.badInput }

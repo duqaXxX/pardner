@@ -59,7 +59,7 @@ import {
   type ProofKind,
   runningHash,
 } from "./proofs.ts";
-import { createRecoveryKey, enterRecoveryKey } from "./recovery.ts";
+import { createRecoveryKey, enterRecoveryKey, showRecoveryKey } from "./recovery.ts";
 import type { Result } from "./result.ts";
 
 /** The test-only constructor that puts a private key under a name (design 3.3); never part of `Platform`. */
@@ -617,8 +617,9 @@ function recovery(
 }
 
 /**
- * What a platform does with a recovery, on each engine: `holds` (a created key holds nothing, an
- * entered one holds both pairs for their use until `deleteKey`), `same-info` and `taken` (refused).
+ * What a platform does with a recovery, on each engine: `holds` (a created key holds no private key
+ * and its secret is shown once, or erased by `deleteKey`; an entered one holds both pairs for
+ * their use until `deleteKey`), `same-info` and `taken` (refused).
  */
 function recoveryBehaviour(c: Case, withSecret: WithSecret | undefined): string {
   if (!withSecret) throw new TypeError("a recovery needs a way to give a secret");
@@ -643,6 +644,30 @@ function recoveryBehaviour(c: Case, withSecret: WithSecret | undefined): string 
       if (!createRecoveryKey(w, "vector.recovery").ok) return "create failed";
       if (!noKey("vector.recovery.sign") || !noKey("vector.recovery.receive"))
         return "created holds";
+      if (showRecoveryKey(w, "vector.unmade", "sheet").ok) return "shown without a secret";
+      if (createRecoveryKey(w, "vector.recovery").ok) return "created twice";
+      if (!showRecoveryKey(w, "vector.recovery", "sheet").ok) return "show failed";
+      if (showRecoveryKey(w, "vector.recovery", "sheet").ok) return "shown twice";
+      if (!createRecoveryKey(w, "vector.recovery").ok) return "create after show failed";
+      if (w.enterRecovery("vector.recovery", signInfo, receiveInfo).ok)
+        return "entered over a secret";
+      if (w.showRecovery("vector.recovery", undefined as never).ok) return "shown without context";
+      if (createRecoveryKey(w, "vector.recovery").ok) return "context wiped the secret";
+      if (!w.deleteKey("vector.recovery").ok) return "delete of a secret failed"; // never shown: erased
+      if (!w.deleteKey("vector.never").ok) return "delete of nothing failed"; // a name never made
+      if (!createRecoveryKey(w, "vector.held").ok) return "create failed";
+      if (w.makeKeyPair("vector.held", "sign").ok) return "made over a secret";
+      if (!createRecoveryKey(w, "vector.held.sign").ok) return "create failed";
+      if (w.enterRecovery("vector.held", signInfo, receiveInfo).ok)
+        return "entered over a secret name";
+      if (!w.deleteKey("vector.held").ok || !w.deleteKey("vector.held.sign").ok)
+        return "delete of a secret failed";
+      if (!w.makeKeyPair("vector.bare", "sign").ok) return "make failed";
+      if (createRecoveryKey(w, "vector.bare").ok) return "created over a key";
+      if (w.enterRecovery("vector.bare", signInfo, receiveInfo).ok) return "entered over a key";
+      if (!w.publicKey("vector.bare").ok) return "key lost to a refusal";
+      w.deleteKey("vector.bare");
+      if (showRecoveryKey(w, "vector.recovery", "sheet").ok) return "deleted secret shown";
       if (!enterRecoveryKey(w, "vector.recovery").ok) return "enter failed";
       if (
         !w.sign("vector.recovery.sign", signInfo).ok ||

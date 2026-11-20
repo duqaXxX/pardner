@@ -7,6 +7,8 @@ import Platform
 final class SoftwareKeyStore: KeyStore, @unchecked Sendable { // one test thread at a time
     private var signing: [String: P256.Signing.PrivateKey] = [:]
     private var receiving: [String: P256.KeyAgreement.PrivateKey] = [:]
+    /// As the Secure Enclave store does: deleting a name that holds nothing is `no-such-key`.
+    var refusesAbsentDelete = false
 
     func make(_ name: String, _ use: KeyUse) throws -> Data {
         switch use {
@@ -54,6 +56,7 @@ final class SoftwareKeyStore: KeyStore, @unchecked Sendable { // one test thread
     }
 
     func delete(_ name: String) throws {
+        if refusesAbsentDelete && !has(name) { throw Failure.noSuchKey }
         signing[name] = nil
         receiving[name] = nil
     }

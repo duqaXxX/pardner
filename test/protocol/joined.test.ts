@@ -25,7 +25,7 @@ let runner: Runner;
 
 /** A platform whose person types `secret`: the test-only way to give a recovery its secret. */
 const secretPlatform = (secret: Uint8Array) =>
-  createNodePlatform({ show: () => {}, enter: () => secret });
+  createNodePlatform({ show: () => true, enter: () => secret });
 
 before(() => {
   execFileSync(

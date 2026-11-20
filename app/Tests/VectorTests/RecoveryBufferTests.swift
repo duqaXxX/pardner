@@ -28,10 +28,16 @@ final class RecoveryBufferTests: XCTestCase {
 
     func testCreateThenEnterGiveTheSamePublicKeysAndLeaveNothing() throws {
         let shown = Box<Data>()
-        let creator = platform(RecoveryPerson(show: { shown.value = Data($0); return true }, enter: { _ in nil }))
+        let context = Box<String>()
+        let creator = platform(RecoveryPerson(show: { shown.value = Data($0); context.value = $1; return true }, enter: { _ in nil }))
         let created = try creator.createRecovery("owner", signInfo, receiveInfo)
+        XCTAssertNil(shown.value, "createRecovery showed the secret")
+        XCTAssertEqual(creator.secrets.count, 1)
+        try creator.showRecovery("owner", "id and relay")
         XCTAssertEqual(shown.value?.count, 32)
-        assertAllZero("after createRecovery")
+        XCTAssertEqual(context.value, "id and relay")
+        assertAllZero("after showRecovery")
+        XCTAssertTrue(creator.secrets.isEmpty)
         made = []
         let entered = platform(.typing(try XCTUnwrap(shown.value)))
         let keys = try entered.enterRecovery("owner", signInfo, receiveInfo)
@@ -65,7 +71,7 @@ final class RecoveryBufferTests: XCTestCase {
     }
 
     func testPersonWhoDeclinesIsBadInputAndEveryBufferIsZero() {
-        let entered = platform(RecoveryPerson(show: { _ in true }, enter: { buffer in
+        let entered = platform(RecoveryPerson(show: { _, _ in true }, enter: { buffer in
             buffer.withUnsafeMutableBytes { $0.copyBytes(from: [UInt8](repeating: 9, count: 32)) } // typed, then went away
             return nil
         }))
@@ -80,15 +86,94 @@ final class RecoveryBufferTests: XCTestCase {
         assertAllZero("after a short secret")
     }
 
-    func testPersonWhoDidNotSeeTheSecretIsBadInputAndEveryBufferIsZero() {
-        let creator = platform(RecoveryPerson(show: { _ in false }, enter: { _ in nil }))
-        XCTAssertThrowsError(try creator.createRecovery("owner", signInfo, receiveInfo)) { XCTAssertEqual($0 as? Failure, .badInput) }
+    func testPersonWhoDidNotSeeTheSecretIsBadInputAndEveryBufferIsZero() throws {
+        let creator = platform(RecoveryPerson(show: { _, _ in false }, enter: { _ in nil }))
+        _ = try creator.createRecovery("owner", signInfo, receiveInfo)
+        XCTAssertThrowsError(try creator.showRecovery("owner", "sheet")) { XCTAssertEqual($0 as? Failure, .badInput) }
         assertAllZero("after a secret nobody saw")
+        XCTAssertTrue(creator.secrets.isEmpty)
+        XCTAssertThrowsError(try creator.showRecovery("owner", "sheet")) { XCTAssertEqual($0 as? Failure, .badInput) }
+    }
+
+    func testShowRecoveryBeforeCreateOrTwiceIsBadInput() throws {
+        let creator = platform(.typing(Data(count: 32)))
+        XCTAssertThrowsError(try creator.showRecovery("owner", "sheet")) { XCTAssertEqual($0 as? Failure, .badInput) }
+        _ = try creator.createRecovery("owner", signInfo, receiveInfo)
+        XCTAssertThrowsError(try creator.createRecovery("owner", signInfo, receiveInfo)) { XCTAssertEqual($0 as? Failure, .keyExists) }
+        try creator.showRecovery("owner", "sheet")
+        XCTAssertThrowsError(try creator.showRecovery("owner", "sheet")) { XCTAssertEqual($0 as? Failure, .badInput) }
+        _ = try creator.createRecovery("owner", signInfo, receiveInfo) // the name is free again
+        creator.endSession()
+    }
+
+    func testDeleteKeyAndEndSessionWipeASecretNeverShown() throws {
+        let creator = platform(.typing(Data(count: 32)))
+        _ = try creator.createRecovery("owner", signInfo, receiveInfo)
+        let held = try XCTUnwrap(creator.secrets["owner"])
+        XCTAssertFalse(held.isZero)
+        try creator.deleteKey("owner")
+        XCTAssertTrue(held.isZero)
+        XCTAssertThrowsError(try creator.showRecovery("owner", "sheet")) { XCTAssertEqual($0 as? Failure, .badInput) }
+        _ = try creator.createRecovery("owner", signInfo, receiveInfo)
+        let second = try XCTUnwrap(creator.secrets["owner"])
+        creator.endSession()
+        XCTAssertTrue(second.isZero)
+        XCTAssertTrue(creator.secrets.isEmpty)
+    }
+
+    func testDeleteKeyOfASecretNeverShownIsOkOnAStoreThatRefusesAnAbsentName() throws {
+        let store = SoftwareKeyStore()
+        store.refusesAbsentDelete = true // as the Secure Enclave store: the name is not in the store
+        let creator = CryptoKitPlatform(store: store, person: .typing(Data(count: 32)))
+        _ = try creator.createRecovery("owner", signInfo, receiveInfo)
+        let held = try XCTUnwrap(creator.secrets["owner"])
+        XCTAssertNoThrow(try creator.deleteKey("owner"))
+        XCTAssertTrue(held.isZero)
+        XCTAssertNoThrow(try creator.deleteKey("owner")) // nothing held now: ok, as on the other engine
+    }
+
+    func testMakersRefuseANameASecretHolds() throws {
+        let store = SoftwareKeyStore()
+        store.refusesAbsentDelete = true
+        let creator = CryptoKitPlatform(store: store, person: .typing(Data(count: 32)))
+        _ = try creator.createRecovery("r", signInfo, receiveInfo)
+        XCTAssertThrowsError(try creator.makeKeyPair("r", "sign")) { XCTAssertEqual($0 as? Failure, .keyExists) }
+        XCTAssertNotNil(creator.secrets["r"]) // not wiped by a later deleteKey of a key that was never made
+        _ = try creator.createRecovery("x.sign", signInfo, receiveInfo)
+        XCTAssertThrowsError(try creator.enterRecovery("x", signInfo, receiveInfo)) { XCTAssertEqual($0 as? Failure, .keyExists) }
+        creator.endSession()
+    }
+
+    func testCreateRefusesANameAKeyHoldsAsItself() throws {
+        let store = SoftwareKeyStore()
+        let creator = CryptoKitPlatform(store: store, person: .typing(Data(count: 32)))
+        _ = try store.make("owner", .sign)
+        XCTAssertThrowsError(try creator.createRecovery("owner", signInfo, receiveInfo)) { XCTAssertEqual($0 as? Failure, .keyExists) }
+        XCTAssertTrue(creator.secrets.isEmpty)
+        creator.derived["held"] = Derived(use: .sign, scalar: SecretBuffer(count: 32))
+        XCTAssertThrowsError(try creator.createRecovery("held", signInfo, receiveInfo)) { XCTAssertEqual($0 as? Failure, .keyExists) }
+        creator.endSession()
+    }
+
+    func testEnterRefusesANameWithASecretNeverShownBeforeThePersonTypes() throws {
+        let asked = Box<Bool>()
+        let person = RecoveryPerson(show: { _, _ in true }, enter: { _ in asked.value = true; return nil })
+        let creator = platform(person)
+        _ = try creator.createRecovery("owner", signInfo, receiveInfo)
+        XCTAssertThrowsError(try creator.enterRecovery("owner", signInfo, receiveInfo)) { XCTAssertEqual($0 as? Failure, .keyExists) }
+        XCTAssertNil(asked.value, "the person was asked")
+        XCTAssertNoThrow(try creator.showRecovery("owner", "sheet")) // the secret was kept
+    }
+
+    func testWithoutAPersonCreateAndShowAreBadInput() {
+        let bare = CryptoKitPlatform(store: SoftwareKeyStore())
+        XCTAssertThrowsError(try bare.createRecovery("owner", signInfo, receiveInfo)) { XCTAssertEqual($0 as? Failure, .badInput) }
+        XCTAssertThrowsError(try bare.showRecovery("owner", "sheet")) { XCTAssertEqual($0 as? Failure, .badInput) }
     }
 
     func testNameTakenWhilePersonTypedIsKeyExistsAndEveryBufferIsZero() throws {
         let store = SoftwareKeyStore()
-        let entered = CryptoKitPlatform(store: store, person: RecoveryPerson(show: { _ in true }, enter: { buffer in
+        let entered = CryptoKitPlatform(store: store, person: RecoveryPerson(show: { _, _ in true }, enter: { buffer in
             _ = try? store.make("owner.sign", .sign) // taken while the person typed
             buffer.withUnsafeMutableBytes { $0.copyBytes(from: [UInt8](repeating: 5, count: 32)) }
             return 32
@@ -99,7 +184,7 @@ final class RecoveryBufferTests: XCTestCase {
     }
 
     func testSecondScalarThatCannotBeMadeWipesTheFirstAndEveryBufferIsZero() {
-        let creator = platform(RecoveryPerson(show: { _ in true }, enter: { _ in nil }))
+        let creator = platform(.typing(Data(count: 32)))
         var accepted = 0
         creator.accepts = { _ in accepted += 1; return accepted == 1 } // the first half is made, the second never
         XCTAssertThrowsError(try creator.createRecovery("owner", signInfo, receiveInfo)) { XCTAssertTrue($0 is Fault) }

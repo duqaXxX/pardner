@@ -78,6 +78,18 @@ All notable changes to this project are documented here. The format follows
   in Light or Dark (View > Appearance). The radii and the base gap are tokens beside the colours. Until a device is
   paired the window says so; `swift run screens-snapshot <dir>` renders it over a synthetic conversation.
 
+### Changed
+
+- The platform's recovery call is split in two, so the recovery sheet can name the person id, which is the id of the
+  device log's entry 0 and exists only after the recovery keys are made. `createRecovery` makes the secret, keeps it in
+  the platform's memory under the name (a `SecretBuffer` in the app, a `Uint8Array` on Node, zeroed when wiped) and
+  returns the two public keys, showing nothing. The new `showRecovery(name, context)` shows the held secret with the
+  sheet's public text, erases it whatever the answer and is `bad-input` for a decline, a `context` that is not a string
+  or a name with no held secret; `deleteKey` and the end of the host erase a secret never shown. A name that a key or an
+  unshown secret holds is refused by `createRecovery` and `enterRecovery`. The secret still never enters JavaScript.
+  `RecoveryPerson.show` takes the context and answers `true` only when the person confirmed. The package gains
+  `showRecoveryKey` (`recovery.ts`), and the `recovery.json` behaviour vector runs the new sequence on both engines.
+
 ### Fixed
 
 - A relay connection whose store write failed delivered the next incarnation without `changed`, and the next first

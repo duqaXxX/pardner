@@ -31,25 +31,33 @@ export interface Platform {
   publicKey(name: string): Result<Bytes>;
   sign(name: string, message: Bytes): Result<Bytes>;
   hpkeOpen(name: string, enc: Bytes, info: Bytes, aad: Bytes, sealed: Bytes): Result<Bytes>;
-  /** Zeroes and forgets the key; `io-failed` when the platform could not record the removal, the key then kept. */
+  /** Zeroes and forgets the key, ok when nothing holds `name`; `io-failed` when the platform could not record the removal, the key then kept. */
   deleteKey(name: string): Result<void>;
 
   /**
    * The recovery secret, on one HKDF `info` per half (the two must differ). Each half is
    * DeriveKeyPair(HKDF(secret, info, 32)) (RFC 9180, 7.1.3).
-   * `createRecovery` makes 32 random bytes, derives both pairs, shows the secret to the person, and
-   * returns the two public keys: it holds nothing, so no private recovery key exists afterwards.
+   * `createRecovery` makes 32 random bytes, derives both pairs, keeps the secret in the platform's
+   * memory under `name` and returns the two public keys; it shows nothing, and no private recovery
+   * key exists afterwards. `showRecovery` shows the held secret to the person together with
+   * `context`, the public text the sheet carries (the person id, the relay's address and key, one
+   * string), then erases it whatever the answer; a person who did not confirm, a `context` that is
+   * not a string (refused before anything is shown or wiped) or a name with no held secret is
+   * `bad-input`. A held secret lives under the bare `name`, which `createRecovery` refuses when a
+   * key already holds it. `deleteKey(name)` erases a secret never shown, and so does the end
+   * of the platform. The secret never enters JavaScript.
    * `enterRecovery` takes the secret from the person, derives, and holds the two pairs under
    * `<name>.sign` and `<name>.receive` for their use; the caller removes them with `deleteKey`.
-   * Neither keeps the secret: it, the HKDF outputs and the candidate scalars are erased on every
-   * path, a refusal and an exception too. A name that is taken is refused before the person is
-   * shown or asked anything.
+   * Neither keeps the secret beyond that: it, the HKDF outputs and the candidate scalars are erased
+   * on every path, a refusal and an exception too. A name that is taken (or holds a secret) is
+   * refused before the person is shown or asked anything.
    */
   createRecovery(
     name: string,
     signInfo: Bytes,
     receiveInfo: Bytes,
   ): Result<{ signing: Bytes; receiving: Bytes }>;
+  showRecovery(name: string, context: string): Result<void>;
   enterRecovery(
     name: string,
     signInfo: Bytes,
