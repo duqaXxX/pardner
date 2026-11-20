@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The keeper: one function in the protocol package (`src/protocol/keeper.ts`) that finds what a device owes its person's
+  channels at a rest. It names the channels that need a new epoch (no epoch, closed, no key, 30 days old) and the
+  history seals the device owes: for each epoch, the current one included, whose key it holds, a seal to each active
+  device of the person and to the current recovery key that has no counting seal, a seal counting only while its maker
+  is not removed. `Link.giveSeal` sends a `give-seal` frame at rest as `submit` sends an item. `AppLink` runs the keeper
+  at each rest: it starts the epoch of each channel that needs one (whatever the reason) and gives its seals through
+  `Link`, at most 16 in flight, never one twice while its answer is pending. The `devices` effect carries, for each
+  active device, the epochs (channel and epoch id) for which it is the only active device sealed the key, whatever the
+  state of the seal's maker. Served history seals count only once their signature is checked. The app's clock of an
+  epoch's age is kept in memory, so an epoch ages by it only after 30 days of one run.
 - The app's link enrols a first device and keeps the device log. `AppLinkOptions.enrol` (the enrolment secret and entry 0;
   a value that cannot be framed throws a `RangeError`) makes the link send the `enrol` frame before the proof on every
   connection until the first `served`, then never again within that process: the link tells the app once with an

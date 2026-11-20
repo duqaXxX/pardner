@@ -6,10 +6,11 @@
 
 import type { Place } from "./bot-reader.ts";
 import { bytesEqual } from "./bytes.ts";
-import { checkDeviceEntry, idKey, type LoggedEntry } from "./device-log.ts";
+import { checkDeviceEntry, idKey, type LoggedEntry, namedDevices } from "./device-log.ts";
 import { Seen } from "./device-reader.ts";
 import {
   checkEpochEntry,
+  checkHistorySeal,
   decodeEpochEntry,
   encodeHistorySeal,
   type HistorySeal,
@@ -103,7 +104,8 @@ export class Reading {
   #chains: Bytes[] = [];
   #log: LoggedEntry[] = [];
   #channels = new Map<string, Channel>();
-  #seals: { seal: HistorySeal; sig: Bytes; id: Bytes }[] = []; // `id`: the seal's own, never its signature (crypto.md 4)
+  // `id`: the seal's own, never its signature (crypto.md 4); `ok`: its maker and signature checked against the log (crypto.md 9)
+  #seals: { seal: HistorySeal; sig: Bytes; id: Bytes; ok: boolean }[] = [];
   #seen = new Seen();
 
   /**
@@ -150,6 +152,11 @@ export class Reading {
       key: last && c.keys.get(idKey(last.id)),
       open: openAt(last, c.members, this.#log.length),
     };
+  }
+
+  /** The history seals read, whatever their recipient: the relay serves every active device all of them. */
+  get seals(): readonly HistorySeal[] {
+    return this.#seals.filter((s) => s.ok).map((s) => s.seal);
   }
 
   /** The key of `epoch` in `channel`, when this device holds it: a message opens with its own epoch's key. */
@@ -203,7 +210,8 @@ export class Reading {
       case "seals":
         for (const s of f.items) {
           const id = signedId(this.#r.platform, encodeHistorySeal(s.seal));
-          if (!this.#seals.some((h) => bytesEqual(h.id, id))) this.#seals.push({ ...s, id });
+          if (!this.#seals.some((h) => bytesEqual(h.id, id)))
+            this.#seals.push({ ...s, id, ok: false });
         }
         this.#unlock();
         return [];
@@ -311,6 +319,7 @@ export class Reading {
       return this.#fault("a head that is not the running hash of the items given");
     if (!this.kept.head || n >= this.kept.head.head.n) this.kept.head = { head, sig };
     this.#state = "rest";
+    this.#verifySeals(true);
     const first = this.#first;
     this.#first = false;
     return [{ do: "rest", first }];
@@ -373,16 +382,37 @@ export class Reading {
     return [{ do: "message", message: v.value.message, place, position }];
   }
 
+  /**
+   * A served seal counts once its maker is a device of the log read so far and its signature holds. One
+   * whose maker is not yet read waits for the log to grow; a bad signature or form is dropped, as the
+   * relay serves it and this reading refuses it without a fault. At rest the log read is all there is,
+   * so a seal whose maker is still unknown (another person's device: the relay serves every kept seal
+   * to every active device) is dropped too.
+   */
+  #verifySeals(atRest = false): void {
+    const { platform } = this.#r;
+    if (this.#seals.every((h) => h.ok)) return; // the fold is the cost: only for a seal not yet checked
+    const named = namedDevices(platform, this.#log);
+    this.#seals = this.#seals.filter((h) => {
+      if (h.ok) return true;
+      const v = checkHistorySeal(platform, this.#log, encodeHistorySeal(h.seal), h.sig, named);
+      h.ok = v.ok;
+      return v.ok || (v.rule === "device" && !atRest);
+    });
+  }
+
   /** The key of each epoch this device holds: its own seal in the entry, or a history seal another device made (5.3). */
   #unlock(): void {
     const { platform, self, receiving } = this.#r;
+    this.#verifySeals();
     for (const c of this.#channels.values())
       for (const e of c.epochs) {
         if (c.keys.has(idKey(e.id))) continue;
         let key = openEpochSeal(platform, receiving, e, self);
         for (const h of this.#seals) {
           if (key.ok) break;
-          if (!bytesEqual(h.seal.recipient, self) || !bytesEqual(h.seal.epoch, e.id)) continue;
+          if (!h.ok || !bytesEqual(h.seal.recipient, self) || !bytesEqual(h.seal.epoch, e.id))
+            continue;
           key = openHistorySeal(
             platform,
             receiving,

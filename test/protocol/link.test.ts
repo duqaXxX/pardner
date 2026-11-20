@@ -6,14 +6,15 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { LoggedEpoch } from "../../src/protocol/epochs.ts";
 import { decodeFrame, encodeFrame, type Frame } from "../../src/protocol/frames.ts";
 import { type Effect, Link, type LinkOptions } from "../../src/protocol/link.ts";
 import type { Bytes } from "../../src/protocol/platform.ts";
 import { checkProof } from "../../src/protocol/proofs.ts";
 import type { Kept } from "../../src/protocol/reading.ts";
 import { platform } from "../relay/support.ts";
-import { fill } from "../relay/world.ts";
-import { prompt, scene } from "./reading-world.ts";
+import { fill, keyed } from "../relay/world.ts";
+import { historySeal, prompt, scene } from "./reading-world.ts";
 
 const NONCE = fill(4);
 const BINDING = fill(9);
@@ -197,6 +198,29 @@ test("2.1.6 submit sends only at rest, and a result for no request in flight is 
     [{ do: "answer", request: 2, code: 0 }],
   );
   assert.ok(a.link.submit(1, item.signed, item.sig, 400) !== "busy", "free again");
+});
+
+test("2.1.6 giveSeal sends a give-seal at rest only, numbered with the submits, and its result is answered", () => {
+  const a = rig();
+  const e = a.epoch;
+  const late = keyed("app");
+  const made = historySeal(a.s.epochs[0] as LoggedEpoch, a.s.alice.first, late, e.key);
+  assert.equal(a.link.giveSeal(made.seal, made.sig, 0), "busy", "not even dialed");
+  a.toRest(0);
+  const r = a.link.giveSeal(made.seal, made.sig, 100);
+  assert.ok(r !== "busy");
+  assert.deepEqual(sends(r.effects), [
+    { type: "give-seal", request: r.request, seal: made.seal, sig: made.sig },
+  ]);
+  const item = a.s.alice.genesis;
+  const next = a.link.submit(1, item.signed, item.sig, 100);
+  assert.ok(next !== "busy" && next.request === r.request + 1, "one request counter");
+  assert.deepEqual(
+    a
+      .give(1, [{ type: "result", request: r.request, code: 0 }], 200)
+      .filter((x) => x.do === "answer"),
+    [{ do: "answer", request: r.request, code: 0 }],
+  );
 });
 
 test("2.1.6 two submits in flight are each answered by their own result", () => {
