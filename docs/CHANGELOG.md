@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The app's first-device screens, which drive the pairing controller. With no pairing the window shows what Pardner needs
+  (a relay of your own) and Set up a new relay; the form takes the relay's address, its public key and the enrolment
+  secret and shows each refusal beside its field. The recovery sheet shows the person id and the relay's address and key
+  with Copy and Print, draws the recovery key glyph by glyph from buffers it wipes when the sheet closes (never as text,
+  and not exposed to accessibility), takes the key typed back through a view that turns secure event input on only while it
+  has focus in the key window of the active app, and enables Confirm only for a match; Cancel and closing the sheet decline.
+  Further screens cover the enrolment (the status, the enrolment secret asked again after a refusal, and Cancel with the
+  controller's rules), a removed device, missing keys, keys with no pairing, a relay put back and a transient fault with
+  Retry. A link fault and a pairing file that does not read offer Pair again with the controller's advice or warning, and a
+  pairing file from a newer version asks to update Pardner and offers no action. The app has one window; closing it leaves the app running and the Dock icon opens it again.
 - The app's pairing store and the first device's tools, with no screen yet. `pairing/pairing.json` under the app's
   data folder keeps how far this Mac has got (`keys-made`, `enrolling`, `joining`, `paired`), the relay, the person, entry
   0 or the proof while they wait, the device entry not yet read back, the names and first-read times of devices and a
