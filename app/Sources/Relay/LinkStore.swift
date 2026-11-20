@@ -32,7 +32,8 @@ public final class LinkStore: @unchecked Sendable {
     public let identity: LinkIdentity
     private var state: State
     private var lock: Int32 = -1
-    private let claims = OSAllocatedUnfairLock(initialState: false)
+    private struct Claims { var held = false, closed = false }
+    private let claims = OSAllocatedUnfairLock(initialState: Claims())
     private let log = Logger(subsystem: "io.github.duqaxxx.pardner", category: "store")
 
     private struct Head: Equatable {
@@ -66,23 +67,35 @@ public final class LinkStore: @unchecked Sendable {
         lock = try StoreDisk.lock(folder)
     }
 
-    deinit { if lock >= 0 { close(lock) } } // closing the descriptor releases the lock
+    deinit { close() } // closing the descriptor releases the lock
+
+    /// Gives the folder's lock back now. Called once the last write is done; a second call does nothing.
+    public func close() {
+        // Under the claims' lock, so a `claim()` on another task sees either a live store or a closed one.
+        claims.withLock { state in
+            state.closed = true
+            guard lock >= 0 else { return }
+            Darwin.close(lock)
+            lock = -1
+        }
+    }
 
     private var jsonPath: String { folder.appendingPathComponent("link.json").path }
     private var idsPath: String { folder.appendingPathComponent("link-ids").path }
 
     /// Taken by a connection before its first load, released when it ends: two connections on one store would cut
-    /// each other's ids, as two processes would. `StoreClaimed` while another holds it.
+    /// each other's ids, as two processes would. `StoreClaimed` while another holds it, and for good once the store is closed
+    /// (its lock is gone: one store serves one process, and a connection that ends closes it).
     public func claim() throws {
-        let taken = claims.withLock { held in
-            if held { return false }
-            held = true
+        let taken = claims.withLock { state in
+            if state.held || state.closed { return false }
+            state.held = true
             return true
         }
         if !taken { throw StoreClaimed() }
     }
 
-    public func release() { claims.withLock { $0 = false } }
+    public func release() { claims.withLock { $0.held = false } }
 
     // MARK: loading
 
@@ -149,6 +162,18 @@ public final class LinkStore: @unchecked Sendable {
         return (s, ids)
     }
 
+    /// Removes the link's two files from `folder` (design 3.10: Pair again erases the link store after the keys): the ids
+    /// and the state belong to keys that are gone, and a store of another pairing is never read. The folder and its lock stay;
+    /// `StoreBusy` while a store holds the folder, so a connection must have ended and dropped its store first.
+    public static func erase(folder: URL) throws {
+        let fd = try StoreDisk.lock(folder)
+        defer { Darwin.close(fd) }
+        for name in ["link.json", "link-ids"] where unlink(folder.appendingPathComponent(name).path) != 0 && Darwin.errno != ENOENT {
+            throw StoreDisk.errno("remove the link's state")
+        }
+        try StoreDisk.syncFolder(folder)
+    }
+
     // MARK: writing
 
     /// Writes one `persist` of the link, `{kept: {from, ids, head, putBack}, incarnation?, fault?}` (design 3.3), and
@@ -197,7 +222,7 @@ public final class LinkStore: @unchecked Sendable {
     private func appendIds(from: Int, _ bytes: Data) throws {
         let fd = open(idsPath, O_WRONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o600)
         guard fd >= 0 else { throw StoreDisk.errno("open the ids file") }
-        defer { close(fd) }
+        defer { Darwin.close(fd) }
         var info = stat()
         guard fstat(fd, &info) == 0 else { throw StoreDisk.errno("read the ids file's size") }
         guard Int(info.st_size) >= from * Self.idSize else { throw StoreError(description: "a cut past the ids file's end") }

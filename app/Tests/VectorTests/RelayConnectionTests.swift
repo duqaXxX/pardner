@@ -3,6 +3,7 @@
 // files: `<dir>/<name>.step` created by this side, then the wait for `<dir>/<name>.done`. Run alone, the tests fail on the missing environment: none passes on nothing.
 import CryptoKit
 import Foundation
+import os
 import Platform
 @testable import ProtocolHost
 @testable import Relay
@@ -109,21 +110,31 @@ final class RelayConnectionTests: XCTestCase {
         }
     }
 
-    /// A connection to a port nothing listens on, with a host of its own and no relay: for the tests of the driver's own rules.
-    func makeLonelyConnection(constants: [String: HostValue]) async throws -> RelayConnection {
+    /// A connection to a port nothing listens on, or to `port`, with a host of its own and no relay: for the tests of the driver's own rules.
+    func makeLonelyConnection(constants: [String: HostValue], port: UInt16? = nil) async throws -> RelayConnection {
         let store = SoftwareKeyStore()
         _ = try store.make("device.sign", .sign)
         _ = try store.make("device.receive", .receive)
         let host = try await ProtocolHost(scriptPath: try env("PARDNER_JOINED_SCRIPT"), store: store)
-        // A port that was free a moment ago: bound, read, closed.
-        let probe = socket(AF_INET, SOCK_STREAM, 0)
-        var address = sockaddr_in(sin_len: UInt8(MemoryLayout<sockaddr_in>.size), sin_family: sa_family_t(AF_INET), sin_port: 0, sin_addr: in_addr(s_addr: inet_addr("127.0.0.1")), sin_zero: (0, 0, 0, 0, 0, 0, 0, 0))
-        _ = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(probe, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
-        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
-        _ = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.getsockname(probe, $0, &length) } }
-        Darwin.close(probe)
-        let endpoint = RelayEndpoint(host: "127.0.0.1", port: UInt16(bigEndian: address.sin_port), pin: Data(repeating: 4, count: 65))
+        let endpoint = RelayEndpoint(host: "127.0.0.1", port: port ?? freePort(), pin: Data(repeating: 4, count: 65))
         return try RelayConnection(host: host, store: store, person: Data(repeating: 1, count: 32), endpoint: endpoint, linkStore: try linkStore(storeFolder(), store, endpoint), constants: constants)
+    }
+
+    /// A port that was free a moment ago: bound, read, closed.
+    func freePort() -> UInt16 {
+        let (descriptor, port) = bound()
+        Darwin.close(descriptor)
+        return port
+    }
+
+    /// A socket bound to a loopback port of the system's choosing.
+    func bound() -> (Int32, UInt16) {
+        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+        var address = sockaddr_in(sin_len: UInt8(MemoryLayout<sockaddr_in>.size), sin_family: sa_family_t(AF_INET), sin_port: 0, sin_addr: in_addr(s_addr: inet_addr("127.0.0.1")), sin_zero: (0, 0, 0, 0, 0, 0, 0, 0))
+        _ = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.getsockname(descriptor, $0, &length) } }
+        return (descriptor, UInt16(bigEndian: address.sin_port))
     }
 
     // MARK: tests
@@ -165,6 +176,37 @@ final class RelayConnectionTests: XCTestCase {
         XCTAssertNotNil(sixth, "the link dials again and again")
         let held = await connection.socketCount()
         XCTAssertLessThanOrEqual(held, 1, "only the dial in progress holds a socket")
+        await connection.stop()
+    }
+
+    /// Fix round 2: a dial that stays `preparing` (a relay that drops packets, here one that accepts and never speaks TLS) is ended by
+    /// the link's patience; the cancel never reaches the socket's state handler as a failure, so the driver itself says nothing reached the relay.
+    func testADialThePatienceEndsWhilePreparingIsUnreached() async throws {
+        let (listener, port) = bound()
+        XCTAssertEqual(Darwin.listen(listener, 4), 0)
+        // Accepts and keeps every connection open without a word: the TLS handshake never completes and the dial stays preparing.
+        let held = OSAllocatedUnfairLock(initialState: [Int32]())
+        DispatchQueue.global().async {
+            while true {
+                let accepted = Darwin.accept(listener, nil, nil)
+                if accepted < 0 { return }
+                held.withLock { $0.append(accepted) }
+            }
+        }
+        defer {
+            Darwin.shutdown(listener, SHUT_RDWR) // unblocks the accept
+            Darwin.close(listener)
+            held.withLock { $0.forEach { Darwin.close($0) } }
+        }
+        let connection = try await makeLonelyConnection(constants: ["first": .number(30), "max": .number(60), "patience": .number(300)], port: port)
+        let log = Log(connection)
+        connection.start()
+        let dialed = await log.wait(from: 0, seconds: 10) { isDialing($0) }
+        XCTAssertNotNil(dialed)
+        let unreached = await log.wait(from: 0, seconds: 10) { if case .unreached = $0 { return true } else { return false } }
+        XCTAssertNotNil(unreached, "the dial the patience cancelled while preparing is told as unreached")
+        let sockets = await connection.socketCount()
+        XCTAssertLessThanOrEqual(sockets, 1)
         await connection.stop()
     }
 

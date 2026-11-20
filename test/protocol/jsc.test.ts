@@ -43,6 +43,12 @@ test("every vector file passes in JavaScriptCore on CryptoKit", {
         timeout: 120_000,
       },
     );
+    // The package's own entry (AppLink, the genesis and recovery exports) for the controller's tests, which need no relay.
+    const appScript = join(folder, "protocol-app.js");
+    execFileSync(process.execPath, [join(ROOT, ".github/scripts/join-protocol.mjs"), appScript], {
+      cwd: ROOT,
+      timeout: 120_000,
+    });
     // The build output stays in the temporary folder: none lands in the repository, and two runs
     // never share a build lock.
     const scratch = ["--scratch-path", join(folder, "build")];
@@ -53,16 +59,26 @@ test("every vector file passes in JavaScriptCore on CryptoKit", {
         timeout,
         env: { ...process.env, ...env },
       });
-    // RelayConnectionTests need a relay: app-relay.test.ts runs them.
-    const tests = swift(["test", "--skip", "RelayConnectionTests"], 450_000, {
-      PARDNER_JOINED_SCRIPT: script,
-    });
+    // RelayConnectionTests and FirstDeviceRelayTests need a relay: app-relay.test.ts and app-first-device.test.ts run them.
+    const tests = swift(
+      ["test", "--skip", "RelayConnectionTests", "--skip", "FirstDeviceRelayTests"],
+      450_000,
+      {
+        PARDNER_JOINED_SCRIPT: script,
+        PARDNER_APP_SCRIPT: appScript,
+      },
+    );
     assert.equal(tests.status, 0, tests.stdout + tests.stderr);
     // Never zero, and never fewer than the package defines: a run that executes nothing is no pass.
     // Every test file of every bundle counts, since `executed` below is the total over all of them.
     const testsDir = join(APP, "Tests");
     const defined = readdirSync(testsDir, { recursive: true, encoding: "utf8" })
-      .filter((file) => file.endsWith(".swift") && !file.endsWith("RelayConnectionTests.swift"))
+      .filter(
+        (file) =>
+          file.endsWith(".swift") &&
+          !file.endsWith("RelayConnectionTests.swift") &&
+          !file.endsWith("FirstDeviceRelayTests.swift"),
+      )
       .reduce(
         (sum, file) =>
           sum + (readFileSync(join(testsDir, file), "utf8").match(/func test\w+\(/g) ?? []).length,

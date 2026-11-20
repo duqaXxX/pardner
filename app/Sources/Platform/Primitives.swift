@@ -22,7 +22,7 @@ public struct Fault: Error {
 /// The person's side of the recovery secret. Both closures run on the host thread, which waits for
 /// them, so the screen must answer from another thread and on every way it goes away (dismissed,
 /// closed, the app quitting): a screen gone without an answer is a decline, never a wait.
-public struct RecoveryPerson {
+public struct RecoveryPerson: Sendable {
     /// Shows the secret with the sheet's public `context` (the person id, the relay's address and key, as one string);
     /// whether the person saw it. The pointer is valid only during the call: the screen copies what it shows.
     public let show: @Sendable (UnsafeRawBufferPointer, String) -> Bool

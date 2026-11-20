@@ -15,6 +15,18 @@ All notable changes to this project are documented here. The format follows
   bytes as 52 Crockford base32 digits and a check symbol, in groups of four) that is made and read in buffers the caller
   wipes, never a `String`. The joined script exports `buildGenesis`, which the app calls through
   `ProtocolHost.callExported`, and `RelayConnection.enrol` gives a running link its enrolment again and dials at once, until the link has told `enrolled`.
+- The app's pairing controller, with no screen yet (`PairingController`, in the app's relay module). At launch it reads the
+  pairing store and the keys and decides the state: the first screen, a setup that stopped before the sheet (the keys, then the
+  store, are erased, and the person is told that a sheet written for it opens nothing), a resume of enrolling with the proof alone,
+  paired, a store whose keys are gone, keys with no store, or a store that does not read. Setting up a new relay checks the form
+  of the address, the relay's key and the enrolment secret, makes the keys, the recovery key and entry 0, hands the recovery sheet to
+  the view as a request it answers, and only then writes `enrolling` and connects. A relay that refuses the secret is asked
+  for it once; a cancel is allowed at once after that refusal, waits while the relay can answer, and needs a second confirmation
+  with a warning while it answers nothing, which means a dial ended without reaching the relay and no connection has since.
+  A refusal stands until the person types the secret again or a new attempt starts; a dial does not clear it. A device the relay removed is shown as removed and erases nothing
+  until Pair again, which is offered only for a removed device, missing keys, keys with no pairing and a store at joining; a
+  transient fault offers a retry from the store; a put-back relay offers pair again (set up a new relay with `pardner relay init` under a new `--instance`, or after moving the old relay's folder away); a fault of the link offers pair again too (the relay sent something that fails Pardner's checks; set up a new relay, then pair this Mac again) and refuses a retry. A pairing file that does not read offers pair again with the warning that this Mac becomes a new device; one written by a newer version of the app erases nothing and tells the person to update Pardner. The address takes `host:port` or `[IPv6]:port`.
+  The enrolment secret stays in memory. The joined script exports `createRecoveryKey` and `showRecoveryKey`.
 - The bot's outbox takes its epoch decision from the keeper and gives the history seals it owes
   (`Connection.giveSeal`), one at a time, computing again after each answer what is owed, so a removal read meanwhile
   stops the seals to that device. A seal that cannot be made is logged once.

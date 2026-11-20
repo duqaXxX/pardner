@@ -13,6 +13,13 @@ import ProtocolHost
 /// The file does not read as a pairing: a fault the app names, never a state it repairs by guessing (design 4.1).
 public struct PairingFault: Error, CustomStringConvertible {
     public let description: String
+    /// The file's version is above this app's: it was written by a newer app and is never erased (design 4.1).
+    public let isNewerVersion: Bool
+
+    init(description: String, isNewerVersion: Bool = false) {
+        self.description = description
+        self.isNewerVersion = isNewerVersion
+    }
 }
 
 /// A state the host built wrong, refused before it is written: the file on disk is untouched and still reads, so this is
@@ -169,7 +176,10 @@ public final class PairingStore: @unchecked Sendable {
             return n
         }
         func int(_ value: Any?) -> Int? { number(value).flatMap { $0 as? Int } }
-        guard int(o["version"]) == version else { throw refuse("another version") }
+        guard int(o["version"]) == version else {
+            let newer = int(o["version"]).map { $0 > version } ?? false
+            throw PairingFault(description: refuse("another version").description, isNewerVersion: newer)
+        }
         guard Set(o.keys).isSubset(of: keys) else { throw refuse("an unknown field") }
         func bytes(_ value: Any?, _ size: Int, _ what: String) throws -> Data {
             guard let d = StoreDisk.hex(value), d.count == size else { throw refuse("a malformed \(what)") }
