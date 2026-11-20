@@ -34,24 +34,31 @@ public struct DeviceRow: Sendable, Equatable, Identifiable {
     public let onlyHolderEpochs: Int
     /// The device joined a removal in progress because it was added while the person was removing (design 3.9, step 3).
     public let addedWhileRemoving: Bool
+
+    /// The controller builds every row; the package's own tools build one for a made-up device, no code outside it can.
+    package init(id: Data, kind: DeviceKind, label: String?, shortForm: String, adder: DeviceAdder, position: Int, active: Bool, isThisMac: Bool, seenAt: Date?,
+                onlyHolderEpochs: Int, addedWhileRemoving: Bool) {
+        (self.id, self.kind, self.label, self.shortForm, self.adder, self.position) = (id, kind, label, shortForm, adder, position)
+        (self.active, self.isThisMac, self.seenAt, self.onlyHolderEpochs, self.addedWhileRemoving) = (active, isThisMac, seenAt, onlyHolderEpochs, addedWhileRemoving)
+    }
+}
+
+/// The device a notice is about: a name the person gave it, else the kind and short form, else nothing known. Only `.label` came from a
+/// pairing string; the views draw it apart from the app's own words.
+public enum DeviceSubject: Sendable, Equatable {
+    case label(String)
+    case shortForm(DeviceKind, String)
+    case unknown
 }
 
 /// A word to the person about an act that did not end as asked.
 public enum DevicesNotice: Sendable, Equatable {
-    /// The log refused the add of the named device.
-    case addRefused(String)
-    /// The log refused the removal of the named device: it leaves the act.
-    case removeRefused(String)
+    /// The log refused the add of the device.
+    case addRefused(DeviceSubject)
+    /// The log refused the removal of the device: it leaves the act.
+    case removeRefused(DeviceSubject)
     /// The entry could not be sent at all.
-    case entryInvalid(String)
-
-    public var message: String {
-        switch self {
-        case .addRefused(let name): "Adding \"\(name)\" failed: the log refused the entry. If the device shows in the list, it was added."
-        case .removeRefused(let name): "Removing \"\(name)\" failed: the log refused the entry."
-        case .entryInvalid(let name): "The change for \"\(name)\" could not be sent."
-        }
-    }
+    case entryInvalid(DeviceSubject)
 }
 
 /// The Devices screen's state: every device newest first, and what is in progress.
@@ -59,6 +66,8 @@ public struct DevicesState: Sendable, Equatable {
     public var rows: [DeviceRow] = []
     /// An entry is kept and not yet read back: the add of a device waits (design 3.6).
     public var pendingEntry = false
+    /// The name of the device the pending entry adds; nil when the entry is a removal's or none is kept.
+    public var pendingAddName: String?
     /// The devices of the removal in progress that are still active, in the order they go (design 3.9).
     public var removing: [Data] = []
     /// Several adds were first read at the same moment, as when this Mac reads the log in one go: their times say nothing of when they were made (design 3.9).
@@ -66,6 +75,12 @@ public struct DevicesState: Sendable, Equatable {
     public var notice: DevicesNotice?
 
     public init() {}
+
+    /// The confirmation a Remove opens (design 3.9): every active device but this Mac, newest first, the clicked one chosen. A screen
+    /// holding the last published state asks the same question as the controller.
+    public func removalChoices(clicked: Data) -> [RemovalChoice] {
+        rows.filter { $0.active && !$0.isThisMac }.map { RemovalChoice(id: $0.id, row: $0, chosen: $0.id == clicked) }
+    }
 }
 
 /// The three values the person gives a new device (design 3.1), as the text to copy.
@@ -73,6 +88,8 @@ public struct PairingHandoff: Sendable, Equatable {
     public let relayAddress: String
     public let relayKey: String
     public let person: String
+
+    package init(relayAddress: String, relayKey: String, person: String) { (self.relayAddress, self.relayKey, self.person) = (relayAddress, relayKey, person) }
 }
 
 /// A pasted pairing string that passed the checks of design 3.4: the person confirms the kind, the name and the short form.
@@ -82,6 +99,11 @@ public struct DeviceCandidate: Sendable, Equatable {
     public let shortForm: String
     let device: HostValue
     let proof: Data
+
+    /// Only the controller makes a candidate from a checked string; the package's own tools make one for a made-up device.
+    package init(kind: DeviceKind, name: String, shortForm: String, device: HostValue, proof: Data) {
+        (self.kind, self.name, self.shortForm, self.device, self.proof) = (kind, name, shortForm, device, proof)
+    }
 }
 
 /// Why a pairing string or an add was refused. `message` is what the person reads.

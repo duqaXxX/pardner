@@ -72,8 +72,12 @@ public struct JoiningInfo: Sendable, Equatable {
     public let shortForm: String
     /// The relay refused this device as not yet known (refusal 2): "Waiting for your other device to add this one".
     public var waiting: Bool
+    /// This Mac's name, as the other device will show it.
+    public let name: String
 
-    public init(pairingString: String, shortForm: String, waiting: Bool = false) { (self.pairingString, self.shortForm, self.waiting) = (pairingString, shortForm, waiting) }
+    public init(pairingString: String, shortForm: String, waiting: Bool = false, name: String = "") {
+        (self.pairingString, self.shortForm, self.waiting, self.name) = (pairingString, shortForm, waiting, name)
+    }
 }
 
 extension PairingPhase {
@@ -168,6 +172,8 @@ public actor PairingController {
     // The devices of the person (design 3.6, 3.9), in PairingController+Devices.swift.
     let clock: @Sendable () -> Date
     var snapshot: DeviceSnapshot?
+    /// The device the pending entry adds; nil when it is a removal's. Not stored: every rest reads the kept entry and sets it again.
+    var pendingAddDevice: Data?
     var acceptedOn: Int?
     var heldAtLength: Int?
     var gate = Gate()

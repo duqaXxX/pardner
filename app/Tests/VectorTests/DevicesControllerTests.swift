@@ -276,6 +276,24 @@ final class DevicesControllerTests: XCTestCase {
         guard case .add? = link.builds.last else { return XCTFail("no add built") }
         let state = await rig.controller.deviceList
         XCTAssertTrue(state.pendingEntry)
+        XCTAssertEqual(state.pendingAddName, "Studio Mac")
+    }
+
+    func testAtLaunchAPendingAddShowsItsNameFromTheStoreAndARemovalsEntryShowsNone() async throws {
+        var state = PairingState(stage: .paired, relay: relay, person: person)
+        state.pending = entry(F.addA1)
+        state.labels[bytes(F.a)] = "Studio Mac"
+        let rig = try rig(state: state)
+        let link = await started(rig)
+        link.emit(effect(length: 1, last: F.genesis, devices: [Dev(id: F.first, by: nil, position: 0)]))
+        let shown = await list(rig, "no pending add name") { $0.pendingAddName != nil }
+        XCTAssertEqual(shown.pendingAddName, "Studio Mac")
+        XCTAssertTrue(shown.pendingEntry)
+        let removal = try removalRig(nil, pending: entry(F.remA3))
+        let second = await started(removal)
+        second.emit(logThree())
+        let removing = await list(removal, "no list") { $0.rows.count == 3 }
+        XCTAssertNil(removing.pendingAddName, "a pending remove is the removal's, not an add")
     }
 
     func testAcceptedStaysPendingUntilTheLogHoldsItThenItIsDropped() async throws {
@@ -337,8 +355,7 @@ final class DevicesControllerTests: XCTestCase {
         link.submitOutcomes = [.code(1)]
         _ = await rig.controller.confirmAdd(try await candidate(rig))
         let state = await rig.controller.deviceList
-        XCTAssertEqual(state.notice, .addRefused("Studio Mac"))
-        XCTAssertEqual(state.notice?.message.contains("Studio Mac"), true)
+        XCTAssertEqual(state.notice, .addRefused(.label("Studio Mac")))
         XCTAssertNil(try stored(rig).pending)
         XCTAssertFalse(state.pendingEntry)
     }
@@ -440,6 +457,9 @@ final class DevicesControllerTests: XCTestCase {
         XCTAssertEqual(onDisk?.removal, PairingRemoval(devices: [bytes(F.a), bytes(F.b)], length: 3), "the clicked first, the log's length at that moment")
         XCTAssertEqual(link.builds, [.remove(target: bytes(F.a))])
         XCTAssertEqual(onDisk?.pending, entry(F.remA3), "kept before it is sent")
+        let running = await rig.controller.deviceList
+        XCTAssertTrue(running.pendingEntry)
+        XCTAssertNil(running.pendingAddName, "the entry is a removal's")
         XCTAssertEqual(link.submitted.count, 1)
         // Accepted, not yet read back: nothing more is built and the act is not over.
         link.emit(rest)
@@ -588,6 +608,7 @@ final class DevicesControllerTests: XCTestCase {
         XCTAssertEqual(state.name, "Mac mini")
         guard case .joining(let info) = await rig.controller.phase else { return XCTFail("not joining") }
         XCTAssertFalse(info.waiting)
+        XCTAssertEqual(info.name, "Mac mini", "the joining screen names this Mac")
         guard case .read(_, let proof, let name, let short) = try await host(rig).inspectPairingString(info.pairingString) else { return XCTFail("the string does not read") }
         XCTAssertEqual(name, "Mac mini")
         XCTAssertEqual(short, info.shortForm)
@@ -657,6 +678,7 @@ final class DevicesControllerTests: XCTestCase {
         await again.launch()
         guard case .joining(let after) = await again.phase else { return XCTFail("not joining after the restart") }
         XCTAssertEqual(after.pairingString, before.pairingString, "the proof was signed once")
+        XCTAssertEqual(after.name, "Mac mini", "the name is read back from the store")
         XCTAssertNil(links.enrolments[0])
     }
 
@@ -710,6 +732,18 @@ final class DevicesControllerTests: XCTestCase {
         XCTAssertNil(try stored(rig).pending)
     }
 
+    func testAnAddOfACandidateWithABadNameIsRefusedBeforeTheLabelIsStored() async throws {
+        let rig = try rig()
+        _ = await readTwo(rig)
+        let good = try await candidate(rig)
+        let labelsBefore = try stored(rig).labels
+        let forged = DeviceCandidate(kind: good.kind, name: "", shortForm: good.shortForm, device: good.device, proof: good.proof)
+        let outcome = await rig.controller.confirmAdd(forged)
+        XCTAssertEqual(outcome, .badName)
+        XCTAssertNil(try stored(rig).pending)
+        XCTAssertEqual(try stored(rig).labels, labelsBefore)
+    }
+
     func testARemoveTheLogRefusedIsNamedAsARemoveAndLeavesTheAct() async throws {
         let rig = try rig()
         let link = await started(rig)
@@ -720,8 +754,7 @@ final class DevicesControllerTests: XCTestCase {
         let refusal = await rig.controller.confirmRemoval(chosen: [bytes(F.a), bytes(F.b)], clicked: bytes(F.a))
         XCTAssertNil(refusal)
         let notice = await rig.controller.deviceList.notice
-        XCTAssertEqual(notice, .removeRefused("Studio Mac"))
-        XCTAssertEqual(notice?.message, "Removing \"Studio Mac\" failed: the log refused the entry.")
+        XCTAssertEqual(notice, .removeRefused(.label("Studio Mac")))
         XCTAssertNil(try stored(rig).pending)
         XCTAssertEqual(try stored(rig).removal?.devices, [bytes(F.b)], "the refused device is not built again at every rest")
         XCTAssertEqual(link.builds, [.remove(target: bytes(F.a))])

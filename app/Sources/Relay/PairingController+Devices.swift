@@ -108,12 +108,13 @@ extension PairingController {
             guard state.removal == nil else { return .removalRunning } // a pending add does not hold a removal back, and an add does not start behind one (3.9)
             let read: DeviceEntryRead
             do {
+                guard try await host.nameFits(candidate.name) else { return .badName } // the label is stored: it is checked again, whoever made the candidate
                 switch try await link.build(.add(device: candidate.device, proof: candidate.proof)) {
                 case .refused(let why): return Self.refusal(why)
                 case .checked: return .failed("the link checked an add and built nothing")
                 case .built(let entry):
                     read = try await host.readDeviceEntry(entry.signed)
-                    (state.pending, state.labels[read.device]) = (entry, candidate.name)
+                    (state.pending, state.labels[read.device], pendingAddDevice) = (entry, candidate.name, read.device)
                     guard save(state) else { return .failed("the pairing could not be written") }
                     deviceList.notice = nil
                     publish()
@@ -158,13 +159,14 @@ extension PairingController {
     }
 
     private func resolvePending(_ snap: DeviceSnapshot) async {
-        guard let host, var state = stored, let pending = state.pending else { return }
+        guard let host, var state = stored, let pending = state.pending else { return pendingAddDevice = nil }
         let read: DeviceEntryRead
         do { read = try await host.readDeviceEntry(pending.signed) } catch is EntryRefused {
             return dropPending() // bytes that read as neither: nothing to keep
         } catch {
             return // the host failed, not the entry: it stays kept (design 3.6)
         }
+        pendingAddDevice = read.kind == .add ? read.device : nil
         let named = snap.devices.first { $0.id == read.device }
         // The log already shows the entry's effect: the device is named (an add) or is not active (a remove), and the entry is read back (step 3 and 4).
         let landed = read.kind == .add ? named != nil : named?.active != true
@@ -185,7 +187,7 @@ extension PairingController {
                 guard save(state) else { return }
                 heldAtLength = nil
             case .refused("busy")?, .refused("ended")?, nil: return
-            default: return dropPending(notice: read.kind == .add ? .addRefused(label(read.device, snap)) : nil)
+            default: return dropPending(notice: read.kind == .add ? .addRefused(subject(read.device, snap)) : nil)
             }
         } else if let held = heldAtLength, snap.length <= held {
             return // the relay said `position`: the log it holds is not here yet
@@ -197,6 +199,7 @@ extension PairingController {
     private func dropPending(notice: DevicesNotice? = nil, leaving: Data? = nil) {
         guard var state = stored else { return }
         state.pending = nil
+        pendingAddDevice = nil
         if let leaving, var act = state.removal {
             act.devices.removeAll { $0 == leaving }
             if !act.left.contains(leaving) { act.left.append(leaving) }
@@ -210,7 +213,7 @@ extension PairingController {
     /// Sends the pending entry as it is kept (design 3.6, steps 2 to 6).
     private func submitPending(kind: DeviceEntryRead.Kind, device: Data) async {
         guard let link, let pending = stored?.pending else { return }
-        let named = label(device, snapshot)
+        let named = subject(device, snapshot)
         let outcome: SubmitOutcome
         do { outcome = try await link.submit(kind: 1, signed: pending.signed, sig: pending.sig) } catch RelayError.invalidItem {
             return dropPending(notice: .entryInvalid(named))
@@ -231,7 +234,7 @@ extension PairingController {
 
     /// The confirmation a Remove opens: every active device but this Mac, newest first, the clicked one chosen.
     public func removalChoices(clicked: Data) -> [RemovalChoice] {
-        deviceList.rows.filter { $0.active && !$0.isThisMac }.map { RemovalChoice(id: $0.id, row: $0, chosen: $0.id == clicked) }
+        deviceList.removalChoices(clicked: clicked)
     }
 
     /// Stores the act and starts it: the clicked device first, then the others newest first. A pending add not yet read back is dropped.
@@ -248,6 +251,7 @@ extension PairingController {
             state.removal = PairingRemoval(devices: first + rest, length: snap.length)
             if let pending = state.pending, let host, let read = try? await host.readDeviceEntry(pending.signed), read.kind == .add {
                 state.pending = nil // an add not yet read back does not hold a removal back; it may still land, and the list shows it
+                pendingAddDevice = nil
                 (acceptedOn, heldAtLength) = (nil, nil)
             }
             guard save(state) else { return .failed("the pairing could not be written") }
@@ -283,6 +287,7 @@ extension PairingController {
         guard case .built(let entry)? = try? await link.build(.remove(target: target)) else { return } // busy or stale: the next rest decides again
         state.pending = entry
         guard save(state) else { return }
+        pendingAddDevice = nil
         await submitPending(kind: .remove, device: target)
     }
 
@@ -345,7 +350,7 @@ extension PairingController {
         let host = try await hostMade()
         let text = try await host.pairingString(device: try deviceValue(), proof: proof, name: name)
         guard case .read(_, _, _, let short) = try await host.inspectPairingString(text) else { throw HostError.faulted("the package refused its own pairing string") }
-        let info = JoiningInfo(pairingString: text, shortForm: short, waiting: false)
+        let info = JoiningInfo(pairingString: text, shortForm: short, waiting: false, name: name)
         joiningScreen = info
         return info
     }
@@ -386,10 +391,10 @@ extension PairingController {
         return true
     }
 
-    private func label(_ id: Data, _ snap: DeviceSnapshot?) -> String {
-        if let name = stored?.labels[id] { return name }
-        guard let device = snap?.devices.first(where: { $0.id == id }) else { return "a device" }
-        return "\(device.kind == .bot ? "Bot" : "Device") \(device.short)"
+    private func subject(_ id: Data, _ snap: DeviceSnapshot?) -> DeviceSubject {
+        if let name = stored?.labels[id] { return .label(name) }
+        guard let device = snap?.devices.first(where: { $0.id == id }) else { return .unknown }
+        return .shortForm(device.kind, device.short)
     }
 
     func publish() {
@@ -411,6 +416,7 @@ extension PairingController {
                 addedWhileRemoving: removal.map { $0.devices.contains(device.id) && device.position >= $0.length && device.addedBy != snap.selfID } ?? false)
         }
         list.pendingEntry = state.pending != nil
+        list.pendingAddName = state.pending == nil ? nil : pendingAddDevice.flatMap { state.labels[$0] }
         list.removing = removal?.devices.filter { active.contains($0) } ?? []
         let times = list.rows.compactMap(\.seenAt)
         list.seenTogether = Dictionary(grouping: times, by: { $0 }).values.contains { $0.count > 1 }
