@@ -96,6 +96,7 @@ else of it.
 | `Translator` | turns the records of the SDK's stream into session events |
 | `TurnRenderer` | turns the session events into a model of one reply |
 | `RelayProvider`, `Inbound`, `Outbox` | the relay chat as the seam sees it: the connection, the reading of the owner's messages (they call `ChatInbound`) and the writing of a reply as parts and an answer ([relay-provider.md](relay-provider.md)) |
+| `keeper` (`src/protocol/keeper.ts`) | what one device owes after reading its person's logs: the epochs it starts and the history seals it gives; the app's link runs it at each rest |
 | `commands` | the `/word` parser and the daemon's own words |
 | `Approvals`, `Holds`, `setup` | the questions the daemon puts to the owner and keeps while it waits: tool permission, a same-folder hold, a session's setup, a shell command's confirmation |
 | `StateStore` | `state.json`: the channels, their threads and what crash repair needs |

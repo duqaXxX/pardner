@@ -511,6 +511,30 @@ test("a history seal of an earlier read is not kept for a later one: a new read 
   assert.equal(r.channel(s.channel)?.key, undefined, "the stale seal is gone");
 });
 
+test("a history seal whose maker no log names is gone once the read rests: the log growing later does not revive it", () => {
+  const s = scene();
+  const wrong = platform.random(32);
+  const seals = recipientsOf(platform, s.log).map((x) => {
+    const sealed = sealEpochKey(platform, s.channel, undefined, x.id, x.receiving, wrong);
+    assert.ok(sealed.ok);
+    return sealed.value;
+  });
+  const epoch = s.epoch({ seals }); // its own seals fail the commitment: only a history seal opens it
+  const held = s.epochs.at(-1);
+  assert.ok(held);
+  // Another person's device: the relay serves every kept seal to every active device.
+  const stranger = keyed("bot");
+  s.wire.seals = [historySeal(held, stranger, s.bot, epoch.key)];
+  const r = new Reading(s.who);
+  play(r, [s.wire.served(), ...s.wire.read()]);
+  assert.equal(r.state, "rest");
+  assert.equal(r.channel(s.channel)?.key, undefined, "no log names its maker");
+  const before = s.wire.items.length;
+  s.entry(s.alice.add(s.log, stranger)); // its maker is named after rest
+  play(r, s.wire.push(before));
+  assert.equal(r.channel(s.channel)?.key, undefined, "the seal was dropped at rest, not kept");
+});
+
 test("a refusal's give-back that ends with no answer through dropped() is owed at the next refusal", () => {
   const s = scene();
   s.epoch();

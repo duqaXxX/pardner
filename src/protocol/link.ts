@@ -6,6 +6,7 @@
  */
 import { bytesEqual } from "./bytes.ts";
 import type { DeviceKeys } from "./device-log.ts";
+import type { HistorySeal } from "./epochs.ts";
 import { decodeFrame, encodeFrame, type Frame, FrameCutter } from "./frames.ts";
 import type { Effect, LinkState, Persist } from "./link-types.ts";
 import type { Bytes } from "./platform.ts";
@@ -207,10 +208,26 @@ export class Link {
     sig: Bytes,
     now: number,
   ): { request: number; effects: Effect[] } | "busy" {
+    return this.#request((request) => ({ type: "submit", request, kind, signed, sig }), now);
+  }
+
+  /** Gives the relay a history seal this device made (security design 5.3, step 6), as `submit` sends an item: its `result` code answers it, `busy` when the reading is not at rest. */
+  giveSeal(
+    seal: HistorySeal,
+    sig: Bytes,
+    now: number,
+  ): { request: number; effects: Effect[] } | "busy" {
+    return this.#request((request) => ({ type: "give-seal", request, seal, sig }), now);
+  }
+
+  #request(
+    frame: (request: number) => Frame,
+    now: number,
+  ): { request: number; effects: Effect[] } | "busy" {
     const fx = this.#fx();
     if (!this.reading.sendable) return "busy";
     const request = this.#reqs.next;
-    this.#send({ type: "submit", request, kind, signed, sig }, fx); // a frame past the limit throws before the request is added
+    this.#send(frame(request), fx); // a frame past the limit throws before the request is added
     this.#reqs.add(now);
     return { request, effects: this.#finish(fx) };
   }

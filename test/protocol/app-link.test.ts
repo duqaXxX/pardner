@@ -5,9 +5,15 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { checkDeviceEntry, recipientsOf } from "../../src/protocol/device-log.ts";
-import { sealEpochKey } from "../../src/protocol/epochs.ts";
+import { checkDeviceEntry, idKey, recipientsOf } from "../../src/protocol/device-log.ts";
+import {
+  checkHistorySeal,
+  decodeEpochEntry,
+  encodeHistorySeal,
+  sealEpochKey,
+} from "../../src/protocol/epochs.ts";
 import { decodeFrame, encodeFrame, type Frame } from "../../src/protocol/frames.ts";
+import { signedId } from "../../src/protocol/ids.ts";
 import {
   type AppEffect,
   type AppLinkOptions,
@@ -21,7 +27,7 @@ import { KIND_PROFILE, sealMessage } from "../../src/protocol/messages.ts";
 import type { Bytes, Platform } from "../../src/protocol/platform.ts";
 import { encodeProfile } from "../../src/protocol/profile.ts";
 import { platform } from "../relay/support.ts";
-import { fill, keyed, message, signedBy } from "../relay/world.ts";
+import { epochEntry, fill, keyed, message, signedBy } from "../relay/world.ts";
 import { makeProof } from "./proof.ts";
 import { historySeal, prompt, receivingOf, type Scene, scene } from "./reading-world.ts";
 
@@ -380,6 +386,7 @@ const frameTypes = (fx: AppEffect[]) =>
 
 test("device pairing 3.5.7 enrol goes before the proof until the first served, then never", () => {
   const s = scene();
+  s.epoch(); // a channel with no epoch is the keeper's to start, which sends a submit after the read
   const enrol = { secret: fill(3), signed: s.alice.genesis.signed, sig: s.alice.genesis.sig };
   const r = rig(s, { enrol });
   assert.deepEqual(frameTypes(r.connect()), ["enrol", "prove-active", "read"]);
@@ -450,18 +457,33 @@ test("device pairing 4.2 the devices effect: every device the log names, at the 
     last: s.log[1]?.id,
     self: s.bot.id,
     devices: [
-      { id: s.alice.first.id, kind: "app", active: true, addedBy: null, position: 0 },
-      { id: s.bot.id, kind: "bot", active: true, addedBy: s.alice.first.id, position: 1 },
+      {
+        id: s.alice.first.id,
+        kind: "app",
+        active: true,
+        addedBy: null,
+        position: 0,
+        onlyHolder: [],
+      },
+      {
+        id: s.bot.id,
+        kind: "bot",
+        active: true,
+        addedBy: s.alice.first.id,
+        position: 1,
+        onlyHolder: [],
+      },
     ],
   });
 });
 
 test("device pairing 4.2 the devices effect comes again only when the log changed, removed devices kept", () => {
   const s = scene();
+  const epoch = s.epoch();
   const r = rig(s);
   r.connect();
   let n = s.wire.items.length;
-  s.wire.put(4, prompt(s, s.epoch()));
+  s.wire.put(4, prompt(s, epoch));
   assert.deepEqual(devicesOf(r.give(s.wire.push(n), 1)), [], "no change in the log, no effect");
   const other = keyed();
   n = s.wire.items.length;
@@ -480,6 +502,7 @@ test("device pairing 4.2 the devices effect comes again only when the log change
     active: false,
     addedBy: s.alice.first.id,
     position: 2,
+    onlyHolder: [],
   });
 });
 
@@ -522,4 +545,133 @@ test("device pairing 3.9 removeDevice builds a remove the log accepts, and refus
   const built = r.link.removeDevice(s.alice.first.id, 5);
   assert.ok(built.ok);
   assert.ok(checkDeviceEntry(platform, s.log, built.value.signed, built.value.sig).ok);
+});
+
+/** The frames the effects send, decoded, in order. */
+const sentFrames = (fx: AppEffect[]): Frame[] =>
+  fx.flatMap((e) => {
+    if (e.do !== "send") return [];
+    const f = decodeFrame(e.bytes, false, "relay");
+    const g = f.ok ? f : decodeFrame(e.bytes, true, "relay");
+    assert.ok(g.ok);
+    return [g.value];
+  });
+type Sent<T extends Frame["type"]> = Extract<Frame, { type: T }>;
+const only = <T extends Frame["type"]>(fx: AppEffect[], type: T): Sent<T>[] =>
+  sentFrames(fx).filter((f): f is Sent<T> => f.type === type);
+const epochSubmits = (fx: AppEffect[]) => only(fx, "submit").filter((f) => f.kind === 3);
+
+test("device pairing 3.11 the app starts the epoch of a closed channel, and no epoch when one is open", () => {
+  const s = scene();
+  const first = s.epoch();
+  s.entry(s.alice.add(s.log, keyed()));
+  const [start] = epochSubmits(rig(s).connect());
+  assert.ok(start, "the closed channel gets its next epoch");
+  const decoded = decodeEpochEntry(start.signed);
+  assert.ok(decoded.ok);
+  assert.equal(decoded.value.seq, 1);
+  assert.deepEqual(decoded.value.prev, first.id);
+  assert.deepEqual(decoded.value.signerDevice, s.bot.id);
+  // Another device started it first: the channel is open, nothing is submitted.
+  const t = scene();
+  t.epoch();
+  t.entry(t.alice.add(t.log, keyed()));
+  t.epoch();
+  assert.deepEqual(epochSubmits(rig(t).connect()), []);
+});
+
+test("device pairing 3.11 the app gives a history seal for each earlier epoch to a new device, never twice while pending, again when the relay's list lacks it, never once read back", () => {
+  const s = scene();
+  const [e1, e2] = [s.epoch(), s.epoch()];
+  const late = keyed();
+  s.entry(s.alice.add(s.log, late));
+  const r = rig(s);
+  const given = only(r.connect(), "give-seal");
+  assert.equal(given.length, 2);
+  assert.deepEqual(given.map((g) => g.seal.epoch).sort(), [e1.id, e2.id].sort());
+  for (const g of given) {
+    assert.deepEqual(g.seal.recipient, late.id);
+    assert.deepEqual(g.seal.maker, s.bot.id);
+    assert.ok(checkHistorySeal(platform, s.log, encodeHistorySeal(g.seal), g.sig).ok);
+  }
+  // A rest before any answer: the same seals are pending, not given again.
+  const n = s.wire.items.length;
+  s.wire.put(4, prompt(s, e2));
+  const again = r.give(s.wire.push(n), 5);
+  assert.deepEqual(only(again, "give-seal"), []);
+  assert.deepEqual(epochSubmits(again), [], "nor is the start sent again");
+  // Answered: the relay's list, read before the seals, still lacks them, so the next rest gives them again (5.10).
+  r.give(
+    given.map((g): Frame => ({ type: "result", request: g.request, code: 0 })),
+    6,
+  );
+  const m = s.wire.items.length;
+  s.wire.put(4, prompt(s, e2, fill(9, 16), 2));
+  assert.equal(only(r.give(s.wire.push(m), 7), "give-seal").length, 2);
+  // The connection ends and the relay's list lacks them (a new incarnation, a put-back): owed again; read back, they are not.
+  r.drop(8);
+  assert.equal(
+    only(r.connect(2000), "give-seal").length,
+    2,
+    "a seal the relay's list lacks is given",
+  );
+  r.drop(2100);
+  s.wire.seals = given.map((g) => ({ seal: g.seal, sig: g.sig }));
+  assert.deepEqual(only(r.connect(4000), "give-seal"), []);
+});
+
+test("device pairing 3.11 no more history seals than the window are in flight; the rest follow the answers, which stay with the link", () => {
+  const s = scene();
+  const epochs = Array.from({ length: 18 }, () => s.epoch());
+  s.entry(s.alice.add(s.log, keyed()));
+  const r = rig(s);
+  const first = only(r.connect(), "give-seal");
+  assert.equal(first.length, 16, "the window");
+  const answer = (g: Sent<"give-seal">): Frame => ({ type: "result", request: g.request, code: 0 });
+  const next = r.give(first.slice(0, 2).map(answer), 1);
+  assert.equal(only(next, "give-seal").length, 2, "one for each answer");
+  assert.equal(
+    next.some((e) => e.do === "answer"),
+    false,
+    "the keeper's answers are not the driver's",
+  );
+  const given = new Set([...first, ...only(next, "give-seal")].map((g) => g.seal.epoch.join()));
+  assert.equal(given.size, 18);
+  assert.equal(epochs.length, 18);
+});
+
+test("device pairing 3.11 a seal whose answer never came is given again on the next connection", () => {
+  const s = scene();
+  s.epoch();
+  s.entry(s.alice.add(s.log, keyed()));
+  const r = rig(s);
+  assert.equal(only(r.connect(), "give-seal").length, 1);
+  r.drop(10);
+  assert.equal(only(r.connect(2000), "give-seal").length, 1, "unanswered, so owed again");
+});
+
+test("device pairing 3.9 the devices effect names the epochs a device alone holds a counting seal for", () => {
+  const s = scene();
+  const seq = {
+    channels: new Map([[idKey(s.channel), s]]),
+    devices: new Map([[idKey(s.alice.id), s.log]]),
+  };
+  const made = epochEntry(seq as never, s.channel, { person: s.alice, device: s.bot }, [s.alice]);
+  s.epochs.push({ entry: made.entry, id: signedId(platform, made.signed) });
+  s.wire.put(3, made);
+  const [both] = devicesOf(rig(s).connect());
+  assert.deepEqual(
+    both?.devices.map((d) => d.onlyHolder),
+    [[], []],
+    "two active devices hold it",
+  );
+  s.entry(s.alice.remove(s.log, s.alice.first));
+  const [alone] = devicesOf(rig(s).connect());
+  assert.deepEqual(
+    alone?.devices.map((d) => [d.active, d.onlyHolder]),
+    [
+      [false, []],
+      [true, [{ channel: s.channel, epoch: s.epochs[0]?.id }]],
+    ],
+  );
 });

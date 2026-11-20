@@ -1,6 +1,7 @@
 import { bytesEqual, decode, isBytes, type Reader, refuse, Writer } from "./bytes.ts";
 import {
   activeDevices,
+  type DeviceKeys,
   idKey,
   type LoggedEntry,
   namedDevices,
@@ -295,19 +296,20 @@ export const decodeHistorySeal = (bytes: Bytes): Result<HistorySeal> =>
 /**
  * Whether a history seal may be taken (security design 5.3, step 6): its maker is a device the
  * person's checked log `devices` ever named, removed since or not (a recovery key never is one),
- * and signed it.
+ * and signed it. A caller checking many seals against one log passes `named`, the log's
+ * `namedDevices`, to fold it once.
  */
 export function checkHistorySeal(
   platform: Platform,
   devices: readonly LoggedEntry[],
   signed: Bytes,
   signature: Bytes,
+  named?: ReadonlyMap<string, DeviceKeys>,
 ): HistoryVerdict {
   const decoded = decodeHistorySeal(signed);
   if (!decoded.ok) return { ok: false, rule: "decode" };
-  const maker = Array.isArray(devices)
-    ? namedDevices(platform, devices).get(idKey(decoded.value.maker))
-    : undefined;
+  const known = named ?? (Array.isArray(devices) ? namedDevices(platform, devices) : undefined);
+  const maker = known?.get(idKey(decoded.value.maker));
   if (!maker) return { ok: false, rule: "device" };
   if (
     !isBytes(signature) ||
