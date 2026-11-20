@@ -37,18 +37,25 @@ public struct TokenPair: Equatable, Sendable {
 
 /// The colour tokens of the app's design.
 public enum Tokens {
-    private struct File: Decodable {
+    struct File: Decodable {
         struct Pair: Decodable { let light: String; let dark: String }
         let colors: [String: Pair]
+        let radii: [String: Double]
+        let spacing: [String: Double]
     }
 
-    /// Every token by its JSON name (`brand-ink`), parsed from the module's `tokens.json`.
-    public static let pairs: [String: TokenPair] = {
+    /// The module's `tokens.json`, read and decoded once.
+    static let file: File = {
         guard let url = Bundle.module.url(forResource: "tokens", withExtension: "json"),
               let data = try? Data(contentsOf: url),
               let file = try? JSONDecoder().decode(File.self, from: data)
         else { fatalError("DesignSystem: tokens.json is missing or unreadable") }
-        return file.colors.mapValues { pair in
+        return file
+    }()
+
+    /// Every token by its JSON name (`brand-ink`), parsed from the module's `tokens.json`.
+    public static let pairs: [String: TokenPair] = {
+        file.colors.mapValues { pair in
             guard let light = RGBA(pair.light), let dark = RGBA(pair.dark) else {
                 fatalError("DesignSystem: a token value in tokens.json does not parse")
             }
@@ -119,4 +126,21 @@ public enum PardnerColor {
     public static let badge = Tokens.color("badge")
     /// Text on `badge`.
     public static let badgeInk = Tokens.color("badge-ink")
+}
+
+/// The radii and the base gap (first-screens decision 5), from the same `tokens.json`.
+public enum PardnerMetrics {
+    private static var file: Tokens.File { Tokens.file }
+
+    private static func value(_ table: [String: Double], _ name: String) -> CGFloat {
+        guard let v = table[name] else { fatalError("DesignSystem: no metric named \(name)") }
+        return CGFloat(v)
+    }
+
+    /// Buttons, list rows, fields.
+    public static let controlRadius = value(file.radii, "control")
+    /// Session cards, the composer, the bot's box.
+    public static let containerRadius = value(file.radii, "container")
+    /// The one base gap; other gaps are multiples or halves of it.
+    public static let gap = value(file.spacing, "gap")
 }

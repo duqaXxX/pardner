@@ -8,6 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		A10000000000000000000005 /* ProtocolHost in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000009 /* ProtocolHost */; };
+		A10000000000000000000021 /* Screens in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000020 /* Screens */; };
+		A10000000000000000000023 /* Conversation in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000022 /* Conversation */; };
+		A10000000000000000000025 /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000024 /* DesignSystem */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +31,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000005 /* ProtocolHost in Frameworks */,
+				A10000000000000000000021 /* Screens in Frameworks */,
+				A10000000000000000000023 /* Conversation in Frameworks */,
+				A10000000000000000000025 /* DesignSystem in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -70,6 +76,9 @@
 			name = Pardner;
 			packageProductDependencies = (
 				A10000000000000000000009 /* ProtocolHost */,
+				A10000000000000000000020 /* Screens */,
+				A10000000000000000000022 /* Conversation */,
+				A10000000000000000000024 /* DesignSystem */,
 			);
 			productName = Pardner;
 			productReference = A10000000000000000000001 /* Pardner.app */;
@@ -213,6 +222,21 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A10000000000000000000010 /* XCLocalSwiftPackageReference "." */;
 			productName = ProtocolHost;
+		};
+		A10000000000000000000020 /* Screens */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000010 /* XCLocalSwiftPackageReference "." */;
+			productName = Screens;
+		};
+		A10000000000000000000022 /* Conversation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000010 /* XCLocalSwiftPackageReference "." */;
+			productName = Conversation;
+		};
+		A10000000000000000000024 /* DesignSystem */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000010 /* XCLocalSwiftPackageReference "." */;
+			productName = DesignSystem;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

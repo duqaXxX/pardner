@@ -88,3 +88,11 @@ final class DesignSystemTests: XCTestCase {
         }
     }
 }
+
+final class MetricsTests: XCTestCase {
+    func testTheRadiiAndTheGapAreDecisionFivesValues() {
+        XCTAssertEqual(PardnerMetrics.controlRadius, 7)
+        XCTAssertEqual(PardnerMetrics.containerRadius, 12)
+        XCTAssertEqual(PardnerMetrics.gap, 8)
+    }
+}
