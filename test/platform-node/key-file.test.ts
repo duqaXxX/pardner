@@ -72,7 +72,7 @@ test("a recovery key held by enterRecovery never reaches the key file", () => {
   const { keyFile } = folder();
   const secret = new Uint8Array(32).fill(5);
   const platform = createNodePlatform(
-    { show() {}, enter: () => Uint8Array.from(secret) },
+    { show: () => true, enter: () => Uint8Array.from(secret) },
     { keyFile },
   );
   const info = (text: string) => new TextEncoder().encode(text);

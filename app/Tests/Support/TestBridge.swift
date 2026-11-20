@@ -20,7 +20,9 @@ extension Bridge {
             let b = Bridge.current()
             do {
                 let secret = try b.bytes(a)
-                return b.platform(CryptoKitPlatform(store: SoftwareKeyStore(), person: .typing(secret)))
+                let store = SoftwareKeyStore()
+                store.refusesAbsentDelete = true // as the Secure Enclave store does
+                return b.platform(CryptoKitPlatform(store: store, person: .typing(secret)))
             } catch { return b.fault("\(error)") }
         } as @convention(block) (JSValue) -> JSValue
         return JSValue(object: block, in: context)

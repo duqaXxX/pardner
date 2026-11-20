@@ -129,6 +129,10 @@ struct Bridge {
             let b = Bridge.current()
             return b.result { recovered(b, try p.createRecovery(a.toString(), try b.bytes(c), try b.bytes(d))) }
         } as @convention(block) (V, V, V) -> V)
+        set("showRecovery", { (a: V, c: V) -> V in
+            // `toString()` would turn a missing context into the text "undefined" on the sheet
+            Bridge.current().result { guard c.isString else { throw Failure.badInput }; try p.showRecovery(a.toString(), c.toString()); return NSNull() }
+        } as @convention(block) (V, V) -> V)
         set("enterRecovery", { (a: V, c: V, d: V) -> V in
             let b = Bridge.current()
             return b.result { recovered(b, try p.enterRecovery(a.toString(), try b.bytes(c), try b.bytes(d))) }

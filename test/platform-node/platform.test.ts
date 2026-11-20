@@ -193,11 +193,19 @@ test("an imported private key is a scalar of 32 bytes", () => {
 
 /** A person who types a copy of `secret`, and keeps what `show` was given, for a test to look at. */
 const person = (secret = new Uint8Array(32).fill(7)) => {
-  const seen: { shown?: Uint8Array; asked: number; showed: number } = { asked: 0, showed: 0 };
+  const seen: {
+    shown?: Uint8Array;
+    context?: string;
+    answer: boolean;
+    asked: number;
+    showed: number;
+  } = { answer: true, asked: 0, showed: 0 };
   const made = createNodePlatform({
-    show: (s) => {
+    show: (s, context) => {
       seen.showed += 1;
       seen.shown = s;
+      seen.context = context;
+      return seen.answer;
     },
     enter: () => {
       seen.asked += 1;
@@ -209,16 +217,129 @@ const person = (secret = new Uint8Array(32).fill(7)) => {
 const [signInfo, receiveInfo] = [text("sign-info"), text("receive-info")];
 const noKey = { ok: false, error: "no-such-key" };
 
-test("createRecovery shows a secret, returns the two keys DeriveKeyPair gives, and holds nothing", () => {
+test("createRecovery shows nothing, returns the two keys DeriveKeyPair gives, and holds no key", () => {
   const { platform: p, seen } = person();
   const keys = value(p.createRecovery("r", signInfo, receiveInfo));
-  assert.equal(seen.shown?.length, 32);
+  assert.equal(seen.showed, 0);
   assert.equal("forgetRecovery" in p, false);
   assert.deepEqual(p.publicKey("r.sign"), noKey);
   assert.deepEqual(p.publicKey("r.receive"), noKey);
   assert.deepEqual(p.sign("r.sign", text("m")), noKey);
   assert.notDeepEqual(keys.signing, keys.receiving);
+});
+
+test("showRecovery shows the held secret with its context, then erases the copy; the keys are the ones createRecovery returned", () => {
+  const { platform: p, seen } = person();
+  const held = new Uint8Array(32).fill(5);
+  p.random = () => held;
+  const keys = value(p.createRecovery("r", signInfo, receiveInfo));
+  assert.deepEqual(p.showRecovery("r", "id and relay"), { ok: true, value: undefined });
+  assert.equal(seen.shown?.length, 32);
+  assert.equal(seen.context, "id and relay");
   assert.ok(seen.shown?.every((b) => b === 0)); // the platform's copy of what it showed is erased
+  assert.ok(held.every((b) => b === 0)); // and the held secret itself
+  const again = person(new Uint8Array(32).fill(7));
+  again.platform.random = () => new Uint8Array(32).fill(7);
+  assert.deepEqual(value(again.platform.createRecovery("r", signInfo, receiveInfo)), {
+    signing: value(again.platform.enterRecovery("e", signInfo, receiveInfo)).signing,
+    receiving: value(again.platform.enterRecovery("f", signInfo, receiveInfo)).receiving,
+  });
+  assert.notDeepEqual(keys.signing, keys.receiving);
+});
+
+test("showRecovery without a created secret, or a second time, is bad-input and shows nothing", () => {
+  const { platform: p, seen } = person();
+  const refused = { ok: false, error: "bad-input" };
+  assert.deepEqual(p.showRecovery("r", "c"), refused);
+  value(p.createRecovery("r", signInfo, receiveInfo));
+  assert.ok(p.showRecovery("r", "c").ok);
+  assert.deepEqual(p.showRecovery("r", "c"), refused);
+  assert.equal(seen.showed, 1);
+});
+
+test("a secret made and not yet shown holds its name; shown, the name is free", () => {
+  const { platform: p } = person();
+  value(p.createRecovery("r", signInfo, receiveInfo));
+  assert.deepEqual(p.createRecovery("r", signInfo, receiveInfo), {
+    ok: false,
+    error: "key-exists",
+  });
+  assert.ok(p.showRecovery("r", "c").ok);
+  assert.ok(p.createRecovery("r", signInfo, receiveInfo).ok);
+});
+
+test("deleteKey wipes a secret never shown: it cannot be shown and the name is free", () => {
+  const { platform: p, seen } = person();
+  const held = new Uint8Array(32).fill(5);
+  p.random = () => held;
+  value(p.createRecovery("r", signInfo, receiveInfo));
+  assert.ok(held.some((b) => b !== 0));
+  assert.ok(p.deleteKey("r").ok);
+  assert.ok(held.every((b) => b === 0));
+  assert.deepEqual(p.showRecovery("r", "c"), { ok: false, error: "bad-input" });
+  assert.equal(seen.showed, 0);
+  assert.ok(p.createRecovery("r", signInfo, receiveInfo).ok);
+});
+
+test("a person who declines is bad-input and the secret is gone and erased", () => {
+  const { platform: p, seen } = person();
+  seen.answer = false;
+  value(p.createRecovery("r", signInfo, receiveInfo));
+  assert.deepEqual(p.showRecovery("r", "c"), { ok: false, error: "bad-input" });
+  assert.ok(seen.shown?.every((b) => b === 0));
+  assert.deepEqual(p.showRecovery("r", "c"), { ok: false, error: "bad-input" });
+  assert.equal(seen.showed, 1);
+});
+
+test("a person who answers nothing has not confirmed: the answer must be true", () => {
+  const p = createNodePlatform({
+    show: (() => undefined) as unknown as (s: Uint8Array, c: string) => boolean,
+    enter: () => new Uint8Array(32),
+  });
+  value(p.createRecovery("r", signInfo, receiveInfo));
+  assert.deepEqual(p.showRecovery("r", "c"), { ok: false, error: "bad-input" });
+});
+
+test("createRecovery refuses a name a key holds as the name itself, and enterRecovery one with an unshown secret", () => {
+  const { platform: p, seen } = person();
+  value(p.makeKeyPair("k", "sign"));
+  assert.deepEqual(p.createRecovery("k", signInfo, receiveInfo), {
+    ok: false,
+    error: "key-exists",
+  });
+  assert.ok(p.publicKey("k").ok); // the key is untouched
+  value(p.createRecovery("r", signInfo, receiveInfo));
+  assert.deepEqual(p.enterRecovery("r", signInfo, receiveInfo), {
+    ok: false,
+    error: "key-exists",
+  });
+  assert.equal(seen.asked, 0); // refused before the person types
+  assert.ok(p.showRecovery("r", "c").ok); // the secret was kept
+});
+
+test("showRecovery with a context that is not a string is bad-input and keeps the secret", () => {
+  const { platform: p, seen } = person();
+  value(p.createRecovery("r", signInfo, receiveInfo));
+  for (const context of [undefined, null, 7, new Uint8Array(1)]) {
+    assert.deepEqual(p.showRecovery("r", context as unknown as string), {
+      ok: false,
+      error: "bad-input",
+    });
+  }
+  assert.equal(seen.showed, 0);
+  assert.ok(p.showRecovery("r", "c").ok);
+});
+
+test("erase wipes a secret never shown", () => {
+  const { platform: p, seen } = person();
+  const made = new Uint8Array(32).fill(5);
+  p.random = () => made;
+  value(p.createRecovery("r", signInfo, receiveInfo));
+  assert.ok(made.some((b) => b !== 0)); // held, not yet erased
+  p.erase();
+  assert.ok(made.every((b) => b === 0));
+  assert.deepEqual(p.showRecovery("r", "c"), { ok: false, error: "bad-input" });
+  assert.equal(seen.showed, 0);
 });
 
 test("enterRecovery holds the two pairs under their names until deleteKey, and they match createRecovery's", () => {
@@ -240,11 +361,11 @@ test("enterRecovery holds the two pairs under their names until deleteKey, and t
 
 test("the secret is erased on every path: typed bytes, a shown copy, a refusal, an exception", () => {
   const typed = new Uint8Array(32).fill(7);
-  const platformA = createNodePlatform({ show: () => {}, enter: () => typed });
+  const platformA = createNodePlatform({ show: () => true, enter: () => typed });
   assert.ok(platformA.enterRecovery("r", signInfo, receiveInfo).ok);
   assert.ok(typed.every((b) => b === 0));
   const short = new Uint8Array(31).fill(7);
-  const platformB = createNodePlatform({ show: () => {}, enter: () => short });
+  const platformB = createNodePlatform({ show: () => true, enter: () => short });
   assert.deepEqual(platformB.enterRecovery("r", signInfo, receiveInfo), {
     ok: false,
     error: "bad-input",
@@ -258,15 +379,17 @@ test("the secret is erased on every path: typed bytes, a shown copy, a refusal, 
     },
     enter: () => new Uint8Array(32),
   });
-  assert.throws(() => platformC.createRecovery("r", signInfo, receiveInfo), /screen closed/);
+  assert.ok(platformC.createRecovery("r", signInfo, receiveInfo).ok);
+  assert.throws(() => platformC.showRecovery("r", "c"), /screen closed/);
   assert.ok(shown?.every((b) => b === 0));
+  assert.deepEqual(platformC.showRecovery("r", "c"), { ok: false, error: "bad-input" }); // wiped on the exception too
   assert.deepEqual(platformC.publicKey("r.sign"), noKey);
 });
 
 test("the recovery secret is not left in Node's shared buffer pool", () => {
   const typed = Uint8Array.from({ length: 32 }, (_, i) => 0xa0 ^ i);
   const marker = Buffer.from(typed); // one copy in the pool: this one
-  const p = createNodePlatform({ show: () => {}, enter: () => typed });
+  const p = createNodePlatform({ show: () => true, enter: () => typed });
   assert.ok(p.enterRecovery("r", signInfo, receiveInfo).ok);
   const pool = Buffer.from(Buffer.allocUnsafe(1).buffer);
   const count = () => {
@@ -293,7 +416,7 @@ const leaks = () =>
   );
 
 test("enterRecovery then deleteKey leaves no secret, HKDF output or private scalar in the buffer pool", () => {
-  const p = createNodePlatform({ show: () => {}, enter: () => heapBytes(recoveryCase.s) });
+  const p = createNodePlatform({ show: () => true, enter: () => heapBytes(recoveryCase.s) });
   const infos = [
     text("blind-relay/1 recovery-signing"),
     text("blind-relay/1 recovery-receiving"),
@@ -305,22 +428,24 @@ test("enterRecovery then deleteKey leaves no secret, HKDF output or private scal
   assert.deepEqual(leaks(), []);
 });
 
-test("createRecovery leaves no secret, HKDF output or private scalar in the buffer pool", () => {
-  const p = createNodePlatform({ show: () => {}, enter: () => new Uint8Array(32) });
+test("createRecovery and showRecovery leave no secret, HKDF output or private scalar in the buffer pool", () => {
+  const p = createNodePlatform({ show: () => true, enter: () => new Uint8Array(32) });
   p.random = () => heapBytes(recoveryCase.s);
   const infos = [
     text("blind-relay/1 recovery-signing"),
     text("blind-relay/1 recovery-receiving"),
   ].map((b) => new Uint8Array([b.length, ...b]));
   assert.ok(p.createRecovery("r", infos[0] as Uint8Array, infos[1] as Uint8Array).ok);
+  assert.ok(p.showRecovery("r", "c").ok);
   assert.deepEqual(leaks(), []);
 });
 
-test("createRecovery draws its secret from the platform's random", () => {
+test("createRecovery draws its secret from the platform's random, and showRecovery shows that one", () => {
   const { platform: p, seen } = person();
   p.random = (length) => new Uint8Array(length).fill(0x42);
   assert.ok(p.createRecovery("r", signInfo, receiveInfo).ok);
-  assert.ok(seen.shown?.length === 32);
+  assert.ok(p.showRecovery("r", "c").ok);
+  assert.equal(seen.shown?.length, 32);
   const expected = createNodePlatform();
   const keys = value(p.createRecovery("q", signInfo, receiveInfo));
   const pair = deriveKeyPair(expected.hkdf(new Uint8Array(32).fill(0x42), signInfo, 32));
@@ -358,7 +483,7 @@ test("a name taken before the person is shown or asked stops the call there", ()
 test("a name taken while the person types holds neither key", () => {
   const holder: { p?: ReturnType<typeof createNodePlatform> } = {};
   holder.p = createNodePlatform({
-    show: () => {},
+    show: () => true,
     enter: () => {
       holder.p?.makeKeyPair("r.receive", "receive");
       return new Uint8Array(32).fill(7);
@@ -371,11 +496,11 @@ test("a name taken while the person types holds neither key", () => {
   assert.deepEqual(holder.p.publicKey("r.sign"), noKey);
 });
 
-test("a recovery with no person is bad-input", () => {
-  assert.deepEqual(createNodePlatform().createRecovery("r", signInfo, receiveInfo), {
-    ok: false,
-    error: "bad-input",
-  });
+test("a recovery with no person is bad-input, for the creation and the showing", () => {
+  const bare = createNodePlatform();
+  const refused = { ok: false, error: "bad-input" };
+  assert.deepEqual(bare.createRecovery("r", signInfo, receiveInfo), refused);
+  assert.deepEqual(bare.showRecovery("r", "c"), refused);
 });
 
 test("an imported key is for sign or receive alone", () => {
@@ -383,4 +508,17 @@ test("an imported key is for sign or receive alone", () => {
     ok: false,
     error: "bad-input",
   });
+});
+
+test("every maker refuses a name a held secret takes, and deleteKey of a name never made is ok", () => {
+  const { platform: p } = person();
+  const exists = { ok: false, error: "key-exists" };
+  assert.ok(p.createRecovery("r", signInfo, receiveInfo).ok);
+  assert.deepEqual(p.makeKeyPair("r", "sign"), exists);
+  assert.deepEqual(p.importKey("r", "sign", new Uint8Array(32).fill(1)), exists);
+  assert.ok(p.createRecovery("x.sign", signInfo, receiveInfo).ok);
+  assert.deepEqual(p.enterRecovery("x", signInfo, receiveInfo), exists);
+  assert.deepEqual(p.deleteKey("never-made"), { ok: true, value: undefined });
+  assert.ok(p.deleteKey("r").ok);
+  assert.ok(p.makeKeyPair("r", "sign").ok); // the secret is gone, the name is free
 });

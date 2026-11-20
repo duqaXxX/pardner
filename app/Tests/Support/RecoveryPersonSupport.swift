@@ -13,7 +13,7 @@ extension SecretBuffer {
 extension RecoveryPerson {
     /// A person who types `secret` and is shown nothing; `onAsk` runs when asked for it.
     static func typing(_ secret: Data, onAsk: @escaping @Sendable () -> Void = {}) -> RecoveryPerson {
-        RecoveryPerson(show: { _ in true }, enter: { buffer in
+        RecoveryPerson(show: { _, _ in true }, enter: { buffer in
             onAsk()
             buffer.withUnsafeMutableBytes { $0.copyBytes(from: secret.prefix(buffer.count)) }
             return secret.count

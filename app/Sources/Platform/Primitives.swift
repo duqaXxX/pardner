@@ -23,12 +23,13 @@ public struct Fault: Error {
 /// them, so the screen must answer from another thread and on every way it goes away (dismissed,
 /// closed, the app quitting): a screen gone without an answer is a decline, never a wait.
 public struct RecoveryPerson {
-    /// Shows the secret; whether the person saw it. The pointer is valid only during the call: the screen copies what it shows.
-    public let show: @Sendable (UnsafeRawBufferPointer) -> Bool
+    /// Shows the secret with the sheet's public `context` (the person id, the relay's address and key, as one string);
+    /// whether the person saw it. The pointer is valid only during the call: the screen copies what it shows.
+    public let show: @Sendable (UnsafeRawBufferPointer, String) -> Bool
     /// Takes the secret into the buffer (32 bytes); the number of bytes the person gave, `nil` for a decline.
     public let enter: @Sendable (SecretBuffer) -> Int?
     /// A person made of a screen that shows the secret and a prompt that takes it back.
-    public init(show: @escaping @Sendable (UnsafeRawBufferPointer) -> Bool, enter: @escaping @Sendable (SecretBuffer) -> Int?) {
+    public init(show: @escaping @Sendable (UnsafeRawBufferPointer, String) -> Bool, enter: @escaping @Sendable (SecretBuffer) -> Int?) {
         self.show = show
         self.enter = enter
     }
@@ -41,6 +42,8 @@ public final class CryptoKitPlatform {
     let person: RecoveryPerson?
     /// The pairs `enterRecovery` computes, by name; only that function writes here.
     var derived: [String: Derived] = [:]
+    /// The secrets `createRecovery` made and `showRecovery` has not yet shown, by name; wiped when shown, by `deleteKey` and at the end.
+    var secrets: [String: SecretBuffer] = [:]
     #if DEBUG
     /// Test-only: which candidate scalars the curve accepts; the curve's own rule in the app.
     var accepts: (SecretBuffer) -> Bool = CryptoKitPlatform.acceptsScalar

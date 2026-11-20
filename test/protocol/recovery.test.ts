@@ -9,16 +9,22 @@ import { openBlob, sealBlob, sealBlobUnderKey } from "../../src/protocol/files.t
 import { recoveryKeyId } from "../../src/protocol/ids.ts";
 import { labelBytes } from "../../src/protocol/labels.ts";
 import type { Platform } from "../../src/protocol/platform.ts";
-import { createRecoveryKey, enterRecoveryKey } from "../../src/protocol/recovery.ts";
+import {
+  createRecoveryKey,
+  enterRecoveryKey,
+  showRecoveryKey,
+} from "../../src/protocol/recovery.ts";
 import { runVectors } from "../../src/protocol/vectors.ts";
 
 const secret = new Uint8Array(32).fill(9);
 /** A platform on Node whose person shows and types `secret`, and the secret `show` was given. */
 const withPerson = (typed: Uint8Array = secret) => {
-  const seen: { shown?: Uint8Array } = {};
+  const seen: { shown?: Uint8Array; context?: string } = {};
   const platform = createNodePlatform({
-    show: (s) => {
+    show: (s, context) => {
       seen.shown = s.slice();
+      seen.context = context;
+      return true;
     },
     enter: () => typed.slice(),
   });
@@ -40,7 +46,12 @@ test("a recovery key is made under its two labels, and its id is the recovery id
     },
   };
   const made = value(createRecoveryKey(spy, "r"));
+  const before = seen.shown;
+  assert.equal(before, undefined); // nothing is shown before the sheet can name the person
+  value(showRecoveryKey(spy, "r", "person id and relay"));
   assert.equal(seen.shown?.length, 32);
+  assert.equal(seen.context, "person id and relay");
+  assert.deepEqual(showRecoveryKey(spy, "r", "again"), { ok: false, error: "bad-input" });
   assert.deepEqual(infos, [labelBytes("recovery-signing"), labelBytes("recovery-receiving")]);
   assert.deepEqual(made.id, recoveryKeyId(platform, made.signing, made.receiving));
   assert.notDeepEqual(made.id, platform.sha256(new Uint8Array(0)));
@@ -49,6 +60,7 @@ test("a recovery key is made under its two labels, and its id is the recovery id
 test("entering the secret again gives the same keys and the same id", () => {
   const first = withPerson();
   const made = value(createRecoveryKey(first.platform, "r"));
+  value(showRecoveryKey(first.platform, "r", "sheet"));
   const again = withPerson(first.seen.shown);
   assert.deepEqual(value(enterRecoveryKey(again.platform, "r")), made);
 });
@@ -59,6 +71,7 @@ test("creating holds no private key; entering holds both for their use until del
   value(createRecoveryKey(platform, "r"));
   assert.deepEqual(platform.sign("r.sign", new Uint8Array(1)), noKey);
   assert.deepEqual(platform.publicKey("r.receive"), noKey);
+  value(showRecoveryKey(platform, "r", "sheet")); // an unshown secret holds the name
   const made = value(enterRecoveryKey(platform, "r"));
   assert.deepEqual(value(platform.publicKey("r.sign")), made.signing);
   assert.equal(value(platform.sign("r.sign", new Uint8Array(1))).length, 64);

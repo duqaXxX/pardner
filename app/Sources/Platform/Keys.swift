@@ -1,5 +1,6 @@
-// The by-name functions of the interface over both kinds of key: the derived pairs (memory of this
-// instance) first, then the store. A name is never in both: the makers refuse a taken name.
+// The by-name functions of the interface over the three holders of a name: the derived pairs and the
+// recovery secrets made and not yet shown (both memory of this instance), then the store. A name is
+// never in two: the makers refuse a taken name, and a secret's bare name counts as taken.
 import CryptoKit
 import Foundation
 
@@ -12,7 +13,7 @@ struct Derived {
 }
 
 extension CryptoKitPlatform {
-    func has(_ name: String) -> Bool { derived[name] != nil || store.has(name) }
+    func has(_ name: String) -> Bool { derived[name] != nil || secrets[name] != nil || store.has(name) }
 
     /// Makes a key pair in the store under `name`: `key-exists` for a taken name, `bad-input` for a use other than sign or receive.
     public func makeKeyPair(_ name: String, _ use: String) throws -> Data {
@@ -64,14 +65,22 @@ extension CryptoKitPlatform {
         } catch is CryptoKitError { throw Failure.openFailed } catch is HPKE.Errors { throw Failure.openFailed }
     }
 
-    /// Zeroes a derived pair's scalar and forgets it, or asks the store, whose failure to record the removal is `io-failed`.
+    /// Zeroes a derived pair's scalar (or a recovery secret never shown) and forgets it, or asks the store, whose failure to record the removal is `io-failed`;
+    /// a name that holds nothing is ok, as on the other engine.
     public func deleteKey(_ name: String) throws {
-        if let pair = derived.removeValue(forKey: name) { pair.scalar.wipe() } else { try store.delete(name) }
+        let wiped = secrets.removeValue(forKey: name)
+        wiped?.wipe() // a recovery secret made and never shown
+        if let pair = derived.removeValue(forKey: name) { pair.scalar.wipe() }
+        else if wiped == nil { // the store is no holder of a secret's name
+            do { try store.delete(name) } catch Failure.noSuchKey {}
+        }
     }
 
-    /// The end of this instance's host: every derived scalar is zeroed and forgotten, so a fault
-    /// between `enterRecovery` and `deleteKey` leaves no key in memory.
+    /// The end of this instance's host: every derived scalar and every recovery secret not yet shown is
+    /// zeroed and forgotten, so a fault between `createRecovery` or `enterRecovery` and its end leaves no key in memory.
     public func endSession() {
+        for secret in secrets.values { secret.wipe() }
+        secrets.removeAll()
         for pair in derived.values { pair.scalar.wipe() }
         derived.removeAll()
     }

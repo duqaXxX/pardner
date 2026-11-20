@@ -20,10 +20,11 @@ interface Held extends KeyPair {
 
 /**
  * The person's side of the recovery secret: a terminal prompt for the bot. `show` gets a copy the
- * platform erases when it returns, and `enter` hands over bytes the platform erases after use.
+ * platform erases when it returns, with the public text the sheet carries (`context`), and answers
+ * `true` only when the person confirmed; `enter` hands over bytes the platform erases after use.
  */
 export interface RecoveryPerson {
-  show(secret: Bytes): void;
+  show(secret: Bytes, context: string): boolean;
   enter(): Bytes;
 }
 
@@ -99,6 +100,8 @@ export function createNodePlatform(
   options: { readonly keyFile?: string } = {},
 ): NodePlatform {
   const keys = new Map<string, Held>();
+  // Recovery secrets made and not yet shown, by name: erased when shown, deleted or at the end.
+  const secrets = new Map<string, Uint8Array>();
   const { keyFile } = options;
   // The names the file holds: a key held another way (a recovery key) never reaches the file.
   const filed = new Set<string>();
@@ -131,7 +134,7 @@ export function createNodePlatform(
 
   const hold = (name: string, use: Use, pair: KeyPair): Result<Bytes> => {
     if (erased) return fail("bad-input");
-    if (keys.has(name)) return fail("key-exists");
+    if (keys.has(name) || secrets.has(name)) return fail("key-exists");
     keys.set(name, { ...pair, use });
     if (keyFile !== undefined) {
       filed.add(name);
@@ -153,7 +156,11 @@ export function createNodePlatform(
     const key = keys.get(name);
     return key?.use === use ? key : undefined;
   };
-  const taken = (name: string) => keys.has(`${name}.sign`) || keys.has(`${name}.receive`);
+  const taken = (name: string) =>
+    keys.has(`${name}.sign`) ||
+    keys.has(`${name}.receive`) ||
+    secrets.has(`${name}.sign`) ||
+    secrets.has(`${name}.receive`);
   const platform: NodePlatform = {
     sha256: (data) => plain(createHash("sha256").update(data).digest()),
     hkdf(ikm, info, length) {
@@ -231,6 +238,8 @@ export function createNodePlatform(
       }
     },
     deleteKey(name) {
+      secrets.get(name)?.fill(0); // a secret made and never shown
+      secrets.delete(name);
       const key = keys.get(name);
       if (key === undefined) return ok(undefined);
       // The file first. A write that failed leaves the key on disk and in memory; one that was
@@ -251,6 +260,8 @@ export function createNodePlatform(
     },
     erase() {
       erased = true;
+      for (const secret of secrets.values()) secret.fill(0);
+      secrets.clear();
       for (const key of keys.values()) key.sk.fill(0);
       keys.clear();
       filed.clear();
@@ -259,28 +270,38 @@ export function createNodePlatform(
     createRecovery(name, signInfo, receiveInfo) {
       if (!person || erased) return fail("bad-input");
       if (same(signInfo, receiveInfo)) return fail("bad-input");
-      if (taken(name)) return fail("key-exists"); // before the person is shown a secret
+      // The held secret lives under the bare name, which deleteKey shares with the keys.
+      if (taken(name) || keys.has(name) || secrets.has(name)) return fail("key-exists");
       const secret = platform.random(32);
       try {
-        const [signing, receiving] = derive(secret, signInfo, receiveInfo); // before the person sees it
+        const [signing, receiving] = derive(secret, signInfo, receiveInfo);
         const keys = { signing: plain(signing.pk), receiving: plain(receiving.pk) };
         signing.sk.fill(0);
         receiving.sk.fill(0);
-        const shown = plain(secret);
-        try {
-          person.show(shown);
-        } finally {
-          shown.fill(0);
-        }
+        secrets.set(name, secret); // kept until showRecovery, deleteKey or erase wipes it
         return ok(keys);
+      } catch (error) {
+        secret.fill(0);
+        throw error;
+      }
+    },
+    showRecovery(name, context) {
+      if (typeof context !== "string") return fail("bad-input"); // before anything is shown or wiped
+      const secret = secrets.get(name);
+      if (!person || erased || !secret) return fail("bad-input");
+      secrets.delete(name); // wiped whatever the person answers
+      const shown = plain(secret);
+      try {
+        return person.show(shown, context) !== true ? fail("bad-input") : ok(undefined);
       } finally {
+        shown.fill(0);
         secret.fill(0);
       }
     },
     enterRecovery(name, signInfo, receiveInfo) {
       if (erased) return fail("bad-input");
       if (same(signInfo, receiveInfo)) return fail("bad-input");
-      if (taken(name)) return fail("key-exists"); // before the person types a secret
+      if (keys.has(name) || taken(name) || secrets.has(name)) return fail("key-exists"); // before the person types a secret
       const secret = person ? person.enter() : new Uint8Array(0);
       try {
         if (secret.length !== 32) return fail("bad-input");
