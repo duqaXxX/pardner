@@ -237,6 +237,44 @@ final class RequestCardTests: XCTestCase {
         XCTAssertNil(card.controls, "an ended card has no controls")
     }
 
+    func testAnAnsweredCardSaysWhatWasAnswered() throws {
+        // (fixture, words): the answers the bot takes, each read back as the owner's reply and taken with an empty kind 5.
+        let cases: [(String, String)] = [
+            ("permission allow", "Allowed"), ("permission deny", "Denied"), ("question single", "Answered: b; x"),
+            ("question other and multi", "Answered: something else; x, y, and more"), ("question skip", "Skipped"), ("shell run", "Ran"),
+            ("shell do not run", "Not run"), ("hold send", "Sent anyway"), ("hold do not send", "Not sent"), ("terminal go", "Sent here"),
+            ("terminal cancel", "Not sent"), ("setup chosen", "Answered"),
+        ]
+        for (name, words) in cases {
+            let f = try fixture(name)
+            let (card, _, s) = makeCard(f.request)
+            let r = deliver(10, alice, ["answer": f.answer], at: 4, to: mini, re: s.request)
+            XCTAssertEqual(card.endedWords, words, "\(name): the reply on its way says it already")
+            deliver(5, mini, ["thread": "", "markdown": ""], at: 5, re: r)
+            XCTAssertEqual(card.phase, .ended(.answered), name)
+            XCTAssertEqual(card.endedWords, words, name)
+        }
+    }
+
+    func testARefusedReplyIsNotTheAnswer() throws {
+        let (card, _, s) = makeCard(permission)
+        let r = deliver(10, alice, ["answer": ["type": "permission", "allow": true]], at: 4, to: mini, re: s.request)
+        deliver(5, mini, ["thread": "", "markdown": "No."], at: 5, re: r)
+        deliver(11, mini, ["thread": s.thread, "answered": true], at: 6, re: s.request)
+        XCTAssertEqual(card.phase, .ended(.answered))
+        XCTAssertEqual(card.endedWords, "Answered", "the bot took no reply of the owner's: its answer came from elsewhere")
+    }
+
+    func testARefusedReplyIsNotTheAnswerWhateverCameFirst() throws {
+        let (card, _, s) = makeCard(permission)
+        let r = deliver(10, alice, ["answer": ["type": "permission", "allow": true]], at: 4, to: mini, re: s.request)
+        deliver(11, mini, ["thread": s.thread, "answered": true], at: 5, re: s.request)
+        XCTAssertEqual(card.endedWords, "Answered", "answered elsewhere before the bot took the owner's reply")
+        deliver(5, mini, ["thread": "", "markdown": "No."], at: 6, re: r)
+        XCTAssertEqual(card.phase, .ended(.answered))
+        XCTAssertEqual(card.endedWords, "Answered", "the refused reply is not what was answered")
+    }
+
     func testNotSentAndNotDeliveredShowAndTheControlsComeBack() async throws {
         outcome = .ended
         let (card, c, s) = makeCard(permission)

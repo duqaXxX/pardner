@@ -27,7 +27,7 @@ struct ThreadPanel: View {
                 Spacer()
                 if let composer { SessionControls(composer: composer, state: thread.state) }
                 Button(action: close) { Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)) }
-                    .buttonStyle(.plain).foregroundStyle(PardnerColor.muted)
+                    .buttonStyle(.plain).pointerStyle(.link).foregroundStyle(PardnerColor.muted)
                     .accessibilityLabel("Close the thread")
             }
             .padding(.horizontal, PardnerMetrics.gap * 2).frame(height: 52)
@@ -107,7 +107,7 @@ struct SessionControls: View {
                 Button("Plan mode on") { composer.command("/plan on") }
                 Button("Plan mode off") { composer.command("/plan off") }
             } label: { Image(systemName: "ellipsis").frame(width: 22, height: 22) }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().disabled(!composer.canCommand).accessibilityLabel("Session mode")
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).pointerStyle(composer.canCommand ? .link : nil).fixedSize().disabled(!composer.canCommand).accessibilityLabel("Session mode")
         }
     }
 }

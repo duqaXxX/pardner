@@ -81,3 +81,5 @@ jobs:
       - run: npm test
       # The shell app, signed ad hoc (no identity, no team): built from the package beside it.
       - run: xcodebuild -project app/Pardner.xcodeproj -scheme Pardner -configuration Release -derivedDataPath "$RUNNER_TEMP/derived" build
+      # The app pairs nothing without its protocol script, which a build phase joins into the bundle.
+      - run: test -s "$RUNNER_TEMP/derived/Build/Products/Release/Pardner.app/Contents/Resources/protocol.js"

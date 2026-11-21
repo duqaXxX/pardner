@@ -197,7 +197,7 @@ struct AddDevice: View {
     @Bindable var model: DevicesModel
 
     var body: some View {
-        Text("On the new device, give these three values. pardner setup asks for them as RELAY_ADDRESS, RELAY_KEY and RELAY_OWNER; a Mac asks for them on its Join as a new device screen.")
+        Text("On the new device, give these three values. pardner setup asks for them as RELAY_ADDRESS, RELAY_KEY and RELAY_OWNER; a Mac asks for them once you choose I already use Pardner on another device on its first screen.")
             .foregroundStyle(PardnerColor.muted).fixedSize(horizontal: false, vertical: true)
         if let handoff = model.handoff {
             Value(title: "Relay address", variable: "RELAY_ADDRESS", value: handoff.relayAddress)

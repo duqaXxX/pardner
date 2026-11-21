@@ -1,6 +1,7 @@
 // What the Devices screen reads and does (device pairing design 3.1, 3.4, 3.6, 3.9): the controller's list as the views draw it, the
 // add flow's form, the removal's choices and one method for each act the controller allows. The controller decides; this holds only what
 // a view needs between two states (the pasted text and its refusal, the page, the choices the person has ticked).
+import Conversation
 import Foundation
 import Observation
 import Relay
@@ -72,11 +73,39 @@ public final class DevicesModel {
 
     // MARK: what the views draw
 
-    /// The person's active bots by profile name (the short id when none), the id breaking a tie: two bots may share a name.
+    /// The person's active bots by the name they show (`botName`), the id breaking a tie: two bots may share a name.
     public func activeBots(names: [Data: String]) -> [ChannelsModel.BotChoice] {
         state.rows.filter { $0.kind == .bot && $0.active }
-            .map { ChannelsModel.BotChoice(id: $0.id, name: names[$0.id] ?? Naming.short($0.id)) }
-            .sorted { $0.name != $1.name ? $0.name < $1.name : $0.id.lexicographicallyPrecedes($1.id) }
+            .map { ChannelsModel.BotChoice(id: $0.id, name: Self.botName(id: $0.id, profile: names[$0.id], label: $0.label),
+                                           isLabel: names[$0.id] == nil && $0.label != nil) }
+            .sorted { Self.precedes(($0.name, $0.id), ($1.name, $1.id)) }
+    }
+
+    /// A bot's name wherever the app lists it: its profile's once a channel carries it, else the label its pairing string gave, else the
+    /// short id.
+    nonisolated static func botName(id: Data, profile: String?, label: String?) -> String { profile ?? label ?? Naming.short(id) }
+
+    /// The order of a list of bots: by name as Finder sorts, the id breaking a tie.
+    nonisolated static func precedes(_ a: (String, Data), _ b: (String, Data)) -> Bool {
+        let order = a.0.localizedStandardCompare(b.0)
+        return order != .orderedSame ? order == .orderedAscending : a.1.lexicographicallyPrecedes(b.1)
+    }
+
+    /// A bot of the sidebar. Its profile names it once a channel carries it; until then the label its pairing string gave (a claim, drawn
+    /// in quotes like the Devices screen draws it) or the short id.
+    public struct SidebarBot: Equatable, Identifiable {
+        public let id: Data
+        public let profile: BotProfile?
+        public let label: String?
+        /// The name the pickers show too (`botName`).
+        public var name: String { DevicesModel.botName(id: id, profile: profile?.name, label: label) }
+    }
+
+    /// Every active bot of the person, a removed one gone, in the pickers' order.
+    public func sidebarBots(profiles: [Data: BotProfile]) -> [SidebarBot] {
+        state.rows.filter { $0.kind == .bot && $0.active }
+            .map { SidebarBot(id: $0.id, profile: profiles[$0.id], label: $0.label) }
+            .sorted { Self.precedes(($0.name, $0.id), ($1.name, $1.id)) }
     }
 
     /// The active devices, newest first: a removed device is not listed (design 3.9).
@@ -110,7 +139,7 @@ public final class DevicesModel {
 
     /// A name in quotes, apart from the app's own marks: no name can pass for "This Mac" (design 3.4). For a label that is only read aloud:
     /// the views draw a name with `NameText`, in a `Text` of its own.
-    public static func quoted(_ name: String) -> String { "\u{201C}\(name)\u{201D}" }
+    public nonisolated static func quoted(_ name: String) -> String { "\u{201C}\(name)\u{201D}" }
 
     /// The label in quotes, else the kind (design 3.3).
     public static func title(_ row: DeviceRow) -> String { row.label.map(quoted) ?? kindName(row.kind) }
@@ -244,7 +273,7 @@ extension RemovalRefusal {
         case .notActive: "A chosen device is no longer in your list. Choose again."
         case .running: "A removal is still running. It ends before another starts."
         case .notReady: "Pardner is still reading your devices. Try again in a moment."
-        case .failed(let why): "The removal could not be started: \(why)."
+        case .failed(let why): "The removal could not be started: \(why). Try again in a moment."
         }
     }
 }

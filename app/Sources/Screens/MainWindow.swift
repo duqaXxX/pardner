@@ -56,12 +56,29 @@ public struct MainWindow: View {
 
     static func ordered(_ model: ReadingModel) -> [Data] { model.channels.keys.sorted { $0.lexicographicallyPrecedes($1) } }
 
+    /// The sidebar's bots: the person's active bots from the device list. Until that list is read (and in the samples, which have no
+    /// pairing), the bots whose profile a channel carries.
+    private var bots: [DevicesModel.SidebarBot] {
+        if let devices, devices.ready { return devices.sidebarBots(profiles: model.profiles) }
+        return model.profiles.map { DevicesModel.SidebarBot(id: $0.key, profile: $0.value, label: nil) }
+            .sorted { DevicesModel.precedes(($0.name, $0.id), ($1.name, $1.id)) }
+    }
+
+    /// What the empty window says to do next: nil while the device list is not read, when either line could be false, and while a channel
+    /// is being made.
+    static func emptyHint(devicesRead: Bool, hasBot: Bool, creating: Bool) -> String? {
+        guard devicesRead, !creating else { return nil }
+        return hasBot ? "Make one with + beside Channels: it binds a folder on your bot's machine."
+            : "Add your bot first: in Devices…, Add a device takes the pairing string pardner setup printed on the bot's machine."
+    }
+
     public var body: some View {
         // Each bot's icon decoded once per drawing, not once per row; the protocol bounds it (PD 6.8: 65,536 bytes,
         // a PNG or a JPEG of at most 256 pixels a side, read from its own header).
         let icons = model.profiles.compactMapValues { $0.icon.flatMap(NSImage.init(data:)) }
+        let bots = bots
         HStack(spacing: 0) {
-            Sidebar(model: model, icons: icons, selected: shown?.id, choose: { channel = $0 }, openDevices: devices.map { devices in { devices.open() } },
+            Sidebar(model: model, bots: bots, icons: icons, selected: shown?.id, choose: { channel = $0 }, openDevices: devices.map { devices in { devices.open() } },
                     channels: channels)
                 .frame(width: 248)
             Divider().overlay(PardnerColor.line)
@@ -74,7 +91,8 @@ public struct MainWindow: View {
                         .frame(width: 380)
                 }
             } else {
-                Empty().frame(maxWidth: .infinity, maxHeight: .infinity)
+                Empty(hint: Self.emptyHint(devicesRead: devices?.ready ?? false, hasBot: !bots.isEmpty,
+                                           creating: channels?.creatingRow(known: Set(model.channels.keys)) != nil)).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .onChange(of: shown?.id) { thread = nil }
@@ -90,13 +108,16 @@ public struct MainWindow: View {
     }
 }
 
-/// What the window shows before any channel is read: in this version, before the device is paired.
+/// What the window shows while no channel is read, with the next step when one is known.
 struct Empty: View {
+    let hint: String?
+
     var body: some View {
         VStack(spacing: PardnerMetrics.gap) {
             Text("No channels yet").font(PardnerFont.ui(size: 17, weight: .semibold))
-            Text("Channels come with a later version of Pardner.")
-                .foregroundStyle(PardnerColor.muted)
+            if let hint {
+                Text(hint).foregroundStyle(PardnerColor.muted).multilineTextAlignment(.center).frame(maxWidth: 420)
+            }
         }
         .padding(PardnerMetrics.gap * 3)
     }
@@ -128,6 +149,7 @@ struct Avatar: View {
 
 struct Sidebar: View {
     let model: ReadingModel
+    let bots: [DevicesModel.SidebarBot]
     let icons: [Data: NSImage]
     let selected: Data?
     let choose: (Data) -> Void
@@ -145,7 +167,7 @@ struct Sidebar: View {
             .padding(.horizontal, 4)
             Section("Channels", trailing: channels.map { channels in
                 AnyView(Button { channels.openNew() } label: { Image(systemName: "plus").font(.system(size: 12, weight: .semibold)).frame(width: 22, height: 22) }
-                    .buttonStyle(.plain).disabled(!channels.ready).help("New channel").accessibilityLabel("New channel"))
+                    .buttonStyle(.plain).pointerStyle(channels.ready ? .link : nil).disabled(!channels.ready).help("New channel").accessibilityLabel("New channel"))
             }) {
                 if let row = channels?.creatingRow(known: Set(model.channels.keys)) {
                     Text(row)
@@ -165,22 +187,23 @@ struct Sidebar: View {
                             .padding(.horizontal, PardnerMetrics.gap).padding(.vertical, 6)
                             .background(selected == id ? PardnerColor.raised : .clear, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.plain).pointerStyle(.link)
                 }
             }
             Section("Bots") {
-                // By name, the id breaking a tie: two bots may share a name.
-                ForEach(model.profiles.keys.sorted { a, b in
-                    let (x, y) = (model.profiles[a]?.name ?? "", model.profiles[b]?.name ?? "")
-                    return x != y ? x < y : a.lexicographicallyPrecedes(b)
-                }, id: \.self) { bot in
-                    let p = model.profiles[bot]
+                ForEach(bots) { bot in
                     HStack(spacing: PardnerMetrics.gap) {
-                        Avatar(name: p?.name ?? Naming.short(bot), isBot: true, icon: icons[bot], size: 20)
+                        Avatar(name: bot.profile?.name ?? bot.label ?? Naming.short(bot.id), isBot: true, icon: icons[bot.id], size: 20)
                         VStack(alignment: .leading, spacing: 0) {
-                            Text(p?.name ?? Naming.short(bot))
-                            if let account = p?.account {
-                                Text(account).font(PardnerFont.ui(size: 11, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                            if let p = bot.profile {
+                                Text(p.name)
+                                if let account = p.account {
+                                    Text(account).font(PardnerFont.ui(size: 11, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                                }
+                            } else {
+                                if let label = bot.label { NameText(name: label, font: PardnerFont.ui(size: 14, weight: .regular)) } else { Text(Naming.short(bot.id)) }
+                                // The profile comes with the first channel that carries the bot.
+                                Text("Not seen yet").font(PardnerFont.ui(size: 11, weight: .regular)).foregroundStyle(PardnerColor.muted)
                             }
                         }
                     }
@@ -190,10 +213,9 @@ struct Sidebar: View {
             Spacer()
             if let openDevices {
                 Button(action: openDevices) {
-                    Text("Devices…").frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, PardnerMetrics.gap).padding(.vertical, 6)
+                    Label("Devices…", systemImage: "laptopcomputer.and.iphone").frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.plain).accessibilityLabel("Open the devices")
+                .buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Open the devices")
             }
         }
         .padding(PardnerMetrics.gap * 1.5)

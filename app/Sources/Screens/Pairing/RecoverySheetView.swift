@@ -112,7 +112,7 @@ extension View {
     }
 }
 
-/// A button in the design's colours: `brand` for the one action of a screen, `raised` for the rest.
+/// A button in the design's colours: `brand` for the one action of a screen, `raised` for the rest; the pointing hand over it.
 struct PardnerButton: ButtonStyle {
     let prominent: Bool
     @Environment(\.isEnabled) private var enabled
@@ -124,5 +124,6 @@ struct PardnerButton: ButtonStyle {
             .padding(.horizontal, PardnerMetrics.gap * 2).padding(.vertical, 7)
             .background(prominent ? PardnerColor.brand : PardnerColor.raised, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
             .opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.4)
+            .pointerStyle(enabled ? .link : nil)
     }
 }

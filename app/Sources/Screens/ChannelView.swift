@@ -32,7 +32,7 @@ struct ChannelView: View {
                     Menu {
                         Button("Bind to a folder…") { channels.openBind(channel: channel.id, bot: ChannelsModel.bot(of: channel)) }.disabled(!channels.canBind(channel.id))
                     } label: { Image(systemName: "ellipsis").frame(width: 22, height: 22) }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("Channel actions")
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).pointerStyle(.link).fixedSize().accessibilityLabel("Channel actions")
                 }
             }
             .padding(.horizontal, PardnerMetrics.gap * 2).frame(height: 52)
@@ -137,7 +137,7 @@ struct Summary: View {
             .background(PardnerColor.surface, in: RoundedRectangle(cornerRadius: PardnerMetrics.containerRadius))
             .overlay(RoundedRectangle(cornerRadius: PardnerMetrics.containerRadius).stroke(PardnerColor.line))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plain).pointerStyle(.link)
     }
 
     private var replies: String { thread.replies == 1 ? "1 reply" : "\(thread.replies) replies" }

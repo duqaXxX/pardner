@@ -99,6 +99,8 @@ extension PairingPhase {
     public static let joinMismatchAdvice = "The relay did not serve a log that holds this Mac. Pair again starts over; remove any entry this attempt left from another of your devices."
     /// What the person is told when this Mac cannot make its pairing string.
     public static let joinUnmadeAdvice = "This Mac cannot make its pairing string. Pair again to start over."
+    /// The next step after a fault the person can do nothing about but try again.
+    static let retryAdvice = "Retry, or quit Pardner and open it again."
     /// What the person is told when the relay was put back (security design 5.11).
     public static let putBackAdvice = "This relay was put back. Set up a new relay with pardner relay init under a new --instance name, or after moving the old relay's folder away, then pair this Mac again."
     /// What the person is told when the link faulted.
@@ -265,7 +267,7 @@ public actor PairingController {
                 ? .fault(.newerStore, PairingPhase.newerStoreAdvice)
                 : .fault(.malformedStore, PairingPhase.malformedStoreWarning)
         } catch {
-            phase = .fault(.failed, "\(error)")
+            phase = .fault(.failed, Problem.sentence("Pardner could not read its pairing", error, next: PairingPhase.retryAdvice))
         }
     }
 
@@ -303,7 +305,8 @@ public actor PairingController {
             do {
                 try await startConnection(state, enrolment: Enrolment(secret: secret, signed: genesis.signed, sig: genesis.sig))
             } catch {
-                phase = .fault(.failed, "\(error)") // `enrolling` is on disk: the next launch resumes
+                // `enrolling` is on disk: the next launch resumes
+                phase = .fault(.failed, Problem.sentence("Pardner could not connect to the relay", error, next: "Retry: the setup goes on where it stopped."))
                 throw error
             }
             phase = .enrolling(asksSecret: false)
@@ -355,8 +358,8 @@ public actor PairingController {
             phase = .unpaired(nil)
             return .erased
         } catch {
-            phase = .fault(.failed, "\(error)")
-            return .failed("\(error)")
+            phase = .fault(.failed, Problem.sentence("Pardner could not erase the setup", error, next: PairingPhase.retryAdvice))
+            return .failed(Problem.reason(error))
         }
     }
 
@@ -377,7 +380,7 @@ public actor PairingController {
             phase = .unpaired(nil)
             return true
         } catch {
-            phase = .fault(.failed, "\(error)")
+            phase = .fault(.failed, Problem.sentence("Pardner could not erase the pairing", error, next: PairingPhase.retryAdvice))
             return false
         }
     }
@@ -556,7 +559,7 @@ public actor PairingController {
         do {
             try pairing.write(state)
         } catch {
-            phase = .fault(.failed, "\(error)")
+            phase = .fault(.failed, Problem.sentence("Pardner could not save the pairing", error, next: PairingPhase.retryAdvice))
             return
         }
         stored = state
@@ -635,7 +638,7 @@ public actor PairingController {
             try await eraseAll()
             phase = .unpaired(nil)
         } catch {
-            phase = .fault(.failed, "\(error)")
+            phase = .fault(.failed, Problem.sentence("Pardner could not erase the pairing", error, next: PairingPhase.retryAdvice))
         }
     }
 

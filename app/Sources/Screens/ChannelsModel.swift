@@ -17,7 +17,12 @@ public final class ChannelsModel {
     /// An active bot as the picker lists it.
     public struct BotChoice: Equatable, Identifiable {
         public let id: Data
+        /// What the person types after `@` to name it.
         public let name: String
+        /// The name is the label its pairing string gave, a claim: drawn in quotes, as the Devices screen and the sidebar draw it.
+        public var isLabel = false
+        /// The name as a picker draws it.
+        public var shown: String { isLabel ? DevicesModel.quoted(name) : name }
     }
 
     /// What Create or Bind would ask of the controller.
@@ -191,7 +196,7 @@ public final class ChannelsModel {
     /// The controller threw: the sheet stays with its fields, and the reason is told as it is (the connection's own faults come through the phase).
     func finishFailure(_ error: Error, for asked: Int? = nil) {
         guard asked ?? ticket == ticket, sheet != nil else { return }
-        (working, problem) = (false, "Pardner could not do this: \(error.localizedDescription).")
+        (working, problem) = (false, Problem.sentence("Pardner could not do this", error, next: "Try again."))
     }
 
     func finishCreate(_ outcome: CreateOutcome, for asked: Int? = nil) {

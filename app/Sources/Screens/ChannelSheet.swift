@@ -25,7 +25,7 @@ public struct ChannelSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Bot").font(PardnerFont.ui(size: 13, weight: .semibold))
                     Picker("Bot", selection: Binding(get: { model.resolvedBot(names: names) }, set: { model.pick($0) })) {
-                        ForEach(model.choices(names: names)) { Text($0.name).tag(Optional($0.id)) }
+                        ForEach(model.choices(names: names)) { Text(verbatim: $0.shown).tag(Optional($0.id)) }
                     }
                     .labelsHidden().accessibilityLabel("Bot")
                 }

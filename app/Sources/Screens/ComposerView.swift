@@ -73,6 +73,8 @@ struct ComposerField: NSViewRepresentable {
             case #selector(NSResponder.moveDown(_:)) where model.picking:
                 model.movePick(1)
                 return true
+            case #selector(NSResponder.insertTab(_:)) where model.picking:
+                return model.pickHighlighted()
             case #selector(NSResponder.cancelOperation(_:)) where model.picking:
                 model.closePicker()
                 return true
@@ -163,19 +165,19 @@ struct ComposerView: View {
     }
 }
 
-/// The person's active bots, under the field, while `@` waits for a pick.
+/// The person's active bots that match what follows the `@`, under the field, while it waits for a pick.
 struct BotList: View {
     let model: ComposerModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(model.choices().enumerated()), id: \.element.id) { index, choice in
+            ForEach(Array(model.matches().enumerated()), id: \.element.id) { index, choice in
                 Button { model.pick(choice.id) } label: {
-                    Text(verbatim: choice.name).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(verbatim: choice.shown).frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, PardnerMetrics.gap).padding(.vertical, 6)
                         .background(index == model.pickIndex ? PardnerColor.raised : .clear)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.plain).pointerStyle(.link)
             }
         }
         .background(PardnerColor.surface, in: RoundedRectangle(cornerRadius: PardnerMetrics.containerRadius))
@@ -214,7 +216,7 @@ struct PendingRows: View {
                 if row.status.canDismiss {
                     Spacer(minLength: 0)
                     Button { model.dismiss(row.id) } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)) }
-                        .buttonStyle(.plain).foregroundStyle(PardnerColor.muted).accessibilityLabel("Dismiss")
+                        .buttonStyle(.plain).pointerStyle(.link).foregroundStyle(PardnerColor.muted).accessibilityLabel("Dismiss")
                 }
             }
         }

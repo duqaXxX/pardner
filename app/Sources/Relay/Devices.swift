@@ -129,7 +129,7 @@ public enum DeviceRefusal: Error, Sendable, Equatable {
         case .notReady: "Pardner is still reading your devices. Try again in a moment."
         case .entryPending: "A change to your devices is still being confirmed. Try again in a moment."
         case .removalRunning: "Finish removing first. A device is being removed, and an add waits for it."
-        case .failed(let why): "The device could not be added: \(why)."
+        case .failed(let why): "The device could not be added: \(why). Try again in a moment."
         }
     }
 }
