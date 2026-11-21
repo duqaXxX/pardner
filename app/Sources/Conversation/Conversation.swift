@@ -15,6 +15,18 @@ public enum RequestStatus: Sendable, Equatable {
     case rewritten(markdown: String)
 }
 
+/// Why the bot did not take a reply, and which reply it was.
+struct Refusal: Sendable, Equatable {
+    let reply: MessageRef
+    let text: String
+}
+
+/// A reply of the owner's, by what it answers and the bot it went to.
+struct ReplyRecord: Sendable, Equatable {
+    let request: MessageRef
+    let to: Data?
+}
+
 /// A session's state, as the Sessions tab shows it.
 public enum SessionState: Sendable, Equatable {
     case idle, running, waiting
@@ -57,10 +69,14 @@ public struct MessageThread: Sendable, Equatable {
     public internal(set) var items: [Item] = []
     public internal(set) var prompts: [MessageRef: PromptStatus] = [:]
     public internal(set) var requests: [MessageRef: RequestStatus] = [:]
+    // Why the bot did not take the last reply to a request, and which reply it was.
+    var reasons: [MessageRef: Refusal] = [:]
     /// The time of the newest message of the session's bot: the Sessions tab's order.
     public internal(set) var lastReply: Date?
     // The devices whose prompts the bot started here: its owner's, the only ones whose reply it takes (SD 5.8).
     var owners: Set<Data> = []
+    // The person's own devices (the Devices list): their replies count whether or not they prompted in this thread.
+    var own: Set<Data> = []
 
     /// Waiting for the owner while a request is open; running while a prompt runs; idle otherwise.
     public var state: SessionState {
@@ -70,6 +86,16 @@ public struct MessageThread: Sendable, Equatable {
     }
 
     init(key: String) { self.key = key }
+
+    /// Whether a reply of `sender` is the owner's: a device whose prompt the bot started here, or one of the person's own.
+    func trusts(_ sender: Data) -> Bool { owners.contains(sender) || own.contains(sender) }
+
+    /// Why the bot did not take this device's last reply to `request`, while the request still waits; nil otherwise. A status other than
+    /// `open` wins over a reason.
+    public func reason(of request: MessageRef, from device: Data) -> String? {
+        guard requests[request] == .open, let r = reasons[request], r.reply.device == device else { return nil }
+        return r.text
+    }
 }
 
 public struct Channel: Sendable, Equatable {
@@ -81,6 +107,11 @@ public struct Channel: Sendable, Equatable {
     public internal(set) var threads: [String: MessageThread] = [:]
     // Which thread a message belongs to, by its reference: how a start, a cut or a reply finds its thread.
     var threadOf: [MessageRef: String] = [:]
+    // The person's own devices, handed to each thread before it reads a message.
+    var own: Set<Data> = []
+    // The replies of the owner's read, by their reference: the request each answers and the bot it went to. What the bot says to one is its
+    // verdict, found by `re` (the body's `thread` may be empty), and never a prompt's state or a thread item.
+    var replies: [MessageRef: ReplyRecord] = [:]
 
     /// The sessions, by their last reply, newest first (first-screens decision 8); the key breaks a tie.
     public var sessions: [MessageThread] {
@@ -90,10 +121,14 @@ public struct Channel: Sendable, Equatable {
         }
     }
 
-    init(id: Data) { self.id = id }
+    init(id: Data, own: Set<Data> = []) { (self.id, self.own) = (id, own) }
 
     mutating func fold(_ m: Message) {
         messages.append(m)
+        if let re = m.re, let reply = replies[re], let key = threadOf[re], [3, 5, 6, 7].contains(m.kind) {
+            threads[key]?.take(verdict: m, of: re, request: reply.request, to: reply.to)
+            return
+        }
         let key: String?
         switch m.body {
         case .prompt where m.thread == nil, .text where m.thread == nil:
@@ -110,7 +145,10 @@ public struct Channel: Sendable, Equatable {
         }
         guard let key else { return }
         threadOf[m.ref] = key
-        threads[key, default: MessageThread(key: key)].take(m)
+        threads[key, default: MessageThread(key: key)].own = own
+        threads[key]?.take(m)
+        // A reply counts for a verdict only from one of the owner's devices, to the session's bot.
+        if case .reply = m.body, let re = m.re, let t = threads[key], t.trusts(m.sender), m.to == t.bot { replies[m.ref] = ReplyRecord(request: re, to: m.to) }
     }
 }
 
@@ -151,17 +189,41 @@ extension MessageThread {
             requests[m.ref] = .open
             items.append(.message(m))
         case .reply:
-            if let re = m.re, requests[re] == .open, owners.contains(m.sender) { requests[re] = .replied }
-            items.append(.message(m))
+            // The owner's reply is no row of the thread: the request's card carries its state.
+            if let re = m.re, requests[re] == .open, trusts(m.sender) { requests[re] = .replied }
         case .edit(let withdrawn, let answered, let markdown) where fromBot:
             guard let re = m.re, requests[re] != nil else { return }
-            if withdrawn { requests[re] = .withdrawn } else if answered { requests[re] = .answered } else if let markdown { requests[re] = .rewritten(markdown: markdown) }
+            if withdrawn { if requests[re] != .answered { requests[re] = .withdrawn } } else if answered { requests[re] = .answered } else if let markdown { requests[re] = .rewritten(markdown: markdown) }
         case .text, .unreadable:
             if m.thread != nil { items.append(.message(m)) } // the opening message is the thread's root, not an item
         default:
             return
         }
         if fromBot { lastReply = max(lastReply ?? .distantPast, m.time) }
+    }
+
+    /// What the bot says to the reply `reply`, from the bot it was `to` alone: its empty kind 5 means the answer was handed on, whatever the request's
+    /// status was (the bot withdraws an accepted request before it writes it); anything else is a reason, and the request waits again.
+    mutating func take(verdict m: Message, of reply: MessageRef, request: MessageRef, to bot: Data?) {
+        guard bot != nil, m.sender == bot, requests[request] != nil else { return }
+        lastReply = max(lastReply ?? .distantPast, m.time)
+        let reason: String
+        switch m.body {
+        case .answer(let markdown) where markdown.isEmpty:
+            // A rewritten request keeps its text: what the bot wrote of it is more than "answered".
+            switch requests[request] {
+            case .open, .replied, .withdrawn: requests[request] = .answered
+            default: break
+            }
+            reasons[request] = nil
+            return
+        case .answer(let markdown): reason = markdown
+        case .cut: reason = "The bot did not take this answer."
+        case .notRead: reason = "The bot could not read this answer."
+        default: return // a start is no verdict
+        }
+        reasons[request] = Refusal(reply: reply, text: reason)
+        if requests[request] == .replied { requests[request] = .open }
     }
 
     /// The prompts that are sent or running while an earlier prompt of the thread, by position (the root, then the thread's prompts in order),
@@ -199,6 +261,8 @@ public struct BotProfile: Sendable, Equatable {
 public struct ReadingModel: Sendable, Equatable {
     public private(set) var channels: [Data: Channel] = [:]
     public private(set) var profiles: [Data: BotProfile] = [:]
+    // The person's own app devices, as the Devices list names them.
+    private var ownDevices: Set<Data> = []
 
     /// An empty model, before the link's first delivery.
     public init() {}
@@ -220,14 +284,25 @@ public struct ReadingModel: Sendable, Equatable {
             if rebuild[m.channel] != nil || passed {
                 rebuild[m.channel, default: [:]][m.position] = m
             } else {
-                channels[m.channel, default: Channel(id: m.channel)].fold(m)
+                channels[m.channel, default: Channel(id: m.channel, own: ownDevices)].fold(m)
             }
         }
         for (id, changed) in rebuild {
             var all = Dictionary(uniqueKeysWithValues: (channels[id]?.messages ?? []).map { ($0.position, $0) })
             all.merge(changed) { _, new in new }
-            var c = Channel(id: id)
+            var c = Channel(id: id, own: ownDevices)
             for position in all.keys.sorted() { c.fold(all[position]!) }
+            channels[id] = c
+        }
+    }
+
+    /// The person's own devices changed: a reply of one counts for a request's status, so every channel is read again from its messages.
+    public mutating func setOwnDevices(_ ids: Set<Data>) {
+        guard ids != ownDevices else { return }
+        ownDevices = ids
+        for (id, channel) in channels {
+            var c = Channel(id: id, own: ids)
+            for m in channel.messages { c.fold(m) }
             channels[id] = c
         }
     }

@@ -27,6 +27,8 @@ public final class DevicesModel {
     /// The devices the open confirmation offered: one that leaves this set went away while the person chose.
     private var offered: Set<Data> = []
 
+    /// Told each list as it arrives: the reading model learns which devices are the person's own.
+    public var onState: (@MainActor (DevicesState) -> Void)?
     private let controller: PairingController?
     private var watching: Task<Void, Never>?
 
@@ -51,6 +53,7 @@ public final class DevicesModel {
 
     func apply(_ next: DevicesState) {
         state = next
+        onState?(next)
         // A device that went while the confirmation was open is no longer a choice; the person unticking every device is not a reason to close it.
         let available = Set(next.removalChoices(clicked: clicked ?? Data()).map(\.id))
         let gone = offered.subtracting(available)

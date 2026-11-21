@@ -56,7 +56,10 @@ struct ChannelView: View {
                         }
                     case .sessions:
                         ForEach(channel.sessions, id: \.key) { t in
-                            Summary(model: model, thread: t, open: { thread = t.key }, showsTitle: true)
+                            HStack(spacing: PardnerMetrics.gap) {
+                                Summary(model: model, thread: t, open: { thread = t.key }, showsTitle: true)
+                                if t.state != .idle, let composers { StopButton(composer: composers.composer(channel: channel.id, thread: t.key)) }
+                            }
                         }
                     }
                     if tab == .conversation, let composers { PendingRows(model: composers.composer(channel: channel.id)) }

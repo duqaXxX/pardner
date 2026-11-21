@@ -1,5 +1,5 @@
 // The thread panel on the right: the opening message, then the thread's entries in order. An answer shows as
-// it is written; a question or an approval shows its title and where it stands (its controls are screen 3.5's).
+// it is written; a question or an approval is a card with its controls (requests design 2); Stop and the mode menu are in the header.
 import Conversation
 import DesignSystem
 import AppKit
@@ -12,6 +12,8 @@ struct ThreadPanel: View {
     let close: () -> Void
     /// This thread's composer; nil where the window has no pairing.
     var composer: ComposerModel?
+    /// The card that has the keyboard, by its request's reference: only a click or Tab gives it, and a card that ends leaves it to no other.
+    @FocusState private var focus: MessageRef?
 
     var body: some View {
         let queued = thread.queued
@@ -23,6 +25,7 @@ struct ThreadPanel: View {
                         .font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.muted)
                 }
                 Spacer()
+                if let composer { SessionControls(composer: composer, state: thread.state) }
                 Button(action: close) { Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)) }
                     .buttonStyle(.plain).foregroundStyle(PardnerColor.muted)
                     .accessibilityLabel("Close the thread")
@@ -54,7 +57,11 @@ struct ThreadPanel: View {
     @ViewBuilder
     private func entry(_ m: Message, queued: Set<MessageRef>) -> some View {
         if case .request(let title, _, _) = m.body {
-            RequestRow(title: title, status: thread.requests[m.ref] ?? .open)
+            if let composer {
+                RequestCardView(card: composer.card(for: m), focus: $focus)
+            } else {
+                RequestRow(title: title, status: thread.requests[m.ref] ?? .open)
+            }
         } else {
             MessageRow(model: model, icons: icons, message: m, queued: queued.contains(m.ref))
         }
@@ -84,7 +91,48 @@ struct AnswerRow: View {
     }
 }
 
-/// A question or an approval, with where it stands.
+/// Stop while the session runs or waits, and the menu of the session's mode: each sends its word as a prompt in the thread (requests design 2.3 and 2.4),
+/// through the composer, with the field as it is. Both are off for a session whose bot was removed.
+struct SessionControls: View {
+    let composer: ComposerModel
+    let state: SessionState
+
+    var body: some View {
+        HStack(spacing: PardnerMetrics.gap) {
+            if state != .idle { StopButton(composer: composer) }
+            Menu {
+                Button("Bypass on") { composer.command("/bypass on") }
+                Button("Bypass off") { composer.command("/bypass off") }
+                Divider()
+                Button("Plan mode on") { composer.command("/plan on") }
+                Button("Plan mode off") { composer.command("/plan off") }
+            } label: { Image(systemName: "ellipsis").frame(width: 22, height: 22) }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().disabled(!composer.canCommand).accessibilityLabel("Session mode")
+        }
+    }
+}
+
+/// Sends `/stop` to the session's bot.
+struct StopButton: View {
+    let composer: ComposerModel
+
+    var body: some View {
+        Button("Stop") { composer.command("/stop") }
+            .buttonStyle(PardnerButton(prominent: false)).disabled(!composer.canCommand).accessibilityLabel("Stop the session")
+    }
+}
+
+/// The frame of a request: `agent` while it waits for the owner, `line` once it ended.
+extension View {
+    func requestFrame(open: Bool) -> some View {
+        padding(PardnerMetrics.gap * 1.5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(open ? PardnerColor.agentSoft : PardnerColor.surface, in: RoundedRectangle(cornerRadius: PardnerMetrics.containerRadius))
+            .overlay(RoundedRectangle(cornerRadius: PardnerMetrics.containerRadius).stroke(open ? PardnerColor.agent : PardnerColor.line))
+    }
+}
+
+/// A question or an approval, with where it stands, for a window with no composer.
 struct RequestRow: View {
     let title: String
     let status: RequestStatus
@@ -92,17 +140,17 @@ struct RequestRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(verbatim: title).font(PardnerFont.ui(size: 14, weight: .semibold))
-            Text(words).font(PardnerFont.ui(size: 12, weight: .medium))
+            Text(status.words).font(PardnerFont.ui(size: 12, weight: .medium))
                 .foregroundStyle(status == .open ? PardnerColor.agentText : PardnerColor.muted)
         }
-        .padding(PardnerMetrics.gap * 1.5)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(status == .open ? PardnerColor.agentSoft : PardnerColor.surface, in: RoundedRectangle(cornerRadius: PardnerMetrics.containerRadius))
-        .overlay(RoundedRectangle(cornerRadius: PardnerMetrics.containerRadius).stroke(status == .open ? PardnerColor.agent : PardnerColor.line))
+        .requestFrame(open: status == .open)
     }
+}
 
-    private var words: String {
-        switch status {
+extension RequestStatus {
+    /// What a request says of itself once it is not the owner's to answer, or while no card can answer it.
+    var words: String {
+        switch self {
         case .open: "Waiting for you"
         case .replied, .answered: "Answered"
         case .withdrawn: "Withdrawn"

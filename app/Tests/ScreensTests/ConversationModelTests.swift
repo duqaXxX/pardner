@@ -45,4 +45,32 @@ final class ConversationModelTests: XCTestCase {
         model.apply(.delivered(text("hello", at: 0)))
         XCTAssertEqual(model.reading.channels[channel]?.messages.map(\.position), [0])
     }
+
+    /// A message of `kind` at `place`, named by its place, as `AppLink` delivers it.
+    private func view(_ kind: Int, from sender: Data, _ json: [String: Any], at place: Int, to: Data? = nil, re: MessageRef? = nil) -> HostValue {
+        .object([
+            "do": .string("message"), "position": .number(Double(place)), "channel": .bytes(channel), "sender": .bytes(sender),
+            "name": .bytes(Data(repeating: UInt8(place), count: 16)), "epoch": .bytes(Data(repeating: 9, count: 32)),
+            "time": .number(1_700_000_000_000 + Double(place) * 1000), "kind": .number(Double(kind)),
+            "to": to.map { .bytes($0) } ?? .null, "blobs": .array([]), "again": .bool(false),
+            "re": re.map { .object(["device": .bytes($0.device), "name": .bytes($0.name)]) } ?? .null, "files": .array([]),
+            "text": .string(String(decoding: try! JSONSerialization.data(withJSONObject: json), as: UTF8.self)),
+        ])
+    }
+
+    func testThePersonsOwnDevicesOutliveAReset() {
+        // The Devices list of a new connection can come before its reset: the reply of a Mac that never prompted still counts.
+        let model = ConversationModel()
+        let mac = Data(repeating: 6, count: 32)
+        model.setOwnDevices([mac])
+        model.apply(.reset)
+        let ref = { (place: Int, device: Data) in MessageRef(device: device, name: Data(repeating: UInt8(place), count: 16)) }
+        model.apply(.delivered(view(2, from: alice, ["text": "go"], at: 0, to: bot)))
+        let root = ref(0, alice)
+        model.apply(.delivered(view(3, from: bot, [:], at: 1, re: root)))
+        model.apply(.delivered(view(9, from: bot, ["thread": root.hex, "title": "Allow?", "request": ["type": "permission"]], at: 2, re: root)))
+        let request = ref(2, bot)
+        model.apply(.delivered(view(10, from: mac, ["answer": ["type": "permission", "allow": true]], at: 3, to: bot, re: request)))
+        XCTAssertEqual(model.reading.channels[channel]?.threads[root.hex]?.requests[request], .replied)
+    }
 }
