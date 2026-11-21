@@ -71,6 +71,12 @@ func sampleDevices(seenTogether: Bool = true, pending: Bool = false, addName: St
     return state
 }
 
+/// A second bot for the picker.
+func sampleBot(_ byte: UInt8) -> DeviceRow {
+    DeviceRow(id: Data(repeating: byte, count: 32), kind: .bot, label: nil, shortForm: "", adder: .none, position: 3, active: true, isThisMac: false, seenAt: nil,
+              onlyHolderEpochs: 0, addedWhileRemoving: false)
+}
+
 let handoff = PairingHandoff(relayAddress: "relay.example.net:7443", relayKey: "04" + String(repeating: "abcd", count: 32), person: String(repeating: "0123456789abcdef", count: 4))
 let candidate = DeviceCandidate(kind: .app, name: "Laptop", shortForm: "aaaa-bbbb-cccc-dddd", device: .null, proof: Data())
 let hostileCandidate = DeviceCandidate(kind: .app, name: "A\u{201D}, position 0, \u{201C}B and a name that goes on past the edge of the card", shortForm: "aaaa-bbbb-cccc-dddd", device: .null, proof: Data())
@@ -141,6 +147,31 @@ MainActor.assumeIsolated {
             try render(appearance, PairingScreen(model: PairingModel(phase: .joining(waiting))), size: page, to: "joining-waits-\(theme).png")
             try render(appearance, PairingScreen(model: PairingModel(phase: .fault(.joinMismatch, PairingPhase.joinMismatchAdvice))), size: page, to: "join-mismatch-\(theme).png")
             try render(appearance, PairingScreen(model: PairingModel(phase: .fault(.joinUnmade, PairingPhase.joinUnmadeAdvice))), size: page, to: "join-unmade-\(theme).png")
+            let channelSample = Samples.model()
+            let busy = sampleDevices()
+            // The sheet over a person with two bots: the picker shows. The names are the profiles' names.
+            var twoBots = busy
+            twoBots.rows.insert(sampleBot(0x2c), at: 1)
+            let botNames = [Data(repeating: 0x2b, count: 32): "mini", Data(repeating: 0x2c, count: 32): "studio"]
+            let sheetStates: [(String, ChannelsModel)] = [
+                ("channel-sheet", ChannelsModel(devices: DevicesModel(state: twoBots), sheet: .create, folder: "projects/docs")),
+                ("channel-sheet-empty", ChannelsModel(devices: DevicesModel(state: busy), sheet: .create)),
+                ("channel-sheet-not-saved", ChannelsModel(devices: DevicesModel(state: twoBots), sheet: .create, folder: "projects/docs",
+                                                          problem: "Pardner could not save the new channel. Try again.")),
+                ("channel-sheet-busy", ChannelsModel(devices: DevicesModel(state: busy), sheet: .create, folder: "projects/docs", problem: "Another channel is being created.")),
+                ("channel-sheet-bind", ChannelsModel(devices: DevicesModel(state: busy), sheet: .bind(channel: channelSample.channel), folder: "projects/docs")),
+            ]
+            for (name, model) in sheetStates { try render(appearance, ChannelSheet(model: model, names: botNames), size: nil, to: "\(name)-\(theme).png") }
+            var creating = ChannelsState()
+            creating.creating = PendingChannel(channel: Data(repeating: 0x77, count: 32), bot: Data(repeating: 0x2b, count: 32), folder: "projects/docs")
+            var refused = ChannelsState()
+            refused.refusal = CreationRefusal(channel: Data(repeating: 0x77, count: 32), code: 7)
+            var faulted = ChannelsState()
+            faulted.faulted = [channelSample.channel]
+            for (name, state) in [("window-creating", creating), ("window-refused", refused), ("window-faulted", faulted), ("window-channels", ChannelsState())] {
+                try render(appearance, MainWindow(model: channelSample.model, devices: DevicesModel(), channels: ChannelsModel(state: state, devices: DevicesModel(state: busy)),
+                                                  channel: channelSample.channel), size: NSSize(width: 1280, height: 800), to: "\(name)-\(theme).png")
+            }
             let sample = Samples.model()
             try render(appearance, MainWindow(model: sample.model, devices: DevicesModel(), channel: sample.channel, thread: sample.thread), size: NSSize(width: 1280, height: 800), to: "window-devices-\(theme).png")
         }

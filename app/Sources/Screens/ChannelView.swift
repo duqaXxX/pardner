@@ -9,6 +9,8 @@ struct ChannelView: View {
     let model: ReadingModel
     let icons: [Data: NSImage]
     let channel: Channel
+    /// The channel acts; nil where the window has no pairing.
+    var channels: ChannelsModel?
     @Binding var tab: MainWindow.Tab
     @Binding var thread: String?
 
@@ -23,8 +25,18 @@ struct ChannelView: View {
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
                 Spacer()
+                if let channels {
+                    Menu {
+                        Button("Bind to a folder…") { channels.openBind(channel: channel.id, bot: ChannelsModel.bot(of: channel)) }.disabled(!channels.canBind(channel.id))
+                    } label: { Image(systemName: "ellipsis").frame(width: 22, height: 22) }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("Channel actions")
+                }
             }
             .padding(.horizontal, PardnerMetrics.gap * 2).frame(height: 52)
+            if let line = channels?.faultLine(channel.id) {
+                Text(line).font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.delText)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, PardnerMetrics.gap * 2).padding(.bottom, PardnerMetrics.gap)
+            }
             Divider().overlay(PardnerColor.line)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: PardnerMetrics.gap * 2) {

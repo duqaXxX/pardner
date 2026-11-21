@@ -26,6 +26,8 @@ public protocol RelayLinking: AnyObject, Sendable {
     func enrol(_ enrolment: Enrolment) async -> Bool
     func submit(kind: UInt8, signed: Data, sig: Data) async throws -> SubmitOutcome
     func build(_ act: DeviceAct) async throws -> BuildOutcome
+    func createChannel(bot: Data, folder: String) async throws -> CreateOutcome
+    func send(channel: Data, draft: OutboxDraft) async throws -> SendOutcome
 }
 
 extension RelayConnection: RelayLinking {}
@@ -101,6 +103,8 @@ extension PairingPhase {
     public static let putBackAdvice = "This relay was put back. Set up a new relay with pardner relay init under a new --instance name, or after moving the old relay's folder away, then pair this Mac again."
     /// What the person is told when the link faulted.
     public static let linkFaultAdvice = "The relay sent something that fails Pardner's checks. Set up a new relay with pardner relay init under a new --instance name, or after moving the old relay's folder away, then pair this Mac again."
+    /// What the person is told when a write of what the app is sending failed (new channel design 5): the relay holds whatever it was given.
+    public static let storeFailedAdvice = "Pardner could not save what it is sending (the disk may be full). Nothing was lost on the relay."
     /// What the person is told when the pairing file does not read.
     public static let malformedStoreWarning = "This Mac becomes a new device. Remove the old one from another of your devices."
     /// What the person is told when the pairing file is from a newer version of the app.
@@ -193,12 +197,17 @@ public actor PairingController {
     public internal(set) var deviceList = DevicesState() { didSet { deviceOut.yield(deviceList) } }
     public nonisolated let deviceStates: AsyncStream<DevicesState>
     let deviceOut: AsyncStream<DevicesState>.Continuation
+    /// What the new-channel sheet and the sidebar read (new channel design 5); every change is also yielded on `channelStates`, newest only.
+    public internal(set) var channels = ChannelsState() { didSet { channelOut.yield(channels) } }
+    public nonisolated let channelStates: AsyncStream<ChannelsState>
+    private let channelOut: AsyncStream<ChannelsState>.Continuation
 
     public init(keys: any KeyStore & Sendable, pairing: PairingStore, linkFolder: URL,
                 makeHost: @escaping MakeHost = PairingController.bundledHost, connect: @escaping Connect = PairingController.relayConnection,
                 clock: @escaping @Sendable () -> Date = { Date() }) {
         (self.keys, self.pairing, self.linkFolder, self.makeHost, self.connect, self.clock) = (keys, pairing, linkFolder, makeHost, connect, clock)
         (deviceStates, deviceOut) = AsyncStream.makeStream(of: DevicesState.self, bufferingPolicy: .bufferingNewest(1))
+        (channelStates, channelOut) = AsyncStream.makeStream(of: ChannelsState.self, bufferingPolicy: .bufferingNewest(1))
         (phases, phaseOut) = AsyncStream.makeStream(of: PairingPhase.self, bufferingPolicy: .bufferingNewest(1))
         (readings, readingOut) = AsyncStream.makeStream(of: ReadingEvent.self)
     }
@@ -401,6 +410,19 @@ public actor PairingController {
         return outcome
     }
 
+    /// Makes a channel bound to `folder` through the running connection (new channel design 3.2); the link's `creating` effect puts it
+    /// in `channels.creating`, and takes it out when it is read back or refused.
+    public func createChannel(bot: Data, folder: String) async throws -> CreateOutcome {
+        guard let link else { return .ended }
+        return try await link.createChannel(bot: bot, folder: folder)
+    }
+
+    /// Queues one message in a channel's outbox through the running connection (new channel design 3.3).
+    public func send(channel: Data, draft: OutboxDraft) async throws -> SendOutcome {
+        guard let link else { return .ended }
+        return try await link.send(channel: channel, draft: draft)
+    }
+
     /// Ends the connection and declines a sheet on screen: the app is quitting. Nothing is erased.
     public func shutdown() async {
         cancelRequested = true
@@ -410,6 +432,7 @@ public actor PairingController {
         phaseOut.finish()
         readingOut.finish()
         deviceOut.finish()
+        channelOut.finish()
     }
 
     // MARK: the connection's events
@@ -421,6 +444,14 @@ public actor PairingController {
         switch event {
         case .delivered(let view): readingOut.yield(.delivered(view))
         case .profile(let profile): readingOut.yield(.profile(profile))
+        default: break
+        }
+        // The channel state is set before any suspension below too: a stop that runs in one moves `connectionID` first.
+        switch event {
+        case .outbox(let effect): outboxChanged(effect)
+        case .creating(let effect): creationChanged(effect)
+        case .channelRefused(let effect): creationRefused(effect)
+        case .channelFault(let effect): if let channel = effect["channel"]?.bytesValue { channels.faulted.insert(channel) }
         default: break
         }
         switch event {
@@ -447,9 +478,40 @@ public actor PairingController {
             case ("fault", _): await linkEnded(.linkFaulted(PairingPhase.linkFaultAdvice))
             default: break
             }
+        case .storeFailed:
+            // Not the relay's fault: Retry builds a new connection, which loads the app outbox again (new channel design 3.1).
+            await stopConnection()
+            phase = .fault(.failed, PairingPhase.storeFailedAdvice)
         case .faulted(let message): await hostFaulted(message)
-        case .profile: break
+        case .profile, .outbox, .creating, .channelRefused, .channelFault: break
         }
+    }
+
+    /// A channel's items as the link lists them now; a channel with none is dropped.
+    private func outboxChanged(_ effect: HostValue) {
+        guard let channel = effect["channel"]?.bytesValue else { return }
+        let rows = (effect["items"]?.arrayValue ?? []).compactMap { item -> OutboxItemRow? in
+            guard let name = item["name"]?.bytesValue, let kind = item["kind"]?.numberValue,
+                  let state = item["state"]?.stringValue.flatMap(OutboxItemState.init(rawValue:)) else { return nil }
+            let re = item["re"].flatMap { r in r["device"]?.bytesValue.flatMap { d in r["name"]?.bytesValue.map { MessageReference(device: d, name: $0) } } }
+            return OutboxItemRow(name: name, kind: Int(kind), to: item["to"]?.bytesValue, re: re, state: state)
+        }
+        channels.outboxes[channel] = rows.isEmpty ? nil : rows
+    }
+
+    private func creationRefused(_ effect: HostValue) {
+        guard let channel = effect["channel"]?.bytesValue, let code = effect["code"]?.numberValue else { return }
+        channels.refusal = CreationRefusal(channel: channel, code: Int(code))
+    }
+
+    /// The link's `creating` effect: the channel being created with its bot and folder, or none. A new creation clears the last refusal.
+    private func creationChanged(_ effect: HostValue) {
+        guard let channel = effect["channel"]?.bytesValue, let bot = effect["bot"]?.bytesValue, let folder = effect["folder"]?.stringValue else {
+            channels.creating = nil
+            return
+        }
+        channels.refusal = nil
+        channels.creating = PendingChannel(channel: channel, bot: bot, folder: folder)
     }
 
     /// A host that faulted is over for good: the next action makes a new one.
@@ -538,6 +600,7 @@ public actor PairingController {
     /// The connection ended and its store given back, so the link's files can be erased.
     func stopConnection() async {
         connectionID += 1
+        channels = ChannelsState() // what an ended connection told is not the next one's
         eventTask?.cancel()
         eventTask = nil
         let ended = link
@@ -571,7 +634,7 @@ public actor PairingController {
             try LinkStore.erase(folder: linkFolder)
             try pairing.erase()
             stored = nil
-            (snapshot, joiningScreen, deviceList) = (nil, nil, DevicesState())
+            (snapshot, joiningScreen, deviceList, channels) = (nil, nil, DevicesState(), ChannelsState())
         }
     }
 

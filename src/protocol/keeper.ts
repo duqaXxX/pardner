@@ -21,7 +21,7 @@ import type { Bytes, Platform } from "./platform.ts";
 import type { Reading } from "./reading.ts";
 import { fail, ok, type Result } from "./result.ts";
 
-/** A channel whose next epoch this device owes, and why. A rollover is the build's to report. */
+/** A channel whose next epoch this device owes, and why. */
 export interface OwedStart {
   channel: Bytes;
   why: StartReason;
@@ -34,15 +34,16 @@ export interface OwedSeal {
   to: { id: Bytes; receiving: Bytes };
 }
 
-/** Why `channel` needs an epoch of this device's, when it does; `clock` is the device's stored age of its epoch. */
+/** Why `channel` needs an epoch of this device's, when it does; `clock` is the device's stored age of its epoch, `rollover` whether a build met the counter limit under its current epoch. */
 export function startOf(
   reading: Reading,
   channel: Bytes,
   clock: EpochClock | undefined,
   now: number,
+  rollover = false,
 ): StartReason | undefined {
   const view = reading.channel(channel);
-  return view && whyStart(view, clock, now, false);
+  return view && whyStart(view, clock, now, rollover);
 }
 
 /** The channels read to their end that need an epoch, by `whyStart`; `clock` is the device's stored age of each channel's epoch. */
@@ -50,9 +51,10 @@ export function starts(
   reading: Reading,
   clock: (channel: Bytes) => EpochClock | undefined,
   now: number,
+  rollover: (channel: Bytes) => boolean = () => false,
 ): OwedStart[] {
   return reading.channels().flatMap((channel) => {
-    const why = startOf(reading, channel, clock(channel), now);
+    const why = startOf(reading, channel, clock(channel), now, rollover(channel));
     return why ? [{ channel, why }] : [];
   });
 }

@@ -23,6 +23,11 @@ final class FakeLink: RelayLinking, @unchecked Sendable { // one test thread at 
     var submitted: [(kind: UInt8, signed: Data, sig: Data)] = []
     var submitOutcomes: [SubmitOutcome] = []
     var onSubmit: (() -> Void)?
+    /// The channels and messages the controller asked for, and what each is answered.
+    var createOutcome = CreateOutcome.created(channel: Data(repeating: 0xC1, count: 32))
+    var sendOutcome = SendOutcome.queued(name: Data(repeating: 0xA1, count: 16))
+    var creations: [(bot: Data, folder: String)] = []
+    var sends: [(channel: Data, draft: OutboxDraft)] = []
     private let putBack: Bool
     var stopGate: Latch?
 
@@ -42,6 +47,14 @@ final class FakeLink: RelayLinking, @unchecked Sendable { // one test thread at 
         submitted.append((kind, signed, sig))
         onSubmit?()
         return submitOutcomes.isEmpty ? submitOutcome : submitOutcomes.removeFirst()
+    }
+    func createChannel(bot: Data, folder: String) async throws -> CreateOutcome {
+        creations.append((bot, folder))
+        return createOutcome
+    }
+    func send(channel: Data, draft: OutboxDraft) async throws -> SendOutcome {
+        sends.append((channel, draft))
+        return sendOutcome
     }
     func build(_ act: DeviceAct) async throws -> BuildOutcome {
         await buildGate?.wait()
@@ -613,6 +626,181 @@ final class PairingControllerTests: XCTestCase {
         XCTAssertEqual(outcome, .code(5))
         let phase = await rig.controller.phase
         XCTAssertEqual(phase, .removed)
+    }
+
+    // MARK: a new channel and the app's outbox (new channel design 3, 5)
+
+    private func channelID(_ n: UInt8) -> Data { Data(repeating: n, count: 32) }
+
+    private func outboxEffect(_ channel: Data, _ items: [HostValue]) -> RelayEvent {
+        .outbox(.object(["do": .string("outbox"), "channel": .bytes(channel), "items": .array(items)]))
+    }
+
+    private func creatingEffect(_ channel: Data?, bot: Data = Data(repeating: 0xB0, count: 32), folder: String = "/work") -> RelayEvent {
+        guard let channel else { return .creating(.object(["do": .string("creating"), "channel": .null])) }
+        return .creating(.object(["do": .string("creating"), "channel": .bytes(channel), "bot": .bytes(bot), "folder": .string(folder)]))
+    }
+
+    private func outboxItem(_ n: UInt8, _ state: String, to: Data? = nil) -> HostValue {
+        var item: [String: HostValue] = ["name": .bytes(Data(repeating: n, count: 16)), "kind": .number(2), "state": .string(state)]
+        if let to { item["to"] = .bytes(to) }
+        return .object(item)
+    }
+
+    private func channelState(_ controller: PairingController, _ message: String, _ matches: (ChannelsState) -> Bool) async -> ChannelsState {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(20))
+        while ContinuousClock.now < deadline {
+            let state = await controller.channels
+            if matches(state) { return state }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail(message)
+        return await controller.channels
+    }
+
+    func testCreateChannelAndSendGoThroughTheLink() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        let bot = Data(repeating: 0xB0, count: 32)
+        let created = try await rig.controller.createChannel(bot: bot, folder: "/work")
+        XCTAssertEqual(created, .created(channel: channelID(0xC1)))
+        XCTAssertEqual(rig.harness.link.creations.count, 1)
+        XCTAssertEqual(rig.harness.link.creations.first?.bot, bot)
+        XCTAssertEqual(rig.harness.link.creations.first?.folder, "/work")
+        let draft = OutboxDraft(kind: 2, to: bot, content: "{\"text\":\"hi\"}")
+        let sent = try await rig.controller.send(channel: channelID(0xC1), draft: draft)
+        XCTAssertEqual(sent, .queued(name: Data(repeating: 0xA1, count: 16)))
+        XCTAssertEqual(rig.harness.link.sends.first?.channel, channelID(0xC1))
+        XCTAssertEqual(rig.harness.link.sends.first?.draft, draft)
+    }
+
+    func testARefusedCreationLeavesNoPendingChannel() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        rig.harness.link.createOutcome = .refused("busy")
+        let created = try await rig.controller.createChannel(bot: Data(repeating: 0xB0, count: 32), folder: "/work")
+        XCTAssertEqual(created, .refused("busy"))
+        let creating = await rig.controller.channels.creating
+        XCTAssertNil(creating)
+    }
+
+    func testCreateChannelAndSendWithNoConnectionAreEnded() async throws {
+        let rig = try rig()
+        await rig.controller.launch()
+        let created = try await rig.controller.createChannel(bot: Data(repeating: 0xB0, count: 32), folder: "/work")
+        let sent = try await rig.controller.send(channel: channelID(1), draft: OutboxDraft(kind: 2, content: "x"))
+        XCTAssertEqual(created, .ended)
+        XCTAssertEqual(sent, .ended)
+    }
+
+    func testTheOutboxEffectIsEachChannelsItemsWithTheirState() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        let bot = Data(repeating: 0xB0, count: 32)
+        rig.harness.link.emit(outboxEffect(channelID(1), [outboxItem(1, "waiting", to: bot), outboxItem(2, "sent")]))
+        rig.harness.link.emit(outboxEffect(channelID(2), [outboxItem(3, "refused")]))
+        let state = await channelState(rig.controller, "no outbox") { $0.outboxes.count == 2 }
+        XCTAssertEqual(state.outboxes[channelID(1)]?.map(\.state), [.waiting, .sent])
+        XCTAssertEqual(state.outboxes[channelID(1)]?.first?.to, bot)
+        XCTAssertEqual(state.outboxes[channelID(1)]?.first?.name, Data(repeating: 1, count: 16))
+        XCTAssertEqual(state.outboxes[channelID(2)]?.map(\.state), [.refused])
+        rig.harness.link.emit(outboxEffect(channelID(1), []))
+        let after = await channelState(rig.controller, "the empty list stays") { $0.outboxes.count == 1 }
+        XCTAssertNil(after.outboxes[channelID(1)], "a channel with nothing left in its outbox is not listed")
+    }
+
+    func testTheCreatingEffectIsTheChannelBeingCreatedAndNullEndsIt() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        let bot = Data(repeating: 0xB0, count: 32)
+        rig.harness.link.emit(creatingEffect(channelID(0xC1), bot: bot, folder: "/work"))
+        let state = await channelState(rig.controller, "no creation") { $0.creating != nil }
+        XCTAssertEqual(state.creating, PendingChannel(channel: channelID(0xC1), bot: bot, folder: "/work"))
+        rig.harness.link.emit(creatingEffect(nil))
+        _ = await channelState(rig.controller, "the creation stays") { $0.creating == nil }
+    }
+
+    func testAChannelTheRelayRefusedKeepsItsCodeUntilTheNextCreation() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        rig.harness.link.emit(creatingEffect(channelID(0xC1)))
+        rig.harness.link.emit(creatingEffect(nil))
+        rig.harness.link.emit(.channelRefused(.object(["do": .string("channel-refused"), "channel": .bytes(channelID(0xC1)), "code": .number(1)])))
+        let state = await channelState(rig.controller, "no refusal") { $0.refusal != nil }
+        XCTAssertEqual(state.refusal, CreationRefusal(channel: channelID(0xC1), code: 1))
+        XCTAssertNil(state.creating)
+        rig.harness.link.emit(creatingEffect(channelID(0xC2), folder: "/other"))
+        let next = await channelState(rig.controller, "no new creation") { $0.creating != nil }
+        XCTAssertNil(next.refusal, "the refusal stands until the next creation")
+        XCTAssertEqual(next.creating?.folder, "/other")
+    }
+
+    func testAChannelFaultMarksTheChannel() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        rig.harness.link.emit(.channelFault(.object(["do": .string("channel-fault"), "channel": .bytes(channelID(4))])))
+        let state = await channelState(rig.controller, "no fault") { !$0.faulted.isEmpty }
+        XCTAssertEqual(state.faulted, [channelID(4)])
+        let phase = await rig.controller.phase
+        XCTAssertEqual(phase, .paired, "a channel's fault stops that channel alone")
+    }
+
+    func testTheChannelStatesAreStreamedAndOnlyTheNewestIsKept() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        for n: UInt8 in 1...3 { rig.harness.link.emit(outboxEffect(channelID(n), [outboxItem(n, "waiting")])) }
+        _ = await channelState(rig.controller, "no outbox") { $0.outboxes.count == 3 }
+        var newest: ChannelsState?
+        for await state in rig.controller.channelStates { newest = state; break }
+        XCTAssertEqual(newest?.outboxes.count, 3, "a stream read late gives the state now, not the road to it")
+    }
+
+    func testAFailedStoreWriteEndsTheConnectionWithTheRetryableFaultAndItsOwnText() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        rig.harness.link.emit(outboxEffect(channelID(1), [outboxItem(1, "waiting")]))
+        _ = await channelState(rig.controller, "no outbox") { !$0.outboxes.isEmpty }
+        rig.harness.link.emit(.storeFailed)
+        let phase = await wait(rig.controller, "the store failure is not a fault") { if case .fault = $0 { return true } else { return false } }
+        XCTAssertEqual(phase, .fault(.failed, PairingPhase.storeFailedAdvice))
+        XCTAssertEqual(PairingPhase.storeFailedAdvice, "Pardner could not save what it is sending (the disk may be full). Nothing was lost on the relay.")
+        XCTAssertTrue(rig.harness.link.stopped)
+        let ended = await rig.controller.channels
+        XCTAssertEqual(ended, ChannelsState(), "what the ended connection told is not drawn while it is a fault")
+        // Retry builds a new connection, which loads the outbox again, and what the old one drew is gone.
+        let retried = await rig.controller.retry()
+        XCTAssertTrue(retried)
+        XCTAssertEqual(rig.harness.links.count, 2)
+        let channels = await rig.controller.channels
+        XCTAssertEqual(channels, ChannelsState())
+    }
+
+    func testARemovedDeviceDrawsNoChannelsOfTheEndedConnection() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        rig.harness.link.emit(creatingEffect(channelID(0xC1)))
+        rig.harness.link.emit(outboxEffect(channelID(0xC1), [outboxItem(1, "waiting")]))
+        _ = await channelState(rig.controller, "no outbox") { $0.creating != nil && !$0.outboxes.isEmpty }
+        rig.harness.link.emit(deliveredRefused(1))
+        _ = await wait(rig.controller, "not removed") { $0 == .removed }
+        let channels = await rig.controller.channels
+        XCTAssertEqual(channels, ChannelsState())
+    }
+
+    func testRetryShowsTheStoredCreationAgainWhenTheNewLinkTellsIt() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        rig.harness.link.emit(creatingEffect(channelID(0xC1)))
+        _ = await channelState(rig.controller, "no creation") { $0.creating != nil }
+        rig.harness.link.emit(.storeFailed)
+        _ = await wait(rig.controller, "no fault") { if case .fault = $0 { return true } else { return false } }
+        let retried = await rig.controller.retry()
+        XCTAssertTrue(retried)
+        let cleared = await rig.controller.channels
+        XCTAssertNil(cleared.creating, "the old connection's creation is gone until the new link tells its own")
+        rig.harness.link.emit(creatingEffect(channelID(0xC1)))
+        let state = await channelState(rig.controller, "the stored creation is not shown again") { $0.creating != nil }
+        XCTAssertEqual(state.creating?.channel, channelID(0xC1))
     }
 
     func testPairAgainIsRefusedWhileNothingIsRemovedOrBroken() async throws {
