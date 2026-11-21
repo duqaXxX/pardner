@@ -82,7 +82,7 @@ final class FirstDeviceRelayTests: XCTestCase {
         await second.launch()
         let again = await second.phase
         XCTAssertEqual(again, .paired)
-        let events = second.relayEvents
+        let events = second.readings
         let rested = await Task {
             for await event in events {
                 if case .delivered(let view) = event, view["do"]?.stringValue == "rest" { return true }

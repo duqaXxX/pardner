@@ -8,6 +8,16 @@ import Network
 import Platform
 import ProtocolHost
 
+/// What the reading model takes from the controller, in order.
+public enum ReadingEvent: Sendable, Equatable {
+    /// A `deliver` of the link, as `RelayEvent.delivered` carries it.
+    case delivered(HostValue)
+    /// A bot's shown profile, as `RelayEvent.profile` carries it.
+    case profile(HostValue)
+    /// The model starts again empty: a new connection reads the sequence from its start, or the pairing's keys and stores were erased.
+    case reset
+}
+
 /// The connection the controller runs: `RelayConnection`, or a stand-in in a test.
 public protocol RelayLinking: AnyObject, Sendable {
     var events: AsyncStream<RelayEvent> { get }
@@ -145,11 +155,13 @@ public actor PairingController {
     public internal(set) var phase: PairingPhase = .starting { didSet { phaseOut.yield(phase) } }
     /// Only the newest phase is kept: a view that reads late draws the state now, not the road to it.
     public nonisolated let phases: AsyncStream<PairingPhase>
-    /// What the connection tells, after the controller has read it: the reading model's input. Nothing reads it yet; the bound keeps
-    /// an unread stream from growing, and the reading model that takes it will read it as events arrive.
-    public nonisolated let relayEvents: AsyncStream<RelayEvent>
+    /// The reading model's input (app data design, 6): `reset` when a connection starts or the pairing's stores are erased, then every
+    /// delivery and profile of the current connection in the order the link gave them. Unbounded, since a delivery dropped would be a
+    /// message missing from the window; the app's `ConversationModel` reads it from launch, and a controller run with no reader keeps
+    /// every delivery until it shuts down.
+    public nonisolated let readings: AsyncStream<ReadingEvent>
     private let phaseOut: AsyncStream<PairingPhase>.Continuation
-    private let eventOut: AsyncStream<RelayEvent>.Continuation
+    private let readingOut: AsyncStream<ReadingEvent>.Continuation
 
     var host: ProtocolHost?
     var link: (any RelayLinking)?
@@ -188,7 +200,7 @@ public actor PairingController {
         (self.keys, self.pairing, self.linkFolder, self.makeHost, self.connect, self.clock) = (keys, pairing, linkFolder, makeHost, connect, clock)
         (deviceStates, deviceOut) = AsyncStream.makeStream(of: DevicesState.self, bufferingPolicy: .bufferingNewest(1))
         (phases, phaseOut) = AsyncStream.makeStream(of: PairingPhase.self, bufferingPolicy: .bufferingNewest(1))
-        (relayEvents, eventOut) = AsyncStream.makeStream(of: RelayEvent.self, bufferingPolicy: .bufferingNewest(256))
+        (readings, readingOut) = AsyncStream.makeStream(of: ReadingEvent.self)
     }
 
     /// The app's own script and a `RelayConnection`.
@@ -396,7 +408,7 @@ public actor PairingController {
         if case .showingSheet(let request) = phase { request.answer(false) }
         await stopConnection()
         phaseOut.finish()
-        eventOut.finish()
+        readingOut.finish()
         deviceOut.finish()
     }
 
@@ -404,7 +416,13 @@ public actor PairingController {
 
     private func handle(_ event: RelayEvent, _ id: Int) async {
         guard id == connectionID else { return }
-        eventOut.yield(event)
+        // Before any suspension below: a stop or an erase that runs in one of them moves `connectionID` first, so nothing of this
+        // connection is yielded after the next `reset`.
+        switch event {
+        case .delivered(let view): readingOut.yield(.delivered(view))
+        case .profile(let profile): readingOut.yield(.profile(profile))
+        default: break
+        }
         switch event {
         case .dialing: secretRetyped = false // `refused` stays until the person types the secret again: no later dial carries `enrol`
         case .reached: reachable = true
@@ -506,6 +524,9 @@ public actor PairingController {
         let connection = try connect(host, keys, person, RelayEndpoint(host: state.relay.host, port: state.relay.port, pin: state.relay.key), linkStore, enrolment)
         connectionID += 1
         let id = connectionID
+        // The new link reads the sequence from position 0: the model starts empty and is rebuilt in order, rather than patched one
+        // position at a time over what the last connection drew (a rebuild of the channel per message).
+        readingOut.yield(.reset)
         link = connection
         (refused, secretRetyped, reachable) = (false, false, true)
         (snapshot, acceptedOn, heldAtLength) = (nil, nil, nil)
@@ -543,6 +564,9 @@ public actor PairingController {
     func eraseAll() async throws {
         try await serially {
             await stopConnection()
+            // Once the connection is stopped nothing of it is yielded again; the next pairing may read another person's sequence, so
+            // nothing read under this one stays drawn, even when an erase below fails.
+            readingOut.yield(.reset)
             for name in [Self.signName, Self.receiveName] where keys.has(name) { try keys.delete(name) }
             try LinkStore.erase(folder: linkFolder)
             try pairing.erase()

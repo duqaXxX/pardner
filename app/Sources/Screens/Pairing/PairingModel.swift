@@ -42,9 +42,12 @@ public final class PairingModel {
     private var watching: Task<Void, Never>?
     /// The Devices screen's model, over the same controller; it follows the phase (closed unless paired).
     public let devices: DevicesModel
+    /// What the main window draws, over the same controller: it is emptied by an erase, not by a phase, since a new connection after a
+    /// fault reads the sequence again from its start and replaces what it drew.
+    public let conversation: ConversationModel
 
     public init(controller: PairingController) {
-        (self.controller, storesOpen, devices) = (controller, true, DevicesModel(controller: controller))
+        (self.controller, storesOpen, devices, conversation) = (controller, true, DevicesModel(controller: controller), ConversationModel(controller: controller))
     }
 
     /// This Mac's name as System Settings shows it. Read when the join form opens: the lookup can wait on the network, so it is not made at launch.
@@ -70,8 +73,9 @@ public final class PairingModel {
 
     /// A model with a fixed phase and no controller: what the screenshot tool and the previews draw.
     public init(phase: PairingPhase, form: Bool = false, join: Bool = false, refused: PairingInputError? = nil, note: CancelNote? = nil, storesOpen: Bool = true,
-                devices: DevicesModel = DevicesModel()) {
-        (controller, self.phase, showForm, showJoin, self.refused, cancelNote, self.storesOpen, self.devices) = (nil, phase, form, join, refused, note, storesOpen, devices)
+                devices: DevicesModel = DevicesModel(), conversation: ConversationModel = ConversationModel()) {
+        (controller, self.phase, showForm, showJoin, self.refused, cancelNote, self.storesOpen, self.devices, self.conversation) =
+            (nil, phase, form, join, refused, note, storesOpen, devices, conversation)
     }
 
     /// The model over this Mac's own stores. A folder that cannot be opened (another Pardner holds it, a link where a folder
@@ -141,6 +145,7 @@ public final class PairingModel {
             for await phase in controller.phases { self?.apply(phase) }
         }
         devices.start()
+        conversation.start()
         Task { await controller.launch() }
     }
 

@@ -1,5 +1,4 @@
 import AppKit
-import Conversation
 import DesignSystem
 import os
 import Screens
@@ -82,9 +81,8 @@ struct PardnerApp: App {
         // One window: the pairing model and the recovery sheet are single, and a second window over them would share one entry and one
         // secure-input flag. The scene has no New Window command.
         Window("Pardner", id: "main") {
-            // The pairing screens until this Mac is paired; then the main window, which shows its empty state until the
-            // reading model takes the link's events (step-6 plan, screen 3.9).
-            PairingRoot(model: delegate.pairing) { MainWindow(model: ReadingModel(), devices: delegate.pairing.devices) }
+            // The pairing screens until this Mac is paired; then the main window over what the link delivered.
+            PairingRoot(model: delegate.pairing) { LiveMainWindow(conversation: delegate.pairing.conversation, devices: delegate.pairing.devices) }
                 .frame(minWidth: MainWindow.minimumWidth, minHeight: 560)
                 .task { delegate.pairing.start() }
                 .onAppear { delegate.showWindow = { openWindow(id: "main") } }

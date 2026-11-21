@@ -137,7 +137,8 @@ All notable changes to this project are documented here. The format follows
 - The app's main window (`Screens`, in `app/Sources/Screens/`): the sidebar of channels and bots, the channel as a
   conversation with a thread's summary under the message that opened it and a Sessions tab, and the thread panel,
   in Light or Dark (View > Appearance). The radii and the base gap are tokens beside the colours. Until a device is
-  paired the window says so; `swift run screens-snapshot <dir>` renders it over a synthetic conversation.
+  paired the window says so; once it is, the window draws what the link delivers, in the link's order, and an erase
+  of the pairing empties it. `swift run screens-snapshot <dir>` renders it over a synthetic conversation.
 
 ### Changed
 
