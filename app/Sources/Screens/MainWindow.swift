@@ -5,6 +5,17 @@ import Conversation
 import DesignSystem
 import SwiftUI
 
+/// The main window over the live conversation. It reads the model in its own body, so a delivery redraws this view and not the
+/// scene that holds it (its menus included).
+public struct LiveMainWindow: View {
+    let conversation: ConversationModel
+    let devices: DevicesModel
+
+    public init(conversation: ConversationModel, devices: DevicesModel) { (self.conversation, self.devices) = (conversation, devices) }
+
+    public var body: some View { MainWindow(model: conversation.reading, devices: devices) }
+}
+
 /// The window's content for a reading model; `channel` and `thread` start the selection.
 public struct MainWindow: View {
     let model: ReadingModel

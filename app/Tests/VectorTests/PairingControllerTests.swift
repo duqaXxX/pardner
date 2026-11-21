@@ -855,6 +855,71 @@ final class PairingControllerTests: XCTestCase {
         XCTAssertEqual(first, .enrolling(asksSecret: false), "a late reader gets the state now")
     }
 
+    /// The first `count` readings, or fewer if 20 s pass first.
+    private func readings(_ controller: PairingController, _ count: Int) async -> [ReadingEvent] {
+        let stream = controller.readings
+        let reader = Task {
+            var got: [ReadingEvent] = []
+            for await event in stream {
+                got.append(event)
+                if got.count == count { break }
+            }
+            return got
+        }
+        let timer = Task { try? await Task.sleep(for: .seconds(20)); reader.cancel() }
+        let got = await reader.value
+        timer.cancel()
+        return got
+    }
+
+    func testReadingsCarryEveryDeliveryAndProfileInTheLinksOrderAndNothingElse() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        let message = HostValue.object(["do": .string("message"), "position": .number(4)])
+        let profile = HostValue.object(["bot": .bytes(Data(repeating: 3, count: 32)), "profile": .null])
+        let rest = HostValue.object(["do": .string("rest")])
+        rig.harness.link.emit(.delivered(message))
+        rig.harness.link.emit(.reached)
+        rig.harness.link.emit(.profile(profile))
+        rig.harness.link.emit(.devices(.object(["person": .bytes(person), "length": .number(1), "last": .bytes(person), "self": .bytes(person), "devices": .array([])])))
+        rig.harness.link.emit(.delivered(rest))
+        let got = await readings(rig.controller, 4)
+        XCTAssertEqual(got, [.reset, .delivered(message), .profile(profile), .delivered(rest)], "a reach and the devices are not the reading model's")
+        await rig.controller.shutdown()
+    }
+
+    func testEveryNewConnectionStartsTheModelAgainBeforeItsFirstDelivery() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        let first = HostValue.object(["do": .string("message"), "position": .number(0)])
+        rig.harness.link.emit(.delivered(first))
+        rig.harness.link.emit(.faulted("the host faulted"))
+        _ = await wait(rig.controller, "no fault") { if case .fault(.failed, _) = $0 { return true } else { return false } }
+        let retried = await rig.controller.retry()
+        XCTAssertTrue(retried)
+        XCTAssertEqual(rig.harness.links.count, 2)
+        rig.harness.link.emit(.delivered(first)) // the new link reads from position 0 again
+        let got = await readings(rig.controller, 4)
+        XCTAssertEqual(got, [.reset, .delivered(first), .reset, .delivered(first)], "rebuilt from empty, never patched over the last connection")
+        await rig.controller.shutdown()
+    }
+
+    // It proves the erase's reset is there, after what the connection gave; not its place against a `handle` suspended across the
+    // erase, which the yields' position before any suspension in `handle` keeps (ledger of the branch, row 3).
+    func testAnEraseResetsTheModelAfterWhatItsConnectionGave() async throws {
+        let rig = try rig(keys: true, state: stored(.enrolling))
+        await rig.controller.launch()
+        let message = HostValue.object(["do": .string("message"), "position": .number(0)])
+        rig.harness.link.emit(.delivered(message))
+        rig.harness.link.emit(deliveredRefused(2))
+        _ = await wait(rig.controller, "no ask") { $0 == .enrolling(asksSecret: true) }
+        let outcome = await rig.controller.cancel()
+        XCTAssertEqual(outcome, .erased)
+        await rig.controller.shutdown()
+        let got = await readings(rig.controller, 99) // the stream ends at the shutdown
+        XCTAssertEqual(got, [.reset, .delivered(message), .delivered(.object(["do": .string("refused"), "reason": .number(2)])), .reset])
+    }
+
     // MARK: the sheet's contract
 
     func testTheSecondAnswerOfASheetChangesNothing() {
