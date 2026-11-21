@@ -139,7 +139,8 @@ final class DevicesRelayTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: link.path)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: link.path) }
         let refused = try await first.send(channel: channel, draft: OutboxDraft(kind: 2, to: botID, content: "{\"text\":\"hi\"}"))
-        XCTAssertEqual(refused, .notSaved)
+        // Both mean "not saved": `notSaved` when this write fails, `refused("not-ready")` when an earlier app write already failed and ended the link.
+        XCTAssertTrue(refused == .notSaved || refused == .refused("not-ready"), "\(refused)")
         await until(30, "the failure is not a fault") { await first.phase == .fault(.failed, PairingPhase.storeFailedAdvice) }
         await first.shutdown()
         await second.shutdown()

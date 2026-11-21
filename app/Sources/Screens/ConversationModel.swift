@@ -25,11 +25,21 @@ public final class ConversationModel {
         }
     }
 
+    /// The person's own app devices, from the Devices list: their replies to a request count even where they never prompted.
+    public func setOwnDevices(_ ids: Set<Data>) {
+        own = ids
+        reading.setOwnDevices(ids)
+    }
+    // Kept across a reset: the list and the readings come by two streams, so a new connection's list can arrive before its reset.
+    @ObservationIgnored private var own: Set<Data> = []
+
     func apply(_ event: ReadingEvent) {
         switch event {
         case .delivered(let view): reading.take(view: view)
         case .profile(let profile): reading.take(profile: profile)
-        case .reset: reading = ReadingModel()
+        case .reset:
+            reading = ReadingModel()
+            reading.setOwnDevices(own)
         }
     }
 }

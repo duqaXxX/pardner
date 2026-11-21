@@ -278,3 +278,222 @@ extension ConversationTests {
         XCTAssertFalse(w.c.threads[thread]!.queued.contains(third), "nothing before it runs any more")
     }
 }
+
+// What the bot answers to a reply of the owner's (requests design 2.2): read by the kind's `re`, from the bot the reply was `to`.
+extension ConversationTests {
+    /// A session with a request and the owner's reply to it; the reply carries no `thread`, as the app's does not.
+    private func replied(_ w: inout World, type: String = "permission", answer: [String: Any] = ["type": "permission", "allow": true])
+        -> (thread: String, prompt: MessageRef, request: MessageRef, reply: MessageRef) {
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "go"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        let request = w.deliver(kind: 9, from: w.bot, json: ["thread": root.hex, "title": "Allow?", "request": ["type": type]], re: root)
+        let reply = w.deliver(kind: 10, from: w.alice, json: ["answer": answer], to: w.bot, re: request)
+        return (root.hex, root, request, reply)
+    }
+
+    func testAReasonOnAReplyIsDrawnOnItsRequestAndMakesNoThreadItem() {
+        var w = World()
+        let s = replied(&w)
+        XCTAssertEqual(w.c.threads[s.thread]?.requests[s.request], .replied)
+        let items = w.c.threads[s.thread]!.items.count
+        // A refusal can carry `thread: ""`: only `re` finds its place.
+        w.deliver(kind: 5, from: w.bot, json: ["thread": "", "markdown": "The bot is no longer waiting for this answer."], re: s.reply)
+        let t = w.c.threads[s.thread]!
+        XCTAssertEqual(t.items.count, items, "a verdict is no thread item")
+        XCTAssertNil(w.c.threads[""], "and opens no thread")
+        XCTAssertEqual(t.requests[s.request], .open, "the request still waits")
+        XCTAssertEqual(t.state, .waiting)
+        XCTAssertEqual(t.reason(of: s.request, from: w.alice), "The bot is no longer waiting for this answer.")
+        XCTAssertNil(t.reason(of: s.request, from: Data(repeating: 7, count: 32)), "the card shows this device's reply's reason")
+        XCTAssertEqual(t.prompts[s.prompt], .running, "no prompt moved")
+    }
+
+    func testAnotherBotsVerdictOnAReplyIsIgnored() {
+        var w = World()
+        let other = Data(repeating: 4, count: 32)
+        let s = replied(&w)
+        w.deliver(kind: 5, from: other, json: ["thread": s.thread, "markdown": ""], re: s.reply)
+        w.deliver(kind: 5, from: other, json: ["thread": s.thread, "markdown": "not me"], re: s.reply)
+        w.deliver(kind: 7, from: other, json: [:], re: s.reply)
+        let t = w.c.threads[s.thread]!
+        XCTAssertEqual(t.requests[s.request], .replied)
+        XCTAssertNil(t.reason(of: s.request, from: w.alice))
+        XCTAssertFalse(t.items.contains { if case .answer = $0 { true } else { false } })
+    }
+
+    func testTheBotsEmptyVerdictAnswersARequestWhateverCameBefore() {
+        var w = World()
+        let s = replied(&w)
+        // The bot's real order: the core withdraws the accepted request, then the module writes the empty kind 5.
+        w.deliver(kind: 11, from: w.bot, json: ["thread": s.thread, "withdrawn": true], re: s.request)
+        XCTAssertEqual(w.c.threads[s.thread]?.requests[s.request], .withdrawn)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": "", "markdown": ""], re: s.reply)
+        XCTAssertEqual(w.c.threads[s.thread]?.requests[s.request], .answered)
+        w.deliver(kind: 11, from: w.bot, json: ["thread": s.thread, "withdrawn": true], re: s.request)
+        XCTAssertEqual(w.c.threads[s.thread]?.requests[s.request], .answered, "a withdrawal never takes it back")
+    }
+
+    func testARewrittenRequestKeepsItsTextOverTheVerdict() {
+        var w = World()
+        let s = replied(&w, type: "setup", answer: ["type": "setup", "selection": ["model": "default", "effort": "default", "bypass": false]])
+        w.deliver(kind: 5, from: w.bot, json: ["thread": "", "markdown": ""], re: s.reply)
+        XCTAssertEqual(w.c.threads[s.thread]?.requests[s.request], .answered)
+        w.deliver(kind: 11, from: w.bot, json: ["thread": s.thread, "markdown": "Set: default"], re: s.request)
+        XCTAssertEqual(w.c.threads[s.thread]?.requests[s.request], .rewritten(markdown: "Set: default"), "written after the verdict")
+        var v = World()
+        let t = replied(&v, type: "setup", answer: ["type": "setup", "selection": ["model": "default", "effort": "default", "bypass": false]])
+        v.deliver(kind: 11, from: v.bot, json: ["thread": t.thread, "markdown": "Set: default"], re: t.request)
+        v.deliver(kind: 5, from: v.bot, json: ["thread": "", "markdown": ""], re: t.reply)
+        XCTAssertEqual(v.c.threads[t.thread]?.requests[t.request], .rewritten(markdown: "Set: default"), "written before it")
+    }
+
+    func testARequestWithNoAcceptedReplyStaysWithdrawn() {
+        var w = World()
+        let s = replied(&w)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": "", "markdown": "could not read"], re: s.reply)
+        w.deliver(kind: 11, from: w.bot, json: ["thread": s.thread, "withdrawn": true], re: s.request)
+        XCTAssertEqual(w.c.threads[s.thread]?.requests[s.request], .withdrawn)
+        XCTAssertNil(w.c.threads[s.thread]?.reason(of: s.request, from: w.alice), "a status other than open wins over a reason")
+    }
+
+    func testAStartACutAndANotReadOnAReplyMoveNoPrompt() {
+        var w = World()
+        let s = replied(&w)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: s.reply)
+        XCTAssertEqual(w.c.threads[s.thread]?.requests[s.request], .replied, "a start is no verdict")
+        XCTAssertNil(w.c.threads[s.thread]?.reason(of: s.request, from: w.alice))
+        w.deliver(kind: 6, from: w.bot, json: [:], re: s.reply)
+        XCTAssertEqual(w.c.threads[s.thread]?.prompts[s.prompt], .running)
+        XCTAssertEqual(w.c.threads[s.thread]?.requests[s.request], .open)
+        XCTAssertEqual(w.c.threads[s.thread]?.reason(of: s.request, from: w.alice), "The bot did not take this answer.")
+        w.deliver(kind: 7, from: w.bot, json: [:], re: s.reply)
+        XCTAssertEqual(w.c.threads[s.thread]?.prompts[s.prompt], .running)
+        XCTAssertEqual(w.c.threads[s.thread]?.reason(of: s.request, from: w.alice), "The bot could not read this answer.")
+    }
+
+    func testAnAnswerToAPromptIsStillItsAnswer() {
+        var w = World()
+        let s = replied(&w)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": s.thread, "markdown": "done"], re: s.prompt)
+        XCTAssertEqual(w.c.threads[s.thread]?.prompts[s.prompt], .answered)
+        XCTAssertTrue(w.c.threads[s.thread]!.items.contains { if case .answer = $0 { true } else { false } })
+    }
+
+    func testAVerdictReadInARebuildFindsItsReply() {
+        var w = World()
+        let s = replied(&w)
+        // A message delivered at a place already passed rebuilds the channel in position order.
+        w.conversation.take(views: [
+            w.view(kind: 5, from: w.bot, json: ["thread": "", "markdown": ""], at: 200, re: s.reply),
+            w.view(kind: 1, from: w.alice, json: ["markdown": "late"], at: 3),
+        ])
+        XCTAssertEqual(w.c.threads[s.thread]?.requests[s.request], .answered)
+    }
+}
+
+// The request's fields as the cards read them, from the body the bot wrote (`shown` in provider.ts).
+extension ConversationTests {
+    private func request(_ fields: [String: Any]) -> OwnerRequest? {
+        let body: [String: Any] = ["thread": "t", "request": fields, "title": "x"]
+        return OwnerRequest(json: String(decoding: try! JSONSerialization.data(withJSONObject: body), as: UTF8.self))
+    }
+
+    func testTheRequestsFieldsAreReadByType() throws {
+        guard case .setup(let setup)? = request([
+            "type": "setup", "bypassOffered": true, "efforts": ["low"], "selection": ["model": "default", "effort": "default", "bypass": false],
+            "models": [["value": "sonnet", "isDefault": true, "resolvedModel": NSNull(), "displayName": "Sonnet", "description": NSNull(), "supportsEffort": true,
+                        "supportedEffortLevels": ["low", "high"]]],
+        ]) else { return XCTFail("no setup") }
+        XCTAssertEqual(setup.models.map(\.displayName), ["Sonnet"])
+        XCTAssertEqual(setup.models[0].supportedEffortLevels, ["low", "high"])
+        XCTAssertEqual([setup.models[0].isDefault, setup.bypassOffered, setup.selection.bypass], [true, true, false])
+        XCTAssertEqual(setup.efforts, ["low"])
+        guard case .permission(let p)? = request(["type": "permission", "toolName": "Edit", "input": ["path": "a/b", "n": 1], "title": NSNull(), "description": "Edit a file", "plan": NSNull()])
+        else { return XCTFail("no permission") }
+        XCTAssertEqual([p.toolName, p.description], ["Edit", "Edit a file"])
+        XCTAssertNil(p.title)
+        XCTAssertNil(p.plan)
+        XCTAssertEqual(p.input, "{\n  \"n\" : 1,\n  \"path\" : \"a/b\"\n}", "indented JSON, keys sorted")
+        guard case .question(let q)? = request(["type": "question", "title": NSNull(), "questions": [
+            ["header": "H", "text": "Which?", "multiSelect": true, "options": [["label": "a", "description": "A", "preview": NSNull()]]]]])
+        else { return XCTFail("no question") }
+        XCTAssertEqual([q[0].header, q[0].text], ["H", "Which?"])
+        XCTAssertTrue(q[0].multiSelect)
+        XCTAssertEqual(q[0].options.map(\.label), ["a"])
+        XCTAssertEqual(q[0].options[0].description, "A")
+        XCTAssertEqual(request(["type": "shell", "command": "ls\npwd", "folder": "docs"]), .shell(command: "ls\npwd", folder: "docs"))
+        XCTAssertEqual(request(["type": "hold", "other": ["channel": "c", "thread": "t"], "link": "the other session"]), .hold(link: "the other session"))
+        XCTAssertEqual(request(["type": "terminal", "state": "move", "running": "a turn", "command": NSNull()]),
+                       .terminal(state: "move", running: "a turn", command: nil))
+        XCTAssertNil(request(["type": "unknown"]), "a type this device does not know has no controls")
+        XCTAssertNil(request(["type": "shell", "command": 3]), "a field of the wrong type is no request")
+    }
+
+    func testAMessageExposesItsRequest() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "go"], to: w.bot)
+        w.deliver(kind: 9, from: w.bot, json: ["thread": root.hex, "title": "Run?", "request": ["type": "shell", "command": "ls", "folder": "."]], re: root)
+        let m = w.c.messages.last!
+        XCTAssertEqual(m.ownerRequest, .shell(command: "ls", folder: "."))
+        XCTAssertNil(w.c.messages.first!.ownerRequest)
+    }
+}
+
+// Who a verdict is trusted for (fix round): the reply must be to the session's bot, from a device whose prompt the bot started or one of the person's own.
+extension ConversationTests {
+    func testAStrangersReplyGetsNoVerdictEvenWhenItNamesTheBot() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "go"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        let request = w.deliver(kind: 9, from: w.bot, json: ["thread": root.hex, "title": "Allow?", "request": ["type": "permission"]], re: root)
+        let stranger = Data(repeating: 8, count: 32)
+        let reply = w.deliver(kind: 10, from: stranger, json: ["answer": ["type": "permission", "allow": true]], to: w.bot, re: request)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": "", "markdown": ""], re: reply)
+        XCTAssertEqual(w.c.threads[root.hex]?.requests[request], .open, "neither replied nor answered")
+    }
+
+    func testAReplyToAnotherBotGetsNoVerdict() {
+        var w = World()
+        let other = Data(repeating: 4, count: 32)
+        let s = replied(&w)
+        let reply = w.deliver(kind: 10, from: w.alice, json: ["answer": ["type": "permission", "allow": true]], to: other, re: s.request)
+        w.deliver(kind: 5, from: other, json: ["thread": "", "markdown": ""], re: reply)
+        XCTAssertEqual(w.c.threads[s.thread]?.requests[s.request], .replied, "only the first reply, to the session's bot, counted")
+    }
+
+    func testAnOwnDeviceThatNeverPromptedHere() {
+        var w = World()
+        let mac = Data(repeating: 6, count: 32)
+        w.conversation.setOwnDevices([mac])
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "go"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        let request = w.deliver(kind: 9, from: w.bot, json: ["thread": root.hex, "title": "Allow?", "request": ["type": "permission"]], re: root)
+        let reply = w.deliver(kind: 10, from: mac, json: ["answer": ["type": "permission", "allow": true]], to: w.bot, re: request)
+        XCTAssertEqual(w.c.threads[root.hex]?.requests[request], .replied, "a second Mac cannot reply twice")
+        w.deliver(kind: 5, from: w.bot, json: ["thread": "", "markdown": ""], re: reply)
+        XCTAssertEqual(w.c.threads[root.hex]?.requests[request], .answered)
+        // Learned after the messages: the channels are read again.
+        var late = World()
+        let r2 = late.deliver(kind: 2, from: late.alice, json: ["text": "go"], to: late.bot)
+        late.deliver(kind: 3, from: late.bot, json: [:], re: r2)
+        let q2 = late.deliver(kind: 9, from: late.bot, json: ["thread": r2.hex, "title": "Allow?", "request": ["type": "permission"]], re: r2)
+        late.deliver(kind: 10, from: mac, json: ["answer": ["type": "permission", "allow": true]], to: late.bot, re: q2)
+        XCTAssertEqual(late.c.threads[r2.hex]?.requests[q2], .open)
+        late.conversation.setOwnDevices([mac])
+        XCTAssertEqual(late.c.threads[r2.hex]?.requests[q2], .replied)
+    }
+
+    func testTheOwnersRepliesAreNoThreadItems() {
+        var w = World()
+        let s = replied(&w)
+        XCTAssertFalse(w.c.threads[s.thread]!.items.contains { if case .message(let m) = $0, m.kind == 10 { true } else { false } })
+    }
+
+    func testAVerdictMovesTheSessionsLastReply() {
+        var w = World()
+        let s = replied(&w)
+        let before = w.c.threads[s.thread]?.lastReply
+        w.deliver(kind: 5, from: w.bot, json: ["thread": "", "markdown": ""], re: s.reply, time: 1_800_000_000_000)
+        XCTAssertGreaterThan(w.c.threads[s.thread]!.lastReply!, before!)
+    }
+}

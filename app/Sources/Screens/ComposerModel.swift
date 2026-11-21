@@ -64,6 +64,10 @@ public final class ComposerModel {
         let to: Data?
         let text: String
         let content: String
+        /// The request a reply (kind 10) answers; nil for a prompt or a text.
+        let re: MessageRef?
+        /// Whether the field takes the text back when the call fails: a prompt or a text typed in the field, not a command or a reply.
+        let restores: Bool
         /// Made from an outbox item that no call of this composer queued (a restart, or the /bind of a sheet).
         let fromOutbox: Bool
         /// The outbox item's name, once it is known.
@@ -83,6 +87,7 @@ public final class ComposerModel {
     public private(set) var notice: String?
 
     private var entries: [Entry] = []
+    private var cards: [MessageRef: RequestCardModel] = [:]
     private var nextID = 0
     /// The state of each item of this place that the last `outbox` effect listed.
     private var known: [Data: OutboxItemState] = [:]
@@ -198,7 +203,7 @@ public final class ComposerModel {
     @discardableResult
     public func submit() -> Task<Void, Never>? {
         guard availability == .ready, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        var bot = promptBot
+        let bot = promptBot
         if thread == nil, let label, !choices().contains(where: { $0.id == label }) {
             notice = "This bot was removed from your devices."
             return nil
@@ -214,18 +219,95 @@ public final class ComposerModel {
             notice = "This message is too long to send."
             return nil
         }
-        let draft = OutboxDraft(kind: bot == nil ? 1 : 2, to: bot, content: content)
-        bot = nil
-        entries.append(Entry(id: nextID, kind: Int(draft.kind), to: draft.to, text: text, content: content, fromOutbox: false, name: nil, phase: .calling))
+        let task = queue(OutboxDraft(kind: bot == nil ? 1 : 2, to: bot, content: content), text: text, restores: true)
+        (text, label, picking, notice) = ("", nil, false, nil)
+        return task
+    }
+
+    /// Sends `text` as a prompt in the thread to the session's bot (a word of the daemon's: `/stop`, `/bypass on`), leaving the field as it is.
+    /// Nothing is sent from a channel's composer, one that is not ready, or a session whose bot was removed.
+    @discardableResult
+    public func command(_ text: String) -> Task<Void, Never>? {
+        guard canCommand, let bot = promptBot else { return nil }
+        return queue(OutboxDraft(kind: 2, to: bot, content: Self.body(prompt: true, text: text, thread: thread)), text: text, restores: false)
+    }
+
+    /// Whether `command` sends: a thread of a session whose bot is one of the person's active devices.
+    public var canCommand: Bool { thread != nil && availability == .ready && promptBot != nil }
+
+    /// Puts a message in the outbox through the sender and draws its row until the reading holds it. The task ends when the call has answered.
+    private func queue(_ draft: OutboxDraft, text: String, restores: Bool) -> Task<Void, Never> {
+        entries.append(Entry(id: nextID, kind: Int(draft.kind), to: draft.to, text: text, content: draft.content, re: draft.re.map(Self.ref),
+                             restores: restores, fromOutbox: false, name: nil, phase: .calling))
         let id = nextID
         nextID += 1
-        (text, label, picking, notice) = ("", nil, false, nil)
         let (channel, send) = (channel, send)
         return Task { [weak self] in
             do { self?.finish(id, try await send(channel, draft)) } catch {
                 self?.fail(id, "Pardner could not send the message: \(error.localizedDescription).")
             }
         }
+    }
+
+    // MARK: replies to requests
+
+    /// How the reply to a request stands on its card.
+    public enum ReplyState: Equatable {
+        /// Queued or on its way, or held by the relay and not read back.
+        case sending
+        /// The call did not queue it; the line says why.
+        case notSent(String)
+        /// The relay refused it.
+        case notDelivered
+    }
+
+    /// What the reading holds now.
+    var reading: ReadingModel { conversation.reading }
+
+    /// The bot of this thread's session, while it is one of the person's active devices.
+    var sessionBotID: Data? { sessionBot?.id }
+
+    /// The device this composer sends from: the one whose replies a card draws the bot's reason for.
+    var thisDevice: Data? { devices.state.rows.first { $0.isThisMac }?.id }
+
+    /// The card of a request of this thread, kept so that what the owner chose in it stays while the panel is closed.
+    public func card(for request: Message) -> RequestCardModel {
+        if let made = cards[request.ref] { return made }
+        let made = RequestCardModel(request: request, composer: self)
+        cards[request.ref] = made
+        return made
+    }
+
+    /// How the last reply this composer holds to `request` stands; nil when there is none (or the reading has read it back).
+    public func replyState(_ request: MessageRef) -> ReplyState? {
+        let held = heldNames
+        // A bound item whose name the reading holds was read back, as `rows()` takes it, though no outbox listing marked it seen.
+        guard let entry = entries.last(where: { entry in
+            if entry.re != request { return false }
+            if case .bound(let name, _) = entry.phase, held.contains(name) { return false }
+            return true
+        }) else { return nil }
+        switch entry.phase {
+        case .calling, .bound: return .sending
+        case .failed(let line): return .notSent(line)
+        case .refused: return .notDelivered
+        }
+    }
+
+    /// Sends `answer` as the owner's reply to `request`: a kind 10 to the request's bot, naming it, with the body `{"answer": ...}`. One reply is on its
+    /// way at a time; the note of an earlier attempt that failed goes with the next. Nothing is sent where `command` would not send, or to a bot that
+    /// is not the session's.
+    @discardableResult
+    func answer(_ request: Message, _ answer: [String: Any]) -> Task<Void, Never>? {
+        guard canCommand, request.kind == 9, sessionBot?.id == request.sender, replyState(request.ref) != .sending else { return nil }
+        entries.removeAll { entry in
+            guard entry.re == request.ref else { return false }
+            if let name = entry.name { dismissed.insert(name) }
+            return true
+        }
+        let json = try? JSONSerialization.data(withJSONObject: ["answer": answer], options: [.withoutEscapingSlashes, .sortedKeys])
+        let draft = OutboxDraft(kind: 10, to: request.sender, re: MessageReference(device: request.sender, name: request.name), content: String(decoding: json ?? Data(), as: UTF8.self))
+        return queue(draft, text: "", restores: false)
     }
 
     /// The body's JSON as the relay chat module reads it: a prompt is `{text, thread?}`, a text `{markdown, thread?}` (its design 3.7 and 3.8).
@@ -282,7 +364,7 @@ public final class ComposerModel {
         var entry = entry
         entry.phase = .failed(line)
         replace(entry)
-        if text.isEmpty, label == nil {
+        if entry.restores, text.isEmpty, label == nil {
             text = entry.text
             if thread == nil { label = entry.to }
         }
@@ -308,16 +390,30 @@ public final class ComposerModel {
         ((try? JSONSerialization.jsonObject(with: Data(content.utf8))) as? [String: Any])?["thread"] as? String
     }
 
+    private static func ref(_ re: MessageReference) -> MessageRef { MessageRef(device: re.device, name: re.name) }
+
     private static func shownText(_ content: String) -> String {
         let fields = (try? JSONSerialization.jsonObject(with: Data(content.utf8))) as? [String: Any]
         return (fields?["text"] as? String) ?? (fields?["markdown"] as? String) ?? ""
+    }
+
+    /// Whether an outbox item is this composer's: a prompt or a text with its thread's key, or a reply to a request of this thread. A reply to a request
+    /// the reading has not read yet (a restart) is claimed too: the one that reads it back drops it, and only a card of its thread draws it.
+    private func isMine(_ item: OutboxItemRow) -> Bool {
+        guard !dismissed.contains(item.name) else { return false }
+        if item.kind == 10, let re = item.re, let thread {
+            let ref = MessageRef(device: re.device, name: re.name)
+            let threads = conversation.reading.channels[channel]?.threads
+            return threads?[thread]?.requests[ref] != nil || !(threads?.values.contains { $0.requests[ref] != nil } ?? false)
+        }
+        return item.re == nil && (item.kind == 1 || item.kind == 2) && Self.threadKey(item.content) == thread
     }
 
     /// A channel's outbox as the link tells it now, with the items it dropped as refused. An item no row holds by name is drawn from its content
     /// (a restart, or a bind made in a sheet); a call's own row takes it over when the call answers. A bound item that the list stops naming
     /// was read back (the outbox drops an item only then, or as refused, which is told): it is hidden, never `Not delivered.`
     func take(items all: [OutboxItemRow]) {
-        let mine = all.filter { !dismissed.contains($0.name) && $0.re == nil && ($0.kind == 1 || $0.kind == 2) && Self.threadKey($0.content) == thread }
+        let mine = all.filter(isMine)
         known = Dictionary(mine.filter { $0.state != .refused }.map { ($0.name, $0.state) }, uniquingKeysWith: { first, _ in first })
         for item in mine {
             let index = entries.firstIndex { $0.name == item.name }
@@ -331,8 +427,8 @@ public final class ComposerModel {
             } else if let index {
                 if case .bound = entries[index].phase { entries[index].phase = .bound(name: item.name, seen: true) }
             } else {
-                entries.append(Entry(id: nextID, kind: item.kind, to: item.to, text: Self.shownText(item.content), content: item.content, fromOutbox: true,
-                                     name: item.name, phase: .bound(name: item.name, seen: true)))
+                entries.append(Entry(id: nextID, kind: item.kind, to: item.to, text: Self.shownText(item.content), content: item.content, re: item.re.map(Self.ref),
+                                     restores: false, fromOutbox: true, name: item.name, phase: .bound(name: item.name, seen: true)))
                 nextID += 1
             }
         }
@@ -345,8 +441,8 @@ public final class ComposerModel {
     private func flushRefused() {
         guard !entries.contains(where: { $0.phase == .calling }) else { return }
         for item in refusedPending {
-            entries.append(Entry(id: nextID, kind: item.kind, to: item.to, text: Self.shownText(item.content), content: item.content, fromOutbox: true,
-                                 name: item.name, phase: .refused))
+            entries.append(Entry(id: nextID, kind: item.kind, to: item.to, text: Self.shownText(item.content), content: item.content, re: item.re.map(Self.ref),
+                                 restores: false, fromOutbox: true, name: item.name, phase: .refused))
             nextID += 1
         }
         refusedPending = []
@@ -360,6 +456,7 @@ public final class ComposerModel {
         let held = heldNames
         let calling = Set(entries.filter { $0.phase == .calling }.map(\.content))
         return entries.compactMap { entry in
+            if entry.re != nil { return nil } // a reply is drawn on its request's card
             if entry.fromOutbox, case .bound = entry.phase, calling.contains(entry.content) { return nil } // the call that queued it is still to answer
             let status: Status
             switch entry.phase {

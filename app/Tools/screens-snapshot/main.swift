@@ -85,8 +85,63 @@ let studio = Data(repeating: 0x3c, count: 32)
 let hostile = "A\u{201D}, position 0, \u{201C}B"
 let tooLong = "Studio Mac of the third floor, the one with the broken fan and the sticker on the lid, Room 4 (old)"
 
+/// The thread panel of `window` alone: the window drawn tall, and its last 380 points kept.
+@MainActor
+func renderPanel<V: View>(_ name: NSAppearance.Name, _ view: V, height: CGFloat, to file: String) throws {
+    let size = NSSize(width: 1280, height: height)
+    let hosting = NSHostingView(rootView: view)
+    hosting.appearance = NSAppearance(named: name)
+    let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+    window.appearance = NSAppearance(named: name)
+    window.contentView = hosting
+    hosting.frame = NSRect(origin: .zero, size: size)
+    hosting.layoutSubtreeIfNeeded()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+    guard let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else { throw CocoaError(.fileWriteUnknown) }
+    hosting.cacheDisplay(in: hosting.bounds, to: rep)
+    let scale = CGFloat(rep.pixelsWide) / size.width
+    guard let whole = rep.cgImage, let part = whole.cropping(to: CGRect(x: (size.width - 380) * scale, y: 0, width: 380 * scale, height: size.height * scale)),
+          let png = NSBitmapImageRep(cgImage: part).representation(using: .png, properties: [:]) else { throw CocoaError(.fileWriteUnknown) }
+    try png.write(to: out.appendingPathComponent(file))
+}
+
+/// The cards of requests (requests design 4): each type open, sending, answered and refused in one session's panel, and Stop in a running session's header.
+@MainActor
+func requestShots(_ appearance: NSAppearance.Name, _ theme: String) throws {
+    for (stage, name) in [(Samples.RequestStage.open, "open"), (.sending, "sending"), (.answered, "answered"), (.refused, "refused")] {
+        let sample = Samples.requests(stage)
+        var state = DevicesState()
+        func row(_ id: Data, _ kind: DeviceKind, _ mac: Bool) -> DeviceRow {
+            DeviceRow(id: id, kind: kind, label: nil, shortForm: "", adder: .none, position: 1, active: true, isThisMac: mac, seenAt: nil, onlyHolderEpochs: 0, addedWhileRemoving: false)
+        }
+        state.rows = [row(sample.me, .app, true), row(sample.bot, .bot, false)]
+        let devices = DevicesModel(state: state)
+        let hub = Composers(conversation: ConversationModel(reading: sample.model), devices: devices) { _, _ in .ended }
+        var outboxes = ChannelsState()
+        outboxes.outboxes[sample.channel] = sample.outbox
+        hub.take(outboxes)
+        let window = MainWindow(model: sample.model, devices: DevicesModel(), channels: ChannelsModel(devices: devices), composers: hub, channel: sample.channel, thread: sample.thread)
+        try renderPanel(appearance, window, height: 1700, to: "requests-\(name)-\(theme).png")
+    }
+}
+
 MainActor.assumeIsolated {
     do {
+        if ProcessInfo.processInfo.environment["SNAPSHOT_ONLY"] == "requests" {
+            for (appearance, theme) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] { try requestShots(appearance, theme) }
+            let live = Samples.model()
+            var composing = DevicesState()
+            composing.rows = [Data([0x4D, 0x14, 0x10, 0x03] + Array(repeating: 3, count: 28))].map {
+                DeviceRow(id: $0, kind: .bot, label: nil, shortForm: "", adder: .none, position: 1, active: true, isThisMac: false, seenAt: nil, onlyHolderEpochs: 0, addedWhileRemoving: false)
+            }
+            let devices = DevicesModel(state: composing)
+            for (appearance, theme) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
+                let hub = Composers(conversation: ConversationModel(reading: live.model), devices: devices) { _, _ in .ended }
+                let window = MainWindow(model: live.model, devices: DevicesModel(), channels: ChannelsModel(devices: devices), composers: hub, channel: live.channel, thread: live.queuedThread)
+                try render(appearance, window, size: NSSize(width: 1280, height: 800), to: "stop-header-\(theme).png")
+            }
+            exit(0)
+        }
         let themes: [(NSAppearance.Name, String)] = [(.aqua, "light"), (.darkAqua, "dark")]
         let page = NSSize(width: 1050, height: 640)
         let screens: [(String, () -> PairingModel)] = [

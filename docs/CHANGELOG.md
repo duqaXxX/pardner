@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The app answers the bot's requests and stops a session. A request in a thread is a card with the controls of its type: setup (a model picker, an effort
+  picker and a bypass switch, preset from the request; Start), a tool's approval (the tool, its description and input as indented JSON, or the plan, cut at
+  4,000 characters until Show all; Allow, Deny), questions (a choice or several, an Other field, Answer, Skip), a shell command (Run, Don't run), a
+  same-folder hold (Send anyway, Don't send) and a terminal request (Go, Cancel). A reply is sent once per card and the card says `Sending…`, `Not sent.`
+  with its reason or `Not delivered.`; the bot's reason for a reply it did not take shows in red with the controls back. With a card focused by a click or
+  Tab, Return is its first button and Escape its second; a card never takes the focus on its own. A request the bot took reads `Answered`, whatever order
+  the bot wrote its withdrawal and its verdict in. The thread's header has Stop (while the session runs or waits; the Sessions tab has it too) and a menu
+  with Bypass on/off and Plan mode on/off, each sent as `/stop`, `/bypass on|off` or `/plan on|off` in the thread.
+- The reading model keeps the bot's verdict on a reply of the owner's apart from the thread: a kind 5, 6 or 7 that names a reply (`re`), from the bot the reply went to,
+  is that request's verdict and not a prompt's answer or state; an empty kind 5 makes the request `answered` unless the bot rewrote it.
 - The app's composer. The channel's Conversation tab and each thread's panel have a field under them: Return sends, Shift-Return starts a new
   line, and a return that commits an input method's marked text sends nothing. Typing `@` first in the channel's field lists your active bots
   and the pick becomes a label, so the message is a prompt to that bot; with no label the message is a text for the people of the channel. In a

@@ -1,0 +1,364 @@
+{
+  "note": "The bodies of the app's replies to requests (requests design 2.1), each with the request body the bot writes (`shown` in provider.ts). app/Tests/ScreensTests/RequestCardTests.swift builds each answer with the cards' controls and fails when it differs from `answer`; app-answers.test.ts hands each to the bot's inbound path.",
+  "cases": [
+    {
+      "name": "setup untouched",
+      "request": {
+        "type": "setup",
+        "models": [
+          {
+            "value": "sonnet",
+            "isDefault": true,
+            "resolvedModel": null,
+            "displayName": "Sonnet",
+            "description": null,
+            "supportsEffort": true,
+            "supportedEffortLevels": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "value": "haiku",
+            "isDefault": false,
+            "resolvedModel": null,
+            "displayName": "Haiku",
+            "description": null,
+            "supportsEffort": false,
+            "supportedEffortLevels": []
+          }
+        ],
+        "efforts": [],
+        "bypassOffered": true,
+        "selection": {
+          "model": "default",
+          "effort": "default",
+          "bypass": false
+        }
+      },
+      "answer": {
+        "type": "setup",
+        "selection": {
+          "model": "default",
+          "effort": "default",
+          "bypass": false
+        }
+      }
+    },
+    {
+      "name": "setup chosen",
+      "request": {
+        "type": "setup",
+        "models": [
+          {
+            "value": "sonnet",
+            "isDefault": true,
+            "resolvedModel": null,
+            "displayName": "Sonnet",
+            "description": null,
+            "supportsEffort": true,
+            "supportedEffortLevels": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "value": "haiku",
+            "isDefault": false,
+            "resolvedModel": null,
+            "displayName": "Haiku",
+            "description": null,
+            "supportsEffort": false,
+            "supportedEffortLevels": []
+          },
+          {
+            "value": "opus",
+            "isDefault": false,
+            "resolvedModel": null,
+            "displayName": "Opus",
+            "description": null,
+            "supportsEffort": true,
+            "supportedEffortLevels": [
+              "high"
+            ]
+          }
+        ],
+        "efforts": [],
+        "bypassOffered": true,
+        "selection": {
+          "model": "default",
+          "effort": "default",
+          "bypass": false
+        }
+      },
+      "answer": {
+        "type": "setup",
+        "selection": {
+          "model": "opus",
+          "effort": "high",
+          "bypass": true
+        }
+      }
+    },
+    {
+      "name": "setup with no model list",
+      "request": {
+        "type": "setup",
+        "models": [],
+        "efforts": [
+          "medium"
+        ],
+        "bypassOffered": false,
+        "selection": {
+          "model": "default",
+          "effort": "default",
+          "bypass": false
+        }
+      },
+      "answer": {
+        "type": "setup",
+        "selection": {
+          "model": "default",
+          "effort": "default",
+          "bypass": false
+        }
+      }
+    },
+    {
+      "name": "permission allow",
+      "request": {
+        "type": "permission",
+        "toolName": "Edit",
+        "input": {
+          "file_path": "docs/setup.md"
+        },
+        "title": "Allow Edit of docs/setup.md?",
+        "description": null,
+        "plan": null
+      },
+      "answer": {
+        "type": "permission",
+        "allow": true
+      }
+    },
+    {
+      "name": "permission deny",
+      "request": {
+        "type": "permission",
+        "toolName": "Edit",
+        "input": {
+          "file_path": "docs/setup.md"
+        },
+        "title": null,
+        "description": null,
+        "plan": null
+      },
+      "answer": {
+        "type": "permission",
+        "allow": false
+      }
+    },
+    {
+      "name": "question single",
+      "request": {
+        "type": "question",
+        "title": null,
+        "questions": [
+          {
+            "header": "Scope",
+            "text": "Which?",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "a",
+                "description": "The first",
+                "preview": null
+              },
+              {
+                "label": "b",
+                "description": null,
+                "preview": null
+              }
+            ]
+          },
+          {
+            "header": "",
+            "text": "Why?",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "x",
+                "description": null,
+                "preview": null
+              }
+            ]
+          }
+        ]
+      },
+      "answer": {
+        "type": "question",
+        "answers": {
+          "Which?": "b",
+          "Why?": "x"
+        },
+        "notes": {}
+      }
+    },
+    {
+      "name": "question other and multi",
+      "request": {
+        "type": "question",
+        "title": null,
+        "questions": [
+          {
+            "header": "Scope",
+            "text": "Which?",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "a",
+                "description": null,
+                "preview": null
+              }
+            ]
+          },
+          {
+            "header": "",
+            "text": "Why?",
+            "multiSelect": true,
+            "options": [
+              {
+                "label": "x",
+                "description": null,
+                "preview": null
+              },
+              {
+                "label": "y",
+                "description": null,
+                "preview": null
+              }
+            ]
+          }
+        ]
+      },
+      "answer": {
+        "type": "question",
+        "answers": {
+          "Which?": "something else",
+          "Why?": [
+            "x",
+            "y",
+            "and more"
+          ]
+        },
+        "notes": {}
+      }
+    },
+    {
+      "name": "question skip",
+      "request": {
+        "type": "question",
+        "title": null,
+        "questions": [
+          {
+            "header": "",
+            "text": "Which?",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "a",
+                "description": null,
+                "preview": null
+              }
+            ]
+          }
+        ]
+      },
+      "answer": {
+        "type": "question",
+        "answers": null,
+        "notes": {}
+      }
+    },
+    {
+      "name": "shell run",
+      "request": {
+        "type": "shell",
+        "command": "ls\npwd",
+        "folder": "docs"
+      },
+      "answer": {
+        "type": "shell",
+        "run": true
+      }
+    },
+    {
+      "name": "shell do not run",
+      "request": {
+        "type": "shell",
+        "command": "ls",
+        "folder": "docs"
+      },
+      "answer": {
+        "type": "shell",
+        "run": false
+      }
+    },
+    {
+      "name": "hold send",
+      "request": {
+        "type": "hold",
+        "other": {
+          "channel": "c",
+          "thread": "t"
+        },
+        "link": "the session at work"
+      },
+      "answer": {
+        "type": "hold",
+        "send": true
+      }
+    },
+    {
+      "name": "hold do not send",
+      "request": {
+        "type": "hold",
+        "other": {
+          "channel": "c",
+          "thread": "t"
+        },
+        "link": "the session at work"
+      },
+      "answer": {
+        "type": "hold",
+        "send": false
+      }
+    },
+    {
+      "name": "terminal go",
+      "request": {
+        "type": "terminal",
+        "state": "open",
+        "running": null,
+        "command": "claude --resume abc"
+      },
+      "answer": {
+        "type": "terminal",
+        "go": true
+      }
+    },
+    {
+      "name": "terminal cancel",
+      "request": {
+        "type": "terminal",
+        "state": "busy",
+        "running": null,
+        "command": null
+      },
+      "answer": {
+        "type": "terminal",
+        "go": false
+      }
+    }
+  ]
+}

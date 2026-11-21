@@ -53,6 +53,7 @@ public final class PairingModel {
     public init(controller: PairingController) {
         let devices = DevicesModel(controller: controller)
         let (channels, conversation) = (ChannelsModel(controller: controller, devices: devices), ConversationModel(controller: controller))
+        devices.onState = { [weak conversation] in conversation?.setOwnDevices(Set($0.rows.filter { $0.kind == .app && $0.active }.map(\.id))) }
         let composers = Composers(conversation: conversation, devices: devices) { channel, draft in try await controller.send(channel: channel, draft: draft) }
         channels.composers = composers
         (self.controller, storesOpen, self.devices, self.channels, self.conversation, self.composers) = (controller, true, devices, channels, conversation, composers)
