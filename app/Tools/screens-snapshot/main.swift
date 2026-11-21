@@ -32,8 +32,19 @@ final class SyntheticKey: RecoverySource {
     }
 }
 
+/// Forgets what an earlier render saved (the split view's widths and the first-launch flags), so that every window draws as a first launch.
+func forgetSavedColumns() { UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier ?? ProcessInfo.processInfo.processName) }
+
+/// The split view under `view`, if the window has one.
+@MainActor
+func splitView(in view: NSView) -> NSSplitView? {
+    if let split = view as? NSSplitView { return split }
+    return view.subviews.lazy.compactMap { splitView(in: $0) }.first
+}
+
 @MainActor
 func render<V: View>(_ name: NSAppearance.Name, _ view: V, size: NSSize?, to file: String) throws {
+    forgetSavedColumns()
     let hosting = NSHostingView(rootView: view)
     hosting.appearance = NSAppearance(named: name)
     let size = size ?? hosting.fittingSize
@@ -85,9 +96,10 @@ let studio = Data(repeating: 0x3c, count: 32)
 let hostile = "A\u{201D}, position 0, \u{201C}B"
 let tooLong = "Studio Mac of the third floor, the one with the broken fan and the sticker on the lid, Room 4 (old)"
 
-/// The thread panel of `window` alone: the window drawn tall, and its last 380 points kept.
+/// The thread panel of `window` alone: the window drawn tall, and the panel's drawn width kept.
 @MainActor
 func renderPanel<V: View>(_ name: NSAppearance.Name, _ view: V, height: CGFloat, to file: String) throws {
+    forgetSavedColumns()
     let size = NSSize(width: 1280, height: height)
     let hosting = NSHostingView(rootView: view)
     hosting.appearance = NSAppearance(named: name)
@@ -100,7 +112,8 @@ func renderPanel<V: View>(_ name: NSAppearance.Name, _ view: V, height: CGFloat,
     guard let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else { throw CocoaError(.fileWriteUnknown) }
     hosting.cacheDisplay(in: hosting.bounds, to: rep)
     let scale = CGFloat(rep.pixelsWide) / size.width
-    guard let whole = rep.cgImage, let part = whole.cropping(to: CGRect(x: (size.width - 380) * scale, y: 0, width: 380 * scale, height: size.height * scale)),
+    guard let panel = splitView(in: hosting)?.arrangedSubviews.last, panel.frame.width > 0 else { throw CocoaError(.fileWriteUnknown) }
+    guard let whole = rep.cgImage, let part = whole.cropping(to: CGRect(x: (size.width - panel.frame.width) * scale, y: 0, width: panel.frame.width * scale, height: size.height * scale)),
           let png = NSBitmapImageRep(cgImage: part).representation(using: .png, properties: [:]) else { throw CocoaError(.fileWriteUnknown) }
     try png.write(to: out.appendingPathComponent(file))
 }

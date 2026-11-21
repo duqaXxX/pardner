@@ -1,4 +1,4 @@
-# Runs on every push to main and every pull request. Three jobs, kept separate: a leak is not a
+# Runs on every push to main and every pull request. Four jobs, kept separate: a leak is not a
 # reason to stop reporting a broken test, nor the reverse, so a red check names what broke. The
 # tests run on macOS alone, the one system the daemon supports; lint and types run on Linux, which
 # claims no support.
@@ -83,3 +83,15 @@ jobs:
       - run: xcodebuild -project app/Pardner.xcodeproj -scheme Pardner -configuration Release -derivedDataPath "$RUNNER_TEMP/derived" build
       # The app pairs nothing without its protocol script, which a build phase joins into the bundle.
       - run: test -s "$RUNNER_TEMP/derived/Build/Products/Release/Pardner.app/Contents/Resources/protocol.js"
+
+  # The app's floor is macOS 15, and the split view's setup order (the autosave name set before the items are added) is not documented by
+  # Apple: the tests that drive it run there, as well as on the latest runner above. No Node: the split's tests need none of the scripts.
+  app-macos-15:
+    name: App on macOS 15
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: cd app && perl -e 'alarm 900; exec @ARGV' swift test --filter 'ScreensTests/(testAFirstLaunch|testADragged|testTheFirstThread|testAPanel|testTheSplitItems|testEachFirstLaunch|testThePanelsDefault)'

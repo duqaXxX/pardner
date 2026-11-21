@@ -45,8 +45,14 @@ public struct MainWindow: View {
         _thread = State(initialValue: thread)
     }
 
-    /// The window's least width with a thread open: the sidebar, the conversation's least, the panel, two dividers.
-    public static let minimumWidth: CGFloat = 248 + 420 + 380 + 2
+    /// The window's least width: the columns' least widths and their dividers, the thread panel's too while a thread is open.
+    static func leastWidth(threadOpen: Bool) -> CGFloat { Columns.leastWidth(threadOpen: threadOpen) }
+
+    // The panel shows a thread only while the channel shown holds it.
+    private var openThread: MessageThread? { Self.openThread(in: shown, key: thread) }
+
+    /// The thread the panel shows: `key` while `channel` holds it, else nil (the panel stays closed).
+    static func openThread(in channel: Channel?, key: String?) -> MessageThread? { key.flatMap { channel?.threads[$0] } }
 
     // The channel shown: the one chosen while the model holds it, else the first, so channels that arrive later
     // or a relay recreated never leave the window on a channel that is gone.
@@ -77,24 +83,26 @@ public struct MainWindow: View {
         // a PNG or a JPEG of at most 256 pixels a side, read from its own header).
         let icons = model.profiles.compactMapValues { $0.icon.flatMap(NSImage.init(data:)) }
         let bots = bots
-        HStack(spacing: 0) {
-            Sidebar(model: model, bots: bots, icons: icons, selected: shown?.id, choose: { channel = $0 }, openDevices: devices.map { devices in { devices.open() } },
-                    channels: channels)
-                .frame(width: 248)
-            Divider().overlay(PardnerColor.line)
-            if let c = shown {
-                ChannelView(model: model, icons: icons, channel: c, channels: channels, composers: composers, tab: $tab, thread: $thread)
-                    .frame(minWidth: 420, maxWidth: .infinity)
-                if let key = thread, let t = c.threads[key] {
-                    Divider().overlay(PardnerColor.line)
-                    ThreadPanel(model: model, icons: icons, thread: t, close: { thread = nil }, composer: composers?.composer(channel: c.id, thread: key))
-                        .frame(width: 380)
+        let threadOpen = openThread != nil
+        // The panes are hosted apart, so each one carries the window's font, colour and background itself.
+        PaneSplit(
+            threadOpen: threadOpen,
+            sidebar: pane(Sidebar(model: model, bots: bots, icons: icons, selected: shown?.id, choose: { channel = $0 }, openDevices: devices.map { devices in { devices.open() } },
+                                  channels: channels), background: PardnerColor.side),
+            conversation: pane(Group {
+                if let c = shown {
+                    ChannelView(model: model, icons: icons, channel: c, channels: channels, composers: composers, tab: $tab, thread: $thread)
+                } else {
+                    Empty(hint: Self.emptyHint(devicesRead: devices?.ready ?? false, hasBot: !bots.isEmpty,
+                                               creating: channels?.creatingRow(known: Set(model.channels.keys)) != nil)).frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            } else {
-                Empty(hint: Self.emptyHint(devicesRead: devices?.ready ?? false, hasBot: !bots.isEmpty,
-                                           creating: channels?.creatingRow(known: Set(model.channels.keys)) != nil)).frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
+            }),
+            panel: pane(Group {
+                if let c = shown, let key = thread, let t = openThread {
+                    ThreadPanel(model: model, icons: icons, thread: t, close: { thread = nil }, composer: composers?.composer(channel: c.id, thread: key))
+                }
+            }))
+        .frame(minWidth: Self.leastWidth(threadOpen: threadOpen))
         .onChange(of: shown?.id) { thread = nil }
         .sheet(isPresented: Binding(get: { devices?.isOpen ?? false }, set: { if !$0 { devices?.close() } })) {
             if let devices { DevicesSheet(model: devices) }
@@ -102,9 +110,11 @@ public struct MainWindow: View {
         .background(Color.clear.sheet(isPresented: Binding(get: { channels?.sheet != nil }, set: { if !$0 { channels?.close() } })) {
             if let channels { ChannelSheet(model: channels, names: model.profiles.mapValues(\.name)) }
         })
-        .font(PardnerFont.ui(size: 14, weight: .regular))
-        .foregroundStyle(PardnerColor.text)
         .background(PardnerColor.bg)
+    }
+
+    private func pane<Content: View>(_ content: Content, background: Color = PardnerColor.bg) -> AnyView {
+        AnyView(content.font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(PardnerColor.text).background(background))
     }
 }
 
