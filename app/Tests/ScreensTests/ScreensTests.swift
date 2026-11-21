@@ -108,6 +108,12 @@ final class ScreensTests: XCTestCase {
         override func bool(forKey key: String) -> Bool { values[key] as? Bool ?? false }
     }
 
+    /// A window the screen does not shrink: a CI runner's display can be narrower than the widths these tests set, and a window
+    /// ordered in is constrained to its screen, which resizes every column in proportion.
+    private final class UnconstrainedWindow: NSWindow {
+        override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
+    }
+
     /// One window over a `ColumnsController` with its own autosave name and flags, as a launch of the app has.
     @MainActor
     private final class Launch {
@@ -118,12 +124,16 @@ final class ScreensTests: XCTestCase {
             controller = ColumnsController(defaults: defaults, autosaveName: name)
             _ = controller.view
             controller.update(sidebar: AnyView(Color.red), conversation: AnyView(Color.green), panel: AnyView(Color.blue), threadOpen: thread)
-            window = NSWindow(contentViewController: controller)
+            window = UnconstrainedWindow(contentViewController: controller)
             window.styleMask = [.titled, .resizable]
             window.setContentSize(NSSize(width: width, height: 800))
             window.makeKeyAndOrderFront(nil)
             settle()
+            // Every width these tests assert assumes the window kept the one asked for: a failure here is the environment's.
+            XCTAssertEqual(contentWidth, Int(width), "the test window was resized to \(contentWidth) by its environment")
         }
+        /// The content's width as laid out: the widths these tests assert only mean something at the width they asked for.
+        var contentWidth: Int { Int(window.contentView?.frame.width ?? 0) }
         func settle() {
             RunLoop.main.run(until: Date().addingTimeInterval(0.3))
             window.contentView?.layoutSubtreeIfNeeded()
