@@ -53,16 +53,14 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
       # The app's scheme in Release, the code that ships (Debug compiles the `#if DEBUG` branches in
       # its place), which builds the package's libraries with it; one architecture, as the CodeQL
-      # build docs recommend, since Release builds every architecture otherwise. No optimisation:
-      # CodeQL reads the source, and under the tracer the optimised Release compile took 6 min against
-      # 3 in Debug (PR #54; Release also differs in whole-module mode). The last two settings are the ones CodeQL's own Swift autobuilder
-      # passes (github/codeql, swift/swift-autobuilder). The package's two developer tools are not in
-      # the scheme and are not analysed.
+      # build docs recommend, since Release builds every architecture otherwise. The two settings
+      # are the ones CodeQL's own Swift autobuilder passes (github/codeql, swift/swift-autobuilder).
+      # The package's two developer tools are not in the scheme and are not analysed.
       - if: matrix.language == 'swift'
         run: >-
           xcodebuild -project app/Pardner.xcodeproj -scheme Pardner -configuration Release
           -arch arm64 -derivedDataPath "$RUNNER_TEMP/derived"
-          SWIFT_OPTIMIZATION_LEVEL=-Onone CODE_SIGNING_ALLOWED=NO SWIFT_USE_INTEGRATED_DRIVER=NO build
+          CODE_SIGNING_ALLOWED=NO SWIFT_USE_INTEGRATED_DRIVER=NO build
       - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           category: /language:${{ matrix.language }}
