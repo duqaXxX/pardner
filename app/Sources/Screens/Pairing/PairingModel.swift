@@ -47,11 +47,15 @@ public final class PairingModel {
     /// What the main window draws, over the same controller: it is emptied by an erase, not by a phase, since a new connection after a
     /// fault reads the sequence again from its start and replaces what it drew.
     public let conversation: ConversationModel
+    /// The composers of the main window, beside the channel acts: they learn each outbox from the same state.
+    public let composers: Composers
 
     public init(controller: PairingController) {
         let devices = DevicesModel(controller: controller)
-        (self.controller, storesOpen, self.devices, channels, conversation) =
-            (controller, true, devices, ChannelsModel(controller: controller, devices: devices), ConversationModel(controller: controller))
+        let (channels, conversation) = (ChannelsModel(controller: controller, devices: devices), ConversationModel(controller: controller))
+        let composers = Composers(conversation: conversation, devices: devices) { channel, draft in try await controller.send(channel: channel, draft: draft) }
+        channels.composers = composers
+        (self.controller, storesOpen, self.devices, self.channels, self.conversation, self.composers) = (controller, true, devices, channels, conversation, composers)
     }
 
     /// This Mac's name as System Settings shows it. Read when the join form opens: the lookup can wait on the network, so it is not made at launch.
@@ -78,8 +82,11 @@ public final class PairingModel {
     /// A model with a fixed phase and no controller: what the screenshot tool and the previews draw.
     public init(phase: PairingPhase, form: Bool = false, join: Bool = false, refused: PairingInputError? = nil, note: CancelNote? = nil, storesOpen: Bool = true,
                 devices: DevicesModel = DevicesModel(), conversation: ConversationModel = ConversationModel()) {
-        (controller, self.phase, showForm, showJoin, self.refused, cancelNote, self.storesOpen, self.devices, channels, self.conversation) =
-            (nil, phase, form, join, refused, note, storesOpen, devices, ChannelsModel(devices: devices), conversation)
+        let channels = ChannelsModel(devices: devices)
+        let composers = Composers(conversation: conversation, devices: devices) { _, _ in .ended }
+        channels.composers = composers
+        (controller, self.phase, showForm, showJoin, self.refused, cancelNote, self.storesOpen, self.devices, self.channels, self.conversation, self.composers) =
+            (nil, phase, form, join, refused, note, storesOpen, devices, channels, conversation, composers)
     }
 
     /// The model over this Mac's own stores. A folder that cannot be opened (another Pardner holds it, a link where a folder
@@ -174,7 +181,9 @@ public final class PairingModel {
             // the answer (`notSaved`) there, and go only when the pairing ends.
             switch next {
             case .paired, .fault(.failed, _): break
-            default: channels.reset()
+            default:
+                channels.reset()
+                composers.reset()
             }
             if case .enrolling = next {} else { (retypedSecret, retypeProblem) = ("", nil) }
             phase = next

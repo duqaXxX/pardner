@@ -164,6 +164,19 @@ extension MessageThread {
         if fromBot { lastReply = max(lastReply ?? .distantPast, m.time) }
     }
 
+    /// The prompts that are sent or running while an earlier prompt of the thread, by position (the root, then the thread's prompts in order),
+    /// still runs: the bot starts every prompt it reads and queues it in its core, so the start alone does not say a prompt is next.
+    /// One pass over the thread: a screen asks once per drawing, not once per message.
+    public var queued: Set<MessageRef> {
+        var (result, earlierRuns) = (Set<MessageRef>(), false)
+        for case let message? in [root] + items.map({ if case .message(let m) = $0 { m } else { nil } }) {
+            guard case .prompt = message.body else { continue }
+            if earlierRuns, prompts[message.ref] == .sent || prompts[message.ref] == .running { result.insert(message.ref) }
+            if prompts[message.ref] == .running { earlierRuns = true }
+        }
+        return result
+    }
+
     private func answerIndex(_ ref: MessageRef) -> Int? {
         items.firstIndex { if case .answer(let a) = $0 { a.ref == ref } else { false } }
     }

@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The app's composer. The channel's Conversation tab and each thread's panel have a field under them: Return sends, Shift-Return starts a new
+  line, and a return that commits an input method's marked text sends nothing. Typing `@` first in the channel's field lists your active bots
+  and the pick becomes a label, so the message is a prompt to that bot; with no label the message is a text for the people of the channel. In a
+  session's thread of your own bot a message is a prompt to that bot (a removed bot disables the field); in any other thread it is a text. A text
+  that starts with `/` or `!` needs a bot to read it and is not sent otherwise. A message shows in place as `Sending…`, `Not sent.` with its
+  reason, or `Not delivered.`, until the reading holds it; drafts stay per channel and thread while the app runs. A prompt sent while an
+  earlier prompt of its session runs says `Queued`. A message that was not sent comes back into an empty field, and a failed or refused row has a close control. A pasted or dropped file or image says `Files cannot be sent yet.`
+- The `outbox` effect of `AppLink` carries each item's `content`, so a screen can draw a message that waits after a restart.
 - The app's screen for a new channel. The sidebar's Channels header has a `+` (New channel), enabled once the log is read. Its sheet asks for a folder
   and, with two or more active bots, the bot; Create makes the channel through the link, which queues the `/bind` prompt. The channel shows
   in the sidebar as `Creating…` and then by its short id. A refused creation says `The relay refused the new channel (code N).` in the sidebar

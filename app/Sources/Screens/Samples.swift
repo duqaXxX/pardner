@@ -13,7 +13,7 @@ public enum Samples {
     static let studio = Data([0x57, 0x0D, 0x10, 0x04] + Array(repeating: 4, count: 28))
 
     /// The conversation, read as the link would deliver it; the first session's key, to open in the panel.
-    public static func model() -> (model: ReadingModel, channel: Data, thread: String) {
+    public static func model() -> (model: ReadingModel, channel: Data, thread: String, queuedThread: String) {
         var m = ReadingModel()
         var position = 1
         let start = 1_763_600_000_000.0 // a Thursday morning, 2025-11-20
@@ -52,10 +52,13 @@ public enum Samples {
         let docs = put(2, alice, ["text": "Update the setup guide for the new store folder."], to: mini, minutes: 12)
         put(3, mini, [:], re: docs, minutes: 12.1)
         put(9, mini, ["thread": docs.hex, "title": "Allow Edit of docs/setup.md?", "request": ["type": "permission"]], re: docs, minutes: 14)
+        // A prompt sent while the session runs: the bot started it and queued it behind the first.
+        let typos = put(2, alice, ["text": "Then fix the typos in it.", "thread": docs.hex], to: mini, minutes: 14.5)
+        put(3, mini, [:], re: typos, minutes: 14.6)
 
         let release = put(2, bob, ["text": "Draft the release notes for 0.18.0."], to: studio, minutes: 15)
         put(3, studio, [:], re: release, minutes: 15.1)
         put(4, studio, ["thread": release.hex, "markdown": "Reading the changelog since 0.17.0…"], re: MessageRef(device: studio, name: Data(repeating: 0xB0, count: 16)), minutes: 16)
-        return (m, channel, fix.hex)
+        return (m, channel, fix.hex, docs.hex)
     }
 }

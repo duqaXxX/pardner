@@ -11,12 +11,15 @@ struct ChannelView: View {
     let channel: Channel
     /// The channel acts; nil where the window has no pairing.
     var channels: ChannelsModel?
+    /// The composers; nil where the window has no pairing.
+    var composers: Composers?
     @Binding var tab: MainWindow.Tab
     @Binding var thread: String?
 
     var body: some View {
         // The channel's own messages by position, found once per drawing rather than by a scan per row.
         let byPosition = Dictionary(uniqueKeysWithValues: channel.messages.map { ($0.position, $0) })
+        let queued = channel.threads.values.reduce(into: Set<MessageRef>()) { $0.formUnion($1.queued) }
         VStack(spacing: 0) {
             HStack(spacing: PardnerMetrics.gap * 2) {
                 Text(Naming.channel(channel.id)).font(PardnerFont.ui(size: 15, weight: .semibold))
@@ -44,7 +47,7 @@ struct ChannelView: View {
                     case .conversation:
                         ForEach(channel.timeline, id: \.self) { position in
                             if let m = byPosition[position] {
-                                MessageRow(model: model, icons: icons, message: m)
+                                MessageRow(model: model, icons: icons, message: m, queued: queued.contains(m.ref))
                                 if let t = channel.threads[m.ref.hex], m.kind == 2 || !t.items.isEmpty {
                                     Summary(model: model, thread: t, open: { thread = t.key })
                                         .padding(.leading, 32 + PardnerMetrics.gap * 1.5)
@@ -56,8 +59,13 @@ struct ChannelView: View {
                             Summary(model: model, thread: t, open: { thread = t.key }, showsTitle: true)
                         }
                     }
+                    if tab == .conversation, let composers { PendingRows(model: composers.composer(channel: channel.id)) }
                 }
                 .padding(PardnerMetrics.gap * 2)
+            }
+            if tab == .conversation, let composers {
+                Divider().overlay(PardnerColor.line)
+                ComposerView(model: composers.composer(channel: channel.id))
             }
         }
         .background(PardnerColor.bg)
@@ -69,6 +77,8 @@ struct MessageRow: View {
     let model: ReadingModel
     let icons: [Data: NSImage]
     let message: Message
+    /// A prompt behind one that still runs (`MessageThread.queued`).
+    var queued = false
 
     var body: some View {
         let name = Naming.sender(message.sender, in: model)
@@ -90,6 +100,7 @@ struct MessageRow: View {
                     .foregroundStyle(message.body == .unreadable ? PardnerColor.muted : PardnerColor.text)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
+                if queued { Text("Queued").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted) }
             }
         }
     }

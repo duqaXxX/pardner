@@ -933,7 +933,7 @@ export class AppLink {
   }
 }
 
-const view = ({ name, kind, to, re }: OutboxItem) => ({ name, kind, to, re });
+const view = ({ name, kind, to, re, content }: OutboxItem) => ({ name, kind, to, re, content });
 
 /** A link for the app, from the platform the host holds. */
 export function appLink(platform: Platform, options: AppLinkOptions): AppLink {

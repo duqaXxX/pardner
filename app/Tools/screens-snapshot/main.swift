@@ -172,6 +172,43 @@ MainActor.assumeIsolated {
                 try render(appearance, MainWindow(model: channelSample.model, devices: DevicesModel(), channels: ChannelsModel(state: state, devices: DevicesModel(state: busy)),
                                                   channel: channelSample.channel), size: NSSize(width: 1280, height: 800), to: "\(name)-\(theme).png")
             }
+            // The composer (composer design 4): over the same conversation, with this person's two bots as devices.
+            let live = Samples.model()
+            let miniID = Data([0x4D, 0x14, 0x10, 0x03] + Array(repeating: 3, count: 28)), studioID = Data([0x57, 0x0D, 0x10, 0x04] + Array(repeating: 4, count: 28))
+            var composing = DevicesState()
+            composing.rows = [miniID, studioID].enumerated().map { index, id in
+                DeviceRow(id: id, kind: .bot, label: nil, shortForm: "", adder: .none, position: index + 1, active: true, isThisMac: false, seenAt: nil, onlyHolderEpochs: 0, addedWhileRemoving: false)
+            }
+            let composingDevices = DevicesModel(state: composing)
+            @MainActor func hub() -> Composers { Composers(conversation: ConversationModel(reading: live.model), devices: composingDevices) { _, _ in .ended } }
+            func item(_ n: UInt8, _ state: OutboxItemState, _ text: String) -> OutboxItemRow {
+                OutboxItemRow(name: Data(repeating: n, count: 16), kind: 1, to: nil, re: nil, content: "{\"markdown\":\"\(text)\"}", state: state)
+            }
+            let big = NSSize(width: 1280, height: 800)
+            @MainActor func window(_ hub: Composers, thread: String? = nil) -> MainWindow {
+                MainWindow(model: live.model, devices: DevicesModel(), channels: ChannelsModel(devices: composingDevices), composers: hub, channel: live.channel, thread: thread)
+            }
+            let labelled = hub()
+            labelled.composer(channel: live.channel).edited("@")
+            labelled.composer(channel: live.channel).pick(miniID)
+            labelled.composer(channel: live.channel).edited("Run the failing relay test again and tell me which line breaks.")
+            try render(appearance, window(labelled), size: big, to: "composer-label-\(theme).png")
+            let listing = hub()
+            listing.composer(channel: live.channel).edited("@")
+            try render(appearance, window(listing), size: big, to: "composer-bot-list-\(theme).png")
+            let sending = hub()
+            var queuedState = ChannelsState()
+            queuedState.outboxes[live.channel] = [item(0xC1, .waiting, "I will look at it after lunch.")]
+            sending.take(queuedState)
+            try render(appearance, window(sending), size: big, to: "composer-sending-\(theme).png")
+            let refusedHub = hub()
+            var refusedState = ChannelsState()
+            refusedState.outboxes[live.channel] = [item(0xC2, .refused, "I will look at it after lunch.")]
+            refusedHub.take(refusedState)
+            try render(appearance, window(refusedHub), size: big, to: "composer-not-delivered-\(theme).png")
+            let threaded = hub()
+            threaded.composer(channel: live.channel, thread: live.queuedThread).edited("And add the new folder to the guide.")
+            try render(appearance, window(threaded, thread: live.queuedThread), size: big, to: "composer-thread-queued-\(theme).png")
             let sample = Samples.model()
             try render(appearance, MainWindow(model: sample.model, devices: DevicesModel(), channel: sample.channel, thread: sample.thread), size: NSSize(width: 1280, height: 800), to: "window-devices-\(theme).png")
         }

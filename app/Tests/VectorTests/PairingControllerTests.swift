@@ -642,7 +642,7 @@ final class PairingControllerTests: XCTestCase {
     }
 
     private func outboxItem(_ n: UInt8, _ state: String, to: Data? = nil) -> HostValue {
-        var item: [String: HostValue] = ["name": .bytes(Data(repeating: n, count: 16)), "kind": .number(2), "state": .string(state)]
+        var item: [String: HostValue] = ["name": .bytes(Data(repeating: n, count: 16)), "kind": .number(2), "content": .string("{\"text\":\"hi \(n)\"}"), "state": .string(state)]
         if let to { item["to"] = .bytes(to) }
         return .object(item)
     }
@@ -703,10 +703,39 @@ final class PairingControllerTests: XCTestCase {
         XCTAssertEqual(state.outboxes[channelID(1)]?.map(\.state), [.waiting, .sent])
         XCTAssertEqual(state.outboxes[channelID(1)]?.first?.to, bot)
         XCTAssertEqual(state.outboxes[channelID(1)]?.first?.name, Data(repeating: 1, count: 16))
+        XCTAssertEqual(state.outboxes[channelID(1)]?.map(\.content), ["{\"text\":\"hi 1\"}", "{\"text\":\"hi 2\"}"], "the body the owner wrote, to draw it until it is read back")
         XCTAssertEqual(state.outboxes[channelID(2)]?.map(\.state), [.refused])
         rig.harness.link.emit(outboxEffect(channelID(1), []))
         let after = await channelState(rig.controller, "the empty list stays") { $0.outboxes.count == 1 }
         XCTAssertNil(after.outboxes[channelID(1)], "a channel with nothing left in its outbox is not listed")
+    }
+
+    func testARefusedItemIsKeptUntilTheScreenAcknowledgesIt() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        rig.harness.link.emit(outboxEffect(channelID(1), [outboxItem(1, "refused")]))
+        rig.harness.link.emit(outboxEffect(channelID(1), [outboxItem(2, "waiting")])) // the next effect replaces the channel's items
+        let state = await channelState(rig.controller, "both effects") { $0.outboxes[self.channelID(1)]?.map(\.state) == [.waiting] }
+        XCTAssertEqual(state.undelivered[channelID(1)]?.map(\.name), [Data(repeating: 1, count: 16)], "told once, kept for the screen")
+        XCTAssertEqual(state.undelivered[channelID(1)]?.first?.content, "{\"text\":\"hi 1\"}")
+        rig.harness.link.emit(outboxEffect(channelID(1), [outboxItem(1, "refused")]))
+        rig.harness.link.emit(outboxEffect(channelID(1), []))
+        let again = await channelState(rig.controller, "emptied") { $0.outboxes[self.channelID(1)] == nil }
+        XCTAssertEqual(again.undelivered[channelID(1)]?.count, 1, "the same name is not kept twice")
+        await rig.controller.acknowledgeUndelivered(channel: channelID(1), names: [Data(repeating: 1, count: 16)])
+        let after = await rig.controller.channels
+        XCTAssertNil(after.undelivered[channelID(1)], "the screen took it")
+    }
+
+    func testAStopKeepsTheRefusalsTheScreenHasNotTaken() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        rig.harness.link.emit(outboxEffect(channelID(1), [outboxItem(1, "refused")]))
+        _ = await channelState(rig.controller, "refusal kept") { $0.undelivered[self.channelID(1)] != nil }
+        await rig.controller.stopConnection()
+        let after = await rig.controller.channels
+        XCTAssertEqual(after.undelivered[channelID(1)]?.count, 1, "a stop does not lose what the screen has not taken")
+        XCTAssertTrue(after.outboxes.isEmpty, "the rest of what the connection told goes")
     }
 
     func testTheCreatingEffectIsTheChannelBeingCreatedAndNullEndsIt() async throws {

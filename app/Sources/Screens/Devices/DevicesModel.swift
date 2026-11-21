@@ -69,6 +69,13 @@ public final class DevicesModel {
 
     // MARK: what the views draw
 
+    /// The person's active bots by profile name (the short id when none), the id breaking a tie: two bots may share a name.
+    public func activeBots(names: [Data: String]) -> [ChannelsModel.BotChoice] {
+        state.rows.filter { $0.kind == .bot && $0.active }
+            .map { ChannelsModel.BotChoice(id: $0.id, name: names[$0.id] ?? Naming.short($0.id)) }
+            .sorted { $0.name != $1.name ? $0.name < $1.name : $0.id.lexicographicallyPrecedes($1.id) }
+    }
+
     /// The active devices, newest first: a removed device is not listed (design 3.9).
     public var rows: [DeviceRow] { state.rows.filter(\.active) }
 
