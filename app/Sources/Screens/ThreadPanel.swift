@@ -10,8 +10,11 @@ struct ThreadPanel: View {
     let icons: [Data: NSImage]
     let thread: MessageThread
     let close: () -> Void
+    /// This thread's composer; nil where the window has no pairing.
+    var composer: ComposerModel?
 
     var body: some View {
+        let queued = thread.queued
         VStack(spacing: 0) {
             HStack(spacing: PardnerMetrics.gap) {
                 Text("Thread").font(PardnerFont.ui(size: 15, weight: .semibold))
@@ -28,27 +31,32 @@ struct ThreadPanel: View {
             Divider().overlay(PardnerColor.line)
             ScrollView {
                 VStack(alignment: .leading, spacing: PardnerMetrics.gap * 2) {
-                    if let root = thread.root { MessageRow(model: model, icons: icons, message: root) }
+                    if let root = thread.root { MessageRow(model: model, icons: icons, message: root, queued: queued.contains(root.ref)) }
                     ForEach(Array(thread.items.enumerated()), id: \.offset) { _, item in
                         switch item {
-                        case .message(let m): entry(m)
+                        case .message(let m): entry(m, queued: queued)
                         case .answer(let a): AnswerRow(model: model, icons: icons, answer: a)
                         }
                     }
+                    if let composer { PendingRows(model: composer) }
                 }
                 .padding(PardnerMetrics.gap * 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let composer {
+                Divider().overlay(PardnerColor.line)
+                ComposerView(model: composer)
             }
         }
         .background(PardnerColor.panel)
     }
 
     @ViewBuilder
-    private func entry(_ m: Message) -> some View {
+    private func entry(_ m: Message, queued: Set<MessageRef>) -> some View {
         if case .request(let title, _, _) = m.body {
             RequestRow(title: title, status: thread.requests[m.ref] ?? .open)
         } else {
-            MessageRow(model: model, icons: icons, message: m)
+            MessageRow(model: model, icons: icons, message: m, queued: queued.contains(m.ref))
         }
     }
 }

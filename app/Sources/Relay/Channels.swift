@@ -64,10 +64,12 @@ public struct OutboxItemRow: Sendable, Equatable {
     public let kind: Int
     public let to: Data?
     public let re: MessageReference?
+    /// The body's JSON as the owner's message carries it: held in memory to draw the message until it is read back.
+    public let content: String
     public let state: OutboxItemState
 
-    package init(name: Data, kind: Int, to: Data?, re: MessageReference?, state: OutboxItemState) {
-        (self.name, self.kind, self.to, self.re, self.state) = (name, kind, to, re, state)
+    package init(name: Data, kind: Int, to: Data?, re: MessageReference?, content: String, state: OutboxItemState) {
+        (self.name, self.kind, self.to, self.re, self.content, self.state) = (name, kind, to, re, content, state)
     }
 }
 
@@ -96,6 +98,9 @@ public struct ChannelsState: Sendable, Equatable {
     public var outboxes: [Data: [OutboxItemRow]] = [:]
     public var refusal: CreationRefusal?
     public var faulted: Set<Data> = []
+    /// The items each channel's outbox dropped as refused, kept until the screen acknowledges them: an `outbox` effect tells a refused item once
+    /// and the next one replaces the list, so a screen that reads only the newest state would miss it.
+    public var undelivered: [Data: [OutboxItemRow]] = [:]
 
     public init() {}
 }

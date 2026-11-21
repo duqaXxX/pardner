@@ -21,6 +21,8 @@ export interface OutboxView {
   kind: number;
   to: Bytes | undefined;
   re: Reference | undefined;
+  /** The text the owner wrote, as the body's JSON: held in memory by a screen, on disk already in the outbox. */
+  content: string;
   state: "waiting" | "sent" | "refused";
 }
 

@@ -257,4 +257,24 @@ extension ConversationTests {
         let order = w.c.sessions.map(\.key)
         XCTAssertEqual(order, [x.hex, y.hex].sorted())
     }
+
+    func testAPromptIsQueuedWhileAnEarlierPromptOfTheThreadRuns() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "one"], to: w.bot)
+        let thread = root.hex
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        let second = w.deliver(kind: 2, from: w.alice, json: ["text": "two", "thread": thread], to: w.bot)
+        let third = w.deliver(kind: 2, from: w.alice, json: ["text": "three", "thread": thread], to: w.bot)
+        XCTAssertFalse(w.c.threads[thread]!.queued.contains(root), "the one that runs is not queued")
+        XCTAssertTrue(w.c.threads[thread]!.queued.contains(second))
+        XCTAssertTrue(w.c.threads[thread]!.queued.contains(third))
+        w.deliver(kind: 3, from: w.bot, json: [:], re: second) // the bot starts every prompt it reads, a queued one too
+        XCTAssertEqual(w.c.threads[thread]?.prompts[second], .running)
+        XCTAssertTrue(w.c.threads[thread]!.queued.contains(second), "running by its start, still behind the root")
+        w.deliver(kind: 5, from: w.bot, json: ["thread": thread, "markdown": "done one"], re: root)
+        XCTAssertFalse(w.c.threads[thread]!.queued.contains(second), "the earlier prompt ended on its answer")
+        XCTAssertTrue(w.c.threads[thread]!.queued.contains(third), "now behind the second, which runs")
+        w.deliver(kind: 7, from: w.bot, json: [:], re: second)
+        XCTAssertFalse(w.c.threads[thread]!.queued.contains(third), "nothing before it runs any more")
+    }
 }

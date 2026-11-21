@@ -972,6 +972,17 @@ test("new channel 3.3 send queues and writes first, builds in the open epoch and
   assert.deepEqual(told?.items[0]?.name, sent.name);
 });
 
+test("new channel 3.3 the outbox effect carries each item's content, so a screen can draw the text after a restart", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const draft = draftTo(s);
+  const sent = post(r, s.channel, draft);
+  const told = fxOf(sent.effects, "outbox")[0];
+  assert.equal(told?.items[0]?.content, draft.content);
+});
+
 test("new channel 3.3 send refuses a draft the package refuses, a channel it does not hold, and a faulted channel", () => {
   const s = scene();
   s.epoch();

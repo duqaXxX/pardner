@@ -423,6 +423,13 @@ public actor PairingController {
         return try await link.send(channel: channel, draft: draft)
     }
 
+    /// The screen took these refused items of `channel` (`ChannelsState.undelivered`): they are not kept any longer.
+    public func acknowledgeUndelivered(channel: Data, names: Set<Data>) {
+        guard let kept = channels.undelivered[channel] else { return }
+        let rest = kept.filter { !names.contains($0.name) }
+        channels.undelivered[channel] = rest.isEmpty ? nil : rest
+    }
+
     /// Ends the connection and declines a sheet on screen: the app is quitting. Nothing is erased.
     public func shutdown() async {
         cancelRequested = true
@@ -494,9 +501,16 @@ public actor PairingController {
             guard let name = item["name"]?.bytesValue, let kind = item["kind"]?.numberValue,
                   let state = item["state"]?.stringValue.flatMap(OutboxItemState.init(rawValue:)) else { return nil }
             let re = item["re"].flatMap { r in r["device"]?.bytesValue.flatMap { d in r["name"]?.bytesValue.map { MessageReference(device: d, name: $0) } } }
-            return OutboxItemRow(name: name, kind: Int(kind), to: item["to"]?.bytesValue, re: re, state: state)
+            return OutboxItemRow(name: name, kind: Int(kind), to: item["to"]?.bytesValue, re: re, content: item["content"]?.stringValue ?? "", state: state)
         }
         channels.outboxes[channel] = rows.isEmpty ? nil : rows
+        var kept = channels.undelivered[channel] ?? []
+        let known = Set(kept.map(\.name))
+        let refused = rows.filter { $0.state == .refused && !known.contains($0.name) }
+        if !refused.isEmpty {
+            kept += refused
+            channels.undelivered[channel] = kept
+        }
     }
 
     private func creationRefused(_ effect: HostValue) {
@@ -600,7 +614,10 @@ public actor PairingController {
     /// The connection ended and its store given back, so the link's files can be erased.
     func stopConnection() async {
         connectionID += 1
-        channels = ChannelsState() // what an ended connection told is not the next one's
+        // What an ended connection told is not the next one's, except the refusals the screen has not taken: a stop must not lose them (`eraseAll` does).
+        let untaken = channels.undelivered
+        channels = ChannelsState()
+        channels.undelivered = untaken
         eventTask?.cancel()
         eventTask = nil
         let ended = link

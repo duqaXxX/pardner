@@ -57,7 +57,16 @@ public final class ChannelsModel {
         }
     }
 
-    func apply(_ next: ChannelsState) { state = next }
+    /// The composers learn each channel's outbox from the same state (they keep the rows a later state no longer lists).
+    @ObservationIgnored weak var composers: Composers?
+
+    func apply(_ next: ChannelsState) {
+        state = next
+        composers?.take(next)
+        // The composers hold what was refused now: the controller need not keep it.
+        guard let controller else { return }
+        for (channel, rows) in next.undelivered { Task { await controller.acknowledgeUndelivered(channel: channel, names: Set(rows.map(\.name))) } }
+    }
 
     /// The pairing ended: the sheet and its fields go.
     func reset() {
@@ -71,11 +80,7 @@ public final class ChannelsModel {
     public var ready: Bool { devices.ready }
 
     /// The person's active bots by profile name, the id breaking a tie: two bots may share a name.
-    public func choices(names: [Data: String]) -> [BotChoice] {
-        devices.state.rows.filter { $0.kind == .bot && $0.active }
-            .map { BotChoice(id: $0.id, name: names[$0.id] ?? Naming.short($0.id)) }
-            .sorted { $0.name != $1.name ? $0.name < $1.name : $0.id.lexicographicallyPrecedes($1.id) }
-    }
+    public func choices(names: [Data: String]) -> [BotChoice] { devices.activeBots(names: names) }
 
     /// The picker shows only when there is a choice: two or more active bots.
     public func showsBotPicker(names: [Data: String]) -> Bool { choices(names: names).count >= 2 }

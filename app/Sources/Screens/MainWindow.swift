@@ -11,12 +11,13 @@ public struct LiveMainWindow: View {
     let conversation: ConversationModel
     let devices: DevicesModel
     let channels: ChannelsModel
+    let composers: Composers
 
-    public init(conversation: ConversationModel, devices: DevicesModel, channels: ChannelsModel) {
-        (self.conversation, self.devices, self.channels) = (conversation, devices, channels)
+    public init(conversation: ConversationModel, devices: DevicesModel, channels: ChannelsModel, composers: Composers) {
+        (self.conversation, self.devices, self.channels, self.composers) = (conversation, devices, channels, composers)
     }
 
-    public var body: some View { MainWindow(model: conversation.reading, devices: devices, channels: channels) }
+    public var body: some View { MainWindow(model: conversation.reading, devices: devices, channels: channels, composers: composers) }
 }
 
 /// The window's content for a reading model; `channel` and `thread` start the selection.
@@ -26,6 +27,8 @@ public struct MainWindow: View {
     let devices: DevicesModel?
     /// The channel acts' model; nil in the samples, which have no pairing.
     let channels: ChannelsModel?
+    /// The composers; nil in the samples.
+    let composers: Composers?
     @State private var channel: Data?
     @State private var thread: String?
     @State private var tab: Tab = .conversation
@@ -33,10 +36,11 @@ public struct MainWindow: View {
     enum Tab: String, CaseIterable { case conversation = "Conversation", sessions = "Sessions" }
 
     /// The window over `model`, with a channel and a thread open when given.
-    public init(model: ReadingModel, devices: DevicesModel? = nil, channels: ChannelsModel? = nil, channel: Data? = nil, thread: String? = nil) {
+    public init(model: ReadingModel, devices: DevicesModel? = nil, channels: ChannelsModel? = nil, composers: Composers? = nil, channel: Data? = nil, thread: String? = nil) {
         self.model = model
         self.devices = devices
         self.channels = channels
+        self.composers = composers
         _channel = State(initialValue: channel)
         _thread = State(initialValue: thread)
     }
@@ -62,11 +66,11 @@ public struct MainWindow: View {
                 .frame(width: 248)
             Divider().overlay(PardnerColor.line)
             if let c = shown {
-                ChannelView(model: model, icons: icons, channel: c, channels: channels, tab: $tab, thread: $thread)
+                ChannelView(model: model, icons: icons, channel: c, channels: channels, composers: composers, tab: $tab, thread: $thread)
                     .frame(minWidth: 420, maxWidth: .infinity)
                 if let key = thread, let t = c.threads[key] {
                     Divider().overlay(PardnerColor.line)
-                    ThreadPanel(model: model, icons: icons, thread: t, close: { thread = nil })
+                    ThreadPanel(model: model, icons: icons, thread: t, close: { thread = nil }, composer: composers?.composer(channel: c.id, thread: key))
                         .frame(width: 380)
                 }
             } else {
