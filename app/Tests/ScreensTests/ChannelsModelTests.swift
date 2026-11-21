@@ -204,7 +204,7 @@ final class ChannelsModelTests: XCTestCase {
         let model = ChannelsModel(devices: devices(), sheet: .create, folder: "/w")
         model.finishFailure(Boom())
         XCTAssertEqual(model.sheet, .create)
-        XCTAssertEqual(model.problem, "Pardner could not do this: the link broke.")
+        XCTAssertEqual(model.problem, "Pardner could not do this: the link broke. Try again.")
     }
 
     // MARK: Bind to a folder… preselects the channel's bot

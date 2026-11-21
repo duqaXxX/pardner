@@ -77,7 +77,8 @@ final class PairingModelTests: XCTestCase {
         model.finishJoin(PairingInputError.notReady, unpaired: true)
         XCTAssertNotNil(model.problem)
         model.finishJoin(CocoaError(.fileWriteUnknown), unpaired: true)
-        XCTAssertTrue(model.problem?.hasPrefix("Joining failed") == true)
+        XCTAssertTrue(model.problem?.hasPrefix("Joining could not finish: ") == true)
+        XCTAssertTrue(model.problem?.hasSuffix(". Check the three values and try again.") == true, "the reason, then the next step")
         model.edited()
         XCTAssertNil(model.refused)
     }

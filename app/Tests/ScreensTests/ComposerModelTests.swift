@@ -69,6 +69,9 @@ final class ComposerModelTests: XCTestCase {
 
     private func type(_ c: ComposerModel, _ text: String) { c.edited(text) }
 
+    /// Types `keys` one at a time after what the field holds, as the field hands each change over.
+    private func press(_ c: ComposerModel, _ keys: String) { for key in keys { c.edited(c.text + String(key)) } }
+
     private func send(_ c: ComposerModel, _ text: String) async {
         c.edited(text)
         await c.submit()?.value
@@ -167,6 +170,105 @@ final class ComposerModelTests: XCTestCase {
         c.pick(mini)
         await send(c, "!ls")
         XCTAssertEqual(sent.last?.1.kind, 2)
+    }
+
+    /// `studio` read as "alpha", `mini` as "Mini Dev", and a third bot known only by its pairing string's label "zeta".
+    private func named() -> ComposerModel {
+        var m = ReadingModel()
+        m.take(profile: .object(["do": .string("profile"), "bot": .bytes(studio), "profile": .object(["name": .string("alpha")])]))
+        m.take(profile: .object(["do": .string("profile"), "bot": .bytes(mini), "profile": .object(["name": .string("Mini Dev")])]))
+        var s = devices().state
+        s.rows.append(DeviceRow(id: Self.id(5), kind: .bot, label: "zeta", shortForm: "", adder: .none, position: 5, active: true, isThisMac: false, seenAt: nil,
+                                onlyHolderEpochs: 0, addedWhileRemoving: false))
+        return composer(reading: m, devices: DevicesModel(state: s))
+    }
+
+    func testTheBotListFiltersAsThePersonTypes() {
+        let c = named()
+        type(c, "@")
+        XCTAssertEqual(c.matches().map(\.name), ["alpha", "Mini Dev", "zeta"])
+        type(c, "@MI")
+        XCTAssertTrue(c.picking)
+        XCTAssertEqual(c.matches().map(\.name), ["Mini Dev"], "case-insensitive")
+        type(c, "@e")
+        XCTAssertEqual(c.matches().map(\.name), ["Mini Dev", "zeta"], "no name starts with e: the names it is inside")
+        type(c, "@a")
+        XCTAssertEqual(c.matches().map(\.name), ["alpha", "zeta"], "the names it starts first, then the names it is inside")
+        type(c, "@mini d")
+        XCTAssertTrue(c.picking, "a space inside a name keeps the list open")
+        XCTAssertEqual(c.matches().map(\.name), ["Mini Dev"])
+        type(c, "@nobody")
+        XCTAssertFalse(c.picking, "a name that is no bot's stays text")
+        XCTAssertNil(c.label)
+        type(c, "@ze")
+        c.movePick(5)
+        XCTAssertEqual(c.pickIndex, 0, "the arrows stay inside the filtered list")
+        XCTAssertTrue(c.pickHighlighted(), "Tab picks, as Return does")
+        XCTAssertEqual(c.label, Self.id(5))
+        XCTAssertEqual(c.text, "")
+        XCTAssertEqual(c.name(of: Self.id(5)), "\u{201C}zeta\u{201D}", "a label is drawn in quotes, a claim")
+        XCTAssertEqual(c.choices().first { $0.id == Self.id(5) }?.shown, "\u{201C}zeta\u{201D}")
+    }
+
+    func testATypedNameAndASpaceBecomeTheLabel() {
+        let c = named()
+        type(c, "@mini dev fix the test")
+        XCTAssertEqual(c.label, mini, "the longest name wins")
+        XCTAssertEqual(c.text, "fix the test", "the rest stays as the text")
+        XCTAssertFalse(c.picking)
+        type(c, "@alpha again")
+        XCTAssertEqual(c.label, mini, "one label per message: a second @name is text")
+        XCTAssertEqual(c.text, "@alpha again")
+        let d = named()
+        type(d, "@ZETA\tgo")
+        XCTAssertEqual(d.label, Self.id(5), "a label's name, any case, any whitespace after it")
+        XCTAssertEqual(d.text, "go")
+        let e = named()
+        type(e, "@alphabet soup")
+        XCTAssertNil(e.label, "a name is whole: alphabet is not alpha")
+        XCTAssertEqual(e.text, "@alphabet soup")
+        let twins = [ChannelsModel.BotChoice(id: mini, name: "twin"), ChannelsModel.BotChoice(id: studio, name: "Twin")]
+        XCTAssertNil(ComposerModel.mention(in: "@twin hi", bots: twins), "two bots of one name: no label")
+        let r = reading()
+        let thread = composer(thread: r.mine, reading: r.0)
+        type(thread, "@alpha hi")
+        XCTAssertNil(thread.label, "in a thread @ is plain text")
+    }
+
+    func testANameThatStartsALongerOneWaitsForTheNextKey() {
+        var m = ReadingModel()
+        m.take(profile: .object(["do": .string("profile"), "bot": .bytes(studio), "profile": .object(["name": .string("mini")])]))
+        m.take(profile: .object(["do": .string("profile"), "bot": .bytes(mini), "profile": .object(["name": .string("mini dev")])]))
+        let c = composer(reading: m)
+        press(c, "@mini dev fix it")
+        XCTAssertEqual(c.label, mini, "typed key by key, `mini dev` is reached: the space after `mini` is still the start of a longer name")
+        XCTAssertEqual(c.text, "fix it")
+        let d = composer(reading: m)
+        press(d, "@mini hello")
+        XCTAssertEqual(d.label, studio, "`mini` alone, once the next key leaves no longer name")
+        XCTAssertEqual(d.text, "hello")
+    }
+
+    func testEscapeKeepsATypedNameAsText() {
+        let c = named()
+        type(c, "@al")
+        c.closePicker()
+        press(c, "pha is down again")
+        XCTAssertNil(c.label, "after Escape the @name is text for people")
+        XCTAssertEqual(c.text, "@alpha is down again")
+    }
+
+    func testEscapeKeepsTheListClosedUntilTheAtGoes() {
+        let c = named()
+        type(c, "@m")
+        c.closePicker()
+        XCTAssertFalse(c.picking)
+        type(c, "@mi")
+        XCTAssertFalse(c.picking, "typing on after Escape does not reopen it")
+        XCTAssertFalse(c.returnPressed(shift: true, marked: false))
+        type(c, "")
+        type(c, "@")
+        XCTAssertTrue(c.picking, "a new @ opens it again")
     }
 
     func testTheLabelListsActiveBotsByNameAndBackspaceRemovesTheLabel() {

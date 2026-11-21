@@ -65,6 +65,7 @@
 			buildPhases = (
 				A10000000000000000000008 /* Sources */,
 				A10000000000000000000006 /* Frameworks */,
+				A10000000000000000000026 /* Join the protocol script */,
 			);
 			buildRules = (
 			);
@@ -115,6 +116,30 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A10000000000000000000026 /* Join the protocol script */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../.github/scripts/join-protocol.mjs",
+			);
+			name = "Join the protocol script";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/protocol.js",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\n# The protocol package joined into one script (protocol-package design, 2.3), which ProtocolHost loads\n# from the bundle by name. The phase runs on every build: tsc reads all of src/protocol/, which no input\n# list here could keep up with.\nnode=\"${NODE_BINARY:-$(command -v node || true)}\"\nif [ -z \"$node\" ]; then\n  echo \"error: Node is not on the build's PATH. Set NODE_BINARY to the node binary, then build again.\"\n  exit 1\nfi\n\"$node\" \"$SRCROOT/../.github/scripts/join-protocol.mjs\" \"$SCRIPT_OUTPUT_FILE_0\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		A10000000000000000000008 /* Sources */ = {

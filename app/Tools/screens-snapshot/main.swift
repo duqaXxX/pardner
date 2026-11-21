@@ -197,6 +197,15 @@ MainActor.assumeIsolated {
             try render(appearance, PairingScreen(model: PairingModel(phase: .joining(joining))), size: page, to: "joining-\(theme).png")
             try render(appearance, PairingScreen(model: PairingModel(phase: .settingUp, join: true)), size: page, to: "setting-up-join-\(theme).png")
             try render(appearance, MainWindow(model: ReadingModel(), devices: DevicesModel()), size: NSSize(width: 1280, height: 800), to: "window-empty-\(theme).png")
+            // The device list read: with no bot the window says to add one; with a bot whose profile no channel carries yet, it lists the
+            // bot by its label and says to make a channel.
+            var macOnly = sampleDevices()
+            macOnly.rows = macOnly.rows.filter { $0.kind == .app }
+            try render(appearance, MainWindow(model: ReadingModel(), devices: DevicesModel(state: macOnly)), size: NSSize(width: 1280, height: 800), to: "window-empty-no-bot-\(theme).png")
+            var withBot = macOnly
+            withBot.rows.append(DeviceRow(id: Data(repeating: 0x2b, count: 32), kind: .bot, label: "mini-dev", shortForm: "", adder: .none, position: 2, active: true,
+                                           isThisMac: false, seenAt: nil, onlyHolderEpochs: 0, addedWhileRemoving: false))
+            try render(appearance, MainWindow(model: ReadingModel(), devices: DevicesModel(state: withBot)), size: NSSize(width: 1280, height: 800), to: "window-empty-bot-\(theme).png")
             var waiting = joining
             waiting.waiting = true
             try render(appearance, PairingScreen(model: PairingModel(phase: .joining(waiting))), size: page, to: "joining-waits-\(theme).png")

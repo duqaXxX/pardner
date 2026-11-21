@@ -199,6 +199,32 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Every error the app shows is a sentence: what failed, the reason in words, and the next step (`Setup could not finish: the disk
+  could not be read or written. Check the relay's values and try again.`). A case name, a raw description or a bridged system
+  message alone is never shown; an error that only one step fixes gives that step (a build with no protocol script says to install
+  Pardner again). `Problem.reason` and `Problem.sentence` word every error on its way to a screen, and a test fails on a screen or
+  controller line that puts a raw error into a text. Setup showed `Setup failed: scriptUnavailable`.
+- The app's `@` list filters as the person types: a leading `@` opens it, what follows narrows it (case-insensitive, the names that
+  start with it first, then the names that contain it), the arrows move, Return or Tab picks and Escape closes it until the `@` goes.
+  A bot's whole name typed after the `@` and followed by a space becomes the label, the rest staying as the text; a name that is no
+  bot's, or that two bots share, stays text. The list showed every bot only for an `@` typed alone, and a typed `@name` was text.
+  A bot known only by its pairing string's label is drawn in quotes in the `@` list and the New channel sheet, as in the sidebar.
+- An answered request's card says what was answered: `Allowed` or `Denied`, the chosen options and the Other text after `Answered:`,
+  `Skipped`, `Ran` or `Not run`, `Sent anyway` or `Not sent`, `Sent here` or `Not sent`, from the owner's reply the bot took (and
+  from the reply on its way before that). A setup keeps the bot's own `Set: …`; a request the bot settled with no reply of the
+  owner's says `Answered`. The reading model keeps that reply's body per request (`MessageThread.answers`).
+- The app's sidebar lists every active bot from the device list: by its profile's name and account once a channel carries the
+  profile, until then by the label its pairing string gave (in quotes) or its short id, with `Not seen yet`. It listed only bots
+  whose profile a channel carried, so a bot just added did not show. The New channel sheet and the `@` list name and order the
+  bots the same way, by name as Finder sorts.
+- The app's empty window says what to do next: `Make one with + beside Channels: it binds a folder on your bot's machine.`, or,
+  with no bot, to add one from Devices. It said channels came with a later version.
+- The app's first screen names its two ways in by the person's situation, `This is my first device` and `I already use Pardner on
+  another device`, each with a line on what it does and what it needs; the forms are titled `Your first device` and `Add this Mac to
+  your devices`. Devices… in the sidebar is a button with an icon, and every button, menu and clickable row shows the pointing hand.
+- The built app holds its protocol script: a build phase of the Xcode project joins `src/protocol/` into
+  `Contents/Resources/protocol.js` on every build, with the Node on the build's `PATH` or the one `NODE_BINARY` names. Without it
+  the app's first screen failed with `scriptUnavailable` and paired nothing. CI fails when the built app lacks the file.
 - A relay connection whose store write failed delivered the next incarnation without `changed`, and the next first
   rest without `first`, so what resets on them (the bot's reader, outbox and profile writer) did not: `Link` now
   reads those flags from the incarnation its store confirmed and from the rests it delivered, not from the reading,

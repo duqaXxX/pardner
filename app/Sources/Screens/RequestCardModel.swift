@@ -126,6 +126,37 @@ public final class RequestCardModel {
         }
     }
 
+    /// What an ended card says: the owner's answer while it goes to the bot and once the bot took it, else the status's words. A setup the
+    /// bot took is rewritten by the bot itself (`Set: …`).
+    public var endedWords: String {
+        guard status == .replied || status == .answered, let owner, let json = thread?.answers[request.ref] else { return status.words }
+        return Self.words(answer: json, to: owner) ?? status.words
+    }
+
+    /// The answer a reply's body (`{answer}`) gives, in the words of the button that sent it; nil for a setup and a body it cannot read.
+    static func words(answer json: String, to owner: OwnerRequest) -> String? {
+        guard let reply = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any], let body = reply["answer"] as? [String: Any] else { return nil }
+        func either(_ key: String, _ yes: String, _ no: String) -> String? { (body[key] as? Bool).map { $0 ? yes : no } }
+        switch owner {
+        case .setup: return nil
+        case .permission: return either("allow", "Allowed", "Denied")
+        case .shell: return either("run", "Ran", "Not run")
+        case .hold: return either("send", "Sent anyway", "Not sent")
+        case .terminal: return either("go", "Sent here", "Not sent")
+        case .question(let asked):
+            if body["answers"] is NSNull { return "Skipped" }
+            guard let answers = body["answers"] as? [String: Any] else { return nil }
+            let each = asked.compactMap { question -> String? in
+                switch answers[question.text] {
+                case let one as String: one
+                case let many as [String]: many.joined(separator: ", ")
+                default: nil
+                }
+            }
+            return each.isEmpty ? nil : "Answered: " + each.joined(separator: "; ")
+        }
+    }
+
     /// The input of a permission, or its plan in place of it, cut at `limit` characters unless `showAll`.
     public var shownText: (text: String, cut: Bool)? {
         guard case .permission(let p)? = owner else { return nil }

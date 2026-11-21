@@ -86,7 +86,7 @@ extension PairingController {
                 }
             }
         } catch {
-            return .failure(.failed("\(error)"))
+            return .failure(.failed(Problem.reason(error)))
         }
     }
 
@@ -120,7 +120,7 @@ extension PairingController {
                     publish()
                 }
             } catch {
-                return .failed("\(error)")
+                return .failed(Problem.reason(error))
             }
             await submitPending(kind: read.kind, device: read.device)
             publish()
@@ -327,7 +327,8 @@ extension PairingController {
                 guard !cancelRequested else { return await abandon() }
                 try await startConnection(state, enrolment: nil)
             } catch {
-                phase = .fault(.failed, "\(error)") // `joining` is on disk: Retry resumes it
+                // `joining` is on disk: Retry resumes it
+                phase = .fault(.failed, Problem.sentence("Pardner could not connect to the relay", error, next: "Retry: joining goes on where it stopped."))
                 throw error
             }
             guard !isShutDown else { return }
@@ -384,7 +385,7 @@ extension PairingController {
         do {
             try pairing.write(state)
         } catch {
-            phase = .fault(.failed, "\(error)")
+            phase = .fault(.failed, Problem.sentence("Pardner could not save the pairing", error, next: PairingPhase.retryAdvice))
             return false
         }
         stored = state

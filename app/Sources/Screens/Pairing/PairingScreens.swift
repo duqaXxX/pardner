@@ -124,7 +124,7 @@ struct FirstScreen: View {
 
     var body: some View {
         Page(title: "Pardner needs a relay of your own") {
-            Text("The relay is a small server you run yourself. It carries your messages, encrypted, between your devices and your bots. Pair this Mac with a new relay to start.")
+            Text("The relay is a small server you run yourself. It carries your messages, encrypted, between your devices and your bots.")
                 .foregroundStyle(PardnerColor.muted)
             if note == .staleSheet {
                 Text("The recovery key from the attempt that stopped opens nothing: its secret lived in memory only. Setting up again makes a new key.")
@@ -132,14 +132,30 @@ struct FirstScreen: View {
                     .background(PardnerColor.agentSoft, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
                     .foregroundStyle(PardnerColor.agentText)
             }
-            Text("Already paired another device? Join as a new device with the three values its Add a device screen shows.")
-                .foregroundStyle(PardnerColor.muted)
-            HStack {
-                Button("Set up a new relay") { model.showForm = true }
-                    .buttonStyle(PardnerButton(prominent: true)).accessibilityLabel("Set up a new relay")
-                Button("Join as a new device") { model.openJoin() }
-                    .buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Join as a new device")
+            Choice(title: "This is my first device", prominent: true,
+                   line: "For a relay just made with pardner relay init. This Mac becomes your first device and makes your recovery key. You need the relay's address, key and enrolment secret.") {
+                model.showForm = true
             }
+            Choice(title: "I already use Pardner on another device", prominent: false,
+                   line: "Your other device approves this Mac. You need the three values its Devices screen shows under Add a device.") {
+                model.openJoin()
+            }
+        }
+    }
+
+    /// One way in: the button, and under it what it does and what it needs.
+    struct Choice: View {
+        let title: String
+        let prominent: Bool
+        let line: String
+        let action: () -> Void
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 6) {
+                Button(title, action: action).buttonStyle(PardnerButton(prominent: prominent))
+                Text(line).font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.muted).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, PardnerMetrics.gap)
         }
     }
 }
@@ -148,7 +164,7 @@ struct RelayForm: View {
     @Bindable var model: PairingModel
 
     var body: some View {
-        Page(title: "Pair this Mac with your relay", showsMark: false) {
+        Page(title: "Your first device", showsMark: false) {
             Field(title: "Relay address", hint: "The address pardner relay serve listens on, as host:port.",
                   error: model.refused == .address ? "Enter host:port, with a port from 1 to 65535. No scheme, no path." : nil) {
                 TextField("relay.example.net:7443", text: $model.address).accessibilityLabel("Relay address")
@@ -184,8 +200,8 @@ struct JoinForm: View {
     @Bindable var model: PairingModel
 
     var body: some View {
-        Page(title: "Join as a new device", showsMark: false) {
-            Field(title: "Relay address", hint: "The first value on the other device's Add a device screen, as host:port.",
+        Page(title: "Add this Mac to your devices", showsMark: false) {
+            Field(title: "Relay address", hint: "The first value your other device shows under Add a device, as host:port.",
                   error: model.refused == .address ? "Enter host:port, with a port from 1 to 65535. No scheme, no path." : nil) {
                 TextField("relay.example.net:7443", text: $model.joinAddress).accessibilityLabel("Relay address")
             }
@@ -337,7 +353,7 @@ struct Enrolling: View {
             .padding(PardnerMetrics.gap * 1.5)
             .background(PardnerColor.agentSoft, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
         case .failed(let message)?:
-            Text("The setup could not be erased: \(message)").foregroundStyle(PardnerColor.delText).font(PardnerFont.ui(size: 13, weight: .regular))
+            Text("The setup could not be erased: \(message). Try again, or quit Pardner and open it again.").foregroundStyle(PardnerColor.delText).font(PardnerFont.ui(size: 13, weight: .regular))
             cancelButton
         }
     }

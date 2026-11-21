@@ -69,7 +69,7 @@ public final class PairingModel {
         return name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// The first screen's Join as a new device: the form opens with this Mac's name, unless the person has typed one.
+    /// The first screen's I already use Pardner on another device: the form opens with this Mac's name, unless the person has typed one.
     public func openJoin() {
         showJoin = true
         if joinName.isEmpty { joinName = Self.fitName(computerName()) }
@@ -98,7 +98,7 @@ public final class PairingModel {
                 keys: try SecureEnclaveKeyStore(), pairing: try PairingStore(folder: PairingStore.defaultFolder()), linkFolder: try LinkStore.defaultFolder())
             return PairingModel(controller: controller)
         } catch {
-            return PairingModel(phase: .fault(.failed, "Pardner's data folders cannot be opened: \(error). Quit Pardner and open it again."), storesOpen: false)
+            return PairingModel(phase: .fault(.failed, Problem.sentence("Pardner's data folders cannot be opened", error, next: "Quit Pardner and open it again.")), storesOpen: false)
         }
     }
 
@@ -228,7 +228,7 @@ public final class PairingModel {
             if error == .notReady { problem = "Setup cannot start now." }
             if error == .enrolmentSecret { enrolmentSecret = "" }
         case let error?:
-            problem = "Setup failed: \(error)"
+            problem = Problem.sentence("Setup could not finish", error, next: "Check the relay's values and try again.")
             enrolmentSecret = ""
         }
         working = false
@@ -259,7 +259,7 @@ public final class PairingModel {
             refused = error
             if error == .notReady { problem = "Joining cannot start now." }
         case let error?:
-            problem = "Joining failed: \(error)"
+            problem = Problem.sentence("Joining could not finish", error, next: "Check the three values and try again.")
         }
         working = false
     }
@@ -294,7 +294,7 @@ public final class PairingModel {
         case .success(false): retypeProblem = "The connection could not take it just now. Try again."
         case .failure(PairingInputError.notReady): retypeProblem = "Pardner is not waiting for the secret now."
         case .failure(is PairingInputError): retypeProblem = "The enrolment secret is 64 hexadecimal characters."
-        case .failure(let error): retypeProblem = "\(error)"
+        case .failure(let error): retypeProblem = Problem.sentence("The secret could not be checked", error, next: "Try again.")
         }
         working = false
     }

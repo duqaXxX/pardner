@@ -81,7 +81,8 @@ public final class ComposerModel {
     public private(set) var text = ""
     /// The bot the channel composer's message is a prompt to; nil sends a text.
     public private(set) var label: Data?
-    public private(set) var picking = false
+    /// Escape closed the bot list: it stays closed until the `@` that opened it goes.
+    private var pickerClosed = false
     public private(set) var pickIndex = 0
     /// What the last key or send refused to do, until the next edit.
     public private(set) var notice: String?
@@ -141,37 +142,81 @@ public final class ComposerModel {
     /// The bots the label offers: the person's active ones, by profile name.
     public func choices() -> [ChannelsModel.BotChoice] { devices.activeBots(names: names) }
 
-    /// The name a label or a row's chip shows for a bot.
-    public func name(of bot: Data) -> String { names[bot] ?? Naming.short(bot) }
+    /// The name a label or a row's chip shows for a bot: as the `@` list draws it while the bot is active.
+    public func name(of bot: Data) -> String { choices().first { $0.id == bot }?.shown ?? names[bot] ?? Naming.short(bot) }
 
     // MARK: the field and its keys
 
-    /// The field's text changed. `@` typed first in an empty channel composer opens the bot list; in a thread it is plain text.
+    /// What follows a leading `@` in a channel composer with no label, while it can still become a bot's name: one word, or the start of a
+    /// name with a space in it. Nil in a thread, where `@` is plain text.
+    private var query: String? {
+        guard thread == nil, label == nil, text.first == "@", !text.contains(where: \.isNewline) else { return nil }
+        let typed = String(text.dropFirst())
+        guard typed.contains(where: \.isWhitespace) else { return typed }
+        return choices().contains { $0.name.lowercased().hasPrefix(typed.lowercased()) } ? typed : nil
+    }
+
+    /// The bot list, open while a leading `@` is typed and some bot's name matches it, until Escape.
+    public var picking: Bool { !pickerClosed && query != nil && !matches().isEmpty }
+
+    /// The bots the list shows for what follows the `@`, case-insensitive: the names it starts first, then the names it is inside.
+    public func matches() -> [ChannelsModel.BotChoice] {
+        let all = choices()
+        guard let typed = query?.lowercased(), !typed.isEmpty else { return all }
+        let starts = all.filter { $0.name.lowercased().hasPrefix(typed) }
+        return starts + all.filter { !$0.name.lowercased().hasPrefix(typed) && $0.name.lowercased().contains(typed) }
+    }
+
+    /// The field's text changed. A leading `@` in a channel composer opens the bot list and filters it as the person types; a bot's whole
+    /// name after the `@`, followed by a space, becomes the label and the rest stays as the text, once what was typed starts no bot's
+    /// name (`@mini ` waits while a bot is named `mini dev`). A name that is no bot's stays text, and so does any after Escape.
     public func edited(_ new: String) {
-        let old = text
         text = new
         notice = nil
-        if thread == nil, label == nil, old.isEmpty, new == "@", !choices().isEmpty {
-            (picking, pickIndex) = (true, 0)
-        } else if picking, new != "@" {
-            picking = false
+        pickIndex = 0
+        if text.first != "@" { pickerClosed = false }
+        let typed = text.dropFirst().lowercased()
+        let startsAName = choices().contains { $0.name.lowercased().hasPrefix(typed) }
+        if thread == nil, label == nil, !pickerClosed, !startsAName, let named = Self.mention(in: text, bots: choices()) {
+            (label, text, pickerClosed) = (named.bot, named.rest, false)
         }
     }
 
-    /// The pick becomes the label in front of the text, and the `@` that asked for the list goes.
+    /// The bot whose whole name follows the leading `@` and a whitespace, with the text after that whitespace; nil when no bot has that
+    /// name or two bots share it. The longest name wins: `@mini dev` is not `@mini` followed by `dev`.
+    static func mention(in text: String, bots: [ChannelsModel.BotChoice]) -> (bot: Data, rest: String)? {
+        guard text.first == "@" else { return nil }
+        let typed = text.dropFirst()
+        for name in Set(bots.map { $0.name.lowercased() }).sorted(by: { $0.count > $1.count }) {
+            guard typed.count > name.count, typed.prefix(name.count).lowercased() == name, typed.dropFirst(name.count).first?.isWhitespace == true else { continue }
+            let named = bots.filter { $0.name.lowercased() == name }
+            return named.count == 1 ? (named[0].id, String(typed.dropFirst(name.count + 1))) : nil
+        }
+        return nil
+    }
+
+    /// The pick becomes the label in front of the text, and the `@` and the name typed after it go.
     public func pick(_ bot: Data) {
         guard picking else { return }
-        (label, text, picking, notice) = (bot, "", false, nil)
+        (label, text, notice, pickerClosed) = (bot, "", nil, false)
     }
 
     /// Arrow keys move through the list, without wrapping.
     public func movePick(_ step: Int) {
         guard picking else { return }
-        pickIndex = min(max(pickIndex + step, 0), max(choices().count - 1, 0))
+        pickIndex = min(max(pickIndex + step, 0), max(matches().count - 1, 0))
     }
 
-    /// Escape closes the list and leaves the `@` as text.
-    public func closePicker() { picking = false }
+    /// Return or Tab while the list is open: the highlighted bot becomes the label. True when the key was taken.
+    public func pickHighlighted() -> Bool {
+        guard picking else { return false }
+        let all = matches()
+        if all.indices.contains(pickIndex) { pick(all[pickIndex].id) }
+        return true
+    }
+
+    /// Escape closes the list and leaves what was typed as text.
+    public func closePicker() { pickerClosed = true }
 
     /// Backspace with the caret at the start of the text removes the label; false when there is none to remove.
     public func backspaceAtStart() -> Bool {
@@ -184,11 +229,7 @@ public final class ComposerModel {
     /// True when the key was taken here.
     public func returnPressed(shift: Bool, marked: Bool) -> Bool {
         if shift || marked { return false }
-        if picking {
-            let all = choices()
-            if all.indices.contains(pickIndex) { pick(all[pickIndex].id) }
-            return true
-        }
+        if pickHighlighted() { return true }
         submit()
         return true
     }
@@ -220,7 +261,7 @@ public final class ComposerModel {
             return nil
         }
         let task = queue(OutboxDraft(kind: bot == nil ? 1 : 2, to: bot, content: content), text: text, restores: true)
-        (text, label, picking, notice) = ("", nil, false, nil)
+        (text, label, notice, pickerClosed) = ("", nil, nil, false)
         return task
     }
 
@@ -244,7 +285,7 @@ public final class ComposerModel {
         let (channel, send) = (channel, send)
         return Task { [weak self] in
             do { self?.finish(id, try await send(channel, draft)) } catch {
-                self?.fail(id, "Pardner could not send the message: \(error.localizedDescription).")
+                self?.fail(id, Problem.sentence("Pardner could not send the message", error, next: "Try again."))
             }
         }
     }
@@ -365,7 +406,8 @@ public final class ComposerModel {
         entry.phase = .failed(line)
         replace(entry)
         if entry.restores, text.isEmpty, label == nil {
-            text = entry.text
+            // A text that starts with `@` comes back as the text it was, the bot list closed.
+            (text, pickerClosed) = (entry.text, true)
             if thread == nil { label = entry.to }
         }
     }

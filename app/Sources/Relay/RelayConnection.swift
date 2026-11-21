@@ -61,7 +61,7 @@ public enum RelayEvent: Sendable {
     case channelFault(HostValue)
     /// A write of the app's outbox failed: nothing is created or sent from here, and the owner ends the connection (new channel design 3.1).
     case storeFailed
-    /// The host faulted: the connection is over for the life of the host, and does not retry.
+    /// The host faulted: the connection is over for the life of the host, and does not retry. The sentence the person is shown.
     case faulted(String)
 }
 
@@ -363,10 +363,8 @@ public final class RelayConnection: @unchecked Sendable {
                 try await handle(event)
                 if final { break }
             }
-        } catch HostError.faulted(let message) {
-            out.yield(.faulted(message))
         } catch {
-            out.yield(.faulted("\(error)"))
+            out.yield(.faulted(Problem.sentence("Pardner stopped its connection", error, next: PairingPhase.retryAdvice)))
         }
         await teardown()
     }

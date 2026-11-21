@@ -15,6 +15,13 @@ public enum RequestStatus: Sendable, Equatable {
     case rewritten(markdown: String)
 }
 
+/// The owner's reply a request's card shows: which reply, its body, whether the bot took it.
+struct OwnerAnswer: Sendable, Equatable {
+    let reply: MessageRef
+    let json: String
+    var taken: Bool
+}
+
 /// Why the bot did not take a reply, and which reply it was.
 struct Refusal: Sendable, Equatable {
     let reply: MessageRef
@@ -25,6 +32,8 @@ struct Refusal: Sendable, Equatable {
 struct ReplyRecord: Sendable, Equatable {
     let request: MessageRef
     let to: Data?
+    /// The reply's body: what the request's card says was answered once the bot takes it.
+    let json: String
 }
 
 /// A session's state, as the Sessions tab shows it.
@@ -69,6 +78,11 @@ public struct MessageThread: Sendable, Equatable {
     public internal(set) var items: [Item] = []
     public internal(set) var prompts: [MessageRef: PromptStatus] = [:]
     public internal(set) var requests: [MessageRef: RequestStatus] = [:]
+    /// The body of the owner's reply each request ended on: the one sent while it waits, then the one the bot took.
+    public var answers: [MessageRef: String] { replied.mapValues(\.json) }
+    // By request: the owner's reply that stands for it, and whether the bot took it. A refusal of that reply, or the bot saying the
+    // request was answered elsewhere before it took one, drops it.
+    var replied: [MessageRef: OwnerAnswer] = [:]
     // Why the bot did not take the last reply to a request, and which reply it was.
     var reasons: [MessageRef: Refusal] = [:]
     /// The time of the newest message of the session's bot: the Sessions tab's order.
@@ -126,7 +140,7 @@ public struct Channel: Sendable, Equatable {
     mutating func fold(_ m: Message) {
         messages.append(m)
         if let re = m.re, let reply = replies[re], let key = threadOf[re], [3, 5, 6, 7].contains(m.kind) {
-            threads[key]?.take(verdict: m, of: re, request: reply.request, to: reply.to)
+            threads[key]?.take(verdict: m, of: re, reply: reply)
             return
         }
         let key: String?
@@ -148,7 +162,9 @@ public struct Channel: Sendable, Equatable {
         threads[key, default: MessageThread(key: key)].own = own
         threads[key]?.take(m)
         // A reply counts for a verdict only from one of the owner's devices, to the session's bot.
-        if case .reply = m.body, let re = m.re, let t = threads[key], t.trusts(m.sender), m.to == t.bot { replies[m.ref] = ReplyRecord(request: re, to: m.to) }
+        if case .reply(_, let json) = m.body, let re = m.re, let t = threads[key], t.trusts(m.sender), m.to == t.bot {
+            replies[m.ref] = ReplyRecord(request: re, to: m.to, json: json)
+        }
     }
 }
 
@@ -190,10 +206,14 @@ extension MessageThread {
             items.append(.message(m))
         case .reply:
             // The owner's reply is no row of the thread: the request's card carries its state.
-            if let re = m.re, requests[re] == .open, trusts(m.sender) { requests[re] = .replied }
+            if case .reply(_, let json) = m.body, let re = m.re, requests[re] == .open, trusts(m.sender) {
+                (requests[re], replied[re]) = (.replied, OwnerAnswer(reply: m.ref, json: json, taken: false))
+            }
         case .edit(let withdrawn, let answered, let markdown) where fromBot:
             guard let re = m.re, requests[re] != nil else { return }
             if withdrawn { if requests[re] != .answered { requests[re] = .withdrawn } } else if answered { requests[re] = .answered } else if let markdown { requests[re] = .rewritten(markdown: markdown) }
+            // Answered elsewhere: a reply of the owner's the bot has not taken does not stand for it.
+            if answered, replied[re]?.taken == false { replied[re] = nil }
         case .text, .unreadable:
             if m.thread != nil { items.append(.message(m)) } // the opening message is the thread's root, not an item
         default:
@@ -204,7 +224,8 @@ extension MessageThread {
 
     /// What the bot says to the reply `reply`, from the bot it was `to` alone: its empty kind 5 means the answer was handed on, whatever the request's
     /// status was (the bot withdraws an accepted request before it writes it); anything else is a reason, and the request waits again.
-    mutating func take(verdict m: Message, of reply: MessageRef, request: MessageRef, to bot: Data?) {
+    mutating func take(verdict m: Message, of ref: MessageRef, reply: ReplyRecord) {
+        let request = reply.request
         guard bot != nil, m.sender == bot, requests[request] != nil else { return }
         lastReply = max(lastReply ?? .distantPast, m.time)
         let reason: String
@@ -215,14 +236,16 @@ extension MessageThread {
             case .open, .replied, .withdrawn: requests[request] = .answered
             default: break
             }
-            reasons[request] = nil
+            (reasons[request], replied[request]) = (nil, OwnerAnswer(reply: ref, json: reply.json, taken: true))
             return
         case .answer(let markdown): reason = markdown
         case .cut: reason = "The bot did not take this answer."
         case .notRead: reason = "The bot could not read this answer."
         default: return // a start is no verdict
         }
-        reasons[request] = Refusal(reply: reply, text: reason)
+        reasons[request] = Refusal(reply: ref, text: reason)
+        // The bot did not take it: it no longer stands for the request, whatever the request's status.
+        if replied[request]?.reply == ref { replied[request] = nil }
         if requests[request] == .replied { requests[request] = .open }
     }
 

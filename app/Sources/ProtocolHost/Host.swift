@@ -7,7 +7,7 @@ import JavaScriptCore
 import Platform
 
 public enum HostError: Error {
-    /// The app bundles no script yet (6.1): the first screen that needs the package adds it.
+    /// The bundle holds no `protocol.js`: the app was built without its join phase.
     case scriptUnavailable
     case faulted(String)
     case foreignHandle

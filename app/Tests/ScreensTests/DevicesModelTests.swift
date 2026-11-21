@@ -1,6 +1,7 @@
 // What the Devices model decides between the controller's states (device pairing design 3.4, 3.6, 3.9): which acts it offers, the add
 // flow's states, the removal's choices and warning, and the words a row carries. Over fixed states and the outcomes the model's own
 // methods take; no controller runs.
+import Conversation
 import Foundation
 import ProtocolHost
 @testable import Relay
@@ -311,5 +312,30 @@ final class DevicesModelTests: XCTestCase {
         XCTAssertEqual(model.pasted, "")
         XCTAssertEqual(model.rows.count, 4, "the controller publishes a change only: the list it last published stays")
         XCTAssertTrue(model.canAdd)
+    }
+
+    // MARK: the sidebar's bots
+
+    func testTheSidebarListsEveryActiveBotFromTheDeviceList() {
+        var s = state()
+        s.rows += [row(6, kind: .bot, label: "Zed", position: 6), row(7, kind: .bot, label: "Gone", position: 7, active: false),
+                   row(8, kind: .bot, label: "Alpha", position: 8)]
+        let model = DevicesModel(state: s)
+        let read = BotProfile(name: "mini", account: "a@example.com", plan: nil, icon: nil)
+        let bots = model.sidebarBots(profiles: [Self.id(8): read])
+        XCTAssertEqual(bots.map(\.id), [Self.id(2), Self.id(8), Self.id(6)],
+                       "by the name shown, as Finder sorts: the bot with neither by its short id, mini (its profile), Zed (its label); a removed bot and the apps are not listed")
+        XCTAssertEqual(bots.map(\.name), model.activeBots(names: [Self.id(8): "mini"]).map(\.name), "the pickers name and order the bots as the sidebar does")
+        XCTAssertEqual(bots.first { $0.id == Self.id(8) }?.profile, read, "a read profile names the bot")
+        XCTAssertEqual(bots.first { $0.id == Self.id(6) }?.label, "Zed")
+        XCTAssertTrue(DevicesModel(state: DevicesState()).sidebarBots(profiles: [Self.id(8): read]).isEmpty, "a profile alone lists no bot before the device list is read")
+    }
+
+    func testTheEmptyWindowSaysTheNextStep() {
+        XCTAssertNil(MainWindow.emptyHint(devicesRead: false, hasBot: false, creating: false), "before the device list is read either line could be false")
+        XCTAssertEqual(MainWindow.emptyHint(devicesRead: true, hasBot: false, creating: false),
+                       "Add your bot first: in Devices…, Add a device takes the pairing string pardner setup printed on the bot's machine.")
+        XCTAssertEqual(MainWindow.emptyHint(devicesRead: true, hasBot: true, creating: false), "Make one with + beside Channels: it binds a folder on your bot's machine.")
+        XCTAssertNil(MainWindow.emptyHint(devicesRead: true, hasBot: true, creating: true), "the sidebar's Creating… row says it")
     }
 }

@@ -181,6 +181,21 @@ the code produces anything else. `npm run golden` writes the files again from th
 so a change to a reply shows as a diff under `test/golden/`: read that diff before committing it,
 since the tests pass on whatever was written last.
 
+### Building the app
+
+The macOS app is the Xcode project `app/Pardner.xcodeproj`; its Swift packages are in `app/`. A
+build phase joins the protocol package (`src/protocol/`) into the app's `protocol.js` with
+`.github/scripts/join-protocol.mjs`, so a build needs `npm ci` first and Node on the build's
+`PATH`. Xcode opened from the Dock does not see a shell's `PATH`: give it the binary as
+`NODE_BINARY` (a build setting, or `NODE_BINARY=$(command -v node)` on the `xcodebuild` line).
+
+```bash
+npm ci
+xcodebuild -project app/Pardner.xcodeproj -scheme Pardner -configuration Release build
+```
+
+`node --test test/protocol/jsc.test.ts` runs the app's Swift suites with the scripts they need.
+
 ### Running your own build
 
 To run the daemon from a clone instead of the version on the npm registry:

@@ -15,8 +15,8 @@ struct RequestCardView: View {
         VStack(alignment: .leading, spacing: PardnerMetrics.gap) {
             Text(verbatim: heading).font(PardnerFont.ui(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
             switch phase {
-            case .ended(let status):
-                Text(status.words).font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.muted).fixedSize(horizontal: false, vertical: true)
+            case .ended:
+                Text(verbatim: card.endedWords).font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.muted).fixedSize(horizontal: false, vertical: true)
             case .asking(let notes):
                 content(enabled: true)
                 buttons(enabled: true)
@@ -72,7 +72,7 @@ struct RequestCardView: View {
             if let description = p.description { line(description, PardnerColor.text) }
             if let shown = card.shownText {
                 mono(shown.text)
-                if shown.cut { Button("Show all") { card.showAll = true }.buttonStyle(.plain).font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.agentText) }
+                if shown.cut { Button("Show all") { card.showAll = true }.buttonStyle(.plain).pointerStyle(.link).font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.agentText) }
             }
         case .question(let asked)?:
             ForEach(Array(asked.enumerated()), id: \.offset) { index, question in questionView(index, question) }
@@ -121,7 +121,7 @@ struct RequestCardView: View {
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.plain).pointerStyle(.link)
             }
             TextField("Other", text: Binding(get: { card.questions.indices.contains(index) ? card.questions[index].other : "" }, set: { card.setOther(question: index, $0) }))
                 .focused($field, equals: index)
