@@ -227,4 +227,133 @@ extension LinkStoreTests {
         store.close()
         XCTAssertThrowsError(try store.claim()) { XCTAssertTrue($0 is StoreClaimed, "\($0)") }
     }
+
+    // MARK: the app outbox (new channel design 4)
+
+    private func bytes(_ n: UInt8, _ count: Int) -> HostValue { .bytes(Data(repeating: n, count: count)) }
+
+    /// A creation, and a channel with a built prompt that answers a message (`to`, `re`, `incarnation`, `built`) and a plain one (all absent).
+    private func outbox() -> HostValue {
+        let built: HostValue = .object(["signed": bytes(4, 90), "signature": bytes(5, 64)])
+        let full: HostValue = .object([
+            "name": bytes(1, 16), "kind": .number(2), "to": id(9), "re": .object(["device": id(8), "name": bytes(7, 16)]),
+            "content": .string("{\"text\":\"/bind /work\"}"), "files": .array([]), "incarnation": bytes(6, 16), "built": built,
+        ])
+        let plain: HostValue = .object(["name": bytes(2, 16), "kind": .number(2), "content": .string("hello"), "files": .array([])])
+        return .object([
+            "pending": .object(["signed": bytes(3, 70), "sig": bytes(3, 64)]),
+            "channels": .array([.object(["channel": id(5), "items": .array([full, plain])])]),
+            "faults": .array([id(6)]),
+        ])
+    }
+
+    private func outboxFile(_ place: URL) -> URL { place.appendingPathComponent("outbox.json") }
+
+    func testNoOutboxFileIsNoOutbox() throws {
+        XCTAssertNil(try LinkStore(folder: folder(), identity: identity).loadOutbox())
+    }
+
+    func testAnOutboxIsGivenBack() throws {
+        let place = folder()
+        var store: LinkStore? = try LinkStore(folder: place, identity: identity)
+        try store!.writeOutbox(outbox())
+        store = nil
+        XCTAssertEqual(try LinkStore(folder: place, identity: identity).loadOutbox(), outbox())
+    }
+
+    func testAnEmptyOutboxIsGivenBackWithItsCreationNull() throws {
+        let place = folder()
+        let empty: HostValue = .object(["pending": .null, "channels": .array([]), "faults": .array([])])
+        var store: LinkStore? = try LinkStore(folder: place, identity: identity)
+        try store!.writeOutbox(empty)
+        store = nil
+        XCTAssertEqual(try LinkStore(folder: place, identity: identity).loadOutbox(), empty)
+    }
+
+    func testTheFileHoldsBase64AndOmitsWhatIsAbsent() throws {
+        let place = folder()
+        let store = try LinkStore(folder: place, identity: identity)
+        try store.writeOutbox(outbox())
+        let file = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: outboxFile(place))) as? [String: Any])
+        XCTAssertEqual(file["version"] as? Int, 1)
+        let pending = try XCTUnwrap(file["pending"] as? [String: Any])
+        XCTAssertEqual(pending["signed"] as? String, Data(repeating: 3, count: 70).base64EncodedString())
+        let channel = try XCTUnwrap((file["channels"] as? [[String: Any]])?.first)
+        let items = try XCTUnwrap(channel["items"] as? [[String: Any]])
+        XCTAssertEqual(Set(items[1].keys), ["name", "kind", "content", "files"], "an absent field is omitted, never null")
+        XCTAssertEqual(file["faults"] as? [String], [Data(repeating: 6, count: 32).base64EncodedString()])
+    }
+
+    func testAnOutboxIsWrittenWholeUnderATemporaryNameWithNoneLeft() throws {
+        let place = folder()
+        let store = try LinkStore(folder: place, identity: identity)
+        try store.writeOutbox(outbox())
+        try store.writeOutbox(.object(["pending": .null, "channels": .array([]), "faults": .array([])]))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: outboxFile(place).path + ".tmp"))
+        XCTAssertEqual(try store.loadOutbox()?["channels"], .array([]), "the second write replaced the first whole")
+        var info = stat()
+        XCTAssertEqual(stat(outboxFile(place).path, &info), 0)
+        XCTAssertEqual(info.st_mode & 0o777, 0o600)
+    }
+
+    func testAnOutboxThatDoesNotReadIsEmpty() throws {
+        for garbage in ["not json", "[]", "{\"version\":2,\"pending\":null,\"channels\":[],\"faults\":[]}",
+                        "{\"version\":1,\"pending\":{\"signed\":\"@@\",\"sig\":\"AA==\"},\"channels\":[],\"faults\":[]}",
+                        "{\"version\":1,\"pending\":null,\"channels\":3,\"faults\":[]}"] {
+            let place = folder()
+            let store = try LinkStore(folder: place, identity: identity)
+            try garbage.write(to: outboxFile(place), atomically: true, encoding: .utf8)
+            XCTAssertNil(try store.loadOutbox(), garbage)
+            try store.writeOutbox(outbox()) // written over by the next write
+            XCTAssertEqual(try store.loadOutbox(), outbox())
+        }
+    }
+
+    func testAnOutboxWriteOfAnotherShapeIsAMismatch() throws {
+        let store = try LinkStore(folder: folder(), identity: identity)
+        for what: HostValue in [.null, .object(["pending": .null, "channels": .string("x"), "faults": .array([])]), .object(["pending": .null])] {
+            XCTAssertThrowsError(try store.writeOutbox(what)) { XCTAssert($0 is LinkStoreMismatch) }
+        }
+    }
+
+    func testAFailedOutboxWriteLeavesTheLastOneWritten() throws {
+        let place = folder()
+        var store: LinkStore? = try LinkStore(folder: place, identity: identity)
+        try store!.writeOutbox(outbox())
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: place.path)
+        let other: HostValue = .object(["pending": .null, "channels": .array([]), "faults": .array([])])
+        XCTAssertThrowsError(try store!.writeOutbox(other))
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: place.path)
+        store = nil
+        XCTAssertEqual(try LinkStore(folder: place, identity: identity).loadOutbox(), outbox())
+    }
+
+    func testEraseRemovesTheOutboxWithTheLink() throws {
+        let place = folder()
+        var store: LinkStore? = try LinkStore(folder: place, identity: identity)
+        try write(store!, kept(from: 0, [id(1)], n: 1))
+        try store!.writeOutbox(outbox())
+        store = nil
+        try LinkStore.erase(folder: place)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: outboxFile(place).path))
+        XCTAssertNil(try LinkStore(folder: place, identity: identity).loadOutbox())
+    }
+
+    func testAnOutboxOfAnotherPairingIsNotLoaded() throws {
+        let place = folder()
+        var store: LinkStore? = try LinkStore(folder: place, identity: identity)
+        try store!.writeOutbox(outbox())
+        store = nil
+        let other = LinkIdentity(signing: identity.signing, receiving: identity.receiving, relay: Data(repeating: 7, count: 65))
+        XCTAssertNil(try LinkStore(folder: place, identity: other).loadOutbox(), "the creation and the prompts of another pairing are not this one's")
+        XCTAssertEqual(try LinkStore(folder: place, identity: identity).loadOutbox(), outbox(), "and its own is still read")
+    }
+
+    func testEraseLeavesNoTemporaryFile() throws {
+        let place = folder()
+        try LinkStore(folder: place, identity: identity).close()
+        for name in ["link.json.tmp", "outbox.json.tmp"] { try Data([1]).write(to: place.appendingPathComponent(name)) }
+        try LinkStore.erase(folder: place)
+        for name in ["link.json.tmp", "outbox.json.tmp"] { XCTAssertFalse(FileManager.default.fileExists(atPath: place.appendingPathComponent(name).path), name) }
+    }
 }

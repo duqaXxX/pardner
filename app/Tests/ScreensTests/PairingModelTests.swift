@@ -244,6 +244,31 @@ final class PairingModelTests: XCTestCase {
         XCTAssertTrue(model.devices.canRemove(list.rows[1]))
     }
 
+    func testTheNewChannelSheetSurvivesAFaultedWriteAndRetryButNotAnUnpairing() {
+        var list = DevicesState()
+        list.rows = [DeviceRow(id: Data(repeating: 2, count: 32), kind: .bot, label: nil, shortForm: "0202-0202-0202-0202", adder: .none, position: 2,
+                               active: true, isThisMac: false, seenAt: nil, onlyHolderEpochs: 0, addedWhileRemoving: false)]
+        let model = PairingModel(phase: .paired, devices: DevicesModel(state: list))
+        model.channels.openNew()
+        model.channels.folder = "/work/app"
+        // A failed write ends the connection with this fault: the sheet and the typed folder wait for Retry and the answer.
+        model.apply(.fault(.failed, "Pardner could not save what it is sending"))
+        model.apply(.paired)
+        model.channels.finishCreate(.notSaved)
+        XCTAssertEqual(model.channels.sheet, .create)
+        XCTAssertEqual(model.channels.folder, "/work/app")
+        XCTAssertEqual(model.channels.problem, "Pardner could not save the new channel. Try again.")
+        for phase: PairingPhase in [.removed, .unpaired(nil)] {
+            model.apply(.paired)
+            model.apply(phase)
+            XCTAssertNil(model.channels.sheet, "\(phase)")
+            XCTAssertEqual(model.channels.folder, "")
+            model.apply(.paired)
+            model.channels.openNew()
+            model.channels.folder = "/work/app"
+        }
+    }
+
     // MARK: the join form
 
     func testTheComputersNameIsCutThenTrimmedAndAnEmptyOneLeavesTheField() {

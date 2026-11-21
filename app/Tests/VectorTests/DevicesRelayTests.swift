@@ -28,7 +28,7 @@ final class DevicesRelayTests: XCTestCase {
         XCTFail(message)
     }
 
-    private func device(_ name: String, script: String, held: Held) throws -> (PairingController, SoftwareKeyStore) {
+    private func device(_ name: String, script: String, held: Held) throws -> (PairingController, SoftwareKeyStore, URL) {
         let keys = SoftwareKeyStore()
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("pardner-devices-relay-\(name)-\(UUID().uuidString)")
         addTeardownBlock { try? FileManager.default.removeItem(at: base) }
@@ -41,15 +41,15 @@ final class DevicesRelayTests: XCTestCase {
                 held.add(connection)
                 return connection
             })
-        return (controller, keys)
+        return (controller, keys, base)
     }
 
     func testASecondDeviceJoinsIsAddedByTheFirstAndIsRemovedByIt() async throws {
         let script = try env("PARDNER_APP_SCRIPT")
         let (port, key, secret) = (try env("PARDNER_RELAY_PORT"), try env("PARDNER_RELAY_PIN"), try env("PARDNER_ENROL_SECRET"))
         let held = Held()
-        let (first, _) = try device("first", script: script, held: held)
-        let (second, secondKeys) = try device("second", script: script, held: held)
+        let (first, _, firstBase) = try device("first", script: script, held: held)
+        let (second, secondKeys, _) = try device("second", script: script, held: held)
 
         // The first device enrols.
         await first.launch()
@@ -93,6 +93,12 @@ final class DevicesRelayTests: XCTestCase {
         XCTAssertNotEqual(secondList.rows.first { $0.isThisMac }?.id, firstList.rows.first { $0.isThisMac }?.id)
         XCTAssertTrue(secondKeys.has("device.sign"), "the second device holds its own keys")
 
+        // The channel calls reach the link through the joined script, and its refusals come back: this device is no bot, and no channel is known.
+        let notABot = try await first.createChannel(bot: added2.id, folder: "/work")
+        XCTAssertEqual(notABot, .refused("bad-input"))
+        let unknown = try await first.send(channel: Data(repeating: 9, count: 32), draft: OutboxDraft(kind: 2, content: "{\"text\":\"hi\"}"))
+        XCTAssertEqual(unknown, .refused("not-member"))
+
         // The first removes the second; the second ends removed, and the act ends on a log read back.
         let choices = await first.removalChoices(clicked: added2.id)
         XCTAssertEqual(choices.map(\.id), [added2.id])
@@ -100,6 +106,41 @@ final class DevicesRelayTests: XCTestCase {
         XCTAssertNil(refusal)
         await until(90, "the second device is not removed") { await second.phase == .removed }
         await until(60, "the removal did not end") { let list = await first.deviceList; return list.removing.isEmpty && list.rows.first { $0.id == added2.id }?.active == false }
+
+        // A channel with a bot, through the joined script to the disk. The bot is a device of the person that a pairing string adds: the
+        // Node side made it for the person id given here (app-devices.test.ts).
+        let sync = URL(fileURLWithPath: try env("PARDNER_SYNC_DIR"))
+        try values.person.write(to: sync.appendingPathComponent("person.txt"), atomically: true, encoding: .utf8)
+        var botString: String?
+        await until(60, "no pairing string of a bot") { botString = try? String(contentsOf: sync.appendingPathComponent("bot.txt"), encoding: .utf8); return botString != nil }
+        let botShown = await first.inspect(pairingString: try XCTUnwrap(botString))
+        guard case .success(let botCandidate) = botShown else { return XCTFail("the bot's string was refused: \(botShown)") }
+        XCTAssertEqual(botCandidate.kind, .bot)
+        let botAdded = await first.confirmAdd(botCandidate)
+        XCTAssertNil(botAdded)
+        await until(60, "the bot is not in the list") { let list = await first.deviceList; return list.rows.contains { $0.kind == .bot && $0.active } && !list.pendingEntry }
+        let botRows = await first.deviceList.rows
+        let botID = try XCTUnwrap(botRows.first { $0.kind == .bot }?.id)
+        let created = try await first.createChannel(bot: botID, folder: "/work")
+        guard case .created(let channel) = created else { return XCTFail("not created: \(created)") }
+        // Answered after its write: the creation and its bind prompt are on the disk now, with the pairing they belong to.
+        let file = firstBase.appendingPathComponent("link/outbox.json")
+        let stored = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        XCTAssertEqual(stored["version"] as? Int, 1)
+        XCTAssertNotNil(stored["pending"] as? [String: Any], "the creation is stored before it is submitted")
+        let items = (stored["channels"] as? [[String: Any]])?.first { $0["channel"] as? String == channel.base64EncodedString() }?["items"] as? [[String: Any]]
+        XCTAssertEqual(items?.count, 1, "and its bind prompt")
+        await until(60, "the creation is not told") { await first.channels.creating?.channel == channel }
+        // Read back, the creation is dropped and the bind goes once the first epoch is open.
+        await until(90, "the channel is not created at the relay") { let state = await first.channels; return state.creating == nil && state.outboxes.isEmpty }
+
+        // A write the disk refuses: the draft is not saved, the connection ends, and Retry is offered.
+        let link = firstBase.appendingPathComponent("link")
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: link.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: link.path) }
+        let refused = try await first.send(channel: channel, draft: OutboxDraft(kind: 2, to: botID, content: "{\"text\":\"hi\"}"))
+        XCTAssertEqual(refused, .notSaved)
+        await until(30, "the failure is not a fault") { await first.phase == .fault(.failed, PairingPhase.storeFailedAdvice) }
         await first.shutdown()
         await second.shutdown()
     }

@@ -93,6 +93,31 @@ test("the keeper gives the reasons of whyStart a reading shows: no epoch, and ag
   assert.equal(starts(readOf(s), () => clock, 1000 + EPOCH_LIFE_MS)[0]?.why, "aged");
 });
 
+test("the keeper names a rollover for the channels the caller marks, and none for the others", () => {
+  const s = scene();
+  s.epoch();
+  assert.deepEqual(
+    starts(readOf(s), () => undefined, 0),
+    [],
+  );
+  const [start] = starts(
+    readOf(s),
+    () => undefined,
+    0,
+    (c) => bytesEqual(c, s.channel),
+  );
+  assert.equal(start?.why, "rollover");
+  assert.deepEqual(
+    starts(
+      readOf(s),
+      () => undefined,
+      0,
+      () => false,
+    ),
+    [],
+  );
+});
+
 test("the recovery key gets a seal when the epoch's own entry lacks it (a recovery key that replaced another)", () => {
   const s = scene();
   const e1 = s.epoch();

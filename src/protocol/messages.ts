@@ -86,6 +86,8 @@ const KINDS = [
   [0, 0, "bot"],
   [0, 0, "bot"],
 ] as const;
+/** Whether only a bot may send `kind` (6.4's table, sender column): `fits` reads the `to` and `re` columns alone. */
+export const botOnly = (kind: number): boolean => KINDS[kind - 1]?.[2] === "bot";
 /** A sender never seals past this many messages in an epoch (SD 5.7). */
 export const MAX_COUNTER = 100_000;
 const allowed = (rule: number, present: boolean) => rule === 2 || (rule === 1) === present;

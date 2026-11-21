@@ -2,7 +2,9 @@
 // head, the incarnation, a put-back and a fault. No key and no content. Two files: `link-ids`, only
 // appended, and `link.json`, written whole under a temporary name and renamed; its `count` is the truth,
 // so bytes a crash left past it are ignored on load and written over by the next write. A third, `lock`,
-// is held for the life of the process: two writers would zero-extend `link-ids` under each other.
+// is held for the life of the process: two writers would zero-extend `link-ids` under each other. A fourth
+// file, `outbox.json`, holds the app's own outbox (new channel design 4): written whole the same way, with
+// bytes in base64, and read as empty when it does not read.
 import Darwin
 import Foundation
 import os
@@ -26,11 +28,14 @@ public struct LinkStoreMismatch: Error, CustomStringConvertible {
 /// time (`claim`), whose loads and writes come one after another.
 public final class LinkStore: @unchecked Sendable {
     private static let version = 1
+    private static let outboxVersion = 1
     private static let idSize = 32
     private let folder: URL
     /// The pairing this store belongs to.
     public let identity: LinkIdentity
     private var state: State
+    /// For tests, through `@testable import`: runs before each outbox write, and a throw is that write's failure.
+    var beforeOutboxWrite: (() throws -> Void)?
     private var lock: Int32 = -1
     private struct Claims { var held = false, closed = false }
     private let claims = OSAllocatedUnfairLock(initialState: Claims())
@@ -82,6 +87,7 @@ public final class LinkStore: @unchecked Sendable {
 
     private var jsonPath: String { folder.appendingPathComponent("link.json").path }
     private var idsPath: String { folder.appendingPathComponent("link-ids").path }
+    private var outboxPath: String { folder.appendingPathComponent("outbox.json").path }
 
     /// Taken by a connection before its first load, released when it ends: two connections on one store would cut
     /// each other's ids, as two processes would. `StoreClaimed` while another holds it, and for good once the store is closed
@@ -126,13 +132,16 @@ public final class LinkStore: @unchecked Sendable {
 
     private struct Unreadable: Error { let why: String }
 
+    /// Whether a file's identity fields are this store's pairing: a file of another is never read.
+    private func belongsHere(_ o: [String: Any]) -> Bool {
+        StoreDisk.hex(o["signing"]) == identity.signing && StoreDisk.hex(o["receiving"]) == identity.receiving && StoreDisk.hex(o["relay"]) == identity.relay
+    }
+
     private func readStore(_ data: Data) throws -> (State, [Data]) {
         let refuse = { (why: String) in Unreadable(why: why) }
         guard let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { throw refuse("not an object") }
         guard o["version"] as? Int == Self.version else { throw refuse("another version") }
-        guard StoreDisk.hex(o["signing"]) == identity.signing, StoreDisk.hex(o["receiving"]) == identity.receiving, StoreDisk.hex(o["relay"]) == identity.relay else {
-            throw refuse("another pairing")
-        }
+        guard belongsHere(o) else { throw refuse("another pairing") }
         var s = State()
         // A count past what a file can hold is no count: its size in bytes would overflow.
         guard let count = o["count"] as? Int, count >= 0, count <= Int.max / Self.idSize, let putBack = o["putBack"] as? Bool, let fault = o["fault"] as? Bool else {
@@ -162,13 +171,14 @@ public final class LinkStore: @unchecked Sendable {
         return (s, ids)
     }
 
-    /// Removes the link's two files from `folder` (design 3.10: Pair again erases the link store after the keys): the ids
+    /// Removes the link's files from `folder` (design 3.10: Pair again erases the link store after the keys): the ids
     /// and the state belong to keys that are gone, and a store of another pairing is never read. The folder and its lock stay;
     /// `StoreBusy` while a store holds the folder, so a connection must have ended and dropped its store first.
     public static func erase(folder: URL) throws {
         let fd = try StoreDisk.lock(folder)
         defer { Darwin.close(fd) }
-        for name in ["link.json", "link-ids"] where unlink(folder.appendingPathComponent(name).path) != 0 && Darwin.errno != ENOENT {
+        // The temporary names too: a write that failed between its open and its rename leaves one.
+        for name in ["link.json", "link-ids", "outbox.json", "link.json.tmp", "outbox.json.tmp"] where unlink(folder.appendingPathComponent(name).path) != 0 && Darwin.errno != ENOENT {
             throw StoreDisk.errno("remove the link's state")
         }
         try StoreDisk.syncFolder(folder)
@@ -208,6 +218,97 @@ public final class LinkStore: @unchecked Sendable {
         try writeJSON(next)
         // Renamed: the disk holds `next` from here on, whatever the folder's flush says, so a later write starts from it.
         state = next
+        try StoreDisk.syncFolder(folder)
+    }
+
+    // MARK: the app outbox (new channel design 4)
+
+    /// The fields of the stored outbox that hold bytes, in base64 in the file; the rest are numbers, text and lists. `faults` holds bytes as its elements.
+    /// Decided by name, which holds while files are refused: an item's `files` is empty today, and a file's key and blob would be bytes under other names.
+    private static let byteFields: Set<String> = ["signed", "sig", "signature", "channel", "name", "to", "device", "incarnation"]
+
+    /// The outbox as `AppLinkOptions.outbox`, or nil for none: no file, or one that does not read, which is logged once and read as empty
+    /// (design 4: a creation lost that way is a channel made again, an item lost a prompt sent again), and written over by the next write.
+    /// A file that cannot be read now (an I/O error) throws: started again with nothing, the next write would drop what it holds.
+    public func loadOutbox() throws -> HostValue? {
+        let data: Data
+        do { data = try StoreDisk.read(outboxPath) } catch StoreDisk.Missing.file { return nil }
+        guard let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], o["version"] as? Int == Self.outboxVersion, belongsHere(o),
+              let channels = o["channels"] as? [Any], let faults = o["faults"] as? [Any], o["pending"] == nil || o["pending"] is NSNull || o["pending"] is [String: Any],
+              let pending = Self.hostValue(o["pending"] ?? NSNull()), let list = Self.hostValue(channels),
+              let faulted = try? faults.map({ item -> HostValue in
+                  guard let bytes = Data(base64Encoded: (item as? String) ?? "") else { throw Unreadable(why: "a fault that is no bytes") }
+                  return .bytes(bytes)
+              }) else {
+            log.error("the app outbox does not read and is started again empty")
+            return nil
+        }
+        return .object(["pending": pending, "channels": list, "faults": .array(faulted)])
+    }
+
+    /// A stored value as the link takes it, `Self.byteFields` turned back into bytes; nil when a value is of another shape.
+    private static func hostValue(_ value: Any, key: String? = nil) -> HostValue? {
+        switch value {
+        case is NSNull: return .null
+        case let text as String:
+            guard let key, byteFields.contains(key) else { return .string(text) }
+            return Data(base64Encoded: text).map { .bytes($0) }
+        case let number as NSNumber:
+            return CFGetTypeID(number) == CFBooleanGetTypeID() ? .bool(number.boolValue) : .number(number.doubleValue)
+        case let list as [Any]:
+            let items = list.compactMap { hostValue($0, key: key) }
+            return items.count == list.count ? .array(items) : nil
+        case let object as [String: Any]:
+            var fields: [String: HostValue] = [:]
+            for (name, field) in object {
+                guard let read = hostValue(field, key: name) else { return nil }
+                fields[name] = read
+            }
+            return .object(fields)
+        default: return nil
+        }
+    }
+
+    /// A value as the file holds it: bytes in base64, an absent field omitted. nil when it holds a shape the file cannot.
+    private static func json(_ value: HostValue) -> Any? {
+        switch value {
+        case .null: return NSNull()
+        case .bool(let b): return b
+        case .number(let n): return n.isFinite ? (n.rounded() == n && abs(n) < 1e15 ? Int(n) as Any : n) : nil
+        case .string(let s): return s
+        case .bytes(let d): return d.base64EncodedString()
+        case .array(let items):
+            let list = items.compactMap(json)
+            return list.count == items.count ? list : nil
+        case .object(let fields):
+            var object: [String: Any] = [:]
+            for (name, field) in fields where field != .null {
+                guard let written = json(field) else { return nil }
+                object[name] = written
+            }
+            return object
+        }
+    }
+
+    /// Writes the app outbox, `{pending, channels, faults}` (design 4), whole under a temporary name, flushed and renamed, then the folder
+    /// flushed; throws on a failure, the file staying the last one written. `LinkStoreMismatch` for a value no link could give, which is the
+    /// host's fault; any other error is the disk's, and the link may ask again.
+    public func writeOutbox(_ what: HostValue) throws {
+        try beforeOutboxWrite?()
+        guard case .object(let fields) = what, let channels = fields["channels"], case .array = channels, let faults = fields["faults"], case .array = faults else {
+            throw LinkStoreMismatch(description: "an outbox this store does not know")
+        }
+        let pending = fields["pending"] ?? .null
+        guard pending == .null || pending["signed"] != nil, let written = Self.json(.object(["channels": channels, "faults": faults])) as? [String: Any],
+              let pendingJSON = Self.json(pending) else {
+            throw LinkStoreMismatch(description: "an outbox this store does not know")
+        }
+        var o = written
+        o["version"] = Self.outboxVersion
+        o["pending"] = pendingJSON
+        // The pairing it was written for, as `link.json` carries it: an outbox of another is never read.
+        for (name, key) in [("signing", identity.signing), ("receiving", identity.receiving), ("relay", identity.relay)] { o[name] = StoreDisk.hex(key) }
+        try StoreDisk.replace(outboxPath, with: try JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]))
         try StoreDisk.syncFolder(folder)
     }
 

@@ -51,6 +51,16 @@ public enum RelayEvent: Sendable {
     case reached
     /// A dial ended without ever becoming ready: nothing reached the relay on it.
     case unreached
+    /// The items of a channel's outbox changed: the link's `outbox` effect, with `channel` and `items` (new channel design 3.3).
+    case outbox(HostValue)
+    /// The relay refused the channel being created: the link's `channel-refused` effect, with `channel` and `code`.
+    case channelRefused(HostValue)
+    /// The channel being created changed: the link's `creating` effect, with `channel` (null when none is pending) and, with one, `bot` and `folder`.
+    case creating(HostValue)
+    /// The link stopped sending in a channel after an answer no check explains: its `channel-fault` effect, with `channel`.
+    case channelFault(HostValue)
+    /// A write of the app's outbox failed: nothing is created or sent from here, and the owner ends the connection (new channel design 3.1).
+    case storeFailed
     /// The host faulted: the connection is over for the life of the host, and does not retry.
     case faulted(String)
 }
@@ -98,6 +108,8 @@ enum Event: Sendable {
     case count(CheckedContinuation<Int, Never>)
     case enrol(Enrolment, CheckedContinuation<Bool, Never>)
     case build(DeviceAct, CheckedContinuation<BuildOutcome, Error>)
+    case createChannel(bot: Data, folder: String, CheckedContinuation<CreateOutcome, Error>)
+    case send(channel: Data, draft: OutboxDraft, CheckedContinuation<SendOutcome, Error>)
     case stop
 }
 
@@ -214,6 +226,9 @@ public final class RelayConnection: @unchecked Sendable {
     private var armed: Double?
     private var last = 0.0 // the time the link was last given: it is never given an earlier one
     private var final = false
+    // The first outbox write of the call being answered, which holds the change the call made: nil until it ran. Later writes of its chain
+    // (the built bytes) are not the caller's: a failure of one ends the connection, while the message is already on the disk.
+    private var firstOutboxWrite: Bool?
     private var readyConnections: Set<Int> = [] // the dials that became ready and have not ended
     private var watch: PathWatch?
     private var wakeObserver: NSObjectProtocol?
@@ -241,6 +256,7 @@ public final class RelayConnection: @unchecked Sendable {
         ]
         do {
             if let stored = try linkStore.load() { options["stored"] = stored }
+            if let outbox = try linkStore.loadOutbox() { options["outbox"] = outbox }
         } catch {
             linkStore.release() // `deinit` does not run for an init that throws
             throw error
@@ -292,6 +308,21 @@ public final class RelayConnection: @unchecked Sendable {
     public func build(_ act: DeviceAct) async throws -> BuildOutcome {
         try await withCheckedThrowingContinuation { continuation in
             if case .terminated = feed.yield(.build(act, continuation)) { continuation.resume(returning: .refused("ended")) }
+        }
+    }
+
+    /// Makes a channel with a `/bind <folder>` prompt to `bot`, kept in the app outbox before anything is sent (new channel design 3.2); the
+    /// link's refusal is the outcome's, and `.ended` when the connection has ended.
+    public func createChannel(bot: Data, folder: String) async throws -> CreateOutcome {
+        try await withCheckedThrowingContinuation { continuation in
+            if case .terminated = feed.yield(.createChannel(bot: bot, folder: folder, continuation)) { continuation.resume(returning: .ended) }
+        }
+    }
+
+    /// Queues a message in a channel's outbox (new channel design 3.3); `.ended` when the connection has ended.
+    public func send(channel: Data, draft: OutboxDraft) async throws -> SendOutcome {
+        try await withCheckedThrowingContinuation { continuation in
+            if case .terminated = feed.yield(.send(channel: channel, draft: draft, continuation)) { continuation.resume(returning: .ended) }
         }
     }
 
@@ -366,6 +397,21 @@ public final class RelayConnection: @unchecked Sendable {
                 continuation.resume(throwing: error)
                 throw error
             }
+        case .createChannel(let bot, let folder, let continuation):
+            // Answered once, after the call's effects ran: a failure of them (a host fault) is its error, and the run ends on it as elsewhere.
+            let outcome: CreateOutcome
+            do { outcome = try await created(bot: bot, folder: folder) } catch {
+                continuation.resume(throwing: error)
+                throw error
+            }
+            continuation.resume(returning: outcome)
+        case .send(let channel, let draft, let continuation):
+            let outcome: SendOutcome
+            do { outcome = try await queued(channel: channel, draft: draft) } catch {
+                continuation.resume(throwing: error)
+                throw error
+            }
+            continuation.resume(returning: outcome)
         case .networkUp: try await perform(try await call("networkUp"))
         case .timer(let at):
             guard armed == at else { return } // a timer that is no longer the armed one does nothing
@@ -392,6 +438,40 @@ public final class RelayConnection: @unchecked Sendable {
                 try await perform(effects)
             }
         }
+    }
+
+    /// The link's answer to a call of the app's outbox: its refusal as text, or the value and the effects to perform.
+    private func answered(_ answer: HostValue) throws -> (value: HostValue, effects: [HostValue])? {
+        if answer.stringValue != nil { return nil }
+        guard let effects = answer["effects"]?.arrayValue else { throw HostError.faulted("the link answered neither a result nor a refusal") }
+        return (answer, effects)
+    }
+
+    private func created(bot: Data, folder: String) async throws -> CreateOutcome {
+        let answer = try await call("createChannel", [.object(["bot": .bytes(bot), "folder": .string(folder)])])
+        guard let (made, effects) = try answered(answer) else { return .refused(answer.stringValue ?? "") }
+        guard let channel = made["channel"]?.bytesValue else { throw HostError.faulted("a new channel answered with no id") }
+        // `notSaved` when the write this call made failed: the caller keeps what it typed (new channel design 9).
+        return try await saved(effects) ? .created(channel: channel) : .notSaved
+    }
+
+    /// Performs the effects of an outbox call and says whether its first write of the app outbox, the one that holds the call's own
+    /// change, was stored; a later write of the chain that fails still ends the connection through `storeFailed`.
+    private func saved(_ effects: [HostValue]) async throws -> Bool {
+        firstOutboxWrite = nil
+        try await perform(effects)
+        return firstOutboxWrite ?? true
+    }
+
+    private func queued(channel: Data, draft: OutboxDraft) async throws -> SendOutcome {
+        var fields: [String: HostValue] = ["kind": .number(Double(draft.kind)), "content": .string(draft.content)]
+        if let to = draft.to { fields["to"] = .bytes(to) }
+        if let name = draft.name { fields["name"] = .bytes(name) }
+        if let re = draft.re { fields["re"] = .object(["device": .bytes(re.device), "name": .bytes(re.name)]) }
+        let answer = try await call("send", [.bytes(channel), .object(fields)])
+        guard let (made, effects) = try answered(answer) else { return .refused(answer.stringValue ?? "") }
+        guard let name = made["name"]?.bytesValue else { throw HostError.faulted("a queued message answered with no name") }
+        return try await saved(effects) ? .queued(name: name) : .notSaved
     }
 
     private func built(_ act: DeviceAct) async throws -> BuildOutcome {
@@ -441,6 +521,24 @@ public final class RelayConnection: @unchecked Sendable {
                 out.yield(.delivered(view))
             case "profile": out.yield(.profile(fx))
             case "devices": out.yield(.devices(fx))
+            case "outbox": out.yield(.outbox(fx))
+            case "creating": out.yield(.creating(fx))
+            case "channel-refused": out.yield(.channelRefused(fx))
+            case "channel-fault": out.yield(.channelFault(fx))
+            case "store-failed": out.yield(.storeFailed)
+            case "write":
+                // A `write` ends its list as a `persist` does, and is answered by the link's own call: the connection is serial, so no call
+                // lands while it is held (new channel design 3.1).
+                var stored = true
+                do { try await writeOutbox(fx["outbox"] ?? .null) } catch let mismatch as LinkStoreMismatch {
+                    throw HostError.faulted("the link asked the store for an outbox write it cannot make: \(mismatch)")
+                } catch {
+                    stored = false
+                    if firstOutboxWrite == nil { firstOutboxWrite = false }
+                    log.error("the app outbox's store write failed: \(String(describing: error), privacy: .public)")
+                }
+                if firstOutboxWrite == nil { firstOutboxWrite = true }
+                try await perform(try await call("written", [.bool(stored)]))
             case "enrolled": out.yield(.enrolled)
             case "enrol-refused": out.yield(.enrolRefused)
             case "persist":
@@ -474,6 +572,18 @@ public final class RelayConnection: @unchecked Sendable {
             writes.async {
                 do {
                     try store.write(what)
+                    done.resume()
+                } catch { done.resume(throwing: error) }
+            }
+        }
+    }
+
+    private func writeOutbox(_ what: HostValue) async throws {
+        let (store, writes) = (linkStore, writes)
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+            writes.async {
+                do {
+                    try store.writeOutbox(what)
                     done.resume()
                 } catch { done.resume(throwing: error) }
             }
@@ -540,6 +650,8 @@ public final class RelayConnection: @unchecked Sendable {
             case .count(let continuation): continuation.resume(returning: 0)
             case .enrol(_, let continuation): continuation.resume(returning: false)
             case .build(_, let continuation): continuation.resume(returning: .refused("ended"))
+            case .createChannel(_, _, let continuation): continuation.resume(returning: .ended)
+            case .send(_, _, let continuation): continuation.resume(returning: .ended)
             default: break
             }
         }

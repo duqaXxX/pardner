@@ -10,10 +10,13 @@ import SwiftUI
 public struct LiveMainWindow: View {
     let conversation: ConversationModel
     let devices: DevicesModel
+    let channels: ChannelsModel
 
-    public init(conversation: ConversationModel, devices: DevicesModel) { (self.conversation, self.devices) = (conversation, devices) }
+    public init(conversation: ConversationModel, devices: DevicesModel, channels: ChannelsModel) {
+        (self.conversation, self.devices, self.channels) = (conversation, devices, channels)
+    }
 
-    public var body: some View { MainWindow(model: conversation.reading, devices: devices) }
+    public var body: some View { MainWindow(model: conversation.reading, devices: devices, channels: channels) }
 }
 
 /// The window's content for a reading model; `channel` and `thread` start the selection.
@@ -21,6 +24,8 @@ public struct MainWindow: View {
     let model: ReadingModel
     /// The Devices sheet's model; nil in the samples, which have no pairing.
     let devices: DevicesModel?
+    /// The channel acts' model; nil in the samples, which have no pairing.
+    let channels: ChannelsModel?
     @State private var channel: Data?
     @State private var thread: String?
     @State private var tab: Tab = .conversation
@@ -28,9 +33,10 @@ public struct MainWindow: View {
     enum Tab: String, CaseIterable { case conversation = "Conversation", sessions = "Sessions" }
 
     /// The window over `model`, with a channel and a thread open when given.
-    public init(model: ReadingModel, devices: DevicesModel? = nil, channel: Data? = nil, thread: String? = nil) {
+    public init(model: ReadingModel, devices: DevicesModel? = nil, channels: ChannelsModel? = nil, channel: Data? = nil, thread: String? = nil) {
         self.model = model
         self.devices = devices
+        self.channels = channels
         _channel = State(initialValue: channel)
         _thread = State(initialValue: thread)
     }
@@ -51,11 +57,12 @@ public struct MainWindow: View {
         // a PNG or a JPEG of at most 256 pixels a side, read from its own header).
         let icons = model.profiles.compactMapValues { $0.icon.flatMap(NSImage.init(data:)) }
         HStack(spacing: 0) {
-            Sidebar(model: model, icons: icons, selected: shown?.id, choose: { channel = $0 }, openDevices: devices.map { devices in { devices.open() } })
+            Sidebar(model: model, icons: icons, selected: shown?.id, choose: { channel = $0 }, openDevices: devices.map { devices in { devices.open() } },
+                    channels: channels)
                 .frame(width: 248)
             Divider().overlay(PardnerColor.line)
             if let c = shown {
-                ChannelView(model: model, icons: icons, channel: c, tab: $tab, thread: $thread)
+                ChannelView(model: model, icons: icons, channel: c, channels: channels, tab: $tab, thread: $thread)
                     .frame(minWidth: 420, maxWidth: .infinity)
                 if let key = thread, let t = c.threads[key] {
                     Divider().overlay(PardnerColor.line)
@@ -70,6 +77,9 @@ public struct MainWindow: View {
         .sheet(isPresented: Binding(get: { devices?.isOpen ?? false }, set: { if !$0 { devices?.close() } })) {
             if let devices { DevicesSheet(model: devices) }
         }
+        .background(Color.clear.sheet(isPresented: Binding(get: { channels?.sheet != nil }, set: { if !$0 { channels?.close() } })) {
+            if let channels { ChannelSheet(model: channels, names: model.profiles.mapValues(\.name)) }
+        })
         .font(PardnerFont.ui(size: 14, weight: .regular))
         .foregroundStyle(PardnerColor.text)
         .background(PardnerColor.bg)
@@ -119,6 +129,8 @@ struct Sidebar: View {
     let choose: (Data) -> Void
     /// Opens the Devices sheet; nil where the window has no pairing.
     var openDevices: (() -> Void)?
+    /// The channel acts; nil where the window has no pairing.
+    var channels: ChannelsModel?
 
     var body: some View {
         VStack(alignment: .leading, spacing: PardnerMetrics.gap * 1.5) {
@@ -127,7 +139,20 @@ struct Sidebar: View {
                 Text("Pardner").font(PardnerFont.display(size: 18, weight: .bold))
             }
             .padding(.horizontal, 4)
-            Section("Channels") {
+            Section("Channels", trailing: channels.map { channels in
+                AnyView(Button { channels.openNew() } label: { Image(systemName: "plus").font(.system(size: 12, weight: .semibold)).frame(width: 22, height: 22) }
+                    .buttonStyle(.plain).disabled(!channels.ready).help("New channel").accessibilityLabel("New channel"))
+            }) {
+                if let row = channels?.creatingRow(known: Set(model.channels.keys)) {
+                    Text(row)
+                        .font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, PardnerMetrics.gap).padding(.vertical, 6)
+                }
+                if let line = channels?.refusalLine {
+                    Text(line).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.delText)
+                        .fixedSize(horizontal: false, vertical: true).padding(.horizontal, PardnerMetrics.gap).padding(.vertical, 4)
+                }
                 ForEach(MainWindow.ordered(model), id: \.self) { id in
                     Button { choose(id) } label: {
                         Text(Naming.channel(id))
@@ -174,13 +199,18 @@ struct Sidebar: View {
 
     struct Section<Content: View>: View {
         let title: String
+        let trailing: AnyView?
         @ViewBuilder let content: Content
-        init(_ title: String, @ViewBuilder content: () -> Content) { (self.title, self.content) = (title, content()) }
+        init(_ title: String, trailing: AnyView? = nil, @ViewBuilder content: () -> Content) { (self.title, self.trailing, self.content) = (title, trailing, content()) }
         var body: some View {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title.uppercased())
-                    .font(PardnerFont.ui(size: 11, weight: .semibold)).foregroundStyle(PardnerColor.muted)
-                    .padding(.horizontal, PardnerMetrics.gap).padding(.bottom, 4)
+                HStack {
+                    Text(title.uppercased()).font(PardnerFont.ui(size: 11, weight: .semibold))
+                    Spacer()
+                    trailing
+                }
+                .foregroundStyle(PardnerColor.muted)
+                .padding(.horizontal, PardnerMetrics.gap).padding(.bottom, 4)
                 content
             }
         }

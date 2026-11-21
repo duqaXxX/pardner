@@ -7,6 +7,33 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The app's screen for a new channel. The sidebar's Channels header has a `+` (New channel), enabled once the log is read. Its sheet asks for a folder
+  and, with two or more active bots, the bot; Create makes the channel through the link, which queues the `/bind` prompt. The channel shows
+  in the sidebar as `Creating…` and then by its short id. A refused creation says `The relay refused the new channel (code N).` in the sidebar
+  until the next creation; a write that failed keeps the sheet open with `Pardner could not save the new channel. Try again.`, and a
+  creation already running says `Another channel is being created.` A channel's header menu has Bind to a folder…, which sends a new
+  `/bind` prompt (disabled for a faulted channel); a faulted channel's header says `Pardner stopped sending in this channel: the relay answered what it should not.`
+- The app's link makes a channel and sends messages, in the protocol only (no screen yet). `AppLink.createChannel({ bot, folder },
+  now)` makes and signs entry 0 and queues a `/bind <folder>` prompt to the bot in the new channel's outbox; it answers
+  `not-ready`, `busy` (one creation at a time) or `bad-input`. `AppLink.send(channel, draft, now)` queues a message of any
+  kind an app may send (not files) and answers `bad-input`, `not-member`, `fault` or `not-ready`. Both keep their state in the
+  app outbox: the pending entry 0 (submitted again as the same bytes until it is read back), each channel's items with their
+  built bytes, and the channels stopped on a fault. It reaches the store as one `write` effect that never shares a list with
+  `persist`, answered with the new call `written(ok)`; a failed write stops creating and sending and delivers `store-failed`.
+  An item is built once in the open epoch whose key the app holds, its bytes are written before it is submitted, and it stays
+  until its device reads it back by name. Results 3 and 4 build it again in the next epoch, 5 and 8 drop it, and a 1 the
+  package's own checks do not explain is a channel fault, stored. A build that meets the counter limit makes the keeper start
+  the next epoch once. New effects: `outbox` (a channel's items as `waiting`, `sent` or `refused`), `channel-refused`,
+  `channel-fault`, and `creating` (the channel being created with its bot and folder, or `channel: null` once it is read back or
+  refused; told at `start` for a stored one). `start` tells the stored outbox's channels as `outbox` effects and each stored fault as `channel-fault`. `AppLinkOptions.outbox` takes the stored app outbox at launch. `startOf` and `starts` take an optional
+  rollover predicate.
+- The app's side of a new channel, without a screen yet. `LinkStore` keeps the app outbox in `outbox.json` beside `link.json`
+  (written whole under a temporary name, flushed and renamed, bytes in base64, erased with the link's files, read as empty when
+  it does not read) and `RelayConnection` loads it at start, performs the link's `write` effect and answers `written`. The
+  connection and `PairingController` gain `createChannel(bot:folder:)` and `send(channel:draft:)`, and the controller publishes
+  `channels` (the channel being created, each channel's outbox with its item states, the last refused creation and the faulted
+  channels) on `channelStates`. A failed write ends the connection with a retryable fault: `Pardner could not save what it is
+  sending (the disk may be full). Nothing was lost on the relay.` `createChannel` and `send` answer after their write and say `notSaved` when it failed.
 - The app's Devices screen, a sheet over the main window opened by Devices… in the sidebar or Shift-Command-D once this Mac
   is paired. It lists the active devices newest first: the name in quotes or the kind, the short form, "This Mac", who added
   it, its position, when this Mac first read the add (with one line when it read several in one go) and Remove for each other

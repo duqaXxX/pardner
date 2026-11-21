@@ -82,7 +82,7 @@ struct PardnerApp: App {
         // secure-input flag. The scene has no New Window command.
         Window("Pardner", id: "main") {
             // The pairing screens until this Mac is paired; then the main window over what the link delivered.
-            PairingRoot(model: delegate.pairing) { LiveMainWindow(conversation: delegate.pairing.conversation, devices: delegate.pairing.devices) }
+            PairingRoot(model: delegate.pairing) { LiveMainWindow(conversation: delegate.pairing.conversation, devices: delegate.pairing.devices, channels: delegate.pairing.channels) }
                 .frame(minWidth: MainWindow.minimumWidth, minHeight: 560)
                 .task { delegate.pairing.start() }
                 .onAppear { delegate.showWindow = { openWindow(id: "main") } }

@@ -5,6 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { bytesEqual } from "../../src/protocol/bytes.ts";
 import { checkDeviceEntry, idKey, recipientsOf } from "../../src/protocol/device-log.ts";
 import {
   checkHistorySeal,
@@ -17,58 +18,76 @@ import { signedId } from "../../src/protocol/ids.ts";
 import {
   type AppEffect,
   type AppLinkOptions,
+  type AppOutbox,
   type AppPersist,
   appLink,
   type MessageView,
   RECEIVE,
   SIGN,
 } from "../../src/protocol/index.ts";
-import { KIND_PROFILE, sealMessage } from "../../src/protocol/messages.ts";
+import { decodeMemberEntry } from "../../src/protocol/member-log.ts";
+import { decodeMessage, KIND_PROFILE, sealMessage } from "../../src/protocol/messages.ts";
+import { Run } from "../../src/protocol/outbox.ts";
 import { shortForm } from "../../src/protocol/pairing-string.ts";
 import type { Bytes, Platform } from "../../src/protocol/platform.ts";
 import { encodeProfile } from "../../src/protocol/profile.ts";
 import { platform } from "../relay/support.ts";
-import { epochEntry, fill, keyed, message, signedBy } from "../relay/world.ts";
+import { epochEntry, fill, type Keyed, keyed, message, signedBy } from "../relay/world.ts";
 import { makeProof } from "./proof.ts";
 import { historySeal, prompt, receivingOf, type Scene, scene } from "./reading-world.ts";
 
 const BINDING = fill(9);
 
-/** The scene's bot as the app's device: the platform holds its keys under the app's two names. */
-function deviceOf(s: Scene): Platform {
-  const names: Record<string, string> = { [SIGN]: s.bot.sign, [RECEIVE]: receivingOf(s.bot) };
+/** `app` (the scene's bot unless told) as the app's device: the platform holds its keys under the app's two names. */
+function deviceOf(s: Scene, app: Keyed = s.bot): Platform {
+  const names: Record<string, string> = { [SIGN]: app.sign, [RECEIVE]: receivingOf(app) };
   return Object.assign(Object.create(platform), {
     sign: (n: string, m: Bytes) => platform.sign(names[n] ?? n, m),
+    publicKey: (n: string) => platform.publicKey(names[n] ?? n),
     hpkeOpen: (n: string, ...rest: [Bytes, Bytes, Bytes, Bytes]) =>
       platform.hpkeOpen(names[n] ?? n, ...rest),
   });
 }
 
 /** An app link on the scene's wire; `write` answers each `persist` (true unless told otherwise) and records it. */
-function rig(s: Scene, over: Partial<AppLinkOptions> = {}) {
-  const link = appLink(deviceOf(s), {
+function rig(s: Scene, over: Partial<AppLinkOptions> = {}, app: Keyed = s.bot) {
+  const link = appLink(deviceOf(s, app), {
     relay: s.wire.key.keys.signing,
     person: s.alice.id,
-    signing: s.bot.keys.signing,
-    receiving: s.bot.keys.receiving,
+    signing: app.keys.signing,
+    receiving: app.keys.receiving,
     ...over,
   });
   const writes: AppPersist[] = [];
+  const outWrites: AppOutbox[] = []; // the app outbox's writes, in order
+  const lists: AppEffect[][] = []; // every list the link returned
   let fail = (_w: AppPersist) => false;
+  let failOutbox = (_w: AppOutbox) => false;
+  let hold = false; // the test answers the outbox's write itself
   let conn = 0;
-  // Every list the link returns ends with its one `persist`, if it has one (design 3.3).
+  // Every list the link returns ends with its one `persist` or `write`, if it has one, never both (design 3.3; new channel design 3.1).
   const ends = (fx: AppEffect[]) => {
-    const at = fx.findIndex((e) => e.do === "persist");
-    assert.ok(at === -1 || at === fx.length - 1, "nothing follows a persist in its list");
+    const at = fx.findIndex((e) => e.do === "persist" || e.do === "write");
+    assert.ok(
+      at === -1 || at === fx.length - 1,
+      "nothing follows a persist or a write in its list",
+    );
+    lists.push(fx);
     return fx;
   };
   const settle = (raw: AppEffect[], now: number): AppEffect[] => {
-    const fx = ends(raw);
-    const out = [...fx];
-    for (let last = fx.at(-1); last?.do === "persist"; ) {
-      writes.push(last.what);
-      const more = ends(link.persisted(!fail(last.what), now));
-      out.push(...more);
+    const out = [...ends(raw)];
+    for (let last = out.at(-1); last; ) {
+      let more: AppEffect[];
+      if (last.do === "persist") {
+        writes.push(last.what);
+        more = link.persisted(!fail(last.what), now);
+      } else if (last.do === "write") {
+        outWrites.push(last.outbox);
+        if (hold) break;
+        more = link.written(!failOutbox(last.outbox), now);
+      } else break;
+      out.push(...ends(more));
       last = more.at(-1);
     }
     return out;
@@ -78,6 +97,19 @@ function rig(s: Scene, over: Partial<AppLinkOptions> = {}) {
   return {
     link,
     writes,
+    outWrites,
+    lists,
+    settle,
+    /** While held, the outbox's writes wait for `answer`. */
+    hold: (on: boolean) => {
+      hold = on;
+    },
+    /** The store's answer to the outbox's write. */
+    answer: (ok: boolean, now: number) => settle(link.written(ok, now), now),
+    /** The store fails the outbox's writes `which` picks. */
+    failOutboxWrites: (which: (w: AppOutbox) => boolean) => {
+      failOutbox = which;
+    },
     /** The store fails the writes `which` picks. */
     failWrites: (which: (w: AppPersist) => boolean) => {
       fail = which;
@@ -96,6 +128,11 @@ function rig(s: Scene, over: Partial<AppLinkOptions> = {}) {
       ];
     },
     give,
+    /** The frames in one chunk, as a socket may hand them over. */
+    chunk: (frames: Frame[], now: number) => {
+      const bytes = frames.map((f) => encodeFrame(f, true));
+      return settle(link.received(conn, new Uint8Array(bytes.flatMap((b) => [...b])), now), now);
+    },
     /** Dial and hello, then the relay's whole answer in one chunk, as a socket may hand it over. */
     connectInOne(now: number, from = 0): AppEffect[] {
       const fx = settle(link.tick(now), now);
@@ -714,4 +751,664 @@ test("device pairing 3.4 checkPairing says what addDevice would refuse, without 
     error: "named",
   });
   assert.deepEqual(r.link.checkPairing({} as never, 5), { ok: false, error: "bad-input" });
+});
+
+// New channel and the app's outbox (design 2026-11-21, 3 and 7): the app is alice's first device, the bot is the scene's.
+type Rig = ReturnType<typeof rig>;
+const appRig = (s: Scene, over: Partial<AppLinkOptions> = {}) => rig(s, over, s.alice.first);
+const outboxes = (fx: AppEffect[]): AppOutbox[] =>
+  fx.flatMap((e) => (e.do === "write" ? [e.outbox] : []));
+const draftTo = (s: Scene, text = "hi") => ({
+  kind: 2,
+  to: s.bot.id,
+  content: JSON.stringify({ text }),
+});
+const fxOf = <D extends AppEffect["do"]>(fx: AppEffect[], d: D) =>
+  fx.filter((e): e is Extract<AppEffect, { do: D }> => e.do === d);
+const itemsOf = (o: AppOutbox | undefined, channel: Bytes) =>
+  o?.channels.find((c) => bytesEqual(c.channel, channel))?.items ?? [];
+type Code = Sent<"result">["code"];
+const results = (fx: AppEffect[], code: Code): Frame[] =>
+  only(fx, "submit").map((f): Frame => ({ type: "result", request: f.request, code }));
+
+/** The relay takes what the effects submitted, in order, answers `code`, and pushes it to the reading. */
+function place(s: Scene, r: Rig, fx: AppEffect[], now: number, code: Code = 0): AppEffect[] {
+  const from = s.wire.items.length;
+  for (const f of only(fx, "submit"))
+    if (!s.wire.items.some((i) => bytesEqual(i.signed, f.signed)))
+      s.wire.put(f.kind, { signed: f.signed, sig: f.sig });
+  return r.give([...results(fx, code), ...s.wire.push(from)], now);
+}
+
+/** `place`, again and again on what each pass submitted, until nothing is submitted: the effects of all. */
+function drive(s: Scene, r: Rig, fx: AppEffect[], now: number): AppEffect[] {
+  const all = [...fx];
+  for (let last = fx, n = 0; only(last, "submit").length; n++) {
+    assert.ok(n < 12, "the exchange ends");
+    last = place(s, r, last, now + n);
+    all.push(...last);
+  }
+  return all;
+}
+
+/** `createChannel` and `send`, their effects taken through the rig's store. */
+const create = (r: Rig, s: Scene, now = 10, folder = "/work/x") => {
+  const made = r.link.createChannel({ bot: s.bot.id, folder }, now);
+  assert.ok(typeof made === "object", `a channel is made, not ${made}`);
+  return { channel: made.channel, effects: r.settle(made.effects, now) };
+};
+const post = (r: Rig, channel: Bytes, draft: Parameters<Rig["link"]["send"]>[1], now = 10) => {
+  const sent = r.link.send(channel, draft, now);
+  assert.ok(typeof sent === "object", `a message is queued, not ${sent}`);
+  return { name: sent.name, effects: r.settle(sent.effects, now) };
+};
+
+test("new channel 3.2 createChannel writes entry 0 and the bind in one write, then submits the same bytes", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  r.hold(true);
+  const made = create(r, s);
+  assert.deepEqual(only(made.effects, "submit"), [], "nothing is submitted before the write");
+  const [w] = outboxes(made.effects);
+  assert.ok(w?.pending, "entry 0 is in the write");
+  const entry = decodeMemberEntry(w.pending.signed);
+  assert.ok(entry.ok);
+  assert.equal(entry.value.kind, "create");
+  assert.equal(entry.value.seq, 0);
+  assert.deepEqual(entry.value.signerDevice, s.alice.first.id);
+  assert.deepEqual(entry.value.signerPerson, s.alice.id);
+  assert.deepEqual(signedId(platform, w.pending.signed), made.channel);
+  const [bind] = itemsOf(w, made.channel);
+  assert.equal(bind?.kind, 2);
+  assert.deepEqual(bind?.to, s.bot.id);
+  assert.equal(bind?.content, JSON.stringify({ text: "/bind /work/x" }));
+  assert.equal(bind?.built, undefined, "the bind is built once its epoch is read");
+  const after = r.answer(true, 11);
+  const [sent] = only(after, "submit");
+  assert.equal(sent?.kind, 2);
+  assert.deepEqual(sent?.signed, w.pending.signed);
+  assert.deepEqual(sent?.sig, w.pending.sig);
+  const answered = r.give([{ type: "result", request: sent?.request ?? 0, code: 0 }], 12);
+  assert.deepEqual(fxOf(answered, "answer"), [], "the request is the link's own, not the driver's");
+});
+
+test("new channel 3.2 createChannel is not-ready before the log reads active, busy while one is pending, bad-input for a bot that is none", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  assert.equal(r.link.createChannel({ bot: s.bot.id, folder: "/x" }, 1), "not-ready");
+  r.connect();
+  assert.equal(
+    r.link.createChannel({ bot: s.alice.first.id, folder: "/x" }, 2),
+    "bad-input",
+    "an app",
+  );
+  assert.equal(r.link.createChannel({ bot: fill(1), folder: "/x" }, 2), "bad-input", "no device");
+  assert.equal(
+    r.link.createChannel({ bot: s.bot.id, folder: 5 as unknown as string }, 2),
+    "bad-input",
+  );
+  create(r, s, 3);
+  assert.equal(r.link.createChannel({ bot: s.bot.id, folder: "/y" }, 4), "busy");
+});
+
+test("new channel 3.2 entry 0 is sent as the same bytes after a reconnection and a restart, and at the next rest after a busy", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const made = create(r, s);
+  const first = only(made.effects, "submit")[0];
+  assert.ok(first, "submitted when the reading is at rest");
+  r.drop(11);
+  const [again] = only(r.connect(2000), "submit");
+  assert.deepEqual(again?.signed, first.signed, "a reconnection sends the entry as it is");
+  assert.deepEqual(again?.sig, first.sig);
+  const stored = r.outWrites.at(-1);
+  const t = appRig(s, stored && { outbox: stored });
+  const [restart] = only(t.connect(), "submit").filter((f) => f.kind === 2);
+  assert.deepEqual(restart?.signed, first.signed, "a restart sends the stored entry");
+  assert.deepEqual(restart?.sig, first.sig);
+  // Written while the reading is not at rest: the submit is owed to the next rest.
+  const u = appRig(s);
+  u.connect();
+  u.drop(5);
+  const late = create(u, s, 6);
+  assert.deepEqual(only(late.effects, "submit"), []);
+  assert.equal(only(u.connect(2000), "submit").filter((f) => f.kind === 2).length, 1);
+});
+
+test("new channel 3.2 a read back entry 0 drops the pending creation by a write, the keeper starts the first epoch, and the bind waits for its key then goes", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  r.hold(true);
+  const made = create(r, s);
+  const sent = r.answer(true, 11);
+  const placed = place(s, r, sent, 12);
+  const dropped = outboxes(placed).at(-1);
+  assert.equal(dropped?.pending, null, "read back: the pending creation is dropped");
+  assert.equal(itemsOf(dropped, made.channel).length, 1, "the bind stays");
+  const [start] = only(placed, "submit").filter((f) => f.kind === 3);
+  assert.ok(start, "the keeper owes the first epoch");
+  const epoch = decodeEpochEntry(start.signed);
+  assert.ok(epoch.ok);
+  assert.deepEqual(epoch.value.channel, made.channel);
+  assert.deepEqual(
+    only(placed, "submit").filter((f) => f.kind === 4),
+    [],
+    "no bind while the channel has no open epoch",
+  );
+  // The epoch read: the bind is built, its bytes written, and only then submitted.
+  r.answer(true, 12);
+  const withEpoch = place(s, r, placed, 13);
+  assert.deepEqual(only(withEpoch, "submit"), [], "written first");
+  const built = itemsOf(outboxes(withEpoch).at(-1), made.channel)[0]?.built;
+  assert.ok(built, "the built bytes are in the write");
+  const [bind] = only(r.answer(true, 14), "submit");
+  assert.equal(bind?.kind, 4);
+  assert.deepEqual(bind?.signed, built.signed);
+});
+
+test("new channel 3.2 a result 1 or 5 for entry 0 drops the creation and its outbox with channel-refused; 2 is treated as 1; 0 keeps it", () => {
+  for (const [code, dropped] of [
+    [1, true],
+    [2, true],
+    [5, true],
+    [0, false],
+  ] as const) {
+    const s = scene();
+    s.epoch();
+    const r = appRig(s);
+    r.connect();
+    const made = create(r, s);
+    const fx = r.give(results(made.effects, code), 12);
+    assert.deepEqual(
+      fxOf(fx, "channel-refused").map((e) => [e.channel, e.code]),
+      dropped ? [[made.channel, code]] : [],
+    );
+    const last = r.outWrites.at(-1);
+    assert.equal(last?.pending === null, dropped, `result ${code}`);
+    assert.equal(itemsOf(last, made.channel).length, dropped ? 0 : 1);
+    if (dropped)
+      assert.deepEqual(
+        fxOf(fx, "outbox").flatMap((e) => e.items.map((i) => i.state)),
+        ["refused"],
+        "the bind is told refused",
+      );
+  }
+});
+
+test("new channel 3.3 send queues and writes first, builds in the open epoch and writes the built bytes before it submits", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  r.hold(true);
+  const sent = post(r, s.channel, draftTo(s));
+  assert.deepEqual(only(sent.effects, "submit"), [], "queued and written first");
+  assert.equal(itemsOf(outboxes(sent.effects)[0], s.channel)[0]?.built, undefined);
+  const second = r.answer(true, 11);
+  assert.deepEqual(only(second, "submit"), [], "the built bytes are written before the submit");
+  const built = itemsOf(outboxes(second)[0], s.channel)[0]?.built;
+  assert.ok(built);
+  const header = decodeMessage(built.signed);
+  assert.ok(header.ok);
+  assert.deepEqual(header.value.header.name, sent.name);
+  assert.deepEqual(header.value.header.sender, s.alice.first.id);
+  const third = r.answer(true, 12);
+  const [submit] = only(third, "submit");
+  assert.equal(submit?.kind, 4);
+  assert.deepEqual(submit?.signed, built.signed);
+  // The effect lets a screen draw the pending message.
+  const told = fxOf(sent.effects, "outbox")[0];
+  assert.deepEqual(
+    told?.items.map((i) => i.state),
+    ["waiting"],
+  );
+  assert.deepEqual(told?.items[0]?.name, sent.name);
+});
+
+test("new channel 3.3 send refuses a draft the package refuses, a channel it does not hold, and a faulted channel", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const bad = [
+    { ...draftTo(s), files: [{ bytes: fill(1, 4), type: "x", name: "f" }] },
+    { ...draftTo(s), to: fill(1, 5) },
+    { kind: 99, content: "{}" },
+  ];
+  for (const d of bad) assert.equal(r.link.send(s.channel, d, 5), "bad-input");
+  assert.equal(r.link.send(fill(8), draftTo(s), 5), "not-member");
+  const faulted = appRig(s, { outbox: { pending: null, channels: [], faults: [s.channel] } });
+  faulted.connect();
+  assert.equal(faulted.link.send(s.channel, draftTo(s), 5), "fault");
+  assert.equal(r.outWrites.length, 0, "a refusal writes nothing");
+});
+
+test("new channel 3.1 a failed write sends nothing more, says store-failed, and refuses what follows", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  r.hold(true);
+  post(r, s.channel, draftTo(s));
+  assert.deepEqual(r.answer(false, 11), [{ do: "store-failed" }]);
+  assert.equal(r.link.send(s.channel, draftTo(s), 12), "not-ready");
+  assert.equal(r.link.createChannel({ bot: s.bot.id, folder: "/x" }, 12), "not-ready");
+  assert.deepEqual(only(r.link.tick(5000), "submit"), []);
+  assert.equal(r.outWrites.length, 1, "no other write is emitted");
+});
+
+test("new channel 3.1 the outbox's write never shares a list with Link's persist: a change made in the list that ends with one is written in the next", () => {
+  const s = scene();
+  const epoch = s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const sent = post(r, s.channel, draftTo(s));
+  // The answer 3 and the next read in one chunk: the answer changes the outbox in the list whose rest ends with Link's persist.
+  const n = s.wire.items.length;
+  s.wire.put(4, prompt(s, epoch, fill(31, 16), 1));
+  const before = r.lists.length;
+  r.chunk([...results(sent.effects, 3), ...s.wire.push(n)], 20);
+  const ends = r.lists.slice(before).map((l) => l.at(-1)?.do);
+  assert.ok(ends.includes("persist"), "the list ended with a persist");
+  assert.ok(ends.indexOf("persist") < ends.lastIndexOf("write"), "the write comes in a later list");
+  assert.equal(itemsOf(r.outWrites.at(-1), s.channel).length, 1, "the change is written");
+});
+
+test("new channel 3.3 result 0 keeps the item until its device reads it back by name", () => {
+  const s = scene();
+  const epoch = s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const sent = post(r, s.channel, draftTo(s));
+  const [submit] = only(sent.effects, "submit");
+  assert.ok(submit);
+  const kept = r.give(results(sent.effects, 0), 11);
+  assert.deepEqual(
+    fxOf(kept, "outbox")[0]?.items.map((i) => i.state),
+    ["sent"],
+  );
+  assert.equal(itemsOf(r.outWrites.at(-1), s.channel).length, 1, "kept until read back");
+  const n = s.wire.items.length;
+  s.wire.put(4, { signed: submit.signed, sig: submit.sig });
+  const back = r.give(s.wire.push(n), 12);
+  assert.equal(
+    itemsOf(outboxes(back).at(-1), s.channel).length,
+    0,
+    "read back: removed by a write",
+  );
+  assert.equal(epoch.id.length, 32);
+});
+
+test("new channel 3.3 results 3 and 4 build the same message again in the next epoch, never in the epoch that answered", () => {
+  for (const code of [3, 4] as const) {
+    const s = scene();
+    const first = s.epoch();
+    const r = appRig(s);
+    r.connect();
+    const sent = post(r, s.channel, draftTo(s));
+    const [one] = only(sent.effects, "submit");
+    assert.ok(one);
+    const again = r.give(results(sent.effects, code), 11);
+    assert.deepEqual(only(again, "submit"), [], `result ${code}: not in the same epoch`);
+    const held = itemsOf(r.outWrites.at(-1), s.channel);
+    assert.equal(held.length, 1);
+    assert.equal(held[0]?.built, undefined, "rebuilt: to be built again");
+    assert.deepEqual(held[0]?.name, sent.name, "the same name");
+    // The next epoch is read: built in it, with the same name and under its own epoch.
+    const next = s.epoch();
+    const n = s.wire.items.length - 1;
+    const read = r.give(s.wire.push(n), 12);
+    const [two] = only(read, "submit");
+    assert.ok(two, "built in the next epoch");
+    const [h1, h2] = [decodeMessage(one.signed), decodeMessage(two.signed)];
+    assert.ok(h1.ok && h2.ok);
+    assert.deepEqual(h1.value.header.epoch, first.id);
+    assert.deepEqual(h2.value.header.epoch, next.id);
+    assert.deepEqual(h2.value.header.name, sent.name);
+    assert.deepEqual(h2.value.header.incarnation, h1.value.header.incarnation);
+  }
+});
+
+test("new channel 3.3 a result 1 that the package's checks explain drops the item as refused; a result 8 and a result 5 drop it too", () => {
+  for (const code of [1, 8, 5] as const) {
+    const s = scene();
+    s.epoch();
+    const r = appRig(s);
+    r.connect();
+    // `to` an app, not a bot: the package's own check refuses it (kind 2 goes to a bot).
+    const sent = post(r, s.channel, { kind: 2, to: s.alice.first.id, content: "{}" });
+    const fx = r.give(results(sent.effects, code), 11);
+    assert.equal(itemsOf(r.outWrites.at(-1), s.channel).length, 0, `result ${code}: dropped`);
+    assert.deepEqual(fxOf(fx, "channel-fault"), [], `result ${code}: no fault`);
+    assert.deepEqual(
+      fxOf(fx, "outbox")[0]?.items.map((i) => i.state),
+      ["refused"],
+    );
+    assert.deepEqual(r.link.send(s.channel, draftTo(s), 12) !== "fault", true);
+  }
+});
+
+test("new channel 3.5 a result 1 no check explains is a channel fault: stored, told, nothing more built or sent there, across a restart", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const sent = post(r, s.channel, draftTo(s));
+  const fx = r.give(results(sent.effects, 1), 11);
+  assert.deepEqual(
+    fxOf(fx, "channel-fault").map((e) => e.channel),
+    [s.channel],
+  );
+  const stored = r.outWrites.at(-1);
+  assert.deepEqual(stored?.faults, [s.channel]);
+  assert.equal(r.link.send(s.channel, draftTo(s), 12), "fault");
+  const t = appRig(s, stored && { outbox: stored });
+  t.connect();
+  assert.deepEqual(only(t.link.tick(5000), "submit"), [], "nothing is sent in a faulted channel");
+  assert.equal(t.link.send(s.channel, draftTo(s), 13), "fault");
+});
+
+test("new channel 3.3 a rollover starts the next epoch once, and the mark ends with the epoch it was met in", () => {
+  const s = scene();
+  const first = s.epoch();
+  // A run with no counter left in the first epoch, as after 100,000 messages.
+  class Spent extends Run {
+    override next(epoch: Bytes): number | undefined {
+      return bytesEqual(epoch, first.id) ? undefined : super.next(epoch);
+    }
+  }
+  const r = appRig(s, { run: new Spent(platform) });
+  const connected = r.connect();
+  assert.deepEqual(epochSubmits(connected), []);
+  const sent = post(r, s.channel, draftTo(s));
+  const [start] = epochSubmits(sent.effects);
+  assert.ok(start, "the keeper starts the next epoch");
+  assert.deepEqual(
+    only(sent.effects, "submit").filter((f) => f.kind === 4),
+    [],
+  );
+  // Not sent twice while its answer is pending.
+  assert.deepEqual(epochSubmits(r.link.tick(11)), []);
+  const read = place(s, r, sent.effects, 12);
+  const [message] = only(drive(s, r, read, 13), "submit").filter((f) => f.kind === 4);
+  assert.ok(message, "the message goes in the new epoch");
+  const decoded = decodeMessage(message.signed);
+  assert.ok(decoded.ok);
+  assert.notDeepEqual(decoded.value.header.epoch, first.id);
+  // Another rest: the mark is gone with its epoch, so no further start.
+  const n = s.wire.items.length;
+  s.wire.put(4, prompt(s, first, fill(21, 16), 1));
+  assert.deepEqual(epochSubmits(r.give(s.wire.push(n), 20)), []);
+});
+
+test("new channel 3.3 an incarnation change gives an item not built the new incarnation and leaves a built one its own", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const old = post(r, s.channel, draftTo(s, "a"));
+  const [builtOld] = only(old.effects, "submit");
+  assert.ok(builtOld);
+  r.drop(11);
+  s.wire.incarnation = fill(8, 16);
+  const again = r.connect(2000);
+  const [resent] = only(again, "submit");
+  assert.deepEqual(resent?.signed, builtOld.signed, "a built item is sent as it is");
+  const fresh = post(r, s.channel, draftTo(s, "b"), 2001);
+  assert.deepEqual(
+    only(fresh.effects, "submit"),
+    [],
+    "one item in flight: the new one follows its answer",
+  );
+  const bytes = only(r.give(results(again, 0), 2002), "submit")[0];
+  assert.ok(bytes);
+  const [h1, h2] = [decodeMessage(builtOld.signed), decodeMessage(bytes.signed)];
+  assert.ok(h1.ok && h2.ok);
+  assert.deepEqual(h1.value.header.incarnation, fill(7, 16));
+  assert.deepEqual(h2.value.header.incarnation, fill(8, 16));
+});
+
+test("fix round: a result no rule handles holds the channel until the next rest, with no resubmit loop", () => {
+  for (const code of [2, 7, 9, 11] as const) {
+    const s = scene();
+    const epoch = s.epoch();
+    const r = appRig(s);
+    r.connect();
+    const sent = post(r, s.channel, draftTo(s));
+    assert.deepEqual(only(r.give(results(sent.effects, code), 11), "submit"), [], `result ${code}`);
+    assert.deepEqual(only(r.link.tick(12), "submit"), []);
+    const n = s.wire.items.length;
+    s.wire.put(4, prompt(s, epoch, fill(40, 16), 1));
+    assert.equal(only(r.give(s.wire.push(n), 20), "submit").length, 1, "sent again at the rest");
+  }
+});
+
+test("fix round: after 3 or 4 the epoch to avoid is the one the item was built in, so a newer epoch already read is used at once", () => {
+  const s = scene();
+  const first = s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const sent = post(r, s.channel, draftTo(s));
+  const next = s.epoch();
+  const n = s.wire.items.length - 1;
+  r.give(s.wire.push(n), 12);
+  const [again] = only(r.give(results(sent.effects, 4), 13), "submit");
+  assert.ok(again, "built in the newer epoch without waiting for another rest");
+  const h = decodeMessage(again.signed);
+  assert.ok(h.ok);
+  assert.deepEqual(h.value.header.epoch, next.id);
+  assert.notDeepEqual(h.value.header.epoch, first.id);
+});
+
+test("fix round: a stored outbox with a malformed item or entry is cleaned at load, and nothing throws", () => {
+  const s = scene();
+  s.epoch();
+  const good = { name: fill(1, 16), kind: 2, to: s.bot.id, content: "{}", files: [] };
+  const stored = {
+    pending: { signed: "x", sig: fill(1, 64) },
+    channels: [
+      {
+        channel: s.channel,
+        items: [
+          { ...good, name: fill(2, 16), to: fill(2, 31) },
+          { ...good, name: fill(3, 16), kind: 99 },
+          { ...good, name: fill(4, 16), re: { device: fill(1, 5), name: fill(1, 16) } },
+          { ...good, name: fill(5, 16), built: { signed: "x", signature: fill(1, 64) } },
+          good,
+        ],
+      },
+    ],
+    faults: [fill(1, 5)],
+  } as unknown as AppOutbox;
+  const r = appRig(s, { outbox: stored });
+  assert.doesNotThrow(() => r.connect());
+  const sent = post(r, s.channel, draftTo(s, "after"));
+  const held = itemsOf(r.outWrites.at(-1), s.channel);
+  assert.deepEqual(
+    held.map((i) => i.name).filter((n) => !bytesEqual(n, good.name) && !bytesEqual(n, fill(5, 16))),
+    [sent.name],
+  );
+  assert.equal(r.outWrites.at(-1)?.pending, null);
+  assert.deepEqual(r.outWrites.at(-1)?.faults, []);
+});
+
+test("fix round: a faulted channel gets no epoch start", () => {
+  const s = scene();
+  s.epoch();
+  s.entry(s.alice.add(s.log, keyed()));
+  const open = appRig(s);
+  assert.equal(epochSubmits(open.connect()).length, 1, "a closed channel is started");
+  const faulted = appRig(s, { outbox: { pending: null, channels: [], faults: [s.channel] } });
+  assert.deepEqual(epochSubmits(faulted.connect()), []);
+});
+
+test("fix round: a name already in the channel's outbox is refused", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const name = fill(5, 16);
+  post(r, s.channel, { ...draftTo(s), name });
+  assert.equal(r.link.send(s.channel, { ...draftTo(s, "again"), name }, 11), "bad-input");
+});
+
+test("fix round: nothing is submitted while the store's write is unanswered", () => {
+  const s = scene();
+  s.epoch();
+  const first = appRig(s);
+  first.connect();
+  const a = post(first, s.channel, draftTo(s, "a"));
+  first.give(results(a.effects, 0), 11);
+  post(first, s.channel, draftTo(s, "b"), 12);
+  const r = appRig(s, { outbox: first.outWrites.at(-1) });
+  const connected = r.connect();
+  const [one] = only(connected, "submit");
+  assert.ok(one, "the first item goes at the rest");
+  r.hold(true);
+  create(r, s, 20);
+  assert.equal(r.outWrites.length, 1, "a write is held");
+  const fx = r.give(results(connected, 0), 21);
+  assert.deepEqual(only(fx, "submit"), [], "the next item waits for the write");
+  assert.deepEqual(only(r.link.tick(22), "submit"), []);
+});
+
+test("fix round: on the same connection, an answer to a request sent before a second served frees and changes nothing", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const a = post(r, s.channel, draftTo(s, "a"));
+  const [old] = only(a.effects, "submit");
+  assert.ok(old);
+  const made = create(r, s, 12);
+  const [oldEntry] = only(made.effects, "submit");
+  assert.ok(oldEntry, "entry 0 is in flight");
+  // The relay serves again with another incarnation on the same connection: the pass reads again, and the next rest submits again.
+  s.wire.incarnation = fill(8, 16);
+  const again = r.give([s.wire.served(), ...s.wire.read(0)], 13);
+  const [item, entry] = [
+    only(again, "submit").find((f) => f.kind === 4),
+    only(again, "submit").find((f) => f.kind === 2),
+  ];
+  assert.ok(
+    item && entry && item.request !== old.request && entry.request !== oldEntry.request,
+    "sent again as new requests",
+  );
+  const writes = r.outWrites.length;
+  // The old requests' answers arrive late: nothing is rebuilt, refused or freed.
+  const stale = r.give(
+    [
+      { type: "result", request: old.request, code: 4 },
+      { type: "result", request: oldEntry.request, code: 1 },
+    ],
+    14,
+  );
+  assert.equal(r.outWrites.length, writes, "no write");
+  assert.deepEqual(fxOf(stale, "channel-refused"), []);
+  assert.deepEqual(only(stale, "submit"), [], "the new requests are still in flight");
+  const held = itemsOf(r.outWrites.at(-1), s.channel).find((i) => bytesEqual(i.name, a.name));
+  assert.ok(held?.built, "not rebuilt");
+  assert.ok(r.outWrites.at(-1)?.pending, "entry 0 is still pending");
+});
+
+test("new channel 5 start tells the stored outbox: an outbox effect for each channel and a creating effect for a pending creation", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const made = create(r, s, 10, "/work/y");
+  const told = fxOf(made.effects, "creating").flatMap((e) => (e.channel ? [e] : []));
+  assert.deepEqual(
+    told.map((e) => [e.channel, e.bot, e.folder]),
+    [[made.channel, s.bot.id, "/work/y"]],
+    "createChannel tells the creation",
+  );
+  const stored = r.outWrites.at(-1);
+  assert.ok(stored?.pending, "the creation is stored");
+  const t = appRig(s, { outbox: stored });
+  const start = t.connect();
+  assert.deepEqual(
+    fxOf(start, "creating")
+      .flatMap((e) => (e.channel ? [e] : []))
+      .map((e) => [e.channel, e.bot, e.folder]),
+    [[made.channel, s.bot.id, "/work/y"]],
+    "a restart tells the stored creation",
+  );
+  const items = fxOf(start, "outbox").filter((e) => bytesEqual(e.channel, made.channel));
+  assert.equal(items.length >= 1 && items[0]?.items.length, 1, "and the stored bind, first");
+  assert.equal(fxOf(appRig(s).connect(), "creating").length, 0, "nothing stored, nothing told");
+});
+
+test("new channel 5 a creation read back or refused is told as creating null", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const made = create(r, s);
+  const placed = place(s, r, made.effects, 12);
+  assert.deepEqual(
+    fxOf(placed, "creating").map((e) => e.channel),
+    [null],
+  );
+  const u = appRig(s);
+  u.connect();
+  const refused = create(u, s);
+  const fx = u.give(results(refused.effects, 1), 12);
+  assert.deepEqual(
+    fxOf(fx, "creating").map((e) => e.channel),
+    [null],
+  );
+});
+
+test("new channel 3.5 start tells each stored channel fault again, so a restart or a Retry shows it", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const made = create(r, s);
+  const stored = r.outWrites.at(-1);
+  assert.ok(stored);
+  const faulted = appRig(s, { outbox: { ...stored, faults: [made.channel] } });
+  assert.deepEqual(
+    fxOf(faulted.connect(), "channel-fault").map((e) => e.channel),
+    [made.channel],
+  );
+  assert.deepEqual(fxOf(appRig(s, { outbox: stored }).connect(), "channel-fault"), []);
+});
+
+test("review: send refuses a kind only a bot may send", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  for (const kind of [3, 4, 8, 12, 13])
+    assert.equal(r.link.send(s.channel, { kind, content: "{}" }, 5), "bad-input", `kind ${kind}`);
+  assert.equal(r.outWrites.length, 0);
+});
+
+test("review: at a rest the accepted items go back to waiting and the screen is told", () => {
+  const s = scene();
+  const epoch = s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const sent = post(r, s.channel, draftTo(s));
+  const kept = r.give(results(sent.effects, 0), 11);
+  assert.deepEqual(
+    fxOf(kept, "outbox")[0]?.items.map((i) => i.state),
+    ["sent"],
+  );
+  const n = s.wire.items.length;
+  s.wire.put(4, prompt(s, epoch, fill(41, 16), 1));
+  const rest = r.give(s.wire.push(n), 20);
+  assert.deepEqual(
+    fxOf(rest, "outbox")[0]?.items.map((i) => i.state),
+    ["waiting"],
+  );
 });
