@@ -8,9 +8,10 @@ import { decodeMessage, fits, type Reference } from "./messages.ts";
 import type { OutboxItem } from "./outbox.ts";
 import type { Bytes } from "./platform.ts";
 
-/** The app outbox as the store keeps it: entry 0 of the channel being created, each channel's items with their built bytes, and the faulted channels. */
+/** The app outbox as the store keeps it: entry 0 of the channel being created, entry 0 of the person's space while it is made (a slot of its own, so it never blocks a new channel), each channel's items with their built bytes, and the faulted channels. */
 export interface AppOutbox {
   pending: { signed: Bytes; sig: Bytes } | null;
+  space?: { signed: Bytes; sig: Bytes } | null;
   channels: { channel: Bytes; items: OutboxItem[] }[];
   faults: Bytes[];
 }
@@ -75,6 +76,7 @@ function clean(raw: unknown): OutboxItem | undefined {
 /** The app outbox in memory: what the store held, cleaned at load, and what `AppLink` changes. */
 export class Boxes {
   pending: AppOutbox["pending"];
+  space: AppOutbox["pending"];
   #items = new Map<string, { channel: Bytes; items: readonly OutboxItem[] }>();
   #faults = new Map<string, Bytes>();
 
@@ -86,6 +88,8 @@ export class Boxes {
     const p: unknown = stored?.pending;
     this.pending =
       object(p) && isBytes(p.signed) && sized(p.sig, 64) ? (p as Boxes["pending"]) : null;
+    const h: unknown = stored?.space;
+    this.space = object(h) && isBytes(h.signed) && sized(h.sig, 64) ? (h as Boxes["space"]) : null;
     const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
     for (const c of list(stored?.channels))
       if (object(c) && sized(c.channel, 32))
@@ -118,10 +122,15 @@ export class Boxes {
   fault(channel: Bytes): void {
     this.#faults.set(idKey(channel), channel);
   }
+  /** Lets `channel` send again: its fault is dropped. */
+  unfault(channel: Bytes): void {
+    this.#faults.delete(idKey(channel));
+  }
   /** What the store writes: a copy, not changed by what follows. */
   snapshot(): AppOutbox {
     return {
       pending: this.pending,
+      ...(this.space && { space: this.space }),
       channels: [...this.#items.values()].map((c) => ({ channel: c.channel, items: [...c.items] })),
       faults: [...this.#faults.values()],
     };

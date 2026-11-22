@@ -479,7 +479,7 @@ const frameTypes = (fx: AppEffect[]) =>
   });
 
 test("device pairing 3.5.7 enrol goes before the proof until the first served, then never", () => {
-  const s = scene();
+  const s = scene({ space: true });
   s.epoch(); // a channel with no epoch is the keeper's to start, which sends a submit after the read
   const enrol = { secret: fill(3), signed: s.alice.genesis.signed, sig: s.alice.genesis.sig };
   const r = rig(s, { enrol });
@@ -811,7 +811,15 @@ test("device pairing 3.4 checkPairing says what addDevice would refuse, without 
 
 // New channel and the app's outbox (design 2026-11-21, 3 and 7): the app is alice's first device, the bot is the scene's.
 type Rig = ReturnType<typeof rig>;
-const appRig = (s: Scene, over: Partial<AppLinkOptions> = {}) => rig(s, over, s.alice.first);
+const homed = new WeakSet<Scene>();
+// The app finds the person's space at rest or makes it (personal space design 3): these scenes already hold one, so a creation here is the test's own.
+const appRig = (s: Scene, over: Partial<AppLinkOptions> = {}) => {
+  if (!homed.has(s) && !s.members[0]?.space) {
+    homed.add(s);
+    addChannel(s, spaceNonce(platform, s.alice.id)).epoch();
+  }
+  return rig(s, over, s.alice.first);
+};
 const outboxes = (fx: AppEffect[]): AppOutbox[] =>
   fx.flatMap((e) => (e.do === "write" ? [e.outbox] : []));
 const draftTo = (s: Scene, text = "hi") => ({
@@ -1629,6 +1637,121 @@ test("the recovery-log effect names both recovery keys of a log whose reset repl
   assert.deepEqual(told.recovery, next.recoveryId);
 });
 
+// The personal space in the app (personal space design 2.3, 2.6, 3): made at rest, never a fault target, spares skipped.
+const entryZeros = (fx: AppEffect[]) =>
+  only(fx, "submit").flatMap((f) => {
+    const e = f.kind === 2 ? decodeMemberEntry(f.signed) : undefined;
+    return e?.ok && e.value.kind === "create" ? [e.value] : [];
+  });
+
+test("personal space 3: an app that reads to rest and finds no space makes it with the space nonce, once, and the keeper opens its first epoch", () => {
+  const s = scene();
+  s.epoch();
+  const r = rig(s, {}, s.alice.first);
+  const fx = r.connect();
+  const [made] = entryZeros(fx);
+  assert.ok(made, "entry 0 of the space is submitted");
+  assert.deepEqual(made.nonce, spaceNonce(platform, s.alice.id));
+  assert.deepEqual(made.signerDevice, s.alice.first.id);
+  assert.deepEqual(fxOf(fx, "channel-refused"), []);
+  const all = drive(s, r, fx, 5);
+  assert.equal(
+    only(all, "submit").filter((f) => f.kind === 3).length > 0,
+    true,
+    "the keeper starts its first epoch",
+  );
+  assert.equal(r.outWrites.at(-1)?.space ?? null, null, "read back: no space creation left");
+  r.drop(100);
+  assert.deepEqual(entryZeros(r.connect(2000)), [], "the next rest finds it");
+});
+
+test("personal space 3: no second space is made where one is read", () => {
+  const s = scene({ space: true });
+  s.epoch();
+  assert.deepEqual(entryZeros(rig(s, {}, s.alice.first).connect()), []);
+});
+
+test("personal space 3: a space another device placed first answers 2: no refusal for the screen, no second try in the run", () => {
+  const s = scene();
+  s.epoch();
+  const r = rig(s, {}, s.alice.first);
+  const fx = r.connect();
+  const from = s.wire.items.length;
+  addChannel(s, spaceNonce(platform, s.alice.id), "bot").epoch(); // the bot placed it first
+  const refused = r.give([...results(fx, 2), ...s.wire.push(from)], 5);
+  assert.deepEqual(fxOf(refused, "channel-refused"), []);
+  assert.deepEqual(fxOf(refused, "creating"), [], "the space is no creation for the screen");
+  assert.equal(r.outWrites.at(-1)?.space ?? null, null);
+  assert.deepEqual(entryZeros(refused), [], "its own entry is not made again");
+});
+
+test("personal space 2.6: a fault an older app stored on the space is dropped at the first rest, with a write and a note; a conversation channel's stays", () => {
+  const s = scene({ space: true });
+  s.epoch();
+  const talk = addChannel(s, fill(9, 16));
+  talk.epoch();
+  const r = rig(
+    s,
+    { outbox: { pending: null, channels: [], faults: [s.channel, talk.id] } },
+    s.alice.first,
+  );
+  const fx = r.connect();
+  assert.deepEqual(
+    fxOf(fx, "channel-fault").map((e) => e.channel),
+    [s.channel, talk.id],
+    "start tells both: nothing names the space yet",
+  );
+  assert.deepEqual(
+    fxOf(fx, "channel-fault-dropped").map((e) => e.channel),
+    [s.channel],
+  );
+  assert.deepEqual(r.outWrites.at(-1)?.faults, [talk.id]);
+  assert.notEqual(r.link.send(s.channel, draftTo(s), 9), "fault");
+  assert.equal(r.link.send(talk.id, draftTo(s), 9), "fault");
+});
+
+test("personal space 2.3: a spare takes no message, a fault stored on it is dropped, and its stored items are dropped as not delivered", () => {
+  const s = scene({ space: true });
+  s.epoch();
+  const spare = addChannel(s, spaceNonce(platform, s.alice.id), "bot");
+  spare.epoch();
+  const stale = {
+    name: fill(70, 16),
+    kind: 1,
+    content: "{}",
+    to: null,
+    re: null,
+    files: [],
+    built: null,
+  };
+  const r = rig(
+    s,
+    {
+      outbox: {
+        pending: null,
+        channels: [{ channel: spare.id, items: [stale as never] }],
+        faults: [spare.id],
+      },
+    },
+    s.alice.first,
+  );
+  const fx = r.connect();
+  assert.deepEqual(only(fx, "submit"), [], "nothing is built or sent into a spare");
+  assert.deepEqual(
+    fxOf(fx, "channel-fault-dropped").map((e) => e.channel),
+    [spare.id],
+  );
+  assert.deepEqual(itemsOf(r.outWrites.at(-1), spare.id), [], "its items are gone");
+  assert.deepEqual(
+    fxOf(fx, "outbox").flatMap((e) =>
+      bytesEqual(e.channel, spare.id) ? e.items.filter((i) => i.state === "refused") : [],
+    ),
+    [],
+    "review P6: a spare's items are dropped silently, no refused row waits for a screen that never clears it",
+  );
+  assert.equal(r.link.send(spare.id, draftTo(s), 9), "not-member");
+});
+
 /** A name message (kind 14 to 16) of alice's first device in `channel`, sealed in `epoch`. */
 function nameIn(
   s: Scene,
@@ -1812,4 +1935,79 @@ test("names 3: a relay put back to before a history seal loses the epoch key, an
     [null],
     "the key is gone with the rewind: the name is told as none",
   );
+});
+
+test("review P1: the space's entry 0 has a slot of its own, so the person's New channel is never busy for it", () => {
+  const s = scene();
+  s.epoch();
+  const r = rig(s, {}, s.alice.first);
+  const fx = r.connect();
+  assert.equal(entryZeros(fx).length, 1, "the space is being made");
+  const w = r.outWrites.at(-1);
+  assert.ok(w?.space, "kept in its own slot");
+  assert.equal(w.pending, null, "the creation slot is free");
+  const made = r.link.createChannel({ bot: s.bot.id, folder: "/work/x" }, 10);
+  assert.ok(typeof made === "object", `a channel is made, not ${made}`);
+  const sent = only(r.settle(made.effects, 10), "submit").filter((f) => f.kind === 2);
+  assert.equal(sent.length, 1, "its entry goes beside the space's");
+});
+
+test("review P1: a restart with the space's creation kept sends the same entry again, in its slot", () => {
+  const s = scene();
+  s.epoch();
+  const r = rig(s, {}, s.alice.first);
+  const first = entryZeros(r.connect());
+  const stored = r.outWrites.at(-1);
+  assert.ok(stored?.space);
+  r.drop(10);
+  const t = rig(s, { outbox: stored }, s.alice.first);
+  const [again] = only(t.connect(), "submit").filter((f) => f.kind === 2);
+  assert.deepEqual(again?.signed, stored.space.signed);
+  assert.equal(first.length, 1);
+  assert.deepEqual(t.outWrites.at(-1)?.space ?? stored.space, stored.space);
+});
+
+test("review P1: a restart with the space's creation pending, the bot having placed the space meanwhile: no second space, nothing kept, no refusal shown", () => {
+  const s = scene();
+  s.epoch();
+  const r = rig(s, {}, s.alice.first);
+  assert.equal(entryZeros(r.connect()).length, 1, "made");
+  const stored = r.outWrites.at(-1);
+  assert.ok(stored?.space, "kept before it is sent");
+  r.drop(10);
+  addChannel(s, spaceNonce(platform, s.alice.id), "bot").epoch(); // the bot placed its space first
+  const t = rig(s, { outbox: stored }, s.alice.first);
+  const again = t.connect();
+  assert.deepEqual(entryZeros(again), [], "review P3: not sent again once another space is read");
+  assert.deepEqual(fxOf(again, "channel-refused"), []);
+  assert.equal(t.outWrites.at(-1)?.space ?? null, null, "nothing kept");
+});
+
+test("review P7: a send() write that fails before the first rest's head leaves the stored space fault undropped and untold", () => {
+  const s = scene({ space: true });
+  s.epoch();
+  const talk = addChannel(s, fill(9, 16));
+  talk.epoch();
+  const r = rig(s, { outbox: { pending: null, channels: [], faults: [s.channel] } }, s.alice.first);
+  const started = r.settle(r.link.start(0), 0);
+  const dial = started.find((e) => e.do === "dial");
+  assert.ok(dial && dial.do === "dial");
+  const conn = dial.conn;
+  r.settle(r.link.opened(conn, BINDING, 0), 0);
+  // The connection as `rig.connect` runs it, split before the head that ends the read.
+  const frames = [s.wire.served(), ...s.wire.read(0)];
+  const head = frames.pop();
+  assert.ok(head && head.type === "head");
+  r.settle(r.link.received(conn, encodeFrame({ type: "hello", relayNonce: fill(4) }, false), 0), 0);
+  for (const f of frames) r.settle(r.link.received(conn, encodeFrame(f, true), 0), 0);
+  r.failOutboxWrites(() => true);
+  const sent = r.link.send(talk.id, draftTo(s), 1);
+  assert.ok(typeof sent === "object", `queued before the rest: ${String(sent)}`);
+  assert.equal(fxOf(r.settle(sent.effects, 1), "store-failed").length, 1, "the write failed");
+  const rest = r.settle(r.link.received(conn, encodeFrame(head, true), 2), 2);
+  assert.ok(
+    rest.some((e) => e.do === "deliver" && e.out.do === "rest"),
+    "the first rest",
+  );
+  assert.deepEqual(fxOf(rest, "channel-fault-dropped"), [], "no drop is told after a failed write");
 });

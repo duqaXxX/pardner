@@ -182,7 +182,13 @@ test("the app connects to a real relay, follows it, submits, survives a restart 
       },
       { op: "relay", act: "swift-done", name: "rest" },
       { op: "relay", act: "swift-wait", name: "exchanged" },
-      { op: "read", conn: "c2", from: 4, expect: { items: ["follow", "chan-name", "own"], n: 7 } },
+      // The app also makes its person's space and the keeper opens its first epoch (personal space design 3).
+      {
+        op: "read",
+        conn: "c2",
+        from: 4,
+        expect: { items: ["follow", "chan-name", "own"], others: 2, n: 9 },
+      },
       { op: "relay", act: "restart-same-port" },
       { op: "relay", act: "swift-done", name: "exchanged" },
       { op: "relay", act: "swift-wait", name: "restarted" },

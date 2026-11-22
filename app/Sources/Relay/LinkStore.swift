@@ -243,7 +243,14 @@ public final class LinkStore: @unchecked Sendable {
             log.error("the app outbox does not read and is started again empty")
             return nil
         }
-        return .object(["pending": pending, "channels": list, "faults": .array(faulted)])
+        // The space's creation has a field of its own (personal space design 3); a file written before has none, and its entry 0 sits in `pending`.
+        guard o["space"] == nil || o["space"] is NSNull || o["space"] is [String: Any], let space = Self.hostValue(o["space"] ?? NSNull()) else {
+            log.error("the app outbox does not read and is started again empty")
+            return nil
+        }
+        var fields: [String: HostValue] = ["pending": pending, "channels": list, "faults": .array(faulted)]
+        if space != .null { fields["space"] = space }
+        return .object(fields)
     }
 
     /// A stored value as the link takes it, `Self.byteFields` turned back into bytes; nil when a value is of another shape.
@@ -290,7 +297,7 @@ public final class LinkStore: @unchecked Sendable {
         }
     }
 
-    /// Writes the app outbox, `{pending, channels, faults}` (design 4), whole under a temporary name, flushed and renamed, then the folder
+    /// Writes the app outbox, `{pending, space, channels, faults}` with `space` only while the person's space is being made (design 4), whole under a temporary name, flushed and renamed, then the folder
     /// flushed; throws on a failure, the file staying the last one written. `LinkStoreMismatch` for a value no link could give, which is the
     /// host's fault; any other error is the disk's, and the link may ask again.
     public func writeOutbox(_ what: HostValue) throws {
@@ -299,13 +306,15 @@ public final class LinkStore: @unchecked Sendable {
             throw LinkStoreMismatch(description: "an outbox this store does not know")
         }
         let pending = fields["pending"] ?? .null
-        guard pending == .null || pending["signed"] != nil, let written = Self.json(.object(["channels": channels, "faults": faults])) as? [String: Any],
-              let pendingJSON = Self.json(pending) else {
+        let space = fields["space"] ?? .null
+        guard pending == .null || pending["signed"] != nil, space == .null || space["signed"] != nil, let written = Self.json(.object(["channels": channels, "faults": faults])) as? [String: Any],
+              let pendingJSON = Self.json(pending), let spaceJSON = Self.json(space) else {
             throw LinkStoreMismatch(description: "an outbox this store does not know")
         }
         var o = written
         o["version"] = Self.outboxVersion
         o["pending"] = pendingJSON
+        if space != .null { o["space"] = spaceJSON }
         // The pairing it was written for, as `link.json` carries it: an outbox of another is never read.
         for (name, key) in [("signing", identity.signing), ("receiving", identity.receiving), ("relay", identity.relay)] { o[name] = StoreDisk.hex(key) }
         try StoreDisk.replace(outboxPath, with: try JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]))

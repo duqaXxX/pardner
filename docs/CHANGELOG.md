@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The personal space, in the app's link. An app that reads to rest and finds no space of its person makes it, as a channel is made but with the space's own nonce and no prompt, and the keeper opens its first epoch; a second device that placed it first is not an error. A fault an older app stored on the space, or on a spare, is dropped at the first rest (`channel-fault-dropped`, which the app takes to withdraw its note), and a spare's stored items are dropped as not delivered: `send` refuses a spare and nothing is built or sent into one. The owner sees no difference: the space has no sidebar entry and no composer.
 - Names of channels, persons and devices, protocol part. Three message kinds join the table: 14, the name of a channel, sent by an app into a conversation
   channel; 15, the name of a person, and 16, the name of a device, sent by an app into the person's space (the relay refuses each outside its class, and a
   bot's). `readName` and `encodeName` read and write their content, `{ "name": ... }`: a channel name is `a-z 0-9 - _`, 1 to 80 characters; a person or a

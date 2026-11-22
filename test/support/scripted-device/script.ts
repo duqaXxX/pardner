@@ -496,18 +496,23 @@ export async function run(
     if (got.problems.length > 0) throw fail(step, `the read broke ${got.problems.join("; ")}`);
     const want = step.expect as {
       items?: string[];
+      /** Items nobody named in the script, which the device under test made (its person's space, and its first epoch): they come in any order. */
+      others?: number;
       n?: number;
       seals?: number;
       inc?: string;
       chained?: boolean;
     };
     const names = want.items ?? [];
-    if (got.items.length !== names.length)
-      throw fail(step, `${got.items.length} items, expected ${names.length}`);
+    const others = want.others ?? 0;
+    if (got.items.length !== names.length + others)
+      throw fail(step, `${got.items.length} items, expected ${names.length + others}`);
+    // The named items are among the read ones in the order given, each one matched once.
+    let at = 0;
     names.forEach((n, i) => {
       const id = items.get(n);
-      if (!id || !same((got.items[i] as { id: Bytes }).id, id))
-        throw fail(step, `item ${i} is not ${n}`);
+      while (at < got.items.length && !(id && same((got.items[at] as { id: Bytes }).id, id))) at++;
+      if (at++ >= got.items.length) throw fail(step, `item ${i} is not ${n}`);
     });
     if (want.n !== undefined && got.head.n !== want.n)
       throw fail(step, `n is ${got.head.n}, expected ${want.n}`);
