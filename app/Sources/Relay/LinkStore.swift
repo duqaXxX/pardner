@@ -248,7 +248,11 @@ public final class LinkStore: @unchecked Sendable {
             log.error("the app outbox does not read and is started again empty")
             return nil
         }
+        // The names the person set that the app has not read back (names design 4.4): a field a file written before has none of.
+        // One that does not read costs the names alone: the rest of the outbox is the person's messages.
+        let names = (o["names"] as? [Any]).flatMap { Self.hostValue($0) } ?? .null
         var fields: [String: HostValue] = ["pending": pending, "channels": list, "faults": .array(faulted)]
+        if names != .null { fields["names"] = names }
         if space != .null { fields["space"] = space }
         return .object(fields)
     }
@@ -307,14 +311,16 @@ public final class LinkStore: @unchecked Sendable {
         }
         let pending = fields["pending"] ?? .null
         let space = fields["space"] ?? .null
+        let names = fields["names"] ?? .null
         guard pending == .null || pending["signed"] != nil, space == .null || space["signed"] != nil, let written = Self.json(.object(["channels": channels, "faults": faults])) as? [String: Any],
-              let pendingJSON = Self.json(pending), let spaceJSON = Self.json(space) else {
+              let pendingJSON = Self.json(pending), let spaceJSON = Self.json(space), let namesJSON = Self.json(names) else {
             throw LinkStoreMismatch(description: "an outbox this store does not know")
         }
         var o = written
         o["version"] = Self.outboxVersion
         o["pending"] = pendingJSON
         if space != .null { o["space"] = spaceJSON }
+        if names != .null { o["names"] = namesJSON }
         // The pairing it was written for, as `link.json` carries it: an outbox of another is never read.
         for (name, key) in [("signing", identity.signing), ("receiving", identity.receiving), ("relay", identity.relay)] { o[name] = StoreDisk.hex(key) }
         try StoreDisk.replace(outboxPath, with: try JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]))

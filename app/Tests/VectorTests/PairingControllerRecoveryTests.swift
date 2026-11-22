@@ -55,7 +55,7 @@ final class PairingControllerRecoveryTests: XCTestCase {
                 await hostGate?.wait()
                 return try await ProtocolHost(scriptPath: script, store: keys, person: person)
             },
-            connect: { _, _, _, _, _, _, recover in
+            connect: { _, _, _, _, _, _, recover, _ in
                 harness.calls += 1
                 if harness.calls == harness.failingCall { throw ConnectFailed() }
                 let link = FakeLink()

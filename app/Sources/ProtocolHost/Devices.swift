@@ -47,6 +47,11 @@ extension ProtocolHost {
         try await callExported("checkPairingName", [.string(name)]) == .bool(true)
     }
 
+    /// Whether `name` may be a person's: the rule kind 15 is read under, 64 characters (names design 2.1), not the pairing string's bytes.
+    public func personNameFits(_ name: String) async throws -> Bool {
+        try await callExported("checkPersonName", [.string(name)]) == .bool(true)
+    }
+
     /// The proof of possession of a joining device, signed once with `device.sign` for `person` (design 3.7).
     public func makePairingProof(person: Data, device: HostValue) async throws -> Data {
         let answer = try await callExported("makePairingProof", [.string("device.sign"), .bytes(person), device])

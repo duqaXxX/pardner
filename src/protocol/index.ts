@@ -3,7 +3,7 @@
  * through `ProtocolHost`. It holds one `AppLink`, the shared `Link` with what must not cross into
  * Swift taken out of its effects: no epoch key, file key or log ever leaves it.
  */
-import { type AppOutbox, Boxes, type OutboxView } from "./app-outbox.ts";
+import { type AppOutbox, Boxes, type OutboxView, type PendingName } from "./app-outbox.ts";
 import { bytesEqual, isBytes } from "./bytes.ts";
 import { buildAdd, buildRemove, type SignedEntry } from "./device-builders.ts";
 import { type DeviceKeys, foldLog, idKey, type LoggedEntry, namedDevices } from "./device-log.ts";
@@ -32,7 +32,7 @@ import {
 import { build, type Draft, type OutboxItem, queue, Run, readBack, rebuild } from "./outbox.ts";
 import { checkPairingProof, shortForm } from "./pairing-string.ts";
 import type { Bytes, Platform } from "./platform.ts";
-import { encodeProfile, Names, type Profile, Profiles, readName } from "./profile.ts";
+import { encodeName, encodeProfile, Names, type Profile, Profiles, readName } from "./profile.ts";
 import type { Identity, Kept, Out } from "./reading.ts";
 import type { RecoverOptions } from "./recover.ts";
 import type { PlatformError, Result } from "./result.ts";
@@ -47,6 +47,8 @@ export {
   pairingString,
 } from "./pairing-string.ts";
 // The recovery key's two halves (design 3.5 steps 3 and 5): made before entry 0 and shown after it, the app calls both the same way; `enterRecoveryKey` takes a typed one back (recovery design 2.2).
+// The person's name typed at setup, checked as kind 15 is read.
+export { checkPersonName } from "./profile.ts";
 export { createRecoveryKey, enterRecoveryKey, showRecoveryKey } from "./recovery.ts";
 export type { AppOutbox, OutboxView };
 export { EXPORTER_LABEL };
@@ -198,6 +200,10 @@ export interface AppLinkOptions {
   enrol?: LinkOptions["enrol"];
   /** The app outbox as the last confirmed write left it (new channel design 4). */
   outbox?: AppOutbox;
+  /** The name this Mac knows for itself, its computer name (names design 4.3): this device's name when it is the first device, or no `typedName` was given, and the space holds none of its own. */
+  ownName?: string;
+  /** The name typed at this device's setup or join (names design 4.2, 4.3): the person's name on the person's first device, this device's name on any other. */
+  typedName?: string;
   /** The run the messages are built under, made here when absent (crypto.md 1): a test passes one at its counter limit. */
   run?: Run;
 }
@@ -262,6 +268,10 @@ export class AppLink {
   #accepted = new Map<string, Set<string>>(); // channel -> names given result 0 since the last rest
   #late = new Map<string, string>(); // channel -> the epoch that answered 3 or 4, where nothing is built again
   #rolled = new Map<string, string>(); // channel -> the epoch in which a build met the counter limit
+  #ownName: string | undefined;
+  #typedName: string | undefined;
+  #nameRefused = false; // the relay refused a name on this connection (names design 2.2): none goes out until the next connection or incarnation
+  #nameWritten = new Set<string>(); // the message names queued on this connection (4.3)
   #spaceAsked = false; // the space's entry 0 was made in this incarnation: not made again until the relay is another
   // The entry 0 of each slot (a channel being created, the person's space): submitted and not answered, or answered and owed again at the next rest; and its request in flight.
   #entries = {
@@ -282,6 +292,8 @@ export class AppLink {
     this.#saved = kept.ids.length;
     this.#boxes = new Boxes(o.outbox);
     this.#run = o.run ?? new Run(platform);
+    this.#ownName = o.ownName;
+    this.#typedName = o.typedName;
     this.#incarnation = s?.incarnation;
     this.#link = new Link({
       who: {
@@ -310,6 +322,7 @@ export class AppLink {
     return this.#view(this.#link.start(now), now);
   }
   opened(conn: number, binding: Bytes, now: number): AppEffect[] {
+    this.#newConnection();
     return this.#view(this.#link.opened(conn, binding, now), now);
   }
   received(conn: number, bytes: Bytes, now: number): AppEffect[] {
@@ -351,7 +364,7 @@ export class AppLink {
    * its first epoch is the keeper's.
    */
   createChannel(
-    bind: { bot: Bytes; folder: string },
+    bind: { bot: Bytes; folder: string; name?: string },
     now: number,
   ): { channel: Bytes; effects: AppEffect[] } | CreateError {
     const { active } = foldLog(this.#platform, this.#link.reading.devices);
@@ -372,6 +385,22 @@ export class AppLink {
     const sig = this.#platform.sign(SIGN, signed);
     if (!sig.ok) return sig.error;
     const channel = signedId(this.#platform, signed);
+    if (bind.name !== undefined) {
+      // The name goes in the one write that keeps entry 0 and the bind, so a stop leaves the same channel and its name to send (names design 4.1).
+      let content: string;
+      try {
+        content = encodeName(KIND_CHANNEL_NAME, bind.name);
+      } catch {
+        return "bad-input";
+      }
+      this.#boxes.names.push({
+        kind: KIND_CHANNEL_NAME,
+        channel,
+        name: this.#platform.random(16),
+        content,
+        setup: false,
+      });
+    }
     this.#boxes.pending = { signed, sig: sig.value };
     this.#put(channel, bound.value);
     this.#notes.push(this.#creating(channel));
@@ -574,6 +603,7 @@ export class AppLink {
       this.#spaceAsked = false; // a relay gone back may lack the space it placed
       this.#profiles = new Profiles();
       for (const [k, { bot }] of this.#shown) this.#recheck.set(k, bot);
+      this.#newConnection();
       this.#names = new Names();
       for (const [k, n] of this.#nameShown) this.#nameRecheck.set(k, n);
     }
@@ -836,6 +866,138 @@ export class AppLink {
     const held = this.#boxes.items(h.channel);
     const rest = readBack([...held], this.#self, h);
     if (rest.length !== held.length) this.#put(h.channel, rest);
+    // Cleared only by a message of this device under the pending message name, never by the name's value (names design 4.4).
+    const names = this.#boxes.names;
+    if (!bytesEqual(h.sender, this.#self) || !names.some((n) => bytesEqual(n.name, h.name))) return;
+    this.#boxes.names = names.filter((n) => !bytesEqual(n.name, h.name));
+    this.#dirty = true;
+  }
+
+  // Whether this device is the person's first: entry 0 of its log names it.
+  #first(): boolean {
+    const g = this.#link.reading.devices[0]?.entry;
+    return (
+      g?.kind === "genesis" &&
+      bytesEqual(deviceId(this.#platform, g.device.signing, g.device.receiving), this.#self)
+    );
+  }
+
+  #newConnection(): void {
+    this.#nameRefused = false;
+    this.#nameWritten.clear();
+  }
+
+  /**
+   * A name the person sets (names design 4.1 to 4.3): kept pending under its own message name in the store, written at rest into
+   * its channel (the space for a person's and a device's name). `target` is the channel for a kind 14. A newer name of the same target replaces it.
+   */
+  setName(
+    kind: number,
+    target: Bytes | undefined,
+    text: string,
+    now: number,
+    options: { setup?: boolean } = {},
+  ): { name: Bytes; effects: AppEffect[] } | SendError {
+    if (this.#failed) return "not-ready";
+    const named = kind === KIND_CHANNEL_NAME;
+    if (!named && kind !== KIND_PERSON_NAME && kind !== KIND_DEVICE_NAME) return "bad-input";
+    const view = target && this.#link.reading.channel(target);
+    if (named && (!view || view.space || !target)) return "not-member";
+    let content: string;
+    try {
+      content = encodeName(kind, text);
+    } catch {
+      return "bad-input";
+    }
+    const same = (n: PendingName) =>
+      n.kind === kind && (!named || bytesEqual(n.channel as Bytes, target as Bytes));
+    const old = this.#boxes.names.find(same);
+    const where = old && (named ? old.channel : this.#link.reading.space());
+    // The replaced name's item goes out of the outbox unless it was built: a built one may be in flight (names design 4.4).
+    if (old && where)
+      this.#put(
+        where,
+        this.#boxes.items(where).filter((i) => !bytesEqual(i.name, old.name) || i.built),
+      );
+    const made: PendingName = {
+      kind,
+      channel: named ? target : undefined,
+      name: this.#platform.random(16),
+      content,
+      setup: kind === KIND_PERSON_NAME && options.setup === true,
+    };
+    this.#boxes.names = [...this.#boxes.names.filter((n) => !same(n)), made];
+    this.#dirty = true;
+    return { name: made.name, effects: this.#view([], now) };
+  }
+
+  /**
+   * At a rest, the pending names are queued as the model's `writeNames` says: a setup name the sequence has since overtaken is
+   * dropped, the device's own name is taken when the space holds none, and each name goes once per connection, none after the relay refused one.
+   */
+  #writeNames(): void {
+    const r = this.#link.reading;
+    const space = r.space();
+    const home = space && r.channel(space);
+    const open = !!home?.key && !!home.epochs.at(-1); // the space's first epoch, whose key this device holds
+    const boxes = this.#boxes;
+    for (const n of boxes.names.filter((x) => x.setup)) {
+      if (!space || !this.#names.personNamedOtherwise(space, n.name)) continue;
+      boxes.names = boxes.names.filter((x) => x !== n);
+      this.#put(
+        space,
+        boxes.items(space).filter((i) => !bytesEqual(i.name, n.name)),
+      );
+    }
+    if (this.#nameRefused) return;
+    const first = this.#first();
+    const own = first ? this.#ownName : (this.#typedName ?? this.#ownName);
+    if (
+      own !== undefined &&
+      !boxes.names.some((n) => n.kind === KIND_DEVICE_NAME) &&
+      !(space && this.#names.hasDevice(space, this.#self)) &&
+      readName(KIND_DEVICE_NAME, JSON.stringify({ name: own })).ok
+    ) {
+      // Kept at the first rest, before the space's epoch is open: a typed name is gone from the pairing's reach after a join, and a restart must still send it.
+      boxes.names.push({
+        kind: KIND_DEVICE_NAME,
+        name: this.#platform.random(16),
+        content: encodeName(KIND_DEVICE_NAME, own),
+        setup: false,
+      });
+      this.#dirty = true;
+    }
+    // The person's own name, typed at the first device's setup: written only while the sequence names the person nowhere (4.2).
+    if (
+      first &&
+      this.#typedName !== undefined &&
+      !boxes.names.some((n) => n.kind === KIND_PERSON_NAME) &&
+      !(space && this.#names.hasPerson(space)) &&
+      readName(KIND_PERSON_NAME, JSON.stringify({ name: this.#typedName })).ok
+    ) {
+      boxes.names.push({
+        kind: KIND_PERSON_NAME,
+        name: this.#platform.random(16),
+        content: encodeName(KIND_PERSON_NAME, this.#typedName),
+        setup: true,
+      });
+      this.#dirty = true;
+    }
+    for (const n of boxes.names) {
+      const channel = n.kind === KIND_CHANNEL_NAME ? n.channel : open ? space : undefined;
+      const key = idKey(n.name);
+      if (!channel || !r.channel(channel) || boxes.faulted(channel) || this.#nameWritten.has(key))
+        continue;
+      if (boxes.items(channel).some((i) => bytesEqual(i.name, n.name))) continue;
+      const queued = queue(this.#platform, boxes.items(channel), {
+        kind: n.kind,
+        content: n.content,
+        name: n.name,
+      });
+      if (!queued.ok) continue;
+      this.#nameWritten.add(key);
+      this.#put(channel, queued.value);
+    }
   }
 
   // The write of the app outbox when it changed, at the end of a list that holds no `persist`; none while one is held or after one failed.
@@ -873,6 +1035,8 @@ export class AppLink {
   #flush(now: number): AppEffect[] {
     const r = this.#link.reading;
     if (!r.sendable || this.#dirty || this.#writing || this.#failed) return [];
+    this.#writeNames();
+    if (this.#dirty) return [];
     const sent: Effect[] = [];
     this.#creation(sent, now, "pending");
     this.#creation(sent, now, "space");
@@ -914,6 +1078,9 @@ export class AppLink {
       // at every rest would loop. The app has no log channel.
       if (slot === "space") return;
       // Refused (a random id cannot be taken, so 2 is the relay's own verdict, treated as 1): the channel never was, and its outbox goes with it.
+      this.#boxes.names = this.#boxes.names.filter(
+        (n) => !n.channel || !bytesEqual(n.channel, channel),
+      ); // its name goes with it (invariant 3)
       this.#notes.push({ do: "creating", channel: null });
       for (const item of this.#boxes.items(channel)) this.#drop(channel, item); // told as refused
       this.#notes.push({ do: "channel-refused", channel, code });
@@ -944,7 +1111,10 @@ export class AppLink {
     )
       return;
     const done = this.#accepted.get(k);
-    const item = this.#boxes.items(channel).find((i) => !done?.has(idKey(i.name)));
+    // A name is held in place while the relay refused one on this connection (names design 2.2).
+    const held = (i: OutboxItem) =>
+      this.#nameRefused && i.kind >= KIND_CHANNEL_NAME && i.kind <= KIND_DEVICE_NAME;
+    const item = this.#boxes.items(channel).find((i) => !done?.has(idKey(i.name)) && !held(i));
     if (!item) return;
     if (!item.built) {
       const at = {
@@ -1016,6 +1186,7 @@ export class AppLink {
       )(signed, signature);
       // Kind, class, `to` and `re` depend on the draft and its channel alone: a refusal by them is the app's own, not the relay's (SD 4, I3).
       // In the space any refusal drops the item and never stops the channel (design 2.6), and a relay older than the kinds 13 to 16 refuses one anywhere: never a fault (names design 2.2, D-N3 A).
+      if (held.kind >= KIND_CHANNEL_NAME && held.kind <= KIND_DEVICE_NAME) this.#nameRefused = true;
       if (
         r.channel(channel)?.space ||
         (held.kind >= KIND_PROFILE && held.kind <= KIND_DEVICE_NAME) ||

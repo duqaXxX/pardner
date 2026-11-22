@@ -22,7 +22,7 @@ struct ChannelView: View {
         let queued = channel.threads.values.reduce(into: Set<MessageRef>()) { $0.formUnion($1.queued) }
         VStack(spacing: 0) {
             HStack(spacing: PardnerMetrics.gap * 2) {
-                Text(Naming.channel(channel.id)).font(PardnerFont.ui(size: 15, weight: .semibold))
+                Text(Naming.channel(channel.id, in: model)).font(PardnerFont.ui(size: 15, weight: .semibold))
                 Picker("", selection: $tab) {
                     ForEach(MainWindow.Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
@@ -30,6 +30,7 @@ struct ChannelView: View {
                 Spacer()
                 if let channels {
                     Menu {
+                        Button("Rename…") { channels.openRename(.channel(channel.id), current: model.names.channels[channel.id]) }.disabled(!channels.canRename(channel.id))
                         Button("Bind to a folder…") { channels.openBind(channel: channel.id, bot: ChannelsModel.bot(of: channel)) }.disabled(!channels.canBind(channel.id))
                     } label: { Image(systemName: "ellipsis").frame(width: 22, height: 22) }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).pointerStyle(.link).fixedSize().accessibilityLabel("Channel actions")

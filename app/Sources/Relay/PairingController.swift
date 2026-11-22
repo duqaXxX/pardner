@@ -14,6 +14,8 @@ public enum ReadingEvent: Sendable, Equatable {
     case delivered(HostValue)
     /// A bot's shown profile, as `RelayEvent.profile` carries it.
     case profile(HostValue)
+    /// The names the link shows, as `RelayEvent.names` carries them.
+    case names(HostValue)
     /// The model starts again empty: a new connection reads the sequence from its start, or the pairing's keys and stores were erased.
     case reset
 }
@@ -26,8 +28,9 @@ public protocol RelayLinking: AnyObject, Sendable {
     func enrol(_ enrolment: Enrolment) async -> Bool
     func submit(kind: UInt8, signed: Data, sig: Data) async throws -> SubmitOutcome
     func build(_ act: DeviceAct) async throws -> BuildOutcome
-    func createChannel(bot: Data, folder: String) async throws -> CreateOutcome
+    func createChannel(bot: Data, folder: String, name: String?) async throws -> CreateOutcome
     func send(channel: Data, draft: OutboxDraft) async throws -> SendOutcome
+    func setName(kind: Int, target: Data?, text: String, setup: Bool) async throws -> SendOutcome
     func holdRecovery(id: Data, receiving: String) async -> Bool
     func recoveryReading() async -> RecoveryReading?
 }
@@ -153,7 +156,7 @@ public actor PairingController {
     public static let unreachableWarning = "The relay may already hold your first entry and then has an owner nobody holds. The way back is pardner relay init on a new directory, or later the recovery sheet."
 
     public typealias MakeHost = @Sendable (any KeyStore, RecoveryPerson) async throws -> ProtocolHost
-    public typealias Connect = @Sendable (ProtocolHost, any KeyStore, Data, RelayEndpoint, LinkStore, Enrolment?, RecoverRequest?) throws -> any RelayLinking
+    public typealias Connect = @Sendable (ProtocolHost, any KeyStore, Data, RelayEndpoint, LinkStore, Enrolment?, RecoverRequest?, String?) throws -> any RelayLinking
 
     static let signName = "device.sign", receiveName = "device.receive", recoveryName = "recovery"
 
@@ -204,6 +207,8 @@ public actor PairingController {
     var attempt = RecoveryAttempt()
     /// The recovery keys given to the link for opening, in order, with the name each is held under; and the keys the person said they no longer have. Memory only.
     var heldRecovery: [(id: Data, name: String)] = []
+    /// The device names the link shows (names design 3), by device id: they replace the pairing string's label in the Devices list.
+    var shownDeviceNames: [Data: String] = [:]
     var gaveUp = Set<Data>()
     var earlierKeys = 0 // the n of `recovery.earlier.<n>`, from 1
     var atRest = false // a rest of this connection was seen: what the link read is all it will read until the log moves
@@ -229,8 +234,11 @@ public actor PairingController {
     /// The app's own script and a `RelayConnection`.
     public static func bundledHost(_ keys: any KeyStore, _ person: RecoveryPerson) async throws -> ProtocolHost { try await ProtocolHost(store: keys, person: person) }
 
-    public static func relayConnection(_ host: ProtocolHost, _ keys: any KeyStore, _ person: Data, _ endpoint: RelayEndpoint, _ linkStore: LinkStore, _ enrolment: Enrolment?, _ recover: RecoverRequest?) throws -> any RelayLinking {
-        try RelayConnection(host: host, store: keys, person: person, endpoint: endpoint, linkStore: linkStore, enrol: enrolment, recover: recover)
+    /// The computer's name, read once per run: the lookup can wait on the network (names design 4.3).
+    private static let macName = Host.current().localizedName
+
+    public static func relayConnection(_ host: ProtocolHost, _ keys: any KeyStore, _ person: Data, _ endpoint: RelayEndpoint, _ linkStore: LinkStore, _ enrolment: Enrolment?, _ recover: RecoverRequest?, _ typedName: String?) throws -> any RelayLinking {
+        try RelayConnection(host: host, store: keys, person: person, endpoint: endpoint, linkStore: linkStore, enrol: enrolment, recover: recover, ownName: Self.macName, typedName: typedName)
     }
 
     // MARK: launch (design 3.5 table, 3.10, 4.1)
@@ -290,13 +298,20 @@ public actor PairingController {
     /// `enrolling` and starts the connection with the enrolment. Throws a `PairingInputError` before anything is written; any other error
     /// after the attempt was erased (or, once `enrolling` is written, left for the next launch to resume). A decline or a cancel ends it
     /// with no throw, in `unpaired`.
-    public func setUp(address: String, relayKey: String, enrolmentSecret: String) async throws {
+    /// `name` is the person's name typed at setup (names design 4.2): kept in the pairing file and written as kind 15 once the space is open.
+    public func setUp(address: String, relayKey: String, enrolmentSecret: String, name: String? = nil) async throws {
         guard case .unpaired = phase else { throw PairingInputError.notReady }
         let relay = try Self.relay(address: address, key: relayKey)
         let secret = try Self.secret(enrolmentSecret)
+        if let name {
+            // The package's check for a person's name (the rule kind 15 is read under): before anything is written.
+            guard try await hostMade().personNameFits(name) else { throw PairingInputError.name }
+            guard case .unpaired = phase else { throw PairingInputError.notReady }
+        }
         phase = .settingUp
         cancelRequested = false
         var state = PairingState(stage: .keysMade(.enrol), relay: relay)
+        state.name = name
         do {
             try pairing.write(state) // before the keys: keys with no store are a fault, never left-overs (step 2)
             _ = try keys.make(Self.signName, .sign)
@@ -430,15 +445,21 @@ public actor PairingController {
 
     /// Makes a channel bound to `folder` through the running connection (new channel design 3.2); the link's `creating` effect puts it
     /// in `channels.creating`, and takes it out when it is read back or refused.
-    public func createChannel(bot: Data, folder: String) async throws -> CreateOutcome {
+    public func createChannel(bot: Data, folder: String, name: String? = nil) async throws -> CreateOutcome {
         guard let link else { return .ended }
-        return try await link.createChannel(bot: bot, folder: folder)
+        return try await link.createChannel(bot: bot, folder: folder, name: name)
     }
 
     /// Queues one message in a channel's outbox through the running connection (new channel design 3.3).
     public func send(channel: Data, draft: OutboxDraft) async throws -> SendOutcome {
         guard let link else { return .ended }
         return try await link.send(channel: channel, draft: draft)
+    }
+
+    /// Sets a name through the running connection (names design 4): a channel's (`kind` 14, `target` the channel), the person's (15) or this device's (16).
+    public func setName(kind: Int, target: Data? = nil, text: String, setup: Bool = false) async throws -> SendOutcome {
+        guard let link else { return .ended }
+        return try await link.setName(kind: kind, target: target, text: text, setup: setup)
     }
 
     /// The screen took these refused items of `channel` (`ChannelsState.undelivered`): they are not kept any longer.
@@ -470,6 +491,9 @@ public actor PairingController {
         switch event {
         case .delivered(let view): readingOut.yield(.delivered(view))
         case .profile(let profile): readingOut.yield(.profile(profile))
+        case .names(let names):
+            readingOut.yield(.names(names))
+            deviceNamesTold(names)
         default: break
         }
         // The channel state is set before any suspension below too: a stop that runs in one moves `connectionID` first.
@@ -517,8 +541,16 @@ public actor PairingController {
             await stopConnection()
             phase = .fault(.failed, PairingPhase.storeFailedAdvice)
         case .faulted(let message): await hostFaulted(message)
-        case .profile, .outbox, .creating, .channelRefused, .channelFault, .channelFaultDropped: break
+        case .profile, .names, .outbox, .creating, .channelRefused, .channelFault, .channelFaultDropped: break
         }
+    }
+
+    /// The device names a `names` effect tells (kind 16), and the list drawn again with them.
+    private func deviceNamesTold(_ effect: HostValue) {
+        for entry in effect["names"]?.arrayValue ?? [] where entry["kind"]?.numberValue == 16 {
+            if let target = entry["target"]?.bytesValue { shownDeviceNames[target] = entry["name"]?.stringValue }
+        }
+        publish()
     }
 
     /// A channel's items as the link lists them now; a channel with none is dropped.
@@ -644,7 +676,7 @@ public actor PairingController {
         guard !isShutDown else { return } // the app quit while the host was made: no connection starts after the streams finished
         let linkStore = try LinkStore(folder: linkFolder, identity: LinkIdentity(
             signing: try keys.publicKey(Self.signName), receiving: try keys.publicKey(Self.receiveName), relay: state.relay.key))
-        let connection = try connect(host, keys, person, RelayEndpoint(host: state.relay.host, port: state.relay.port, pin: state.relay.key), linkStore, enrolment, recover)
+        let connection = try connect(host, keys, person, RelayEndpoint(host: state.relay.host, port: state.relay.port, pin: state.relay.key), linkStore, enrolment, recover, state.name) // the name typed at setup or at a join (names design 4.2, 4.3)
         connectionID += 1
         atRest = false
         forgetHeldKeys() // a new link holds no recovery key
@@ -652,6 +684,7 @@ public actor PairingController {
         // The new link reads the sequence from position 0: the model starts empty and is rebuilt in order, rather than patched one
         // position at a time over what the last connection drew (a rebuild of the channel per message).
         readingOut.yield(.reset)
+        shownDeviceNames = [:] // the new link tells every name again as it reads
         link = connection
         (refused, secretRetyped, reachable) = (false, false, true)
         (snapshot, acceptedOn, heldAtLength) = (nil, nil, nil)

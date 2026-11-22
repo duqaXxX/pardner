@@ -53,8 +53,8 @@ final class FirstDeviceRelayTests: XCTestCase {
         func makeController() -> PairingController {
             PairingController(keys: keys, pairing: pairing, linkFolder: linkFolder,
                               makeHost: { keys, person in try await ProtocolHost(scriptPath: script, store: keys, person: person) },
-                              connect: { host, keys, person, endpoint, linkStore, enrolment, recover in
-                                  let connection = try PairingController.relayConnection(host, keys, person, endpoint, linkStore, enrolment, recover)
+                              connect: { host, keys, person, endpoint, linkStore, enrolment, recover, ownName in
+                                  let connection = try PairingController.relayConnection(host, keys, person, endpoint, linkStore, enrolment, recover, ownName)
                                   held.add(connection)
                                   return connection
                               })

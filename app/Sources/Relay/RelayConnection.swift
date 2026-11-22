@@ -69,6 +69,8 @@ public enum RelayEvent: Sendable {
     case delivered(HostValue)
     /// The profile shown for a bot changed: the link's `profile` effect, with `bot` and `profile`, `profile` null when none reads (app data design, 5).
     case profile(HostValue)
+    /// The names the link shows changed: its `names` effect, with `names`, each `kind`, `target` and `name` (null when none shows; names design 3).
+    case names(HostValue)
     /// The device log the link reads changed: the link's `devices` effect, with `person`, `length`, `last`, `devices` and `self` (device pairing design 4.2).
     case devices(HostValue)
     /// The relay first served a link given an `Enrolment`: entry 0 was placed, and the owner stops passing the secret (device pairing design 3.5).
@@ -174,8 +176,9 @@ enum Event: Sendable {
     case hold(id: Data, receiving: String, CheckedContinuation<Bool, Never>)
     case reading(CheckedContinuation<RecoveryReading?, Never>)
     case build(DeviceAct, CheckedContinuation<BuildOutcome, Error>)
-    case createChannel(bot: Data, folder: String, CheckedContinuation<CreateOutcome, Error>)
+    case createChannel(bot: Data, folder: String, name: String?, CheckedContinuation<CreateOutcome, Error>)
     case send(channel: Data, draft: OutboxDraft, CheckedContinuation<SendOutcome, Error>)
+    case setName(kind: Int, target: Data?, text: String, setup: Bool, CheckedContinuation<SendOutcome, Error>)
     case stop
 }
 
@@ -307,12 +310,12 @@ public final class RelayConnection: @unchecked Sendable {
     /// `store` holds the device's keys as `device.sign` and `device.receive`, and `host` was made on that store; `person`
     /// is the id the device was paired for. `linkStore` is the process's one store of the link's state (design 3.2: its
     /// lock lives as long as the process holds it), for the same keys and relay; a store that cannot be read now throws.
-    public convenience init(host: ProtocolHost, store: KeyStore, person: Data, endpoint: RelayEndpoint, linkStore: LinkStore, enrol: Enrolment? = nil, recover: RecoverRequest? = nil) throws {
-        try self.init(host: host, store: store, person: person, endpoint: endpoint, linkStore: linkStore, constants: [:], enrol: enrol, recover: recover)
+    public convenience init(host: ProtocolHost, store: KeyStore, person: Data, endpoint: RelayEndpoint, linkStore: LinkStore, enrol: Enrolment? = nil, recover: RecoverRequest? = nil, ownName: String? = nil, typedName: String? = nil) throws {
+        try self.init(host: host, store: store, person: person, endpoint: endpoint, linkStore: linkStore, constants: [:], enrol: enrol, recover: recover, ownName: ownName, typedName: typedName)
     }
 
     /// For tests, through `@testable import`: `constants` shortens the link's `first`, `max`, `patience` and `ask`.
-    init(host: ProtocolHost, store: KeyStore, person: Data, endpoint: RelayEndpoint, linkStore: LinkStore, constants: [String: HostValue], enrol: Enrolment? = nil, recover: RecoverRequest? = nil) throws {
+    init(host: ProtocolHost, store: KeyStore, person: Data, endpoint: RelayEndpoint, linkStore: LinkStore, constants: [String: HostValue], enrol: Enrolment? = nil, recover: RecoverRequest? = nil, ownName: String? = nil, typedName: String? = nil) throws {
         self.host = host
         self.endpoint = endpoint
         let signing = try store.publicKey("device.sign"), receiving = try store.publicKey("device.receive")
@@ -332,6 +335,8 @@ public final class RelayConnection: @unchecked Sendable {
             throw error
         }
         if let enrol { options["enrol"] = .object(["secret": .bytes(enrol.secret), "signed": .bytes(enrol.signed), "sig": .bytes(enrol.sig)]) }
+        if let ownName { options["ownName"] = .string(ownName) }
+        if let typedName { options["typedName"] = .string(typedName) }
         self.recover = recover?.value
         if !constants.isEmpty { options["constants"] = .object(constants) }
         self.options = options
@@ -384,9 +389,9 @@ public final class RelayConnection: @unchecked Sendable {
 
     /// Makes a channel with a `/bind <folder>` prompt to `bot`, kept in the app outbox before anything is sent (new channel design 3.2); the
     /// link's refusal is the outcome's, and `.ended` when the connection has ended.
-    public func createChannel(bot: Data, folder: String) async throws -> CreateOutcome {
+    public func createChannel(bot: Data, folder: String, name: String? = nil) async throws -> CreateOutcome {
         try await withCheckedThrowingContinuation { continuation in
-            if case .terminated = feed.yield(.createChannel(bot: bot, folder: folder, continuation)) { continuation.resume(returning: .ended) }
+            if case .terminated = feed.yield(.createChannel(bot: bot, folder: folder, name: name, continuation)) { continuation.resume(returning: .ended) }
         }
     }
 
@@ -408,6 +413,14 @@ public final class RelayConnection: @unchecked Sendable {
     public func send(channel: Data, draft: OutboxDraft) async throws -> SendOutcome {
         try await withCheckedThrowingContinuation { continuation in
             if case .terminated = feed.yield(.send(channel: channel, draft: draft, continuation)) { continuation.resume(returning: .ended) }
+        }
+    }
+
+    /// Sets a name the person typed (names design 4.1 to 4.3): kept pending in the app outbox and written at rest. `kind` 14 names the channel
+    /// `target`, 15 the person (`setup` for the name asked at setup), 16 this device. `queued` carries the pending entry's message name.
+    public func setName(kind: Int, target: Data?, text: String, setup: Bool = false) async throws -> SendOutcome {
+        try await withCheckedThrowingContinuation { continuation in
+            if case .terminated = feed.yield(.setName(kind: kind, target: target, text: text, setup: setup, continuation)) { continuation.resume(returning: .ended) }
         }
     }
 
@@ -505,10 +518,10 @@ public final class RelayConnection: @unchecked Sendable {
                 continuation.resume(throwing: error)
                 throw error
             }
-        case .createChannel(let bot, let folder, let continuation):
+        case .createChannel(let bot, let folder, let name, let continuation):
             // Answered once, after the call's effects ran: a failure of them (a host fault) is its error, and the run ends on it as elsewhere.
             let outcome: CreateOutcome
-            do { outcome = try await created(bot: bot, folder: folder) } catch {
+            do { outcome = try await created(bot: bot, folder: folder, name: name) } catch {
                 continuation.resume(throwing: error)
                 throw error
             }
@@ -516,6 +529,13 @@ public final class RelayConnection: @unchecked Sendable {
         case .send(let channel, let draft, let continuation):
             let outcome: SendOutcome
             do { outcome = try await queued(channel: channel, draft: draft) } catch {
+                continuation.resume(throwing: error)
+                throw error
+            }
+            continuation.resume(returning: outcome)
+        case .setName(let kind, let target, let text, let setup, let continuation):
+            let outcome: SendOutcome
+            do { outcome = try await named(kind: kind, target: target, text: text, setup: setup) } catch {
                 continuation.resume(throwing: error)
                 throw error
             }
@@ -555,8 +575,10 @@ public final class RelayConnection: @unchecked Sendable {
         return (answer, effects)
     }
 
-    private func created(bot: Data, folder: String) async throws -> CreateOutcome {
-        let answer = try await call("createChannel", [.object(["bot": .bytes(bot), "folder": .string(folder)])])
+    private func created(bot: Data, folder: String, name: String?) async throws -> CreateOutcome {
+        var bind: [String: HostValue] = ["bot": .bytes(bot), "folder": .string(folder)]
+        if let name { bind["name"] = .string(name) } // the channel's name goes in the write that keeps entry 0 (names design 4.1)
+        let answer = try await call("createChannel", [.object(bind)])
         guard let (made, effects) = try answered(answer) else { return .refused(answer.stringValue ?? "") }
         guard let channel = made["channel"]?.bytesValue else { throw HostError.faulted("a new channel answered with no id") }
         // `notSaved` when the write this call made failed: the caller keeps what it typed (new channel design 9).
@@ -582,6 +604,13 @@ public final class RelayConnection: @unchecked Sendable {
         return try await saved(effects) ? .queued(name: name) : .notSaved
     }
 
+    private func named(kind: Int, target: Data?, text: String, setup: Bool) async throws -> SendOutcome {
+        let answer = try await call("setName", [.number(Double(kind)), target.map { .bytes($0) } ?? .null, .string(text)], tail: [.object(["setup": .bool(setup)])])
+        guard let (made, effects) = try answered(answer) else { return .refused(answer.stringValue ?? "") }
+        guard let name = made["name"]?.bytesValue else { throw HostError.faulted("a name answered with no message name") }
+        return try await saved(effects) ? .queued(name: name) : .notSaved
+    }
+
     private func built(_ act: DeviceAct) async throws -> BuildOutcome {
         func pairing(_ device: HostValue, _ proof: Data) -> HostValue { .object(["device": device, "proof": .bytes(proof)]) }
         let answer: HostValue
@@ -600,10 +629,10 @@ public final class RelayConnection: @unchecked Sendable {
     }
 
     /// A call of the link, with the time: the clock, and never before a deadline the timer fired for.
-    private func call(_ method: String, _ arguments: [HostValue] = [], at: Double = 0) async throws -> HostValue {
+    private func call(_ method: String, _ arguments: [HostValue] = [], at: Double = 0, tail: [HostValue] = []) async throws -> HostValue {
         let elapsed = origin.duration(to: .now)
         last = max(last, at, Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e15)
-        return try await host.call(link!, method, arguments + [.number(last)])
+        return try await host.call(link!, method, arguments + [.number(last)] + tail)
     }
 
     /// The effects in order.
@@ -628,7 +657,7 @@ public final class RelayConnection: @unchecked Sendable {
                 if ["put-back", "fault"].contains(view["do"]?.stringValue) { final = true }
                 out.yield(.delivered(view))
             case "profile": out.yield(.profile(fx))
-            case "names": break // the names a device shows reach the screens with step N2 of the names design; until then the link tells them and the app ignores them
+            case "names": out.yield(.names(fx))
             case "devices": out.yield(.devices(fx))
             case "outbox": out.yield(.outbox(fx))
             case "creating": out.yield(.creating(fx))
@@ -772,8 +801,9 @@ public final class RelayConnection: @unchecked Sendable {
             case .hold(_, _, let continuation): continuation.resume(returning: false)
             case .reading(let continuation): continuation.resume(returning: nil)
             case .build(_, let continuation): continuation.resume(returning: .refused("ended"))
-            case .createChannel(_, _, let continuation): continuation.resume(returning: .ended)
+            case .createChannel(_, _, _, let continuation): continuation.resume(returning: .ended)
             case .send(_, _, let continuation): continuation.resume(returning: .ended)
+            case .setName(_, _, _, _, let continuation): continuation.resume(returning: .ended)
             default: break
             }
         }

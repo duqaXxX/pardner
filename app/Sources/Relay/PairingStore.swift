@@ -110,7 +110,7 @@ public struct PairingState: Sendable, Equatable {
     public var person: Data?
     /// Entry 0 and its signature, while enrolling.
     public var genesis: SignedEntry?
-    /// The proof of possession, while joining or recovering; the name is the joining's alone.
+    /// The proof of possession, while joining or recovering; the name is the joining's, and stays once paired.
     public var proof: Data?
     public var name: String?
     /// Device entries made and not yet read back: at most one (design 3.6).
@@ -129,7 +129,8 @@ public struct PairingState: Sendable, Equatable {
 /// Reads and writes the pairing in one folder: one process holds it (the lock).
 public final class PairingStore: @unchecked Sendable {
     /// Version 2 is a file that holds a recovery: an app that reads version 1 only calls it newer and erases nothing (design 4.1).
-    private static let version = 2, plainVersion = 1
+    /// Version 3 is a file that keeps the name typed at setup or at a join, from `keys-made` of a first device to paired (names design 4.2, 4.3): an app that reads version 2 or 1 calls it newer and erases nothing.
+    private static let version = 3, recoveryVersion = 2, plainVersion = 1
     private let folder: URL
     private var lock: Int32 = -1
     private let calls = OSAllocatedUnfairLock()
@@ -194,7 +195,7 @@ public final class PairingStore: @unchecked Sendable {
         func hex(_ data: Data) -> String { StoreDisk.hex(data) }
         let entry = { (e: SignedEntry) -> [String: Any] in ["signed": hex(e.signed), "sig": hex(e.sig), "id": hex(e.id)] }
         var o: [String: Any] = [
-            "version": s.recovery == nil ? plainVersion : version,
+            "version": s.name != nil && s.stage != .joining ? version : s.recovery == nil ? plainVersion : recoveryVersion,
             "relay": ["host": s.relay.host, "port": Int(s.relay.port), "key": hex(s.relay.key)],
             "labels": Dictionary(uniqueKeysWithValues: s.labels.map { (hex($0.key), $0.value) }),
             "seen": Dictionary(uniqueKeysWithValues: s.seen.map { (hex($0.key), $0.value) }),
@@ -235,7 +236,7 @@ public final class PairingStore: @unchecked Sendable {
             return n
         }
         func int(_ value: Any?) -> Int? { number(value).flatMap { $0 as? Int } }
-        guard let fileVersion = int(o["version"]), [plainVersion, version].contains(fileVersion), fileVersion == plainVersion ? o["recovery"] == nil : true else {
+        guard let fileVersion = int(o["version"]), [plainVersion, recoveryVersion, version].contains(fileVersion), fileVersion == plainVersion ? o["recovery"] == nil : true else {
             let newer = int(o["version"]).map { $0 > version } ?? false
             throw PairingFault(description: refuse("another version").description, isNewerVersion: newer)
         }
@@ -296,6 +297,7 @@ public final class PairingStore: @unchecked Sendable {
         }
         if let recovery = o["recovery"] { s.recovery = try Self.recovery(recovery, bytes, refuse) }
         try shape(s, refuse)
+        if s.stage != .joining, s.name != nil, fileVersion != version { throw refuse("a name that belongs to version 3") }
         return s
     }
 
@@ -331,11 +333,11 @@ public final class PairingStore: @unchecked Sendable {
         case .keysMade(.recover): fits = present.person && !present.genesis && !present.proof && !present.name && later && made && !reset
         case .recovering: fits = present.person && !present.genesis && present.proof && !present.name && later && reset
         case .recovered: fits = present.person && !present.genesis && !present.proof && !present.name && later && reset
-        case .keysMade(.enrol): fits = !made && !present.person && !present.genesis && !present.proof && !present.name && later
+        case .keysMade(.enrol): fits = !made && !present.person && !present.genesis && !present.proof && later // the name typed at setup may be there, in a version 3 file
         case .keysMade(.join): fits = !made && present.person && !present.genesis && !present.proof && !present.name && later
-        case .enrolling: fits = !made && present.person && present.genesis && s.person == s.genesis?.id && !present.proof && !present.name && later
+        case .enrolling: fits = !made && present.person && present.genesis && s.person == s.genesis?.id && !present.proof && later
         case .joining: fits = !made && present.person && !present.genesis && present.proof && present.name && later
-        case .paired: fits = !made && present.person && !present.genesis && !present.proof && !present.name
+        case .paired: fits = !made && present.person && !present.genesis && !present.proof // a name may stay: the one typed at a join (names design 4.3), in a version 3 file
         }
         guard fits else { throw refuse("fields that do not belong to the stage") }
     }

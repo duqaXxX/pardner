@@ -50,6 +50,7 @@ final class DevicesControllerTests: XCTestCase {
     private final class Links: @unchecked Sendable {
         var all: [FakeLink] = []
         var enrolments: [Enrolment?] = []
+        var ownNames: [String?] = []
         var link: FakeLink { all.last! }
     }
 
@@ -67,10 +68,11 @@ final class DevicesControllerTests: XCTestCase {
         return PairingController(
             keys: keys, pairing: pairing, linkFolder: linkFolder,
             makeHost: { keys, person in try await ProtocolHost(scriptPath: script, store: keys, person: person) },
-            connect: { _, _, _, _, _, enrolment, _ in
+            connect: { _, _, _, _, _, enrolment, _, ownName in
                 let link = FakeLink()
                 links.all.append(link)
                 links.enrolments.append(enrolment)
+                links.ownNames.append(ownName)
                 prime.forEach(link.emit) // buffered until the controller reads the stream
                 return link
             },
@@ -177,6 +179,22 @@ final class DevicesControllerTests: XCTestCase {
     }
 
     // MARK: the list (3.9)
+
+    func testADeviceNameTheLinkShowsReplacesTheLabelInTheList() async throws {
+        let rig = try rig()
+        let link = await started(rig)
+        link.emit(logThree(a: false, extra: [Dev(id: F.s, by: F.a, position: 3, held: 2)]))
+        _ = await list(rig, "no list") { $0.rows.count == 4 }
+        link.emit(.names(.object(["do": .string("names"), "names": .array([
+            .object(["kind": .number(16), "target": .bytes(bytes(F.a)), "name": .string("Mac Studio")]),
+            .object(["kind": .number(16), "target": .bytes(bytes(F.b)), "name": .string("Mac mini")]),
+        ])])))
+        let state = await list(rig, "no names") { $0.rows.first { $0.id == self.bytes(F.b) }?.label == "Mac mini" }
+        XCTAssertEqual(state.rows.first { $0.id == bytes(F.a) }?.label, "Mac Studio", "the name read replaces the pairing string's label")
+        link.emit(.names(.object(["do": .string("names"), "names": .array([.object(["kind": .number(16), "target": .bytes(bytes(F.a)), "name": .null])])])))
+        let back = await list(rig, "no label") { $0.rows.first { $0.id == self.bytes(F.a) }?.label == "Studio Mac" }
+        XCTAssertEqual(back.rows.first { $0.id == bytes(F.a) }?.label, "Studio Mac", "a name that no longer shows leaves the label")
+    }
 
     func testTheListIsNewestFirstWithLabelsAdderPositionAndThisMac() async throws {
         let rig = try rig()
@@ -648,9 +666,23 @@ final class DevicesControllerTests: XCTestCase {
         let state = try stored(rig)
         XCTAssertEqual(state.stage, .paired)
         XCTAssertNil(state.proof)
-        XCTAssertNil(state.name)
+        XCTAssertEqual(state.name, "Mac mini", "the name typed at the join stays: a restart before the name is written still sends it (names design 4.3)")
         let list = await list(rig, "no list") { $0.rows.count == 2 }
         XCTAssertTrue(list.rows.first { $0.id == bytes(F.a) }!.isThisMac)
+    }
+
+    func testARestartAfterTheJoinStillGivesTheLinkTheTypedName() async throws {
+        let rig = try joinRig()
+        await rig.controller.launch()
+        try await form(rig)
+        XCTAssertEqual(rig.links.ownNames.last, "Mac mini", "the join's connection carries it")
+        rig.links.link.emit(effect(length: 2, last: F.addA1, devices: [Dev(id: F.first, by: nil, position: 0), Dev(id: F.a, by: F.first, position: 1)], me: F.a))
+        await until("not paired") { await rig.controller.phase == .paired }
+        await rig.controller.shutdown()
+        let restarted = Links()
+        let again = try controller(rig.keys, rig.pairing, rig.folders.link, restarted, rig.clock)
+        await again.launch()
+        XCTAssertEqual(restarted.ownNames.last, "Mac mini", "not the computer's name")
     }
 
     func testServedWithoutThisDevicesAddStopsAndOffersPairAgain() async throws {
@@ -742,6 +774,20 @@ final class DevicesControllerTests: XCTestCase {
         XCTAssertEqual(outcome, .badName)
         XCTAssertNil(try stored(rig).pending)
         XCTAssertEqual(try stored(rig).labels, labelsBefore)
+    }
+
+    func testANoticeNamesADeviceByTheNameTheLinkShowsBeforeItsLabel() async throws {
+        let rig = try rig()
+        let link = await started(rig)
+        link.emit(logThree())
+        _ = await list(rig, "no list") { $0.rows.count == 3 }
+        link.emit(.names(.object(["do": .string("names"), "names": .array([.object(["kind": .number(16), "target": .bytes(bytes(F.a)), "name": .string("Mac Studio")])])])))
+        _ = await list(rig, "no name") { $0.rows.first { $0.id == self.bytes(F.a) }?.label == "Mac Studio" }
+        link.buildOutcomes = [.built(entry(F.remA3))]
+        link.submitOutcomes = [.code(1)]
+        _ = await rig.controller.confirmRemoval(chosen: [bytes(F.a), bytes(F.b)], clicked: bytes(F.a))
+        let notice = await rig.controller.deviceList.notice
+        XCTAssertEqual(notice, .removeRefused(.label("Mac Studio")))
     }
 
     func testARemoveTheLogRefusedIsNamedAsARemoveAndLeavesTheAct() async throws {

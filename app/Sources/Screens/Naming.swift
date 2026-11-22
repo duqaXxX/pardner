@@ -8,9 +8,14 @@ enum Naming {
     static func short(_ id: Data) -> String { id.prefix(4).map { String(format: "%02x", $0) }.joined() }
 
     /// A sender as a message shows it.
-    static func sender(_ id: Data, in model: ReadingModel) -> String { model.profiles[id]?.name ?? short(id) }
+    static func sender(_ id: Data, in model: ReadingModel) -> String {
+        model.profiles[id]?.name ?? (model.isOwn(id) ? model.personName : nil) ?? model.names.devices[id] ?? short(id)
+    }
 
-    /// A channel in the sidebar and the header.
+    /// A channel in the sidebar and the header: its name when one shows, else its short id.
+    static func channel(_ id: Data, in model: ReadingModel) -> String { "#" + (model.names.channels[id] ?? short(id)) }
+
+    /// A channel by its short id alone, where no names are read.
     static func channel(_ id: Data) -> String { "#" + short(id) }
 
     /// The initial drawn on a sender's colour when no icon is given (first-screens decision 9).

@@ -32,6 +32,8 @@ public struct MainWindow: View {
     @State private var channel: Data?
     @State private var thread: String?
     @State private var tab: Tab = .conversation
+    /// This Mac's rename was asked from the Devices sheet: the name sheet opens once that sheet is gone, not in the same tick.
+    @State private var renameAfterDevices = false
 
     enum Tab: String, CaseIterable { case conversation = "Conversation", sessions = "Sessions" }
 
@@ -107,11 +109,20 @@ public struct MainWindow: View {
             }))
         .frame(minWidth: Self.leastWidth(threadOpen: threadOpen))
         .onChange(of: shown?.id) { thread = nil }
-        .sheet(isPresented: Binding(get: { devices?.isOpen ?? false }, set: { if !$0 { devices?.close() } })) {
-            if let devices { DevicesSheet(model: devices) }
+        .sheet(isPresented: Binding(get: { devices?.isOpen ?? false }, set: { if !$0 { devices?.close() } }), onDismiss: {
+            guard renameAfterDevices, let devices else { return }
+            renameAfterDevices = false
+            let this = devices.rows.first(where: \.isThisMac)
+            channels?.openRename(.device, current: this.flatMap { model.names.devices[$0.id] ?? $0.label })
+        }) {
+            if let devices {
+                DevicesSheet(model: devices, renameThisMac: channels == nil ? nil : { renameAfterDevices = true; devices.close() })
+            }
         }
         .background(Color.clear.sheet(isPresented: Binding(get: { channels?.sheet != nil }, set: { if !$0 { channels?.close() } })) {
-            if let channels { ChannelSheet(model: channels, names: model.profiles.mapValues(\.name)) }
+            if let channels {
+                if case .rename? = channels.sheet { NameSheet(model: channels, channelNames: model.names.channels) } else { ChannelSheet(model: channels, names: model.profiles.mapValues(\.name), channelNames: model.names.channels) }
+            }
         })
         .background(PardnerColor.bg)
     }
@@ -194,7 +205,7 @@ struct Sidebar: View {
                 }
                 ForEach(MainWindow.ordered(model), id: \.self) { id in
                     Button { choose(id) } label: {
-                        Text(Naming.channel(id))
+                        Text(Naming.channel(id, in: model))
                             .font(PardnerFont.ui(size: 14, weight: selected == id ? .semibold : .regular))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, PardnerMetrics.gap).padding(.vertical, 6)
@@ -224,6 +235,17 @@ struct Sidebar: View {
                 }
             }
             Spacer()
+            if let channels {
+                Button { channels.openRename(.person, current: model.personName) } label: {
+                    HStack(spacing: PardnerMetrics.gap) {
+                        Avatar(name: model.personName ?? "You", isBot: false, icon: nil, size: 20)
+                        Text(model.personName ?? "Set your name").foregroundStyle(model.personName == nil ? PardnerColor.muted : PardnerColor.text).lineLimit(1)
+                        Spacer()
+                    }
+                    .padding(.horizontal, PardnerMetrics.gap)
+                }
+                .buttonStyle(.plain).pointerStyle(channels.ready ? .link : nil).disabled(!channels.ready).help("Change your name").accessibilityLabel("Change your name")
+            }
             if let openDevices {
                 Button(action: openDevices) {
                     Label("Devices…", systemImage: "laptopcomputer.and.iphone").frame(maxWidth: .infinity, alignment: .leading)
