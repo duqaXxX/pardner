@@ -82,6 +82,8 @@ struct PardnerApp: App {
         }
         // Room for the three columns at their first-launch widths and a thread open.
         .defaultSize(width: 1280, height: 800)
+        // No title bar: the sidebar runs the window's height (its own "Pardner" is the name on screen) and the traffic lights stay.
+        .windowStyle(.hiddenTitleBar)
         .commands {
             // The Settings panel (Devices is one of its panes) and the new channel's sheet over the main window, once this Mac is paired and while no sheet is up.
             CommandGroup(replacing: .appSettings) {
