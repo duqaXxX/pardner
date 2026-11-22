@@ -54,7 +54,7 @@ const validAddress = (address: string) => {
 };
 
 const NAME_RULE =
-  "PARDNER_BOT_NAME: write 1 to 32 characters, with no @, no control character and no space at either end.";
+  "PARDNER_BOT_NAME: write 1 to 32 characters, with no @, no control or invisible character and no space at either end.";
 const MAX_ICON_FILE = 65_536;
 const ICON_RULE =
   "PARDNER_BOT_ICON: the icon is a square PNG or JPEG of 16 to 256 pixels a side, 65,536 bytes at most.";
@@ -162,15 +162,21 @@ export function pairingName(
   host = hostname(),
 ): string {
   const typed = values.PARDNER_BOT_NAME;
-  const name = configuredProfile(
-    { variables: typed === undefined ? {} : { PARDNER_BOT_NAME: typed }, instance, brand },
-    host,
-  ).name;
-  if (!checkPairingName(createNodePlatform(), name)) {
-    throw new ConfigError(
-      "PARDNER_BOT_NAME: this Mac's name cannot travel in the pairing string (64 bytes at most, no invisible character). Move .env away, then run setup again and type a name.",
-    );
+  const cannotTravel = new ConfigError(
+    "PARDNER_BOT_NAME: this Mac's name cannot travel in the pairing string (64 bytes at most, no invisible character). Move .env away, then run setup again and type a name.",
+  );
+  let name: string;
+  try {
+    name = configuredProfile(
+      { variables: typed === undefined ? {} : { PARDNER_BOT_NAME: typed }, instance, brand },
+      host,
+    ).name;
+  } catch (error) {
+    // A default the profile refuses (an invisible character in the host name) is the same case.
+    if (typed === undefined && error instanceof ConfigError) throw cannotTravel;
+    throw error;
   }
+  if (!checkPairingName(createNodePlatform(), name)) throw cannotTravel;
   return name;
 }
 

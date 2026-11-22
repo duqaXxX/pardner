@@ -5,6 +5,7 @@
 
 import { idKey } from "./device-log.ts";
 import { KIND_PROFILE, type MessageHeader } from "./messages.ts";
+import { hidden, hiddenInName } from "./name-rule.ts";
 import type { Bytes } from "./platform.ts";
 import { fail, ok, type Result } from "./result.ts";
 
@@ -19,16 +20,6 @@ export interface Profile {
 const MAX_ICON = 65_536;
 const MAX_ICON_TEXT = 4 * Math.ceil(MAX_ICON / 3); // its base64, refused before it is decoded
 
-// Only what needs no Unicode table, so that Node and JavaScriptCore give one verdict (design 3.1):
-// a C0 or C1 control, a line or paragraph separator, or a lone surrogate, which Swift turns into
-// U+FFFD so that two strings that differ would look alike. Iterating by code point leaves a lone
-// surrogate as one unit in U+D800 to U+DFFF.
-export const hidden = (c: number): boolean =>
-  c <= 0x1f ||
-  (c >= 0x7f && c <= 0x9f) ||
-  c === 0x2028 ||
-  c === 0x2029 ||
-  (c >= 0xd800 && c <= 0xdfff);
 const text = (v: unknown, min: number, max: number): v is string => {
   // A code point is one or two UTF-16 units: a longer string is refused before it is split.
   if (typeof v !== "string" || v.length > 2 * max) return false;
@@ -36,10 +27,13 @@ const text = (v: unknown, min: number, max: number): v is string => {
   return (
     points.length >= min &&
     points.length <= max &&
-    points.every((p) => !hidden(p.codePointAt(0) as number))
+    points.every((p) => !hiddenInName(p.codePointAt(0) as number))
   );
 };
-/** Whether a code point may not stand in a bot's name: what `hidden` names, and `@` (design 3.1). */
+/**
+ * Whether a code point may not stand in a default name: what `hidden` names, and `@`. A default
+ * name drops only these; one holding an invisible code point stops setup, which asks for a name.
+ */
 export const refusedInName = (c: number): boolean => hidden(c) || c === 0x40;
 const nameTaken = (name: unknown): name is string =>
   text(name, 1, 32) && !name.includes("@") && !name.startsWith(" ") && !name.endsWith(" ");
@@ -132,7 +126,9 @@ const record = (v: unknown): v is Record<string, unknown> =>
  * The profile of a message's content (design 3.1), or `bad-input`. A field it does not know is
  * ignored, so that a profile written by a later version still names its bot; a known field that
  * does not read refuses the whole profile (crypto.md 9), so a later version that changes a known
- * field's rule writes it under a new field.
+ * field's rule writes it under a new field. The one exception is `name`, tightened in place on
+ * 2026-11-22 to the rule of a device's name (`hiddenInName`): an older profile whose name holds an
+ * invisible code point no longer reads, and a device shows the last profile that does, else the id.
  */
 export function readProfile(content: string): Result<Profile> {
   let json: unknown;

@@ -63,6 +63,7 @@ test("a configured name is stricter than a reader: NFC, no format character, no 
   refused({ PARDNER_BOT_NAME: "Café" }, /NFC/);
   refused({ PARDNER_BOT_NAME: "mi​ni" }, /format character/);
   refused({ PARDNER_BOT_NAME: "mi‮ni" }, /format character/);
+  refused({ PARDNER_BOT_NAME: "mi\u{fe0f}ni" }, /^PARDNER_BOT_NAME: write 1 to 32 characters/);
   refused({ PARDNER_BOT_NAME: "my ACME_agent" }, /may not hold "Acme Agent"/);
   refused({ PARDNER_BOT_NAME: "acme.agent-2" }, /may not hold/);
   assert.deepEqual(of({ PARDNER_BOT_NAME: "Café" }), { name: "Café" });

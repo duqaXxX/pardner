@@ -204,6 +204,7 @@ All notable changes to this project are documented here. The format follows
   unshown secret holds is refused by `createRecovery` and `enterRecovery`. The secret still never enters JavaScript.
   `RecoveryPerson.show` takes the context and answers `true` only when the person confirmed. The package gains
   `showRecoveryKey` (`recovery.ts`), and the `recovery.json` behaviour vector runs the new sequence on both engines.
+- A bot's profile name follows the rule of a device's name: a zero width character, a directional mark such as U+202E, a filler, a variation selector or a tag character is refused, as are the controls it already refused. A profile whose name holds one is not read (`bad-input`), and `PARDNER_BOT_NAME` holding one stops the start. A profile that a bot wrote earlier with such a name no longer reads, so a device shows the bot's last profile that does, else its id. When `PARDNER_BOT_NAME` is absent and the host name holds one, the start stops too: set `PARDNER_BOT_NAME`. The account's name and plan follow the same rule. The rule is one function, `hiddenInName` in `src/protocol/name-rule.ts`.
 
 ### Fixed
 

@@ -12,39 +12,13 @@ import {
   writeDevice,
 } from "./device-log.ts";
 import { deviceId } from "./ids.ts";
+import { hiddenInName } from "./name-rule.ts";
 import type { Bytes, Platform } from "./platform.ts";
-import { hidden as refusedInProfile } from "./profile.ts";
 import { fail, ok, type Result } from "./result.ts";
 
 const MAX_NAME_BYTES = 64;
 /** The device (kind byte and two keys) and the proof, before the name. */
 const FIXED_BYTES = 1 + 65 + 65 + 64;
-// No name can pass for another: the bot profile's own refusals (a control, a line or paragraph
-// separator, a lone surrogate), Unicode's default-ignorable code points, which render as nothing
-// (DerivedCoreProperties.txt, Unicode 18.0.0, read 2026-11-20), and the interlinear annotations. The
-// ranges are written here rather than read from an engine's Unicode tables, so that Node and
-// JavaScriptCore give one verdict, as profile.ts does.
-const INVISIBLE: readonly (readonly [number, number])[] = [
-  [0x00ad, 0x00ad],
-  [0x034f, 0x034f],
-  [0x061c, 0x061c],
-  [0x115f, 0x1160],
-  [0x17b4, 0x17b5],
-  [0x180b, 0x180f],
-  [0x200b, 0x200f],
-  [0x202a, 0x202e],
-  [0x2060, 0x206f],
-  [0x3164, 0x3164],
-  [0xfe00, 0xfe0f],
-  [0xfeff, 0xfeff],
-  [0xffa0, 0xffa0],
-  [0xfff0, 0xfffb],
-  [0x1bca0, 0x1bca3],
-  [0x1d173, 0x1d17a],
-  [0xe0000, 0xe0fff],
-];
-const hiddenInName = (c: number): boolean =>
-  refusedInProfile(c) || INVISIBLE.some(([from, to]) => c >= from && c <= to);
 const HEX = /^(?:[0-9a-f]{2})+$/i;
 
 const toHex = (bytes: Bytes): string =>
@@ -56,7 +30,7 @@ const fromHex = (text: string): Bytes =>
 
 /**
  * Whether `name` may travel: 1 to 64 bytes of UTF-8 (a lone surrogate is not), with no hidden
- * character and no space at either end, as a bot's profile name (profile.ts).
+ * character and no space at either end, as a bot's profile name (`name-rule.ts`).
  */
 export function checkPairingName(platform: Platform, name: string): boolean {
   const bytes = platform.utf8Encode(name);
