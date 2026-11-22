@@ -241,7 +241,7 @@ test("the control of an update offer names the version, and the page's has no me
   const { chat, provider, channel } = await built();
   const picks: unknown[] = [];
   await provider.start({ ...NOBODY, picked: async (pick) => void picks.push(pick) });
-  await provider.channel(channel).offer(
+  await provider.channel(channel).offer?.(
     {
       type: "update",
       from: "0.3.0",

@@ -117,7 +117,7 @@ export function titleOf(relative: string): string {
  * It is opened with `fs.promises.open` and numeric flags from `fs.constants` (`O_RDONLY |
  * O_NONBLOCK | O_NOFOLLOW`: a file that became a link in between is refused, a FIFO is never
  * waited on). The handle's `stat` says it is a regular file under the limit, its `read` takes the
- * bytes at the current position, up to `limit` + 1, and its `close` ends it.
+ * bytes at the current position, up to `limit` + 1 into a buffer sized from the `stat`, and its `close` ends it.
  */
 export async function readOnce(
   target: string,
@@ -131,13 +131,21 @@ export async function readOnce(
     throw new NotAFile({ cause: error });
   }
   let total = 0;
-  const content = Buffer.allocUnsafe(limit + 1);
+  let content = Buffer.alloc(0);
   try {
     const found = await handle.stat();
     if (!found.isFile()) throw new NotAFile();
     if (found.size > limit) throw new TooLarge();
+    // The size `fstat` gave and one byte more, so that the end of the file shows as a read of 0;
+    // a file that grows meanwhile takes a larger buffer below, never more than `limit` + 1.
+    content = Buffer.allocUnsafe(Math.min(found.size + 1, limit + 1));
     while (total <= limit) {
-      const { bytesRead } = await handle.read(content, total, limit + 1 - total, null);
+      if (total === content.length) {
+        const larger = Buffer.allocUnsafe(Math.min(content.length * 2, limit + 1));
+        content.copy(larger, 0, 0, total);
+        content = larger;
+      }
+      const { bytesRead } = await handle.read(content, total, content.length - total, null);
       if (bytesRead === 0) break;
       total += bytesRead;
     }

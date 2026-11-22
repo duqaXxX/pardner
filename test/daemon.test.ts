@@ -38,7 +38,7 @@ import {
   type ThreadRef,
 } from "../src/chat/seam.ts";
 import type { Clock } from "../src/clock.ts";
-import { CLEAN_EVERY_SECONDS } from "../src/core/cleanup.ts";
+import { CLEAN_EVERY_SECONDS, logger as cleanupLog } from "../src/core/cleanup.ts";
 import { AlreadyRunning, identityDirectory, singleInstance, updateLock } from "../src/core/lock.ts";
 import type { ChatContext, ChatEntry } from "../src/core/port.ts";
 import { StateError, StateStore } from "../src/core/state.ts";
@@ -150,7 +150,7 @@ class Daemon {
 
   constructor(
     t: TestContext,
-    options: { scripts?: Script[]; identities?: readonly string[] } = {},
+    options: { scripts?: Script[]; identities?: readonly string[]; lookups?: boolean } = {},
   ) {
     const identities = options.identities ?? [MEMORY_IDENTITY];
     this.dir = configDirectory(t);
@@ -161,6 +161,7 @@ class Daemon {
     // `rootStatus` for the repair of a root a crash left working, `index` for the page.
     this.chat = memoryChat({
       identities,
+      lookups: options.lookups,
       rootStatus: true,
       index: {
         page: () => ({
@@ -239,14 +240,16 @@ class Daemon {
             await target.close();
           };
         }
-        if (property === "channelState") {
+        if (property === "channelState" && target.channelState !== undefined) {
           return async (channel: string): Promise<Presence> => {
             daemon.asked.push(channel);
             if (daemon.gate !== null) {
               daemon.gated.set();
               await daemon.gate.wait();
             }
-            return daemon.gone.has(channel) ? "gone" : target.channelState(channel);
+            return daemon.gone.has(channel)
+              ? "gone"
+              : (target.channelState?.(channel) ?? "no answer");
           };
         }
         if (property === "thread") {
@@ -927,6 +930,33 @@ test("run forgets a gone channel at start and again on its schedule", async (t) 
   const asked = d.asked.length;
   await d.clock.advance(CLEAN_EVERY_SECONDS * 2);
   assert.equal(d.asked.length, asked);
+});
+
+test("the start's cleanup asks a chat with no lookups nothing, a chat with lookups each bound channel", async (t) => {
+  for (const lookups of [false, true]) {
+    const d = new Daemon(t, { lookups });
+    const warnings = written(t, cleanupLog, "warning");
+    writeFileSync(
+      d.path,
+      JSON.stringify({
+        version: 3,
+        agent: MODULES.agent,
+        chat: MODULES.chat,
+        channels: { [d.channel]: { directory: d.dir } },
+      }),
+    );
+    d.start();
+    await d.booted();
+    await tick();
+    assert.deepEqual(d.asked, lookups ? [d.channel] : []);
+    // The daemon's fallback answers `no answer` outside the chat: without the capability the
+    // pass must not reach it, or it would warn.
+    assert.deepEqual(
+      warnings().filter((line) => line.includes("could not read channel")),
+      [],
+    );
+    await d.stop("SIGINT");
+  }
 });
 
 test("the chat's refresh control runs the cleanup at once, and the page is written without the channel", async (t) => {

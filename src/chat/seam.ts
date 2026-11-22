@@ -201,6 +201,17 @@ export interface ChatCapabilities {
   /** `ThreadChat.offer`: a list with a control per row, posted in a session's thread. */
   readonly threadLists: boolean;
   /**
+   * `ChannelChat.offer`: a list with a control per row, posted in a channel (`/bind` alone,
+   * `/resume` alone, the update). Without it the core answers those words with a line that says
+   * what each needs, and the chat has no `offer`.
+   */
+  readonly channelLists: boolean;
+  /**
+   * `ChatProvider.channelState` and `threadState`. Without them the cleanup never asks, forgets
+   * no channel or thread on the chat's word and logs nothing about it.
+   */
+  readonly lookups: boolean;
+  /**
    * `ThreadChat.fold` and `Reply.posted`: the chat rewrites a message of the daemon's into one
    * collapsed element that keeps what the message showed.
    */
@@ -844,8 +855,8 @@ export interface ChannelChat {
    * the first edit, as it hands the words of any other root.
    */
   open?(markdown: string, root?: { lead: string; words: string }): Promise<ThreadRef>;
-  /** Posts a list, each row with its control; `title` is the list in one line. */
-  offer(list: OwnerList, title: string): Promise<void>;
+  /** Posts a list, each row with its control; `title` is the list in one line. Present with `channelLists`. */
+  offer?(list: OwnerList, title: string): Promise<void>;
   /** Removes a list that did its job. False when the chat refused and it still shows. */
   withdraw(list: MessageId): Promise<boolean>;
   /** Rewrites a list into a notice that says `text`, in a notice's markup, with nothing left to press. */
@@ -1012,13 +1023,14 @@ export interface ChatProvider {
   /**
    * Whether the chat still has `channel`. A chat that could not say answers `no answer`, or
    * rejects with a `ChatError` whose name is the reason: the core logs it and forgets nothing.
+   * Present with `lookups`.
    */
-  channelState(channel: string): Promise<Presence>;
+  channelState?(channel: string): Promise<Presence>;
   /**
    * Whether the chat still has the thread's first message. Answers like `channelState`; `gone`
-   * only when the chat is certain.
+   * only when the chat is certain. Present with `lookups`.
    */
-  threadState(ref: ThreadRef): Promise<Presence>;
+  threadState?(ref: ThreadRef): Promise<Presence>;
   /**
    * The chat's own control that runs the cleanup at once, named for the owner as the subject of
    * a sentence in a notice (for example `Refresh on the sessions page`); absent when the chat offers none.

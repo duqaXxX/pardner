@@ -321,7 +321,7 @@ test("a first message deleted during a turn is left to the cleanup, and the turn
   // The next cleanup pass finds the root gone and forgets the thread.
   world.chat.removeThread(ref);
   const forgotten = await forgetGoneThreads(
-    (thread) => world.provider.threadState(thread),
+    (thread) => world.provider.threadState?.(thread) ?? Promise.resolve("no answer"),
     world.state,
     [ref.channel],
     () => [],

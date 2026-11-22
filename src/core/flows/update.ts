@@ -277,12 +277,24 @@ export function updating(deps: FlowDeps, updates: Updates, talk: Talk): PardnerF
         failure !== null
           ? fill(texts.UPDATE_STATUS_UNKNOWN, { installed, reason: whyUnknown(failure), time })
           : newer !== null
-            ? fill(texts.UPDATE_STATUS_NEWER, { installed, latest: newer, time })
+            ? fill(
+                chat.capabilities.channelLists
+                  ? texts.UPDATE_STATUS_NEWER
+                  : texts.UPDATE_STATUS_NEWER_NO_LIST,
+                {
+                  installed,
+                  latest: newer,
+                  time,
+                },
+              )
             : fill(texts.UPDATE_STATUS_CURRENT, { installed, time }),
       ];
       const refusal = updates.refusal;
       if (refusal !== null) lines.push(outside(refusal, "reference"));
-      else if (updates.canUpdate && !host.supervised()) lines.push(notAService());
+      else if (updates.canUpdate && chat.capabilities.channelLists && !host.supervised()) {
+        // Without lists the update is not made from the chat: the line would promise it.
+        lines.push(notAService());
+      }
       return lines.join("\n");
     },
 
@@ -305,6 +317,8 @@ export function updating(deps: FlowDeps, updates: Updates, talk: Talk): PardnerF
       const failure = updates.checkFailure;
       const copy = updates.copy;
       const newer = updates.newer;
+      const picker = chat.channel(channel);
+      const lists = chat.capabilities.channelLists && picker.offer !== undefined;
       if (refusal !== null) {
         await talk.inChannel(channel, outside(refusal, "notice"), answers);
       } else if (failure !== null) {
@@ -322,10 +336,17 @@ export function updating(deps: FlowDeps, updates: Updates, talk: Talk): PardnerF
           fill(texts.UPDATE_LATEST, { installed: updates.installed }),
           answers,
         );
+      } else if (!lists) {
+        // Before the service check: a chat with no lists tells the command whatever the copy.
+        await talk.inChannel(
+          channel,
+          fill(texts.UPDATE_NO_LIST, { installed: updates.installed, latest: newer }),
+          answers,
+        );
       } else if (!host.supervised()) {
         await talk.inChannel(channel, notAService(), answers);
       } else {
-        await chat.channel(channel).offer(
+        await picker.offer?.(
           {
             type: "update",
             from: updates.installed,
@@ -393,7 +414,10 @@ export function updating(deps: FlowDeps, updates: Updates, talk: Talk): PardnerF
         ? null
         : (parseCommand(message.text, message.bare) ?? parseCommand(message.plain, message.bare));
       if (typed?.kind === "pardner") return;
-      const text = fill(texts.UPDATE_NOTICE, { latest: version, installed: updates.installed });
+      const text = fill(
+        chat.capabilities.channelLists ? texts.UPDATE_NOTICE : texts.UPDATE_NOTICE_NO_LIST,
+        { latest: version, installed: updates.installed },
+      );
       // A message of the channel opens a thread that has no reply yet, and a chat may show a
       // line for the owner alone in a thread only once it is active: the line goes to the
       // channel. A chat that refuses the line does not hold the message back.

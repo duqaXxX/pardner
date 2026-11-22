@@ -208,6 +208,34 @@ test("clean forgets gone channels then prunes what is left", async () => {
   );
 });
 
+// #78: the relay chat has no lookup to ask, so a pass asks nothing and warns of nothing.
+test("a chat that cannot be asked is not asked, and the pass still prunes", async () => {
+  const asked: string[] = [];
+  state.openThread(CHANNEL, GONE_THREAD);
+  await clean(
+    async (channelId) => {
+      asked.push(channelId);
+      return "no answer";
+    },
+    state,
+    {
+      threadLookup: async (ref) => {
+        asked.push(ref.thread);
+        return "no answer";
+      },
+      lookups: false,
+      live: nothingLive,
+      chat: "Relay chat",
+      openedAt: opened,
+      now: () => (OPENED_AT[GONE_THREAD] as number) + 2 * 24 * 60 * 60,
+      logger: log,
+    },
+  );
+  assert.deepEqual(asked, []);
+  assert.ok(!log.lines.some((line) => line.startsWith("WARNING")), log.lines.join("\n"));
+  assert.equal(state.thread(CHANNEL, GONE_THREAD), null, "pruned all the same");
+});
+
 // #148: the thread's messages remain in the chat, and the Home lists it from the state.
 test("a pass keeps a thread whose session the agent no longer lists", async () => {
   await clean(channelsInChat({}), state, {

@@ -291,7 +291,7 @@ export function wordFlow(
         } else if (command.path) {
           await others.bind.to(channel, command.path, answers);
         } else {
-          await others.bind.list(channel);
+          await others.bind.list(channel, answers);
         }
         return;
       case "bypass": {

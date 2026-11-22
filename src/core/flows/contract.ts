@@ -132,8 +132,11 @@ export interface RewindFlow {
 export interface BindFlow {
   /** `/bind <folder>` typed in a channel. */
   to(channel: string, path: string, answers?: MessageId): Promise<void>;
-  /** `/bind` alone: the folders a session can start in, offered as a list. */
-  list(channel: string): Promise<void>;
+  /**
+   * `/bind` alone: the folders a session can start in, offered as a list; a chat that cannot
+   * offer one gets a line naming what the word needs. `answers` as for `to`.
+   */
+  list(channel: string, answers?: MessageId): Promise<void>;
 }
 
 /** `/pardner`, the update from the chat, and the line told once per version. */

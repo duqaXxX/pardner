@@ -256,6 +256,13 @@ export const UPDATE_NOT_A_SERVICE = naming(
   "pardner is not running as a service. `pardner service install` in a terminal makes it one; " +
     "then it can update and restart from {chat}.",
 );
+// For a chat that cannot offer the install yet (the relay chat, until the app draws one).
+export const UPDATE_NO_LIST =
+  "pardner {latest} is available (this copy runs {installed}). Run `pardner update` in a " +
+  "terminal on the bot's machine to install it.";
+export const UPDATE_STATUS_NEWER_NO_LIST =
+  "pardner {installed} · latest {latest}, checked {time} · `pardner update` in a terminal on " +
+  "the bot's machine installs it";
 export const UPDATE_OFFER = "Update pardner {installed} → {latest}";
 export const UPDATE_WHAT_CHANGED = "What changed";
 export const UPDATE_DRAIN =
@@ -270,6 +277,9 @@ export const UPDATE_UNKNOWN =
   "The latest version is unknown: {reason}. `/pardner update` tries again.";
 export const UPDATE_NOTICE =
   "pardner {latest} is available (this copy runs {installed}) · `/pardner update` installs it";
+export const UPDATE_NOTICE_NO_LIST =
+  "pardner {latest} is available (this copy runs {installed}) · `pardner update` in a terminal " +
+  "on the bot's machine installs it";
 // The line of the chat's own page: `UPDATE_HOME_AVAILABLE` with the link and the button, the
 // dialog the button asks through, then the states of a click.
 export const UPDATE_HOME_AVAILABLE = "pardner {latest} is available, this copy runs {installed}";
@@ -429,6 +439,14 @@ export const BIND_LIST_ANY = "Folders under `{root}`:";
 export const BIND_EMPTY = naming(
   "No folder under `{root}` is trusted by {agent} yet. Open one in the terminal with " +
     "`{cli}` and accept the trust dialog, then send `/bind` again.",
+);
+// For a chat that cannot offer the list yet (the relay chat, until the app draws one).
+export const BIND_NO_LIST =
+  "Name the folder to bind: `/bind <folder>`, a path under `{root}`, for example " +
+  "`/bind my-project`.";
+export const BIND_NO_LIST_TRUST = naming(
+  "{agent} starts a session only in a folder it trusts: open the folder once in the terminal " +
+    "with `{cli}` and accept the trust dialog first.",
 );
 export const BIND_ALREADY = "This channel is already bound to `{directory}`.";
 export const BIND_BUSY =
@@ -884,8 +902,16 @@ export const RESUME_OK =
   "Resumed **{title}**: your next message continues it. If it is open in a terminal, close it " +
   "there first: while it is open in both, neither sees the other's messages, and a later " +
   "resume keeps only one side's.";
+// For a chat that cannot offer the list yet (the relay chat, until the app draws one).
+export const RESUME_NO_LIST =
+  "Name the session to resume: `/resume <id>` with at least {min} characters of its id, or " +
+  "`/resume <name>`.";
 export const RESUME_NONE =
   "No session in `{directory}` has the id or name `{target}`: `/resume` lists them.";
+// `RESUME_NONE` and `RESUME_AMBIGUOUS` for a chat with no list to send the owner to.
+export const RESUME_NONE_NO_LIST = "No session in `{directory}` has the id or name `{target}`.";
+export const RESUME_AMBIGUOUS_NO_LIST =
+  "More than one session in `{directory}` is named or starts with `{target}`: type more of its id.";
 export const RESUME_AMBIGUOUS =
   "More than one session in `{directory}` is named or starts with `{target}`: pick one from " +
   "`/resume`.";

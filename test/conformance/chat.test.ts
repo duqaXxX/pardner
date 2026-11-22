@@ -77,8 +77,11 @@ function ordering() {
   };
 }
 
-async function memoryRig(threadIds: "own" | "opening" = "own"): Promise<ChatRig> {
-  const chat = memoryChat({ suggestions: true, threadIds, lists: true, folds: true });
+async function memoryRig(
+  threadIds: "own" | "opening" = "own",
+  without: { channelLists?: false; lookups?: false } = {},
+): Promise<ChatRig> {
+  const chat = memoryChat({ suggestions: true, threadIds, lists: true, folds: true, ...without });
   const provider = await chat.build({
     variables: {},
     allowedRoot: "/work",
@@ -121,4 +124,8 @@ chatConformance("the memory chat", () => memoryRig());
 // A thread named by its opening message's id, as some chats' are: the other thread model of the seam.
 chatConformance("the memory chat, threads named by their opening message", () =>
   memoryRig("opening"),
+);
+// The relay's shape: no list in a channel and no lookup. What those capabilities serve is skipped by name.
+chatConformance("the memory chat without channel lists and lookups", () =>
+  memoryRig("own", { channelLists: false, lookups: false }),
 );

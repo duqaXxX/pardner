@@ -144,6 +144,43 @@ test("a file that grows while it is read never gives more than the limit", async
   await assert.rejects(readOnce(path, CAP, grows), TooLarge);
 });
 
+/** A handle over `target` that records the length of every buffer `read` is given. */
+function recording(sizes: number[], grow?: (target: string) => void) {
+  return async (target: string): Promise<Opened> => {
+    const handle = await open(target, constants.O_RDONLY);
+    return {
+      stat: async () => {
+        const found = await handle.stat();
+        grow?.(target);
+        return found;
+      },
+      read: (buffer, offset, length, position) => {
+        sizes.push(buffer.length);
+        return handle.read(buffer, offset, length, position);
+      },
+      close: () => handle.close(),
+    };
+  };
+}
+
+test("a small file under a large limit is read into a buffer sized from its fstat", async () => {
+  const path = write(app(), "small.txt", "hello");
+  const sizes: number[] = [];
+  assert.deepEqual(await readOnce(path, CAP, recording(sizes)), Buffer.from("hello"));
+  // The size and one byte more, which is how a file that grew is still told from one at its end.
+  assert.ok(
+    sizes.every((size) => size === 6),
+    `buffers of ${sizes.join(", ")} bytes`,
+  );
+});
+
+test("a file that grows past its fstat but under the limit is read whole", async () => {
+  const path = write(app(), "grows.log", "x".repeat(10));
+  const sizes: number[] = [];
+  const grow = (target: string) => writeFileSync(target, Buffer.alloc(100, "y"));
+  assert.deepEqual(await readOnce(path, CAP, recording(sizes, grow)), Buffer.alloc(100, "y"));
+});
+
 test("regular files keeps what exists in order and stops at the limit", async () => {
   const folder = app();
   for (const name of ["a.py", "b.py", "c.py"]) write(folder, name);
