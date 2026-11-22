@@ -6,6 +6,7 @@
  */
 import type { AgentBackend } from "../../agent/seam.ts";
 import {
+  type ChannelBind,
   ChatError,
   type ChatProvider,
   type MessageId,
@@ -127,8 +128,13 @@ export class Talk {
    * posted there, is answered. `answers`: the top-level prompt of the owner's it answers, which a
    * chat can draw it under; absent for a line that answers no prompt.
    */
-  async inChannel(channel: string, text: string, answers?: MessageId): Promise<void> {
-    await this.postInChannel(channel, text, answers);
+  async inChannel(
+    channel: string,
+    text: string,
+    answers?: MessageId,
+    bind?: ChannelBind,
+  ): Promise<void> {
+    await this.postInChannel(channel, text, answers, bind);
   }
 
   /**
@@ -139,9 +145,10 @@ export class Talk {
     channel: string,
     text: string,
     answers?: MessageId,
+    bind?: ChannelBind,
   ): Promise<MessageId | null> {
     if (this.stopped) return null;
-    return this.deps.chat.channel(channel).notice(text, answers);
+    return this.deps.chat.channel(channel).notice(text, answers, bind);
   }
 
   /** The mark that a word took effect, on the owner's own message, where the chat has one. */

@@ -257,6 +257,24 @@ test(
 );
 
 test(
+  "a queued message is in the store's saved outboxes before the call is awaited (the seam's ordering, #69)",
+  DARWIN,
+  async () => {
+    const r = await rig();
+    const b = botOn(r);
+    try {
+      const queued = b.outbox.queue(r.channel, text);
+      assert.equal(b.queued().length, 1);
+      assert.equal(await queued, true);
+      assert.equal(b.queued().length, 1);
+    } finally {
+      await b.stop();
+      await r.stop();
+    }
+  },
+);
+
+test(
   "C13: a closed channel gets no build; the bot starts the next epoch and sends in it",
   DARWIN,
   async () => {

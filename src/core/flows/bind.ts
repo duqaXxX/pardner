@@ -3,11 +3,16 @@
  * starts in. The core decides which folders the list holds and what the answer says; the chat
  * draws the list.
  */
-import type { ListPick, MessageId } from "../../chat/seam.ts";
+import type { ChannelBind, ListPick, MessageId } from "../../chat/seam.ts";
 import { compareCodePoints } from "../../text.ts";
 import { errorName } from "../../values.ts";
 import { type Refusal, resolveDirectory, untrustedNotice } from "../sessions/directory.ts";
-import type { DirectoryUnavailable } from "../sessions/errors.ts";
+import {
+  DirectoryMissing,
+  type DirectoryUnavailable,
+  DirectoryUnreadable,
+  DirectoryUntrusted,
+} from "../sessions/errors.ts";
 import * as texts from "../texts.ts";
 import { fill, named } from "../texts.ts";
 import type { BindFlow } from "./contract.ts";
@@ -51,9 +56,54 @@ const REFUSALS: Readonly<Record<Refusal, string>> = {
   outside: texts.BIND_OUTSIDE,
 };
 
+/** The state a folder check names; null for an unavailability this reply has no word for. */
+function stateOf(unavailable: DirectoryUnavailable | null): ChannelBind["state"] | null {
+  if (unavailable === null) return "usable";
+  if (unavailable instanceof DirectoryUntrusted) return "untrusted";
+  if (unavailable instanceof DirectoryMissing) return "missing";
+  if (unavailable instanceof DirectoryUnreadable) return "unreadable";
+  return null;
+}
+
 export function binding(deps: FlowDeps, talk: Talk): Binding {
   const { agent, chat, sessions, state, names, allowedRoot } = deps;
   const inNotice = (text: string): string => chat.escape(text, "notice");
+
+  /**
+   * An answer to a bind, with the channel's folder as stored and its state, when it has one. The
+   * stored folder is read last and `inChannel` follows with no await between (a notice takes its
+   * place among the channel's lines at the call, `ChannelChat.notice`), so of two binds in flight
+   * the last reply names the folder the store ends with. A check awaits, so a folder changed
+   * meanwhile is read again. A refusal always reaches the owner: a check that fails sends the text alone.
+   */
+  const reply = async (
+    channel: string,
+    text: string,
+    answers?: MessageId,
+    known?: { directory: string; unavailable: DirectoryUnavailable | null },
+  ): Promise<void> => {
+    let checked = known;
+    for (;;) {
+      const folder = state.channel(channel)?.directory;
+      if (folder === undefined) return talk.inChannel(channel, text, answers);
+      if (checked?.directory === folder) {
+        const bindState = stateOf(checked.unavailable);
+        return talk.inChannel(
+          channel,
+          text,
+          answers,
+          bindState === null ? undefined : { folder, state: bindState },
+        );
+      }
+      try {
+        checked = { directory: folder, unavailable: await sessions.unavailable(folder) };
+      } catch (error) {
+        if (isCancelled(error)) throw error;
+        logger.warning(`could not check the bound folder for a bind reply: ${errorName(error)}`);
+        return talk.inChannel(channel, text, answers);
+      }
+    }
+  };
 
   /** The folder a typed path or a pick names, inside the allowed root; null, told, otherwise. */
   const folderNamed = async (
@@ -64,7 +114,7 @@ export function binding(deps: FlowDeps, talk: Talk): Binding {
     const resolved = resolveDirectory(path, allowedRoot);
     if ("directory" in resolved) return resolved.directory;
     const refusal = REFUSALS[resolved.refused];
-    await talk.inChannel(
+    await reply(
       channel,
       fill(refusal, { path: inNotice(path), root: inNotice(allowedRoot) }),
       answers,
@@ -98,10 +148,11 @@ export function binding(deps: FlowDeps, talk: Talk): Binding {
     ].sort(compareCodePoints);
     // A folder no session can start in names no repository below it: that comes first.
     const below = unavailable === null ? await untrusted(directory) : [];
-    await talk.inChannel(
+    await reply(
       channel,
       [boundText(directory, unavailable, oldFolders, inNotice), ...below].join("\n"),
       answers,
+      { directory, unavailable },
     );
   };
 
@@ -110,7 +161,7 @@ export function binding(deps: FlowDeps, talk: Talk): Binding {
       const directory = await folderNamed(channel, path, answers);
       if (directory === null) return;
       if (!(await sessions.bind(channel, directory))) {
-        await talk.inChannel(channel, texts.BIND_BUSY, answers);
+        await reply(channel, texts.BIND_BUSY, answers);
         return;
       }
       await announce(channel, directory, answers);
@@ -151,12 +202,12 @@ export function binding(deps: FlowDeps, talk: Talk): Binding {
       if (directory === null) return;
       const record = state.channel(channel);
       if (record !== null && record.directory === directory) {
-        await talk.inChannel(channel, fill(texts.BIND_ALREADY, { directory: inNotice(directory) }));
+        await reply(channel, fill(texts.BIND_ALREADY, { directory: inNotice(directory) }));
         return;
       }
       // A list can be old: unlike a typed `/bind`, a pick never ends work in flight either.
       if (!(await sessions.bind(channel, directory))) {
-        await talk.inChannel(channel, texts.BIND_BUSY);
+        await reply(channel, texts.BIND_BUSY);
         return;
       }
       await announce(channel, directory);

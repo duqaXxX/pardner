@@ -832,6 +832,12 @@ export type ListPick =
       readonly list: MessageId;
     };
 
+/** The folder a channel is bound to, as stored when a `/bind` was answered, and whether a session can start in it. */
+export interface ChannelBind {
+  folder: string;
+  state: "usable" | "untrusted" | "missing" | "unreadable";
+}
+
 /**
  * A channel outside any thread: where a word typed in the channel is answered. A member
  * rejects with `ChatError` when the chat refused, unless it says otherwise.
@@ -841,9 +847,11 @@ export interface ChannelChat {
    * A line of the daemon's own, small and grey, as a message of the channel; a notice's markup.
    * Resolves with the message posted, which `rewrite` takes; null when the chat cannot say.
    * `answers`: the top-level prompt of the owner's this line answers, for a chat that draws it
-   * under that prompt.
+   * under that prompt. `bind`: the answer to a `/bind`, for a chat that carries the channel's
+   * folder beside the text; the others ignore it. The line takes its place among the channel's
+   * lines at the call, before the first await: the core relies on it to order its replies.
    */
-  notice(text: string, answers?: MessageId): Promise<MessageId | null>;
+  notice(text: string, answers?: MessageId, bind?: ChannelBind): Promise<MessageId | null>;
   /** A reference at full size, in Markdown; a long one continues in further messages. `answers` as for `notice`. */
   say(markdown: string, answers?: MessageId): Promise<void>;
   /**

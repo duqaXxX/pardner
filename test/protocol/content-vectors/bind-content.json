@@ -1,0 +1,118 @@
+{
+  "structure": "bind-content",
+  "version": 1,
+  "source": "channel-folder design (#69) section 1, 2026-11-22; synthetic paths. `content` is the JSON of a kind 1 message; `bind` is what a reader takes from it, null when it skips the field and draws the text alone",
+  "cases": [
+    {
+      "name": "state usable",
+      "content": {
+        "say": "notice",
+        "markdown": "Bound this channel to `/srv/code/demo`.",
+        "bind": {
+          "folder": "/srv/code/demo",
+          "state": "usable"
+        }
+      },
+      "bind": {
+        "folder": "/srv/code/demo",
+        "state": "usable"
+      }
+    },
+    {
+      "name": "state untrusted",
+      "content": {
+        "say": "notice",
+        "markdown": "Bound this channel to `/srv/code/demo`.",
+        "bind": {
+          "folder": "/srv/code/demo",
+          "state": "untrusted"
+        }
+      },
+      "bind": {
+        "folder": "/srv/code/demo",
+        "state": "untrusted"
+      }
+    },
+    {
+      "name": "state missing",
+      "content": {
+        "say": "notice",
+        "markdown": "Bound this channel to `/srv/code/demo`.",
+        "bind": {
+          "folder": "/srv/code/demo",
+          "state": "missing"
+        }
+      },
+      "bind": {
+        "folder": "/srv/code/demo",
+        "state": "missing"
+      }
+    },
+    {
+      "name": "state unreadable",
+      "content": {
+        "say": "notice",
+        "markdown": "Bound this channel to `/srv/code/demo`.",
+        "bind": {
+          "folder": "/srv/code/demo",
+          "state": "unreadable"
+        }
+      },
+      "bind": {
+        "folder": "/srv/code/demo",
+        "state": "unreadable"
+      }
+    },
+    {
+      "name": "no bind",
+      "content": {
+        "say": "notice",
+        "markdown": "Bound this channel to `/srv/code/demo`."
+      },
+      "bind": null
+    },
+    {
+      "name": "a bind with no folder",
+      "content": {
+        "say": "notice",
+        "markdown": "Bound this channel to `/srv/code/demo`.",
+        "bind": {
+          "state": "usable"
+        }
+      },
+      "bind": null
+    },
+    {
+      "name": "a bind with no state",
+      "content": {
+        "say": "notice",
+        "markdown": "Bound this channel to `/srv/code/demo`.",
+        "bind": {
+          "folder": "/srv/code/demo"
+        }
+      },
+      "bind": null
+    },
+    {
+      "name": "a bind with an unknown state",
+      "content": {
+        "say": "notice",
+        "markdown": "Bound this channel to `/srv/code/demo`.",
+        "bind": {
+          "folder": "/srv/code/demo",
+          "state": "locked"
+        }
+      },
+      "bind": null
+    },
+    {
+      "name": "a bind that is not an object",
+      "content": {
+        "say": "notice",
+        "markdown": "Bound this channel to `/srv/code/demo`.",
+        "bind": "usable"
+      },
+      "bind": null
+    }
+  ]
+}

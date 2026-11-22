@@ -14,6 +14,7 @@ import type { Question } from "../../../src/agent/seam.ts";
 import {
   type Activity,
   type AgentAccount,
+  type ChannelBind,
   type ChannelChat,
   type ChatCapabilities,
   ChatError,
@@ -696,8 +697,10 @@ class MemoryChannel implements ChannelChat {
     }
   }
 
-  async notice(text: string, answers?: MessageId): Promise<MessageId | null> {
+  async notice(text: string, answers?: MessageId, bind?: ChannelBind): Promise<MessageId | null> {
     this.#answered("notice", text, answers);
+    // The folder a `/bind` answer carries, recorded as `calls("bind")`; the text is drawn as ever.
+    if (bind !== undefined) this.#room.record(null, "bind", [text, bind]);
     return this.#room.write(this.#channel, null, DAEMON, text, "notice").id;
   }
 
