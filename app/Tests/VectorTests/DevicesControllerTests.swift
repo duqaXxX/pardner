@@ -196,6 +196,21 @@ final class DevicesControllerTests: XCTestCase {
         XCTAssertEqual(back.rows.first { $0.id == bytes(F.a) }?.label, "Studio Mac", "a name that no longer shows leaves the label")
     }
 
+    /// The device this Mac held before a recovery is marked while it is active; once removed, the mark goes.
+    func testTheEarlierDeviceOfARecoveryIsMarkedWhileActive() async throws {
+        var state = PairingState(stage: .paired, relay: relay, person: person)
+        state.earlier = bytes(F.b)
+        state.labels[bytes(F.a)] = "Studio Mac"
+        let rig = try rig(state: state)
+        let link = await started(rig)
+        link.emit(logThree(a: false, extra: []))
+        let shown = await list(rig, "no list") { $0.rows.count == 3 }
+        XCTAssertEqual(shown.rows.filter(\.isEarlierKeys).map(\.id), [bytes(F.b)])
+        link.emit(logThree(a: false, b: false, extra: [], length: 4, last: F.addB2))
+        let gone = await self.list(rig, "no change") { $0.rows.first { $0.id == self.bytes(F.b) }?.active == false }
+        XCTAssertTrue(gone.rows.filter(\.isEarlierKeys).isEmpty, "a removed device is no longer marked")
+    }
+
     func testTheListIsNewestFirstWithLabelsAdderPositionAndThisMac() async throws {
         let rig = try rig()
         let link = await started(rig)
@@ -667,6 +682,7 @@ final class DevicesControllerTests: XCTestCase {
         XCTAssertEqual(state.stage, .paired)
         XCTAssertNil(state.proof)
         XCTAssertEqual(state.name, "Mac mini", "the name typed at the join stays: a restart before the name is written still sends it (names design 4.3)")
+        XCTAssertEqual(state.device, bytes(F.a), "the join stores this Mac's own device id")
         let list = await list(rig, "no list") { $0.rows.count == 2 }
         XCTAssertTrue(list.rows.first { $0.id == bytes(F.a) }!.isThisMac)
     }

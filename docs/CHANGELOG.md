@@ -229,6 +229,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Recovery with the recovery key, this Mac's earlier keys. The app stores its own device id in the pairing file (version 4, which builds up to version 3 read as newer and leave untouched) when a pairing completes, and a Mac paired before stores it at its first read of the device list. After `This Mac's keys are not here` the recovery carries the earlier id: `No` adds `Your earlier keys on this Mac (<short form>) stay active until you remove them in Devices.` when that device is active in the log, and `Your earlier keys on this Mac may still be active; remove them in Devices if so.` when the app holds no id. Devices marks the device `This Mac's earlier keys` while it is active. A cancel keeps the file that holds the id for the next attempt.
+- Recovery with the recovery key: where the relay answers that the key is no longer current or no longer knows the person, the refusal screen offers `Quit recovery and keep this Mac as it is`. It pauses the recovery and erases nothing (the keys, the stored reset and the stage stay); Retry then asks for the recovery key again, as a later launch does, and the way out today is to quit Pardner. There is still no Stop once the reset is sent.
+- The first device's "Your name" field reads `Your name, the same on all your devices.`, so the name is not taken for a profile of this Mac.
 - `@anthropic-ai/claude-agent-sdk` is pinned to 0.3.330, which bundles Claude Code 2.1.330. The release probe
   certified it; the three tools and the three stream paths it adds (`begun_message_ids` on a result,
   `served_by_anthropic` on the init record), which the Claude back end does not read, are accepted in

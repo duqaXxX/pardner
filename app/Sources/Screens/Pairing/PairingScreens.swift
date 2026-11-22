@@ -195,7 +195,7 @@ struct RelayForm: View {
                   error: model.refused == .enrolmentSecret ? "The enrolment secret must be 64 hexadecimal characters." : nil) {
                 SecureField("", text: $model.enrolmentSecret).accessibilityLabel("Enrolment secret")
             }
-            Field(title: "Your name", hint: "Your other devices show it. Change it if you like, or leave it empty.",
+            Field(title: "Your name", hint: PairingModel.setupNameHint,
                   error: model.refused == .name ? "Use up to 64 characters, with no hidden characters and no @." : nil) {
                 TextField("Your name", text: $model.setupName).accessibilityLabel("Your name")
             }

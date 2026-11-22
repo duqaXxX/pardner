@@ -1030,4 +1030,178 @@ final class PairingControllerRecoveryTests: XCTestCase {
         let outcome = await rig.controller.cancel()
         XCTAssertEqual(outcome, .notCancellable)
     }
+    /// The one stop of a stored recovery: the relay answered that the key is no longer current or no longer knows the person. Nothing is erased,
+    /// the phase is one Retry leaves, and a later launch asks for the key again.
+    func testQuitRecoveryAtAStoredRefusalKeepsEverythingAndRetryAsksForTheKeyAgain() async throws {
+        for (answer, why) in [(3, RecoveryRefusal.noLongerCurrent), (2, .personGone)] {
+            let rig = try makeRig(keys: true, state: try await recovering(try makeRig()))
+            await rig.controller.launch()
+            await type(rig.controller, secret)
+            _ = await wait(rig.controller, "never sending", at(.sending))
+            rig.harness.link.emit(.recovery(.object(["refused": .number(Double(answer))])))
+            _ = await wait(rig.controller, "not refused", at(.refused(why)))
+            let before = try rig.pairing.load()
+            let quit = await rig.controller.quitRecovery()
+            XCTAssertTrue(quit, "\(why)")
+            let phase = await rig.controller.phase
+            XCTAssertEqual(phase, .fault(.failed, PairingPhase.recoveryQuitAdvice))
+            XCTAssertTrue(PairingPhase.recoveryQuitAdvice.hasPrefix("The recovery is paused."), "the store stays at recovering: it is not closed")
+            XCTAssertTrue(PairingPhase.recoveryQuitAdvice.contains("Quit Pardner"), "the way out today")
+            XCTAssertEqual(try rig.pairing.load(), before, "the stored reset is as it was")
+            XCTAssertTrue(rig.keys.has("device.sign") && rig.keys.has("device.receive"))
+            let retried = await rig.controller.retry()
+            XCTAssertTrue(retried)
+            _ = await wait(rig.controller, "no key asked again", { if case .recovering(.typeKey) = $0 { true } else { false } })
+        }
+    }
+
+    /// Quit is for those two refusals alone: a reset in flight, or a key that can be typed again, has its own ways.
+    func testQuitRecoveryIsRefusedWhereAnotherWayExists() async throws {
+        let rig = try makeRig(keys: true, state: try await recovering(try makeRig()))
+        await rig.controller.launch()
+        await type(rig.controller, secret)
+        _ = await wait(rig.controller, "never sending", at(.sending))
+        let sending = await rig.controller.quitRecovery()
+        XCTAssertFalse(sending, "no Stop once the reset is sent")
+        let phase = await rig.controller.phase
+        XCTAssertEqual(phase, .recovering(.sending))
+    }
+
+    // MARK: this Mac's earlier keys (2.4, R4-5; maintainer's decision 2026-11-22)
+
+    private let earlier = Data(repeating: 0x5E, count: 32)
+
+    /// A recovery started at the dead end `before` leaves, with the log read listing `earlier` as `active` and short form `5e5e 5e5e 5e5e 5e5e`.
+    private func askedAfter(_ dead: PairingState, earlierActive: Bool = true) async throws -> Rig {
+        let rig = try makeRig(state: dead)
+        await rig.controller.launch()
+        let task = begin(rig)
+        await type(rig.controller, secret)
+        _ = await wait(rig.controller, "never reading", at(.reading))
+        let device = { (id: Data, active: Bool) in HostValue.object(["id": .bytes(id), "active": .bool(active), "short": .string("5e5e 5e5e 5e5e 5e5e")]) }
+        rig.harness.link.emit(.recoveryLog(.object(["do": .string("recovery-log"), "devices": .array([device(kept, true), device(self.earlier, earlierActive)]), "recoveries": .array([])])))
+        _ = await wait(rig.controller, "no question") { if case .recovering(.askDevices) = $0 { true } else { false } }
+        try await task.value
+        return rig
+    }
+
+    private func pairedBefore(device: Data?) -> PairingState {
+        var state = PairingState(stage: .paired, relay: relay, person: person)
+        state.device = device
+        return state
+    }
+
+    func testTheEarlierDeviceIsNamedAndKeptWhenThisMacsKeysAreNotHere() async throws {
+        let rig = try await askedAfter(pairedBefore(device: earlier))
+        let phase = await rig.controller.phase
+        XCTAssertEqual(phase, .recovering(.askDevices(others: 2, earlier: .named("5e5e 5e5e 5e5e 5e5e"))))
+        XCTAssertEqual(try rig.pairing.load()?.earlier, earlier, "kept in the recovery's store, with the stage that rewrote it")
+    }
+
+    func testAMacPairedBeforeWithNoStoredIdGetsTheLineThatNamesNothing() async throws {
+        let rig = try await askedAfter(pairedBefore(device: nil))
+        let phase = await rig.controller.phase
+        XCTAssertEqual(phase, .recovering(.askDevices(others: 2, earlier: .unnamed)))
+        XCTAssertNil(try rig.pairing.load()?.earlier)
+    }
+
+    func testAnEarlierDeviceThatIsNotActiveInTheLogIsNotMentioned() async throws {
+        let rig = try await askedAfter(pairedBefore(device: earlier), earlierActive: false)
+        let phase = await rig.controller.phase
+        XCTAssertEqual(phase, .recovering(.askDevices(others: 1, earlier: .notActive)))
+    }
+
+    /// After "removed" the earlier device is not active, and with no stored id nothing is known of it: no line.
+    func testAfterRemovedWithNoStoredIdNothingIsSaidOfEarlierKeys() async throws {
+        let rig = try makeRig(keys: true, state: pairedBefore(device: nil))
+        await rig.controller.launch()
+        rig.harness.link.emit(.delivered(.object(["do": .string("refused"), "reason": .number(1)])))
+        _ = await wait(rig.controller, "not removed") { $0 == .removed }
+        let task = begin(rig)
+        await type(rig.controller, secret)
+        _ = await wait(rig.controller, "never reading", at(.reading))
+        logRead(rig.harness.link)
+        _ = await wait(rig.controller, "no question", at(.askDevices(others: 2)))
+        try await task.value
+    }
+
+    /// G1: a cancel erases the attempt's keys but keeps the file that holds the earlier id, as a restart does: the next attempt still names it.
+    func testACancelKeepsTheEarlierDeviceForTheNextAttempt() async throws {
+        let rig = try await askedAfter(pairedBefore(device: earlier))
+        let outcome = await rig.controller.cancel()
+        XCTAssertEqual(outcome, .erased)
+        let phase = await rig.controller.phase
+        XCTAssertEqual(phase, .unpaired(nil))
+        XCTAssertEqual(try rig.pairing.load()?.earlier, earlier)
+        XCTAssertFalse(rig.keys.has("device.sign"))
+        let task = begin(rig)
+        await type(rig.controller, secret)
+        _ = await wait(rig.controller, "never reading", at(.reading))
+        let device = HostValue.object(["id": .bytes(earlier), "active": .bool(true), "short": .string("5e5e 5e5e 5e5e 5e5e")])
+        rig.harness.links.last!.emit(.recoveryLog(.object(["do": .string("recovery-log"), "devices": .array([device]), "recoveries": .array([])])))
+        _ = await wait(rig.controller, "no question", at(.askDevices(others: 1, earlier: .named("5e5e 5e5e 5e5e 5e5e"))))
+        try await task.value
+    }
+
+    /// G1: the unnamed origin survives a cancel in the same run.
+    func testACancelKeepsTheUnnamedOriginForTheNextAttempt() async throws {
+        let rig = try await askedAfter(pairedBefore(device: nil))
+        _ = await rig.controller.cancel()
+        let task = begin(rig)
+        await type(rig.controller, secret)
+        _ = await wait(rig.controller, "never reading", at(.reading))
+        logRead(rig.harness.links.last!)
+        _ = await wait(rig.controller, "no question", at(.askDevices(others: 2, earlier: .unnamed)))
+        try await task.value
+    }
+
+    /// F2: the earlier id of a store at recovering or recovered is the device before that recovery, not the recovery's own: the line names nothing.
+    func testAStoreAtRecoveringNeverNamesTheDeviceBeforeThatRecovery() async throws {
+        var state = try await recovering(try makeRig())
+        state.earlier = earlier
+        let rig = try await askedAfter(state)
+        let phase = await rig.controller.phase
+        XCTAssertEqual(phase, .recovering(.askDevices(others: 2, earlier: .unnamed)))
+        XCTAssertNil(try rig.pairing.load()?.earlier)
+    }
+
+    /// G2: a done that read no snapshot listing this Mac stores its id at the next read that does.
+    func testDoneWithNoSnapshotStoresThisMacsIdAtTheNextRead() async throws {
+        let rig = try await placed()
+        let start = try await keyID(rig, secret)
+        rest(rig, RecoveryReading(epochs: [epoch(epochA, open: true, [start])], recoveries: [start], current: start))
+        _ = await wait(rig.controller, "not done") { if case .recovering(.done) = $0 { true } else { false } }
+        XCTAssertNil(try rig.pairing.load()?.device)
+        let me = Data(repeating: 0x6F, count: 32)
+        let item = HostValue.object(["id": .bytes(me), "kind": .string("app"), "active": .bool(true), "short": .string("6f6f 6f6f 6f6f 6f6f"), "position": .number(1)])
+        rig.harness.link.emit(.devices(.object(["person": .bytes(person), "length": .number(2), "last": .bytes(person), "self": .bytes(me), "devices": .array([item])])))
+        for _ in 0..<200 where try rig.pairing.load()?.device == nil { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(try rig.pairing.load()?.device, me)
+    }
+
+    /// A restart at keys-made keeps the earlier id: the next start carries it.
+    func testARestartAtKeysMadeKeepsTheEarlierDevice() async throws {
+        var state = started()
+        state.earlier = earlier
+        let rig = try makeRig(keys: true, state: state)
+        await rig.controller.launch()
+        XCTAssertEqual(try rig.pairing.load()?.earlier, earlier)
+    }
+
+    /// The id is carried to done and the new pairing stores its own device id.
+    func testDoneKeepsTheEarlierDeviceAndStoresThisMacsNewId() async throws {
+        let rig = try await askedAfter(pairedBefore(device: earlier))
+        _ = await rig.controller.answerDevices(someoneElse: false)
+        try await rig.controller.answerNewKey(make: false)
+        rig.harness.link.emit(.recovered)
+        _ = await wait(rig.controller, "never placed", at(.placed))
+        let start = try await keyID(rig, secret)
+        let me = Data(repeating: 0x6F, count: 32)
+        let item = HostValue.object(["id": .bytes(me), "kind": .string("app"), "active": .bool(true), "short": .string("6f6f 6f6f 6f6f 6f6f"), "position": .number(1)])
+        rig.harness.link.emit(.devices(.object(["person": .bytes(person), "length": .number(2), "last": .bytes(person), "self": .bytes(me), "devices": .array([item])])))
+        rest(rig, RecoveryReading(epochs: [epoch(epochA, open: true, [start])], recoveries: [start], current: start))
+        _ = await wait(rig.controller, "not done") { if case .recovering(.done) = $0 { true } else { false } }
+        XCTAssertEqual(try rig.pairing.load()?.device, me)
+        XCTAssertEqual(try rig.pairing.load()?.earlier, earlier)
+    }
 }

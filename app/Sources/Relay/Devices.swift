@@ -34,12 +34,14 @@ public struct DeviceRow: Sendable, Equatable, Identifiable {
     public let onlyHolderEpochs: Int
     /// The device joined a removal in progress because it was added while the person was removing (design 3.9, step 3).
     public let addedWhileRemoving: Bool
+    /// The device this Mac held before a recovery, still active: the person removes it here (recovery design 2.4, R4-5).
+    public let isEarlierKeys: Bool
 
     /// The controller builds every row; the package's own tools build one for a made-up device, no code outside it can.
     package init(id: Data, kind: DeviceKind, label: String?, shortForm: String, adder: DeviceAdder, position: Int, active: Bool, isThisMac: Bool, seenAt: Date?,
-                onlyHolderEpochs: Int, addedWhileRemoving: Bool) {
+                onlyHolderEpochs: Int, addedWhileRemoving: Bool, isEarlierKeys: Bool = false) {
         (self.id, self.kind, self.label, self.shortForm, self.adder, self.position) = (id, kind, label, shortForm, adder, position)
-        (self.active, self.isThisMac, self.seenAt, self.onlyHolderEpochs, self.addedWhileRemoving) = (active, isThisMac, seenAt, onlyHolderEpochs, addedWhileRemoving)
+        (self.active, self.isThisMac, self.seenAt, self.onlyHolderEpochs, self.addedWhileRemoving, self.isEarlierKeys) = (active, isThisMac, seenAt, onlyHolderEpochs, addedWhileRemoving, isEarlierKeys)
     }
 }
 

@@ -47,8 +47,8 @@ struct RecoveryFlow: View {
         case .starting?, nil: wait(RecoveryScreenWords.preparingTitle, RecoveryScreenWords.preparing, cancel: false)
         case .typeKey?: if let entry = model.entry { KeyEntry(model: model, entry: entry) }
         case .reading?: wait(RecoveryScreenWords.readingTitle, RecoveryScreenWords.reading, cancel: true)
-        case .askDevices?: question(RecoveryScreenWords.devicesTitle, nil, [
-            (RecoveryScreenWords.devicesNo, RecoveryScreenWords.devicesNoLine, true, { model.answerDevices(someoneElse: false) }),
+        case .askDevices(_, let earlier)?: question(RecoveryScreenWords.devicesTitle, nil, [
+            (RecoveryScreenWords.devicesNo, RecoveryScreenWords.noLine(earlier), true, { model.answerDevices(someoneElse: false) }),
             (RecoveryScreenWords.devicesYes, RecoveryScreenWords.devicesYesLine, false, { model.answerDevices(someoneElse: true) })])
         case .askNewKey?: question(RecoveryScreenWords.newKeyTitle, RecoveryScreenWords.newKeyLine, [
             (RecoveryScreenWords.makeNewKey, RecoveryScreenWords.makeNewKeyLine, true, { model.answerNewKey(make: true) }),
@@ -179,8 +179,11 @@ struct Refusal: View {
             if RecoveryScreenWords.canCancel(why) {
                 Button("Cancel") { model.cancel() }.buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Cancel the recovery")
             } else {
-                // Nothing stops a stored recovery here; where nothing can be done, say so plainly.
-                if why == .noLongerCurrent || why == .personGone { Text(RecoveryScreenWords.cannotFinish).foregroundStyle(PardnerColor.agentText) }
+                // Cancel erases, so a stored recovery has none; where nothing can be done, say so plainly and offer Quit.
+                if RecoveryScreenWords.canQuit(why) {
+                    Text(RecoveryScreenWords.cannotFinish).foregroundStyle(PardnerColor.agentText)
+                    Button(RecoveryScreenWords.quitRecovery) { model.quitRecovery() }.buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Quit the recovery and keep this Mac as it is")
+                }
                 Text(RecoveryScreenWords.keepKeys).font(PardnerFont.ui(size: 13, weight: .semibold)).foregroundStyle(PardnerColor.agentText)
             }
         }

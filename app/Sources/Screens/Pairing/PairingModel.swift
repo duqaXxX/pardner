@@ -20,6 +20,7 @@ public final class PairingModel {
     public var enrolmentSecret = ""
     /// The person's name, asked at a first device's setup (names design 4.2).
     public var setupName = ""
+    public static let setupNameHint = "Your name, the same on all your devices."
     /// The join form: the three values the approving device gives, and this Mac's name.
     public var joinAddress = ""
     public var joinKey = ""

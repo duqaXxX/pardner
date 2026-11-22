@@ -114,6 +114,8 @@ extension PairingController {
         let held = heldRecovery
         state.stage = .paired
         state.recovery = nil
+        if let snap = snapshot, snap.devices.contains(where: { $0.id == snap.selfID && $0.active }) { state.device = snap.selfID } // else the next devices read stores it
+        mayHoldUnnamedEarlier = false
         do { try pairing.write(state) } catch {
             phase = .fault(.failed, Problem.sentence("Pardner could not save the pairing", error, next: PairingPhase.retryAdvice))
             return
