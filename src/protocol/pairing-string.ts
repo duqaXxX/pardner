@@ -3,7 +3,7 @@
  * 3.2, 3.4): the device, its proof of possession and its name as hex text, and the short form the
  * person compares on both screens. Written once for the bot and the app.
  */
-import { decode, type Reader, Writer } from "./bytes.ts";
+import { decode, type Reader, toHex, Writer } from "./bytes.ts";
 import {
   type DeviceKeys,
   encodeDevicePossession,
@@ -21,8 +21,6 @@ const MAX_NAME_BYTES = 64;
 const FIXED_BYTES = 1 + 65 + 65 + 64;
 const HEX = /^(?:[0-9a-f]{2})+$/i;
 
-const toHex = (bytes: Bytes): string =>
-  Array.from(bytes, (b) => (b < 16 ? "0" : "") + b.toString(16)).join("");
 const fromHex = (text: string): Bytes =>
   Uint8Array.from({ length: text.length / 2 }, (_, i) =>
     Number.parseInt(text.slice(i * 2, i * 2 + 2), 16),

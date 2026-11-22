@@ -4,7 +4,8 @@
  * Swift taken out of its effects: no epoch key, file key or log ever leaves it.
  */
 import { type AppOutbox, Boxes, type OutboxView, type PendingName } from "./app-outbox.ts";
-import { bytesEqual, isBytes } from "./bytes.ts";
+import { type ArrangeAct, applyAct } from "./arrangement-act.ts";
+import { bytesEqual, isBytes, toHex } from "./bytes.ts";
 import { buildAdd, buildRemove, type SignedEntry } from "./device-builders.ts";
 import { type DeviceKeys, foldLog, idKey, type LoggedEntry, namedDevices } from "./device-log.ts";
 import { buildEpoch, type EpochClock, tickEpoch } from "./epochs.ts";
@@ -18,6 +19,7 @@ import { encodeMemberEntry, spaceNonce } from "./member-log.ts";
 import {
   botOnly,
   decodeMessage,
+  KIND_ARRANGEMENT,
   KIND_CHANNEL_NAME,
   KIND_DEVICE_NAME,
   KIND_PERSON_NAME,
@@ -32,7 +34,18 @@ import {
 import { build, type Draft, type OutboxItem, queue, Run, readBack, rebuild } from "./outbox.ts";
 import { checkPairingProof, shortForm } from "./pairing-string.ts";
 import type { Bytes, Platform } from "./platform.ts";
-import { encodeName, encodeProfile, Names, type Profile, Profiles, readName } from "./profile.ts";
+import {
+  type Arrangement,
+  type ArrangementWalk,
+  encodeArrangement,
+  encodeName,
+  encodeProfile,
+  Names,
+  type Profile,
+  Profiles,
+  readArrangement,
+  readName,
+} from "./profile.ts";
 import type { Identity, Kept, Out } from "./reading.ts";
 import type { RecoverOptions } from "./recover.ts";
 import type { PlatformError, Result } from "./result.ts";
@@ -51,7 +64,7 @@ export {
 // The person's name typed at setup, checked as kind 15 is read.
 export { checkPersonName } from "./profile.ts";
 export { createRecoveryKey, enterRecoveryKey, showRecoveryKey } from "./recovery.ts";
-export type { AppOutbox, OutboxView };
+export type { AppOutbox, ArrangeAct, OutboxView };
 export { EXPORTER_LABEL };
 
 /** The platform's names for the device's two keys: the app's key store holds them under these. */
@@ -143,6 +156,28 @@ export type CreateError = "not-ready" | "busy" | PlatformError;
 /** Why `send` queued nothing: the draft is refused (6.4's table, files, a length), the channel is not one the reading holds or is being created (a spare of the space is none), it is faulted, or the store failed. */
 export type SendError = "bad-input" | "not-member" | "fault" | "not-ready";
 
+/** What `arrange` answers: `not-ready` while the device is not current (sections design 3.1), `bad-input` for an act it refuses, `too-many` when the result passes a limit (64 sections, 1,024 channels), `queued` with the entry's message name and the effects of storing it. */
+export type ArrangeAnswer =
+  | "not-ready"
+  | "bad-input"
+  | "too-many"
+  | { answer: "queued"; name: Bytes; effects: AppEffect[] };
+
+/** A section as a screen draws it: ids in lowercase hex, its channels in order (the ones the device does not hold are the screen's to leave out, sections design 4). */
+export interface SectionShown {
+  id: string;
+  name: string;
+  channels: string[];
+}
+
+/** What the arrangement effect tells (sections design 4.1): the tree shown, `current` (3.1), `behind` (3.1's condition 2 failing) and `notApplied` (the line of 3.2). */
+interface ArrangementShown {
+  sections: SectionShown[] | null;
+  current: boolean;
+  behind: boolean;
+  notApplied: boolean;
+}
+
 /** The name a device now shows for a channel (kind 14), the person (15, `target` the person) or a device (16), or `null` when it shows none. */
 export interface NameShown {
   kind: number;
@@ -169,6 +204,7 @@ export type AppEffect =
   | { do: "creating"; channel: null }
   | { do: "profile"; bot: Bytes; profile: Profile | null }
   | { do: "names"; names: NameShown[] }
+  | ({ do: "arrangement" } & ArrangementShown)
   | { do: "recovery"; outcome: Exclude<RecoveryOutcome, { log: readonly LoggedEntry[] }> }
   | {
       do: "recovery-log";
@@ -280,6 +316,18 @@ export class AppLink {
   #typedName: string | undefined;
   #nameRefused = false; // the relay refused a name on this connection (names design 2.2): none goes out until the next connection or incarnation
   #nameWritten = new Set<string>(); // the message names queued on this connection (4.3)
+  #reached = false; // the reading reached rest on this connection (sections design 3.1): a push keeps it; a drop, a rewind and any reading state but reading and rest clear it
+  #notApplied = false; // an own tree took no part, or an entry was dropped (sections design 3.2): until the next act
+  #ownTrees = new Set<string>(); // the message names of own kind 17 read back in this run that cleared a pending entry, and those judged
+  #judged = new Set<string>();
+  #arrangementTold: ArrangementShown = {
+    sections: null,
+    current: false,
+    behind: false,
+    notApplied: false,
+  }; // as last told to Swift
+  #rechecking = false; // a rewind began and the pass has not reached rest: the tree told stands until then (sections design 4.1)
+  #arrangementRefused = false; // the relay refused an arrangement on this connection (sections design 5): none goes out until the next connection or incarnation, and no name is held by it
   #spaceAsked = false; // the space's entry 0 was made in this incarnation: not made again until the relay is another
   // The entry 0 of each slot (a channel being created, the person's space): submitted and not answered, or answered and owed again at the next rest; and its request in flight.
   #entries = {
@@ -437,6 +485,7 @@ export class AppLink {
     )
       return "bad-input"; // two items of one name would be built and read back as one
     if (botOnly(draft.kind)) return "bad-input"; // the table says who sends a kind
+    if (draft.kind === KIND_ARRANGEMENT) return "bad-input"; // `arrange` is its one writer (sections design 2)
     // A name goes only into its own class, with a content the reading would accept and no file (names design 2.1).
     if (draft.kind >= KIND_CHANNEL_NAME && draft.kind <= KIND_DEVICE_NAME) {
       const space = this.#link.reading.channel(channel)?.space === true;
@@ -590,13 +639,18 @@ export class AppLink {
   #view(effects: Effect[], now: number): AppEffect[] {
     const out = effects.flatMap((fx) => this.#reduce(fx));
     const tail = out.at(-1)?.do === "persist" ? out.splice(-1) : [];
+    const retried = this.#retry(); // a key that came opens what waited before the walk is judged and before anything is sent
+    const walk = this.#walk();
+    // Judged at rest alone, as the model's `walked` is: a prefix of a pass could drop what the whole pass keeps.
+    if (this.#link.reading.state === "rest") this.#judge(walk.steps);
     if (!tail.length) out.push(...this.#flush(now), ...this.#keep(now)); // a held `persist` forbids any other call of the link
     return [
       ...out,
       ...this.#notes.splice(0),
-      ...this.#retry(),
+      ...retried,
       ...this.#told(),
       ...this.#namesTold(),
+      ...(tail.length ? [] : this.#arrangementEffect(walk)), // the call that answers a `persist` follows at once: a rewind has reset the reading before the link is told
       ...this.#listing(),
       ...this.#outboxTold(),
       ...(tail.length ? tail : this.#own()),
@@ -604,6 +658,7 @@ export class AppLink {
   }
 
   #reduce(fx: Effect): AppEffect[] {
+    if (fx.do === "close") this.#reached = false; // the link ended its connection itself: a deadline, a bad frame
     if (fx.do === "answer") {
       const undo = this.#asked.get(fx.request);
       if (undo) {
@@ -630,10 +685,14 @@ export class AppLink {
       for (const [k, { bot }] of this.#shown) this.#recheck.set(k, bot);
       this.#newConnection();
       this.#names = new Names();
+      this.#rechecking = true;
       for (const [k, n] of this.#nameShown) this.#nameRecheck.set(k, n);
     }
+    if (["refused", "put-back", "fault", "give-back"].includes(out.do)) this.#reached = false;
     if (out.do === "rest") {
       this.#rested = this.#owed = true;
+      this.#reached = true;
+      this.#rechecking = false;
       this.#tried = new Set(this.#given); // one in flight is answered before it is tried again
       for (const c of this.#boxes.channels())
         if (this.#accepted.has(idKey(c))) this.#changed.set(idKey(c), c); // back to waiting: the screen is told
@@ -716,6 +775,9 @@ export class AppLink {
   // A message opened now for the first time; delivered again only when it reads (`again`).
   #open(message: Message, position: number, key: Bytes, again: boolean): AppEffect[] {
     const body = openMessage(this.#platform, key, message);
+    // Sections design 3.1: a kind 17 body that does not open under a held key takes no part; it is not waited for.
+    if (!body.ok && message.header.kind === KIND_ARRANGEMENT)
+      this.#names.take(position, message.header, undefined);
     if (again && !body.ok) return [];
     const view = this.#message(message, position, body.ok ? body.value : undefined, again);
     const h = message.header;
@@ -726,18 +788,18 @@ export class AppLink {
       this.#profiles.take(position, h, body.value.content);
       this.#touched.set(idKey(h.sender), h.sender);
     }
-    if (body.ok && h.kind >= KIND_CHANNEL_NAME && h.kind <= KIND_DEVICE_NAME) {
+    if (body.ok && h.kind >= KIND_CHANNEL_NAME && h.kind <= KIND_ARRANGEMENT) {
       this.#names.take(position, h, body.value.content);
-      this.#touchName(h); // a message that opens in a later call, once its key arrives, is told then
+      if (h.kind !== KIND_ARRANGEMENT) this.#touchName(h); // a message that opens in a later call, once its key arrives, is told then
     }
     return r.channel(h.channel)?.space ? [] : [{ do: "deliver", out: view }];
   }
 
-  // A message of kinds 14 to 16 that passed the check, opened or not: its header places the first copy of its name (names design 3).
+  // A message of kinds 14 to 17 that passed the check, opened or not: its header places the first copy of its name (names design 3).
   #seeName(position: number, h: MessageHeader): void {
-    if (h.kind < KIND_CHANNEL_NAME || h.kind > KIND_DEVICE_NAME) return;
+    if (h.kind < KIND_CHANNEL_NAME || h.kind > KIND_ARRANGEMENT) return;
     this.#names.see(position, h);
-    this.#touchName(h);
+    if (h.kind !== KIND_ARRANGEMENT) this.#touchName(h);
   }
 
   #touchName(h: MessageHeader): void {
@@ -894,6 +956,7 @@ export class AppLink {
     // Cleared only by a message of this device under the pending message name, never by the name's value (names design 4.4).
     const names = this.#boxes.names;
     if (!bytesEqual(h.sender, this.#self) || !names.some((n) => bytesEqual(n.name, h.name))) return;
+    if (h.kind === KIND_ARRANGEMENT) this.#ownTrees.add(idKey(h.name));
     this.#boxes.names = names.filter((n) => !bytesEqual(n.name, h.name));
     this.#dirty = true;
   }
@@ -908,6 +971,8 @@ export class AppLink {
   }
 
   #newConnection(): void {
+    this.#reached = false;
+    this.#arrangementRefused = false;
     this.#nameRefused = false;
     this.#nameWritten.clear();
   }
@@ -956,6 +1021,178 @@ export class AppLink {
     return { name: made.name, effects: this.#view([], now) };
   }
 
+  // Sections design 3.2: the walk over the kind 17 messages of the space, as `Names` reads them.
+  #walk(): ArrangementWalk {
+    const space = this.#link.reading.space();
+    return space ? this.#names.arrangement(space) : { steps: [] };
+  }
+
+  // Sections design 3.1's condition 2 failing: a first copy of a kind 17 of the space waits for its key, earlier or later than what is read.
+  #behind(steps: ArrangementWalk["steps"] = this.#walk().steps): boolean {
+    return steps.some((x) => x.status === "passed");
+  }
+
+  /** Sections design 3.1: the reading reached rest on this connection (`#reached`), and no first copy of a kind 17 waits for its key. */
+  #current(steps?: ArrangementWalk["steps"]): boolean {
+    const state = this.#link.state;
+    return this.#reached && (state === "reading" || state === "rest") && !this.#behind(steps);
+  }
+
+  // The arrangement this device shows (sections design 4): its own pending one first, else the standing tree.
+  #shownArrangement(walk: ArrangementWalk = this.#walk()): Arrangement | undefined {
+    const own = this.#boxes.names.filter((n) => n.kind === KIND_ARRANGEMENT).at(-1);
+    const read = readArrangement(own?.content ?? "");
+    return read.ok ? read.value : walk.standing?.arrangement;
+  }
+
+  // Sections design 3.2: an item of an entry waits while an earlier pending entry of this device has no item ahead of it.
+  #arrangementAhead(item: OutboxItem, items: readonly OutboxItem[]): boolean {
+    if (item.kind !== KIND_ARRANGEMENT) return false;
+    const entries = this.#boxes.names.filter((n) => n.kind === KIND_ARRANGEMENT).map((n) => n.name);
+    const own = entries.findIndex((e) => bytesEqual(e, item.name));
+    if (own < 0) return false; // an item whose entry is gone waits behind nothing
+    const at = items.indexOf(item);
+    return entries.slice(0, own).some((e) => {
+      const i = items.findIndex((x) => bytesEqual(x.name, e));
+      return i < 0 || i > at;
+    });
+  }
+
+  // The pending entries built over an own message, in the order they were made: each one's name and the name of the message it is built over, as hex.
+  #ownBases(): { name: string; over: string }[] {
+    const own = toHex(this.#self);
+    return this.#boxes.names.flatMap((n) => {
+      const read = n.kind === KIND_ARRANGEMENT ? readArrangement(n.content) : undefined;
+      const base = read?.ok ? read.value.base : null;
+      return base?.sender === own ? [{ name: toHex(n.name), over: base.name }] : [];
+    });
+  }
+
+  /**
+   * Sections design 3.2, after a walk at rest (`#readBack` runs before it and cannot judge): an own message read back in this run is judged once, and one that took no
+   * part at its turn raises `notApplied`, unless a first copy placed before it, or it itself, waits for its key (the `behind` line stays). With no first copy of the kind
+   * waiting, every pending entry built over an own message that took no part is dropped, read back in this run or not, and raises it too.
+   */
+  #judge(steps: ArrangementWalk["steps"]): void {
+    const waiting = steps.some((x) => x.status === "passed");
+    const bases = this.#ownBases();
+    steps.forEach((step, at) => {
+      if (!bytesEqual(step.sender, this.#self)) return;
+      const key = idKey(step.name);
+      if (step.status === "none" && !waiting && bases.length && this.#dropDoomed(step.name, bases))
+        this.#notApplied = true;
+      if (!this.#ownTrees.has(key) || this.#judged.has(key)) return;
+      if (steps.slice(0, at + 1).some((x) => x.status === "passed")) return;
+      this.#judged.add(key);
+      if (step.status === "none") this.#notApplied = true;
+    });
+  }
+
+  // The pending entries built over `name`, directly or through other pending entries, can never stand: they go, with their item unless it is built (a built item goes out and takes no part where it lands). How many went.
+  #dropDoomed(name: Bytes, bases: { name: string; over: string }[]): number {
+    const doomed = new Set([toHex(name)]);
+    // In the order they were made, each entry is built over an earlier one: one pass finds the chain.
+    for (const b of bases) if (doomed.has(b.over)) doomed.add(b.name);
+    doomed.delete(toHex(name));
+    if (!doomed.size) return 0; // nothing to drop: no write, or every call would ask for one
+    const gone = (n: { name: Bytes }) => doomed.has(toHex(n.name));
+    const space = this.#link.reading.space();
+    if (space)
+      this.#put(
+        space,
+        this.#boxes.items(space).filter((i) => !gone(i) || i.built),
+      );
+    this.#boxes.names = this.#boxes.names.filter((n) => !gone(n));
+    this.#dirty = true;
+    return doomed.size;
+  }
+
+  // Once per call, the shown tree and its two flags when any differs from the last told (sections design 4.1). While a rewind's pass has not reached rest, `current` alone is told: the tree stands until the pass has read it again.
+  #arrangementEffect(walk: ArrangementWalk): AppEffect[] {
+    const behind = this.#behind(walk.steps);
+    const current = this.#current(walk.steps);
+    const shown = this.#shownArrangement(walk);
+    const now: ArrangementShown = this.#rechecking
+      ? { ...this.#arrangementTold, current }
+      : {
+          sections: shown
+            ? shown.sections.map(({ id, name, channels }) => ({
+                id,
+                name,
+                channels: [...channels],
+              }))
+            : null,
+          current,
+          behind,
+          notApplied: this.#notApplied,
+        };
+    if (JSON.stringify(now) === JSON.stringify(this.#arrangementTold)) return [];
+    this.#arrangementTold = now;
+    return [{ do: "arrangement", ...now }];
+  }
+
+  /**
+   * An act of the person on the sections (sidebar sections design 3): built whole from the arrangement this device shows and stored as one
+   * pending kind 17 entry under a fresh message name, as `setName` stores a name. An entry not yet signed is replaced; one signed stays and goes first.
+   */
+  arrange(act: ArrangeAct, now: number): ArrangeAnswer {
+    const r = this.#link.reading;
+    if (this.#failed || !this.#current()) return "not-ready";
+    const held = new Set(
+      r
+        .channels()
+        .filter((c) => !r.channel(c)?.space)
+        .map(toHex),
+    );
+    const shown = this.#shownArrangement() ?? {
+      base: null,
+      sections: [],
+      carried: Object.create(null),
+    };
+    const made = applyAct(shown, act, held, () => toHex(this.#platform.random(16)));
+    if (typeof made === "string") return made;
+    const space = r.space();
+    const entries = this.#boxes.names.filter((n) => n.kind === KIND_ARRANGEMENT);
+    const signed = (n: PendingName) =>
+      !!space && this.#boxes.items(space).some((i) => bytesEqual(i.name, n.name) && i.built);
+    const unsigned = entries.filter((n) => !signed(n));
+    const kept = entries.filter(signed).at(-1);
+    const standing = this.#walk().standing;
+    // The base: the earliest unsigned entry's (each later one is built over an earlier one never sent), else the signed entry that stays, else the standing tree's.
+    const over = unsigned[0] && readArrangement(unsigned[0].content);
+    const id = (x: { sender: Bytes; name: Bytes }) => ({
+      sender: toHex(x.sender),
+      name: toHex(x.name),
+    });
+    made.base = over?.ok
+      ? over.value.base
+      : kept
+        ? id({ sender: this.#self, name: kept.name })
+        : standing
+          ? id(standing)
+          : null;
+    let content: string;
+    try {
+      content = encodeArrangement(made);
+    } catch {
+      return "bad-input"; // the name or a limit
+    }
+    const name = this.#platform.random(16);
+    const gone = new Set(unsigned.map((n) => idKey(n.name)));
+    if (space)
+      this.#put(
+        space,
+        this.#boxes.items(space).filter((i) => !gone.has(idKey(i.name))),
+      );
+    this.#boxes.names = [
+      ...this.#boxes.names.filter((n) => !gone.has(idKey(n.name))),
+      { kind: KIND_ARRANGEMENT, name, content, setup: false },
+    ];
+    this.#dirty = true;
+    this.#notApplied = false; // until the next change (sections design 3.2)
+    return { answer: "queued", name, effects: this.#view([], now) };
+  }
+
   /**
    * At a rest, the pending names are queued as the model's `writeNames` says: a setup name the sequence has since overtaken is
    * dropped, the device's own name is taken when the space holds none, and each name goes once per connection, none after the relay refused one.
@@ -974,10 +1211,10 @@ export class AppLink {
         boxes.items(space).filter((i) => !bytesEqual(i.name, n.name)),
       );
     }
-    if (this.#nameRefused) return;
     const first = this.#first();
     const own = first ? this.#ownName : (this.#typedName ?? this.#ownName);
     if (
+      !this.#nameRefused &&
       own !== undefined &&
       !boxes.names.some((n) => n.kind === KIND_DEVICE_NAME) &&
       !(space && this.#names.hasDevice(space, this.#self)) &&
@@ -994,6 +1231,7 @@ export class AppLink {
     }
     // The person's own name, typed at the first device's setup: written only while the sequence names the person nowhere (4.2).
     if (
+      !this.#nameRefused &&
       first &&
       this.#typedName !== undefined &&
       !boxes.names.some((n) => n.kind === KIND_PERSON_NAME) &&
@@ -1013,6 +1251,7 @@ export class AppLink {
       const key = idKey(n.name);
       if (!channel || !r.channel(channel) || boxes.faulted(channel) || this.#nameWritten.has(key))
         continue;
+      if (n.kind === KIND_ARRANGEMENT ? this.#arrangementRefused : this.#nameRefused) continue;
       if (boxes.items(channel).some((i) => bytesEqual(i.name, n.name))) continue;
       const queued = queue(this.#platform, boxes.items(channel), {
         kind: n.kind,
@@ -1021,6 +1260,15 @@ export class AppLink {
       });
       if (!queued.ok) continue;
       this.#nameWritten.add(key);
+      if (n.kind === KIND_ARRANGEMENT) {
+        // In the order the entries were made: before an item of a later entry (sections design 3.2).
+        const arranged = boxes.names.filter((x) => x.kind === KIND_ARRANGEMENT);
+        const rank = (name: Bytes) => arranged.findIndex((x) => bytesEqual(x.name, name));
+        const later = queued.value.findIndex(
+          (i) => i.kind === KIND_ARRANGEMENT && rank(i.name) > rank(n.name),
+        );
+        if (later >= 0) queued.value.splice(later, 0, queued.value.pop() as OutboxItem);
+      }
       this.#put(channel, queued.value);
     }
   }
@@ -1138,8 +1386,13 @@ export class AppLink {
     const done = this.#accepted.get(k);
     // A name is held in place while the relay refused one on this connection (names design 2.2).
     const held = (i: OutboxItem) =>
-      this.#nameRefused && i.kind >= KIND_CHANNEL_NAME && i.kind <= KIND_DEVICE_NAME;
-    const item = this.#boxes.items(channel).find((i) => !done?.has(idKey(i.name)) && !held(i));
+      i.kind === KIND_ARRANGEMENT
+        ? this.#arrangementRefused
+        : this.#nameRefused && i.kind >= KIND_CHANNEL_NAME && i.kind <= KIND_DEVICE_NAME;
+    const items = this.#boxes.items(channel);
+    const item = items.find(
+      (i) => !done?.has(idKey(i.name)) && !held(i) && !this.#arrangementAhead(i, items),
+    );
     if (!item) return;
     if (!item.built) {
       const at = {
@@ -1212,6 +1465,7 @@ export class AppLink {
       // Kind, class, `to` and `re` depend on the draft and its channel alone: a refusal by them is the app's own, not the relay's (SD 4, I3).
       // In the space any refusal drops the item and never stops the channel (design 2.6), and a relay older than the kinds 13 to 16 refuses one anywhere: never a fault (names design 2.2, D-N3 A).
       if (held.kind >= KIND_CHANNEL_NAME && held.kind <= KIND_DEVICE_NAME) this.#nameRefused = true;
+      if (held.kind === KIND_ARRANGEMENT) this.#arrangementRefused = true; // a mark of its own (sections design 5)
       if (
         r.channel(channel)?.space ||
         (held.kind >= KIND_PROFILE && held.kind <= KIND_DEVICE_NAME) ||

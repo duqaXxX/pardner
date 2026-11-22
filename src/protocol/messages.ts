@@ -77,9 +77,16 @@ export const KIND_CHANNEL_NAME = 14;
 export const KIND_PERSON_NAME = 15;
 /** The kind of a device's name: sent by that app into the person's space. */
 export const KIND_DEVICE_NAME = 16;
+/** The kind of an arrangement of the sidebar's sections: sent by an app into the person's space (sidebar sections design 2). */
+export const KIND_ARRANGEMENT = 17;
 /** The kinds of a person's space, which no conversation channel holds; every other kind, a channel's name included, is the conversation channels' (personal space design 4, S5). */
-const SPACE_KINDS: readonly number[] = [KIND_PROFILE, KIND_PERSON_NAME, KIND_DEVICE_NAME];
-// By kind, 1 to 16: how 6.4's table treats `to` and `re` (0 none, 1 required, 2 either), and who sends it.
+const SPACE_KINDS: readonly number[] = [
+  KIND_PROFILE,
+  KIND_PERSON_NAME,
+  KIND_DEVICE_NAME,
+  KIND_ARRANGEMENT,
+];
+// By kind, 1 to 17: how 6.4's table treats `to` and `re` (0 none, 1 required, 2 either), and who sends it.
 const KINDS = [
   [0, 2, undefined],
   [1, 0, "app"],
@@ -94,6 +101,7 @@ const KINDS = [
   [2, 1, undefined],
   [0, 0, "bot"],
   [0, 0, "bot"],
+  [0, 0, "app"],
   [0, 0, "app"],
   [0, 0, "app"],
   [0, 0, "app"],

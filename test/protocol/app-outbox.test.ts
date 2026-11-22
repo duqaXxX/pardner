@@ -84,3 +84,29 @@ test("damaged built bytes leave the item unbuilt, and bytes that are its own are
     );
   }
 });
+
+test("sections 3: a kind 17 entry is kept when its content reads and it has no channel and is no setup name, and dropped otherwise", () => {
+  const section = { id: "a1".repeat(16), name: "Work", channels: [] };
+  const entry = (content: string, over = {}) => ({
+    kind: 17,
+    name: fill(5, 16),
+    content,
+    setup: false,
+    ...over,
+  });
+  const reads = JSON.stringify({ base: null, sections: [section] });
+  const kept = (e: unknown) =>
+    new Boxes({ pending: null, channels: [], faults: [], names: [e] } as AppOutbox).names;
+  assert.deepEqual(
+    kept(entry(reads)).map((n) => n.kind),
+    [17],
+  );
+  assert.deepEqual(
+    kept(entry(reads, { channel: null })).map((n) => n.kind),
+    [17],
+  );
+  assert.deepEqual(kept(entry(reads, { channel: fill(9) })), [], "a kind 17 has no channel field");
+  assert.deepEqual(kept(entry(JSON.stringify({ base: null }))), [], "a content that does not read");
+  assert.deepEqual(kept(entry(reads, { setup: undefined })), [], "no setup flag");
+  assert.deepEqual(kept(entry(reads, { setup: true })), [], "never a setup name");
+});

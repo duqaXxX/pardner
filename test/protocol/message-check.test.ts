@@ -591,6 +591,13 @@ test("S5, PD 6.4: a profile is accepted in a space only, and every other kind in
   assert.equal(verdict(w, signedBy(w.bot, { kind: 13 }), false), "class");
 });
 
+test("sections design 2: an arrangement is an app's, accepted in a space only", () => {
+  const w = world();
+  assert.equal(verdict(w, signedBy(w.app, { kind: 17 }), true), "ok");
+  assert.equal(verdict(w, signedBy(w.app, { kind: 17 }), false), "class");
+  assert.equal(verdict(w, signedBy(w.bot, { kind: 17 }), true), "kind");
+});
+
 test("S5: the sender's kind is judged before the class, as the model orders them", () => {
   const w = world();
   assert.equal(verdict(w, signedBy(w.app, { kind: 13 }), false), "kind");
