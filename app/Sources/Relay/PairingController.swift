@@ -110,6 +110,8 @@ extension PairingPhase {
     public static let joinUnmadeAdvice = "This Mac cannot make its pairing string. Pair again to start over."
     /// The next step after a fault the person can do nothing about but try again.
     static let retryAdvice = "Retry, or quit Pardner and open it again."
+    /// What the person is told after quitting a recovery the relay no longer accepts: nothing was erased.
+    public static let recoveryQuitAdvice = "The recovery is paused. Your recovery key and this Mac's keys are kept. Pardner asks for your recovery key again when you press Retry or open it again. Quit Pardner to leave it for now."
     /// What the person is told when the relay was put back (security design 5.11).
     public static let putBackAdvice = "This relay was put back. Set up a new relay with pardner relay init under a new --instance name, or after moving the old relay's folder away, then pair this Mac again."
     /// What the person is told when the link faulted.
@@ -210,6 +212,8 @@ public actor PairingController {
     /// The device names the link shows (names design 3), by device id: they replace the pairing string's label in the Devices list.
     var shownDeviceNames: [Data: String] = [:]
     var gaveUp = Set<Data>()
+    /// The recovery in progress started where this Mac's earlier keys may be active and no id of them was stored. Memory only; a cancel keeps it for the next attempt.
+    var mayHoldUnnamedEarlier = false
     var earlierKeys = 0 // the n of `recovery.earlier.<n>`, from 1
     var atRest = false // a rest of this connection was seen: what the link read is all it will read until the log moves
     /// What the Devices screen reads; every change is also yielded on `deviceStates`.
@@ -621,6 +625,7 @@ public actor PairingController {
             return
         }
         stored = state
+        mayHoldUnnamedEarlier = false
         phase = .paired
     }
 

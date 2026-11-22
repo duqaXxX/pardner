@@ -26,6 +26,16 @@ public enum RecoveryRefusal: Sendable, Equatable {
     case notTyped
 }
 
+/// What `No` says of the keys this Mac held before the recovery (recovery design 2.4, R4-5).
+public enum EarlierKeys: Sendable, Equatable {
+    /// Nothing to say: the earlier device is not active in the log, or there is none.
+    case notActive
+    /// The stored id of the earlier device is active in the log: its short form is named.
+    case named(String)
+    /// A Mac paired before the id was stored, whose keys are not here: its earlier keys may be active, and which they are is not known.
+    case unnamed
+}
+
 /// Where a recovery waits (recovery design 2.3).
 public enum RecoveryStep: Sendable, Equatable {
     /// The device keys are made, or the connection is being set up.
@@ -34,8 +44,8 @@ public enum RecoveryStep: Sendable, Equatable {
     case typeKey(RecoveryEntryRequest)
     /// The reading connection proves with the key and reads the device log.
     case reading
-    /// `Could someone else have one of your devices?`, with how many other devices the log holds active.
-    case askDevices(others: Int)
+    /// `Could someone else have one of your devices?`, with how many other devices the log holds active and what is known of this Mac's earlier keys.
+    case askDevices(others: Int, earlier: EarlierKeys = .notActive)
     /// `Make a new recovery key?`
     case askNewKey
     /// The reset's inputs are stored and the connection tries until the relay serves this device.
@@ -75,6 +85,9 @@ extension PairingController {
         // The ids of keys made in recoveries that stopped. A store at recovering or recovered holds the id of the placed reset's new key as the last of them:
         // that key is the current one, so it is not carried (a key refused as "opens nothing" may be the only one the relay accepts).
         let onDisk = try? pairing.load()
+        // A restart or a cancel of a recovery keeps what the store held. A store at recovering or recovered holds the device before that recovery, which is not the one
+        // this recovery made active: nothing is named then.
+        let earlier = [.recovering, .recovered].contains(onDisk?.stage) ? nil : onDisk?.device ?? onDisk?.earlier
         var made = onDisk?.recovery?.made ?? []
         if onDisk?.recovery?.reset?.replacement != nil { made = Array(made.dropLast()) }
         phase = .recovering(.starting) // claimed before the first await: a second start meets it and is refused
@@ -85,11 +98,17 @@ extension PairingController {
                 throw error
             }
         }
-        // Open decision of the maintainer (recovery design 2.4, R4-5): after "This Mac's keys are not here" the line "This device's earlier keys stay active"
-        // and the Devices mark for this Mac's earlier device need that device's id, which the store does not hold. Not built until it is decided.
+        // The earlier device's id is carried to done (R4-5): the `No` line names it and Devices marks it while it is active in the log. A Mac with no id stored
+        // (paired before) says so without naming it, at "This Mac's keys are not here" only: after "removed" the earlier device is not active.
         attempt = RecoveryAttempt()
+        switch before {
+        case .keysMissing: mayHoldUnnamedEarlier = earlier == nil
+        case .removed: mayHoldUnnamedEarlier = false
+        default: break // unpaired: a cancel or a restart of this run's earlier attempt keeps what it knew
+        }
         var state = PairingState(stage: .keysMade(.recover), relay: relay, person: personID)
         state.recovery = PairingRecovery(made: made)
+        state.earlier = earlier
         do {
             try pairing.write(state)
             stored = state
@@ -218,8 +237,15 @@ extension PairingController {
         guard case .recovering(.reading) = phase, let list = effect["devices"]?.arrayValue else { return }
         attempt.active = list.compactMap { if case .bool(true)? = $0["active"] { $0["id"]?.bytesValue } else { nil } }
         attempt.previous = (effect["recoveries"]?.arrayValue ?? []).compactMap(\.bytesValue)
+        let earlier: EarlierKeys
+        if let id = stored?.earlier {
+            let row = list.first { $0["id"]?.bytesValue == id }
+            if case .bool(true)? = row?["active"] { earlier = row?["short"]?.stringValue.map(EarlierKeys.named) ?? .unnamed } else { earlier = .notActive }
+        } else {
+            earlier = mayHoldUnnamedEarlier ? .unnamed : .notActive
+        }
         await stopConnection() // the reading connection is closed before the person answers (2.3 step 3)
-        phase = .recovering(.askDevices(others: attempt.active.count))
+        phase = .recovering(.askDevices(others: attempt.active.count, earlier: earlier))
     }
 
     func recoveryAnswered(_ outcome: HostValue) async {
@@ -272,7 +298,7 @@ extension PairingController {
             request.answer(false)
             return .abandoning
         case .askDevices, .askNewKey, .refused, .reading, .sending:
-            // A stored reset may be placed and this device in the log: no stop is offered then (whether one exists is the maintainer's decision).
+            // A stored reset may be placed and this device in the log: Cancel erases nothing it could undo, so it is refused (`quitRecovery` is the one stop, at the two refusals below).
             if stored?.stage == .recovering { return .notCancellable }
             await abandonRecovery()
             return .erased
@@ -281,11 +307,20 @@ extension PairingController {
         }
     }
 
+    /// Closes a stored recovery the relay answered as no longer finishable (`.noLongerCurrent`, `.personGone`) and erases nothing: the keys, the reset and the stage stay,
+    /// the phase is a fault that Retry leaves, and a later launch asks for the recovery key again (2.7).
+    public func quitRecovery() -> Bool {
+        guard case .recovering(.refused(let why)) = phase, why == .noLongerCurrent || why == .personGone else { return false }
+        phase = .fault(.failed, PairingPhase.recoveryQuitAdvice)
+        return true
+    }
+
     func abandonRecovery() async {
         await dropRecoveryKeys()
         guard !isShutDown else { return }
         do {
-            try await eraseAll()
+            // The file that holds this Mac's earlier device stays, as at a restart: the next attempt can still name it.
+            try await eraseAll(keepingPairing: stored?.stage == .keysMade(.recover) && stored?.earlier != nil)
             phase = .unpaired(nil)
         } catch {
             phase = .fault(.failed, Problem.sentence("Pardner could not erase the recovery", error, next: PairingPhase.retryAdvice))
@@ -318,7 +353,7 @@ extension PairingController {
         switch state.stage {
         case .keysMade:
             let named = state.recovery?.made.isEmpty == false // the ids of keys made are all the store keeps then
-            try await eraseAll(keepingPairing: named)
+            try await eraseAll(keepingPairing: named || state.earlier != nil) // and the earlier device's id, which only the stale file still holds
             phase = .unpaired(named ? .staleRecoveryKey : nil)
         case .recovering:
             guard keys.has(Self.signName), keys.has(Self.receiveName) else { return phase = .keysMissing }

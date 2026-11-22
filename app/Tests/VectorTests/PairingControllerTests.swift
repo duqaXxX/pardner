@@ -273,7 +273,7 @@ final class PairingControllerTests: XCTestCase {
 
     /// Design 4.1: a file written by a newer app is the newer app's: nothing is erased and no action is offered but updating.
     func testANewerVersionStoreErasesNothingAndRefusesPairAgain() async throws {
-        let rig = try rig(keys: true, rawStore: #"{"version": 4}"#)
+        let rig = try rig(keys: true, rawStore: #"{"version": 5}"#)
         await rig.controller.launch()
         let phase = await rig.controller.phase
         guard case .fault(.newerStore, let advice) = phase else { return XCTFail("\(phase)") }
@@ -335,6 +335,53 @@ final class PairingControllerTests: XCTestCase {
         rig.harness.link.emit(.devices(.object(["person": .bytes(id), "length": .number(1), "last": .bytes(id), "self": .bytes(id), "devices": .array([])])))
         _ = await wait(rig.controller, "never paired") { $0 == .paired }
         XCTAssertEqual(try rig.pairing.load()?.stage, .paired)
+    }
+
+    private func selfRead(_ me: Data) -> RelayEvent {
+        let item = HostValue.object(["id": .bytes(me), "kind": .string("app"), "active": .bool(true), "short": .string("0707 0707 0707 0707"), "position": .number(0)])
+        return .devices(.object(["person": .bytes(person), "length": .number(1), "last": .bytes(person), "self": .bytes(me), "devices": .array([item])]))
+    }
+
+    /// The first device keeps its own device id once its pairing completes (recovery follow-up P1).
+    func testTheFirstDevicesPairingStoresItsOwnDeviceId() async throws {
+        let rig = try rig(keys: true, state: stored(.enrolling))
+        await rig.controller.launch()
+        let me = Data(repeating: 9, count: 32)
+        rig.harness.link.emit(.enrolled)
+        rig.harness.link.emit(selfRead(me))
+        _ = await wait(rig.controller, "never paired") { $0 == .paired }
+        for _ in 0..<200 where try rig.pairing.load()?.device == nil { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(try rig.pairing.load()?.device, me)
+    }
+
+    /// G6: a Mac paired before this release stores its id at the first read that lists it.
+    func testAMacPairedBeforeStoresItsDeviceIdAtTheFirstRead() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        let me = Data(repeating: 9, count: 32)
+        rig.harness.link.emit(selfRead(me))
+        for _ in 0..<200 where try rig.pairing.load()?.device == nil { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(try rig.pairing.load()?.device, me)
+    }
+
+    /// G3: a failed write of the id is bookkeeping: the phase stays paired and the next read tries again.
+    func testAFailedWriteOfTheDeviceIdFaultsNothingAndIsTriedAgain() async throws {
+        let me = Data(repeating: 9, count: 32)
+        var state = stored(.paired)
+        state.seen[me] = 1 // the read's other bookkeeping has nothing to write, so only the id's write meets the failure
+        let rig = try rig(keys: true, state: state)
+        await rig.controller.launch()
+        let folder = rig.pairingFolder
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: folder.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path) }
+        rig.harness.link.emit(selfRead(me))
+        try await Task.sleep(for: .milliseconds(300))
+        let phase = await rig.controller.phase
+        XCTAssertEqual(phase, .paired, "a write that failed faults nothing")
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+        rig.harness.link.emit(selfRead(me))
+        for _ in 0..<200 where try rig.pairing.load()?.device == nil { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(try rig.pairing.load()?.device, me)
     }
 
     func testPairedRunsTheConnectionAndStaysPairedAcrossARestart() async throws {

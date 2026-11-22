@@ -97,6 +97,16 @@ public enum RecoveryScreenWords {
     public static let devicesTitle = "Could someone else have one of your devices?"
     public static let devicesNo = "No"
     public static let devicesNoLine = "Your other devices stay as they are. You can remove any of them later in Devices."
+    /// What `No` says besides that, when this Mac's earlier keys may still be active (recovery design 2.4, R4-5; the maintainer's decision of 2026-11-22).
+    public static func noLine(_ earlier: EarlierKeys) -> String {
+        switch earlier {
+        case .notActive: devicesNoLine
+        case .unnamed: devicesNoLine + " Your earlier keys on this Mac may still be active; remove them in Devices if so."
+        case .named(let short): devicesNoLine + " Your earlier keys on this Mac (\(short)) stay active until you remove them in Devices."
+        }
+    }
+    /// The pill that marks the earlier device in Devices.
+    public static let earlierKeysMark = "This Mac's earlier keys"
     public static let devicesYes = "Yes"
     public static let devicesYesLine = "Only this device stays. Every other device is removed; pair again each one you still have."
     public static let newKeyTitle = "Make a new recovery key?"
@@ -116,8 +126,10 @@ public enum RecoveryScreenWords {
     public static let makeNewKeyLine = "A new recovery key is shown for you to write down and type back before anything is sent."
     public static let keepMyKeyLine = "Nothing new is made. The key you typed stays your current recovery key."
 
-    /// Cancel is offered only while no reset is stored; every other refusal is at a stored recovery, which nothing stops (the maintainer decides whether a stop exists).
+    /// Cancel is offered only while no reset is stored; a stored recovery is stopped by Quit alone, where the relay no longer accepts the key or the person.
     public static func canCancel(_ why: RecoveryRefusal) -> Bool { [.unknownPerson, .notCurrent, .madeEarlier].contains(why) }
+    public static let quitRecovery = "Quit recovery and keep this Mac as it is"
+    public static func canQuit(_ why: RecoveryRefusal) -> Bool { why == .noLongerCurrent || why == .personGone }
     /// A key can be typed again after these.
     public static func canTypeAgain(_ why: RecoveryRefusal) -> Bool { why != .unknownPerson && why != .noLongerCurrent && why != .personGone }
     public static let newKeyOnSheet = "After this recovery is done, this key opens your history. Until then, keep every recovery key you have."
@@ -212,6 +224,12 @@ extension PairingModel {
     public func typeAnotherKey() {
         guard let controller else { return }
         Task { await controller.typeAnotherKey() }
+    }
+
+    /// Closes a recovery the relay no longer accepts, erasing nothing (`PairingController.quitRecovery`).
+    public func quitRecovery() {
+        guard let controller else { return }
+        Task { _ = await controller.quitRecovery() }
     }
 
     public func typeEarlierKey() {

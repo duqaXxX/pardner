@@ -113,6 +113,10 @@ public struct PairingState: Sendable, Equatable {
     /// The proof of possession, while joining or recovering; the name is the joining's, and stays once paired.
     public var proof: Data?
     public var name: String?
+    /// This app's own device id, stored when a pairing completes (first device, join, recovery); a Mac paired before holds none.
+    public var device: Data?
+    /// The device id this Mac held before a recovery began, read from the store the recovery replaced: the recovery names it and Devices marks it while it is active.
+    public var earlier: Data?
     /// Device entries made and not yet read back: at most one (design 3.6).
     public var pending: SignedEntry?
     /// Device id to the name a pairing string gave it.
@@ -130,7 +134,8 @@ public struct PairingState: Sendable, Equatable {
 public final class PairingStore: @unchecked Sendable {
     /// Version 2 is a file that holds a recovery: an app that reads version 1 only calls it newer and erases nothing (design 4.1).
     /// Version 3 is a file that keeps the name typed at setup or at a join, from `keys-made` of a first device to paired (names design 4.2, 4.3): an app that reads version 2 or 1 calls it newer and erases nothing.
-    private static let version = 3, recoveryVersion = 2, plainVersion = 1
+    /// Version 4 is a file that keeps this app's device id or a recovery's earlier one: an app that reads up to version 3 calls it newer and erases nothing.
+    private static let version = 4, nameVersion = 3, recoveryVersion = 2, plainVersion = 1
     private let folder: URL
     private var lock: Int32 = -1
     private let calls = OSAllocatedUnfairLock()
@@ -187,7 +192,7 @@ public final class PairingStore: @unchecked Sendable {
 
     // MARK: the file
 
-    private static let keys: Set<String> = ["version", "stage", "intent", "relay", "person", "genesis", "proof", "name", "pending", "labels", "seen", "removal", "recovery"]
+    private static let keys: Set<String> = ["version", "stage", "intent", "relay", "person", "genesis", "proof", "name", "device", "earlier", "pending", "labels", "seen", "removal", "recovery"]
 
     /// The JSON of a state, whole; a time that is not finite is refused before the serializer sees it, which raises an Objective-C exception on one.
     static func encode(_ s: PairingState) throws -> Data {
@@ -195,7 +200,7 @@ public final class PairingStore: @unchecked Sendable {
         func hex(_ data: Data) -> String { StoreDisk.hex(data) }
         let entry = { (e: SignedEntry) -> [String: Any] in ["signed": hex(e.signed), "sig": hex(e.sig), "id": hex(e.id)] }
         var o: [String: Any] = [
-            "version": s.name != nil && s.stage != .joining ? version : s.recovery == nil ? plainVersion : recoveryVersion,
+            "version": s.device != nil || s.earlier != nil ? version : s.name != nil && s.stage != .joining ? nameVersion : s.recovery == nil ? plainVersion : recoveryVersion,
             "relay": ["host": s.relay.host, "port": Int(s.relay.port), "key": hex(s.relay.key)],
             "labels": Dictionary(uniqueKeysWithValues: s.labels.map { (hex($0.key), $0.value) }),
             "seen": Dictionary(uniqueKeysWithValues: s.seen.map { (hex($0.key), $0.value) }),
@@ -212,6 +217,8 @@ public final class PairingStore: @unchecked Sendable {
         if let genesis = s.genesis { o["genesis"] = entry(genesis) }
         if let proof = s.proof { o["proof"] = hex(proof) }
         if let name = s.name { o["name"] = name }
+        if let device = s.device { o["device"] = hex(device) }
+        if let earlier = s.earlier { o["earlier"] = hex(earlier) }
         if let pending = s.pending { o["pending"] = entry(pending) }
         if let removal = s.removal { o["removal"] = ["devices": removal.devices.map(hex), "length": removal.length, "left": removal.left.map(hex)] }
         if let recovery = s.recovery {
@@ -236,7 +243,7 @@ public final class PairingStore: @unchecked Sendable {
             return n
         }
         func int(_ value: Any?) -> Int? { number(value).flatMap { $0 as? Int } }
-        guard let fileVersion = int(o["version"]), [plainVersion, recoveryVersion, version].contains(fileVersion), fileVersion == plainVersion ? o["recovery"] == nil : true else {
+        guard let fileVersion = int(o["version"]), [plainVersion, recoveryVersion, nameVersion, version].contains(fileVersion), fileVersion == plainVersion ? o["recovery"] == nil : true else {
             let newer = int(o["version"]).map { $0 > version } ?? false
             throw PairingFault(description: refuse("another version").description, isNewerVersion: newer)
         }
@@ -278,6 +285,8 @@ public final class PairingStore: @unchecked Sendable {
             guard let name = name as? String, !name.isEmpty else { throw refuse("a malformed name") }
             s.name = name
         }
+        if let device = o["device"] { s.device = try bytes(device, 32, "device id") }
+        if let earlier = o["earlier"] { s.earlier = try bytes(earlier, 32, "earlier device id") }
         if let pending = o["pending"] { s.pending = try entry(pending, "pending entry") }
         guard let labels = o["labels"] as? [String: Any], let seen = o["seen"] as? [String: Any] else { throw refuse("malformed labels or seen") }
         for (id, name) in labels {
@@ -297,7 +306,8 @@ public final class PairingStore: @unchecked Sendable {
         }
         if let recovery = o["recovery"] { s.recovery = try Self.recovery(recovery, bytes, refuse) }
         try shape(s, refuse)
-        if s.stage != .joining, s.name != nil, fileVersion != version { throw refuse("a name that belongs to version 3") }
+        if s.stage != .joining, s.name != nil, fileVersion < nameVersion { throw refuse("a name that belongs to version 3") }
+        if s.device != nil || s.earlier != nil, fileVersion != version { throw refuse("a device id that belongs to version 4") }
         return s
     }
 
@@ -327,6 +337,7 @@ public final class PairingStore: @unchecked Sendable {
     private static func shape(_ s: PairingState, _ refuse: (String) -> PairingFault) throws {
         let present = (genesis: s.genesis != nil, proof: s.proof != nil, name: s.name != nil, person: s.person != nil)
         let later = s.pending == nil && s.removal == nil
+        let ownDevice = s.device == nil || s.stage == .paired, earlier = s.earlier == nil || [.keysMade(.recover), .recovering, .recovered, .paired].contains(s.stage)
         let (made, reset) = (s.recovery != nil, s.recovery?.reset != nil)
         let fits: Bool
         switch s.stage {
@@ -339,6 +350,6 @@ public final class PairingStore: @unchecked Sendable {
         case .joining: fits = !made && present.person && !present.genesis && present.proof && present.name && later
         case .paired: fits = !made && present.person && !present.genesis && !present.proof // a name may stay: the one typed at a join (names design 4.3), in a version 3 file
         }
-        guard fits else { throw refuse("fields that do not belong to the stage") }
+        guard fits, ownDevice, earlier else { throw refuse("fields that do not belong to the stage") }
     }
 }

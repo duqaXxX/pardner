@@ -101,7 +101,7 @@ final class PairingStoreTests: XCTestCase {
         try fault("")
         try fault("[]")
         try fault("{\"version\":1")
-        try fault(good.replacingOccurrences(of: "\"version\":1", with: "\"version\":4"))
+        try fault(good.replacingOccurrences(of: "\"version\":1", with: "\"version\":5"))
         try fault(good.replacingOccurrences(of: "\"stage\":\"paired\"", with: "\"stage\":\"done\""))
         try fault("{\"extra\":1," + good.dropFirst())
         try fault(good.replacingOccurrences(of: "\"port\":8443", with: "\"port\":70000"))
@@ -252,7 +252,7 @@ final class PairingStoreTests: XCTestCase {
         XCTAssertThrowsError(try PairingStore.decode(Data(recovering.replacingOccurrences(of: "\"version\":2", with: "\"version\":1").utf8))) { error in
             XCTAssertEqual((error as? PairingFault)?.isNewerVersion, false, "a recovery in a version 1 file is malformed, not newer")
         }
-        XCTAssertThrowsError(try PairingStore.decode(Data(recovering.replacingOccurrences(of: "\"version\":2", with: "\"version\":4").utf8))) { error in
+        XCTAssertThrowsError(try PairingStore.decode(Data(recovering.replacingOccurrences(of: "\"version\":2", with: "\"version\":5").utf8))) { error in
             XCTAssertEqual((error as? PairingFault)?.isNewerVersion, true)
         }
         let plain = String(decoding: try PairingStore.encode(states()[5]), as: UTF8.self)
@@ -271,7 +271,7 @@ final class PairingStoreTests: XCTestCase {
                 XCTAssertEqual((error as? PairingFault)?.isNewerVersion, false, "a name at paired in version \(old) is malformed, not newer")
             }
         }
-        XCTAssertThrowsError(try PairingStore.decode(Data(text.replacingOccurrences(of: "\"version\":3", with: "\"version\":4").utf8))) { error in
+        XCTAssertThrowsError(try PairingStore.decode(Data(text.replacingOccurrences(of: "\"version\":3", with: "\"version\":5").utf8))) { error in
             XCTAssertEqual((error as? PairingFault)?.isNewerVersion, true)
         }
         let plain = String(decoding: try PairingStore.encode(PairingState(stage: .paired, relay: relay, person: person)), as: UTF8.self)
@@ -294,6 +294,40 @@ final class PairingStoreTests: XCTestCase {
         var join = states().first { $0.stage == .keysMade(.join) }!
         join.name = "Mac"
         XCTAssertThrowsError(try PairingStore.decode(try PairingStore.encode(join)), "a join's keys-made holds no name")
+    }
+
+    /// A paired Mac that keeps its own device id, or a recovery's earlier one, is version 4: a build that reads up to 3 calls the file newer and erases nothing.
+    func testAFileThatHoldsADeviceIdIsVersionFourAndEveryVersionIsRead() throws {
+        let device = Data(repeating: 0x7d, count: 32)
+        var paired = PairingState(stage: .paired, relay: relay, person: person)
+        paired.device = device
+        paired.name = "Mac mini"
+        var recovery = states().first { $0.stage == .keysMade(.recover) }!
+        recovery.earlier = device
+        var kept = PairingState(stage: .paired, relay: relay, person: person)
+        kept.earlier = device
+        for state in [paired, recovery, kept] {
+            let text = String(decoding: try PairingStore.encode(state), as: UTF8.self)
+            XCTAssertTrue(text.contains("\"version\":4"), "\(state.stage)")
+            XCTAssertEqual(try PairingStore.decode(Data(text.utf8)), state)
+            for old in ["1", "2", "3"] {
+                XCTAssertThrowsError(try PairingStore.decode(Data(text.replacingOccurrences(of: "\"version\":4", with: "\"version\":\(old)").utf8))) { error in
+                    XCTAssertEqual((error as? PairingFault)?.isNewerVersion, false, "a device id in version \(old) is malformed, not newer")
+                }
+            }
+            XCTAssertThrowsError(try PairingStore.decode(Data(text.replacingOccurrences(of: "\"version\":4", with: "\"version\":5").utf8))) { error in
+                XCTAssertEqual((error as? PairingFault)?.isNewerVersion, true)
+            }
+        }
+        var named = PairingState(stage: .paired, relay: relay, person: person)
+        named.name = "Mac mini"
+        XCTAssertTrue(String(decoding: try PairingStore.encode(named), as: UTF8.self).contains("\"version\":3"), "a name alone stays version 3")
+        var wrong = states().first { $0.stage == .enrolling }!
+        wrong.device = device
+        XCTAssertThrowsError(try PairingStore.decode(try PairingStore.encode(wrong)), "a device id belongs to a paired Mac")
+        var early = states().first { $0.stage == .enrolling }!
+        early.earlier = device
+        XCTAssertThrowsError(try PairingStore.decode(try PairingStore.encode(early)), "an earlier device belongs to a recovery or to a paired Mac")
     }
 
     func testEnrollingNamesTheGenesisIdAsThePerson() throws {
