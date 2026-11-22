@@ -53,6 +53,11 @@ export interface CleanOptions {
   /** True once a stop has begun: the threads not yet asked about wait for the next start. */
   readonly stopping?: () => boolean;
   readonly live: Live;
+  /**
+   * False for a chat that has no lookups (`ChatCapabilities.lookups`): the pass asks it nothing
+   * and logs nothing about it, and only prunes. True when absent.
+   */
+  readonly lookups?: boolean;
   /** The chat's name (`ChatProvider.name`), for the log lines that say whose answer it was. */
   readonly chat: string;
   /** When the chat opened a thread (`ChatProvider.openedAt`): a thread it cannot date is kept. */
@@ -193,25 +198,27 @@ export async function clean(
   const { live } = options;
   const now = options.now ?? (() => Date.now() / 1000);
   const log = options.logger ?? logger;
-  let found: readonly string[] = [];
-  try {
-    found = (await forgetGoneChannels(lookup, state, live, options.chat, log, options.stopping))
-      .found;
-  } catch (error) {
-    log.warning(`could not check the bound channels: ${errorName(error)}`);
-  }
-  try {
-    await forgetGoneThreads(
-      options.threadLookup,
-      state,
-      found,
-      live,
-      options.chat,
-      log,
-      options.stopping,
-    );
-  } catch (error) {
-    log.warning(`could not check the threads: ${errorName(error)}`);
+  if (options.lookups !== false) {
+    let found: readonly string[] = [];
+    try {
+      found = (await forgetGoneChannels(lookup, state, live, options.chat, log, options.stopping))
+        .found;
+    } catch (error) {
+      log.warning(`could not check the bound channels: ${errorName(error)}`);
+    }
+    try {
+      await forgetGoneThreads(
+        options.threadLookup,
+        state,
+        found,
+        live,
+        options.chat,
+        log,
+        options.stopping,
+      );
+    } catch (error) {
+      log.warning(`could not check the threads: ${errorName(error)}`);
+    }
   }
   // A stop closes the sessions after this pass: the keep set `live` gives would then be empty,
   // and a thread whose setup is still open (no session id yet) would be pruned for its age.

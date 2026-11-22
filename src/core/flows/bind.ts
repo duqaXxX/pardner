@@ -116,7 +116,15 @@ export function binding(deps: FlowDeps, talk: Talk): Binding {
       await announce(channel, directory, answers);
     },
 
-    async list(channel) {
+    async list(channel, answers) {
+      const picker = chat.channel(channel);
+      if (!chat.capabilities.channelLists || picker.offer === undefined) {
+        const root = inNotice(allowedRoot);
+        const line = fill(texts.BIND_NO_LIST, { root });
+        const trust = agent.capabilities.folderTrust ? named(texts.BIND_NO_LIST_TRUST, names) : "";
+        await talk.inChannel(channel, [line, trust].filter(Boolean).join(" "), answers);
+        return;
+      }
       const record = state.channel(channel);
       const folders = await sessions.foldersIn(allowedRoot);
       // An agent with no record of trust is offered every folder: no title names its trust.
@@ -125,7 +133,7 @@ export function binding(deps: FlowDeps, talk: Talk): Binding {
       const title = fill(agent.capabilities.folderTrust ? trusted : texts.BIND_LIST_ANY, {
         root: allowedRoot,
       });
-      await chat.channel(channel).offer(
+      await picker.offer(
         {
           type: "folders",
           root: allowedRoot,

@@ -102,7 +102,9 @@ class Faulty implements ChatProvider {
         return inner.notice(text);
       },
       say: (markdown) => inner.say(markdown),
-      offer: (list, title) => inner.offer(list, title),
+      ...(inner.offer === undefined
+        ? {}
+        : { offer: (list, title) => inner.offer?.(list, title) ?? Promise.resolve() }),
       withdraw: async (list) => (this.withdrawRefused ? false : inner.withdraw(list)),
       rewrite: (list, text) => {
         this.rewrites.push([list, text]);
@@ -125,11 +127,11 @@ class Faulty implements ChatProvider {
   }
 
   channelState(channel: string): Promise<Presence> {
-    return this.#inner.channelState(channel);
+    return this.#inner.channelState?.(channel) ?? Promise.resolve("no answer");
   }
 
   threadState(ref: ThreadRef): Promise<Presence> {
-    return this.#inner.threadState(ref);
+    return this.#inner.threadState?.(ref) ?? Promise.resolve("no answer");
   }
 
   start(inbound: ChatInbound): Promise<void> {

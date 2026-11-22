@@ -82,11 +82,13 @@ export function resuming(deps: FlowDeps, talk: Talk): Resuming {
     const link = await chat.thread(holder).link(HOLDER_LABEL, "notice");
     if (link !== null) return fill(texts.RESUME_ELSEWHERE, { link });
     let presence: Presence = "no answer";
-    try {
-      presence = await chat.channelState(holder.channel);
-    } catch (error) {
-      if (isCancelled(error)) throw error;
-      logger.warning(`could not ask about channel ${holder.channel}: ${errorName(error)}`);
+    if (chat.channelState !== undefined) {
+      try {
+        presence = await chat.channelState(holder.channel);
+      } catch (error) {
+        if (isCancelled(error)) throw error;
+        logger.warning(`could not ask about channel ${holder.channel}: ${errorName(error)}`);
+      }
     }
     if (presence !== "gone" || sessions.sessionsOf(holder.channel).length > 0) {
       const name = fill(texts.STATUS_CHANNEL_LINK_FALLBACK, { thread_ts: holder.thread });
@@ -168,13 +170,23 @@ export function resuming(deps: FlowDeps, talk: Talk): Resuming {
         return;
       }
       const directory = record.directory;
+      const picker = chat.channel(channel);
+      const lists = chat.capabilities.channelLists && picker.offer !== undefined;
+      if (!target && !lists) {
+        await talk.inChannel(
+          channel,
+          fill(texts.RESUME_NO_LIST, { min: String(ID_PREFIX_MIN) }),
+          answers,
+        );
+        return;
+      }
       const stored = await sessions.sessionsIn(directory);
       if (!target) {
         // A session a thread already holds cannot be resumed: it takes no row, so the rows are
         // the ones the owner can pick. Only the list shows dates, and dating reads
         // files: the sessions left out are not dated.
         const free = stored.filter((session) => state.holder(session.id) === null);
-        await chat.channel(channel).offer(
+        await picker.offer?.(
           {
             type: "sessions",
             folder: directory,
@@ -189,7 +201,14 @@ export function resuming(deps: FlowDeps, talk: Talk): Resuming {
       const found = matching(stored, target);
       const [only] = found;
       if (found.length !== 1 || only === undefined) {
-        const template = found.length > 0 ? texts.RESUME_AMBIGUOUS : texts.RESUME_NONE;
+        // Without lists `/resume` has none to send the owner to: the line says what to type.
+        const template = lists
+          ? found.length > 0
+            ? texts.RESUME_AMBIGUOUS
+            : texts.RESUME_NONE
+          : found.length > 0
+            ? texts.RESUME_AMBIGUOUS_NO_LIST
+            : texts.RESUME_NONE_NO_LIST;
         await talk.inChannel(
           channel,
           fill(template, { directory: inNotice(directory), target: inNotice(target) }),

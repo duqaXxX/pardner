@@ -32,6 +32,8 @@ const NONE: ChatCapabilities = {
   activityLine: false,
   fileUpload: false,
   threadLists: false,
+  channelLists: false,
+  lookups: false,
   messageFold: false,
   threadTags: false,
   threadPins: false,
@@ -265,7 +267,6 @@ export class RelayProvider implements ChatProvider {
       },
       say: text("say"),
       tell: (markdown) => text("tell")(markdown),
-      offer: async () => {}, // `/bind` alone offers folders: the owner types the folder (section 5)
       withdraw: async () => false,
       rewrite: async () => {},
     };
@@ -274,8 +275,6 @@ export class RelayProvider implements ChatProvider {
   escape = (text: string) => text;
   channelName = (channel: string) => channel.slice(0, 8);
   openedAt = () => null;
-  channelState = async () => "no answer" as const;
-  threadState = async () => "no answer" as const;
 
   async start(inbound: ChatInbound): Promise<void> {
     this.#inbound.start(inbound);

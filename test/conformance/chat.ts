@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { describe, type TestContext, test } from "node:test";
 import type { PromptContent, Question } from "../../src/agent/seam.ts";
 import {
+  type ChannelChat,
   ChatError,
   type ChatInbound,
   type ChatProvider,
@@ -426,6 +427,20 @@ async function offerDiff(s: Started): Promise<ThreadListed> {
   return { ref: s.ref, list: DIFF_LIST, message };
 }
 
+/** The members a chat that declares `channelLists` and `lookups` has; a chat that lacks one fails here. */
+function offerOf(channel: ChannelChat): NonNullable<ChannelChat["offer"]> {
+  assert.ok(channel.offer, "ChannelChat.offer");
+  return channel.offer.bind(channel);
+}
+function channelStateOf(provider: ChatProvider): NonNullable<ChatProvider["channelState"]> {
+  assert.ok(provider.channelState, "ChatProvider.channelState");
+  return provider.channelState.bind(provider);
+}
+function threadStateOf(provider: ChatProvider): NonNullable<ChatProvider["threadState"]> {
+  assert.ok(provider.threadState, "ChatProvider.threadState");
+  return provider.threadState.bind(provider);
+}
+
 const FOLDERS: OwnerList = {
   type: "folders",
   root: "/work",
@@ -593,8 +608,9 @@ export function chatConformance(
     title: string,
     needed: keyof ChatProvider["capabilities"],
     body: (started: Started, t: TestContext) => Promise<void>,
+    marks: { readonly todo?: string | undefined } = {},
   ): void => {
-    test(title, async (t) => {
+    test(title, { todo: marks.todo }, async (t) => {
       const started = await start(t, make);
       if (!started.provider.capabilities[needed]) {
         t.skip(`${name} lacks the capability ${needed}`);
@@ -611,6 +627,16 @@ export function chatConformance(
   const updates = (title: string, body: Parameters<typeof check>[1]): void =>
     check(title, body, { todo: todo.update });
 
+  /** The checks of what a chat with `lookups` or `channelLists` has: skipped by name without it. */
+  const lookupCheck = (title: string, body: Parameters<typeof check>[1]): void =>
+    gated(title, "lookups", body);
+  const listCheck = (title: string, body: Parameters<typeof check>[1]): void =>
+    gated(title, "channelLists", body);
+  const listInbound = (title: string, body: Parameters<typeof check>[1]): void =>
+    gated(title, "channelLists", body, { todo: todo.inbound });
+  const listUpdates = (title: string, body: Parameters<typeof check>[1]): void =>
+    gated(title, "channelLists", body, { todo: todo.update });
+
   describe(`the chat seam: ${name}`, () => {
     describe("the provider", () => {
       check("names itself and declares its capabilities", async ({ provider }) => {
@@ -621,8 +647,10 @@ export function chatConformance(
           "acknowledgement",
           "activityLine",
           "channelClean",
+          "channelLists",
           "commandSuggestions",
           "fileUpload",
+          "lookups",
           "loopCard",
           "messageFold",
           "nativeStreaming",
@@ -700,6 +728,19 @@ export function chatConformance(
         },
       );
 
+      check("has offer on a channel exactly when it declares channelLists", async (s) => {
+        const channel = s.provider.channel(s.rig.channel);
+        assert.equal(typeof channel.offer === "function", s.provider.capabilities.channelLists);
+      });
+
+      check("has channelState and threadState exactly when it declares lookups", async (s) => {
+        const { provider } = s;
+        const has = [provider.channelState, provider.threadState].map(
+          (m) => typeof m === "function",
+        );
+        assert.deepEqual(has, [provider.capabilities.lookups, provider.capabilities.lookups]);
+      });
+
       check("has open on a channel exactly when it declares threadOpen", async (s) => {
         const channel = s.provider.channel(s.rig.channel);
         assert.equal(typeof channel.open === "function", s.provider.capabilities.threadOpen);
@@ -764,20 +805,22 @@ export function chatConformance(
         assert.equal(s.provider.openedAt({ channel: s.ref.channel, thread: "never-opened" }), null);
       });
 
-      check("says a channel it has is there", async ({ rig, provider }) => {
-        assert.equal(await provider.channelState(rig.channel), "there");
+      lookupCheck("says a channel it has is there", async ({ rig, provider }) => {
+        assert.equal(await channelStateOf(provider)(rig.channel), "there");
       });
 
-      check("says a channel that went is gone", async ({ rig, provider }) => {
+      lookupCheck("says a channel that went is gone", async ({ rig, provider }) => {
         rig.removeChannel(rig.channel);
-        assert.equal(await provider.channelState(rig.channel), "gone");
+        assert.equal(await channelStateOf(provider)(rig.channel), "gone");
       });
 
-      check(
+      lookupCheck(
         "says `no answer`, or rejects with a named ChatError, when it can not say",
         async ({ rig, provider }) => {
           rig.failLookups();
-          const answer = await provider.channelState(rig.channel).catch((error: unknown) => error);
+          const answer = await channelStateOf(provider)(rig.channel).catch(
+            (error: unknown) => error,
+          );
           if (answer instanceof ChatError) assert.notEqual(answer.name, "");
           else assert.equal(answer, "no answer");
         },
@@ -785,14 +828,17 @@ export function chatConformance(
     });
 
     describe("a thread: whether the chat still has it", () => {
-      check("says a thread it has is there", async ({ provider, ref }) => {
-        assert.equal(await provider.threadState(ref), "there");
+      lookupCheck("says a thread it has is there", async ({ provider, ref }) => {
+        assert.equal(await threadStateOf(provider)(ref), "there");
       });
 
-      check("says a thread whose first message went is gone", async ({ rig, provider, ref }) => {
-        rig.removeThread(ref);
-        assert.equal(await provider.threadState(ref), "gone");
-      });
+      lookupCheck(
+        "says a thread whose first message went is gone",
+        async ({ rig, provider, ref }) => {
+          rig.removeThread(ref);
+          assert.equal(await threadStateOf(provider)(ref), "gone");
+        },
+      );
 
       check("ask into a thread whose first message went rejects as `gone`", async (s) => {
         s.rig.removeThread(s.ref);
@@ -804,11 +850,11 @@ export function chatConformance(
         assert.equal(failure.failure, "gone");
       });
 
-      check(
+      lookupCheck(
         "says `no answer`, or rejects with a named ChatError, when it can not say",
         async ({ rig, provider, ref }) => {
           rig.failLookups();
-          const answer = await provider.threadState(ref).catch((error: unknown) => error);
+          const answer = await threadStateOf(provider)(ref).catch((error: unknown) => error);
           if (answer instanceof ChatError) assert.notEqual(answer.name, "");
           else assert.equal(answer, "no answer");
         },
@@ -1533,9 +1579,9 @@ export function chatConformance(
         await assert.rejects(channel.say("Nobody reads this"), ChatError);
       });
 
-      check("offers a list with a control, withdraws it and rewrites it", async (s) => {
+      listCheck("offers a list with a control, withdraws it and rewrites it", async (s) => {
         const channel = s.provider.channel(s.rig.channel);
-        await channel.offer(FOLDERS, "Pick a folder to bind");
+        await offerOf(channel)(FOLDERS, "Pick a folder to bind");
         const offered = s.rig
           .read({ channel: s.rig.channel })
           .filter((m) => m.text.includes("Pick a folder to bind"));
@@ -1548,7 +1594,7 @@ export function chatConformance(
           s.rig.read({ channel: s.rig.channel }).some((m) => m.id === id),
           false,
         );
-        await channel.offer(sessions(s.ref), "Pick a session to resume");
+        await offerOf(channel)(sessions(s.ref), "Pick a session to resume");
         const again = s.rig
           .read({ channel: s.rig.channel })
           .find((m) => m.text.includes("Pick a session to resume"));
@@ -1560,9 +1606,9 @@ export function chatConformance(
         assert.match(done.text, /Resumed an earlier session/);
       });
 
-      updates("offers an update with a control, and rewrites it into a notice", async (s) => {
+      listUpdates("offers an update with a control, and rewrites it into a notice", async (s) => {
         const channel = s.provider.channel(s.rig.channel);
-        await channel.offer(UPDATE, "Update pardner 0.3.0 to 0.3.1");
+        await offerOf(channel)(UPDATE, "Update pardner 0.3.0 to 0.3.1");
         const offered = s.rig
           .read({ channel: s.rig.channel })
           .find((m) => m.text.includes("Update pardner 0.3.0 to 0.3.1"));
@@ -1697,9 +1743,9 @@ export function chatConformance(
         );
       });
 
-      inbound("a pick from a list of folders arrives with the list's message", async (s) => {
+      listInbound("a pick from a list of folders arrives with the list's message", async (s) => {
         const channel = s.provider.channel(s.rig.channel);
-        await channel.offer(FOLDERS, "Pick a folder to bind");
+        await offerOf(channel)(FOLDERS, "Pick a folder to bind");
         const shown = s.rig
           .read({ channel: s.rig.channel })
           .find((m) => m.text.includes("Pick a folder to bind"));
@@ -1713,12 +1759,12 @@ export function chatConformance(
         ]);
       });
 
-      inbound(
+      listInbound(
         "a pick from a list of sessions arrives with the session and the thread",
         async (s) => {
           const channel = s.provider.channel(s.rig.channel);
           const list = sessions(s.ref);
-          await channel.offer(list, "Pick a session to resume");
+          await offerOf(channel)(list, "Pick a session to resume");
           const shown = s.rig
             .read({ channel: s.rig.channel })
             .find((m) => m.text.includes("Pick a session to resume"));
@@ -1735,11 +1781,11 @@ export function chatConformance(
         },
       );
 
-      updates(
+      listUpdates(
         "a pick from an update offer arrives with the version and the offer's message",
         async (s) => {
           const channel = s.provider.channel(s.rig.channel);
-          await channel.offer(UPDATE, "Update pardner 0.3.0 to 0.3.1");
+          await offerOf(channel)(UPDATE, "Update pardner 0.3.0 to 0.3.1");
           const shown = s.rig
             .read({ channel: s.rig.channel })
             .find((m) => m.text.includes("Update pardner 0.3.0 to 0.3.1"));
@@ -1760,13 +1806,13 @@ export function chatConformance(
         assert.ok(early.inbound.empty);
       });
 
-      inbound("nothing arrives after stop", async (s) => {
+      listInbound("nothing arrives after stop", async (s) => {
         const thread = s.provider.thread(s.ref);
         const requestId = "request-late";
         const request = permission();
         const message = await thread.ask(requestId, request, "A permission");
         const channel = s.provider.channel(s.rig.channel);
-        await channel.offer(FOLDERS, "Pick a folder to bind");
+        await offerOf(channel)(FOLDERS, "Pick a folder to bind");
         const listed = s.rig
           .read({ channel: s.rig.channel })
           .find((m) => m.text.includes("Pick a folder to bind"));
@@ -1868,13 +1914,13 @@ export function chatConformance(
         });
       }
 
-      inbound("a pick from a list from somebody else never arrives", async (s) => {
+      listInbound("a pick from a list from somebody else never arrives", async (s) => {
         const channel = s.provider.channel(s.rig.channel);
         for (const [title, list, row] of [
           ["Pick a folder to bind", FOLDERS, "/work/tools"],
           ["Pick a session to resume", sessions(s.ref), "session-1"],
         ] as const) {
-          await channel.offer(list, title);
+          await offerOf(channel)(list, title);
           const shown = s.rig.read({ channel: s.rig.channel }).find((m) => m.text.includes(title));
           assert.ok(shown?.id);
           const listed: Listed = { channel: s.rig.channel, list, message: shown.id };
@@ -2084,9 +2130,9 @@ export function chatConformance(
         },
       );
 
-      updates("a pick from an update offer from somebody else never arrives", async (s) => {
+      listUpdates("a pick from an update offer from somebody else never arrives", async (s) => {
         const channel = s.provider.channel(s.rig.channel);
-        await channel.offer(UPDATE, "Update pardner 0.3.0 to 0.3.1");
+        await offerOf(channel)(UPDATE, "Update pardner 0.3.0 to 0.3.1");
         const shown = s.rig
           .read({ channel: s.rig.channel })
           .find((m) => m.text.includes("Update pardner 0.3.0 to 0.3.1"));

@@ -466,8 +466,9 @@ export async function run(options: RunOptions = {}): Promise<number> {
     // overlap, and none begins once a stop has.
     const cleanups = new Cleanups(
       () =>
-        clean((channel) => chat.channelState(channel), state, {
-          threadLookup: (ref) => chat.threadState(ref),
+        clean((channel) => chat.channelState?.(channel) ?? Promise.resolve("no answer"), state, {
+          threadLookup: (ref) => chat.threadState?.(ref) ?? Promise.resolve("no answer"),
+          lookups: chat.capabilities.lookups,
           stopping: isStopping,
           live: () => sessions.liveThreads(),
           chat: chat.name,

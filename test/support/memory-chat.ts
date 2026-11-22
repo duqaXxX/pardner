@@ -83,6 +83,10 @@ export interface MemoryChatOptions {
   /** `threadOpen` and `loopCard` are declared unless false: the relay declares neither. */
   readonly threadOpen?: boolean;
   readonly loopCard?: boolean;
+  /** The provider declares `channelLists` unless false: the relay does not. */
+  readonly channelLists?: boolean;
+  /** The provider declares `lookups` unless false: the relay does not. */
+  readonly lookups?: boolean;
   /** The provider has a session index that records its refreshes (`Recorded.index`). */
   readonly index?: { readonly page?: () => unknown };
   /**
@@ -190,6 +194,8 @@ export function memoryChat(options: MemoryChatOptions = {}): MemoryChat {
       activityRefused: options.activityRefused,
       threadOpen: options.threadOpen,
       loopCard: options.loopCard,
+      channelLists: options.channelLists,
+      lookups: options.lookups,
       index: options.index,
     },
   );

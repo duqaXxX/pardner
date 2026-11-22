@@ -248,6 +248,9 @@ All notable changes to this project are documented here. The format follows
   rest without `first`, so what resets on them (the bot's reader, outbox and profile writer) did not: `Link` now
   reads those flags from the incarnation its store confirmed and from the rests it delivered, not from the reading,
   which moves before the write.
+- Reading a file to share allocates a buffer the size of the file (one byte more, and no more than the limit) and no longer the whole limit for every file (#3).
+- `/bind` alone, `/resume` alone and `/pardner update` with a newer version no longer answer nothing on the relay chat: the chat seam has a capability `channelLists`, and `ChannelChat.offer` is present only with it. Without it each word answers the prompt with a line that says what it needs, `/resume` with a name that matches nothing no longer sends you to a list, and the update notice and status line name `pardner update` in a terminal in place of `/pardner update` (#81).
+- The start's cleanup no longer logs `could not read channel <id>: no answer` for each bound channel on the relay chat. The relay chat has no lookup and no date for a thread, so its cleanup now asks nothing and forgets and prunes nothing (`state.json` keeps what it holds); the chat seam has a capability `lookups`, and `ChatProvider.channelState` and `threadState` are present only with it (#78).
 
 ## [0.17.0] - 2026-11-19
 

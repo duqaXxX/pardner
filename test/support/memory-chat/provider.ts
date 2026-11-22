@@ -48,6 +48,8 @@ const CAPABILITIES: ChatCapabilities = {
   activityLine: false,
   fileUpload: false,
   threadLists: false,
+  channelLists: true,
+  lookups: true,
   messageFold: false,
   threadTags: false,
   threadPins: false,
@@ -70,6 +72,10 @@ export interface Recorded {
   /** The two the memory chat declares unless false, as the relay does not. */
   readonly threadOpen?: boolean;
   readonly loopCard?: boolean;
+  /** The memory chat declares `channelLists` unless false, as the relay does not. */
+  readonly channelLists?: boolean;
+  /** The memory chat declares `lookups` unless false, as the relay does not. */
+  readonly lookups?: boolean;
   /**
    * The provider has a session index (`ChatProvider.index`) and records each `refresh` as the
    * call `index.refresh`, with the sessions it names (none: any may have changed) and what
@@ -676,9 +682,18 @@ class MemoryChannel implements ChannelChat {
   readonly #room: Room;
   readonly #channel: string;
 
-  constructor(room: Room, channel: string) {
+  /** Present with `channelLists`. */
+  readonly offer?: (list: OwnerList, title: string) => Promise<void>;
+
+  constructor(room: Room, channel: string, lists: boolean) {
     this.#room = room;
     this.#channel = channel;
+    if (lists) {
+      this.offer = async (list, title) => {
+        const message = room.write(channel, null, DAEMON, title, "list");
+        room.addList({ message: message.id, channel, list, title });
+      };
+    }
   }
 
   async notice(text: string, answers?: MessageId): Promise<MessageId | null> {
@@ -701,11 +716,6 @@ class MemoryChannel implements ChannelChat {
     const ref = { channel: this.#channel, thread: root.thread as string };
     if (lead !== undefined) this.#room.keepLead(ref, lead);
     return ref;
-  }
-
-  async offer(list: OwnerList, title: string): Promise<void> {
-    const message = this.#room.write(this.#channel, null, DAEMON, title, "list");
-    this.#room.addList({ message: message.id, channel: this.#channel, list, title });
   }
 
   async withdraw(list: MessageId): Promise<boolean> {
@@ -769,6 +779,8 @@ export class MemoryProvider implements ChatProvider {
       ...CAPABILITIES,
       commandSuggestions: suggests,
       threadLists: lists,
+      channelLists: recorded.channelLists !== false,
+      lookups: recorded.lookups !== false,
       messageFold: folds,
       fileUpload: files,
       nativeStreaming: recorded.nativeStreaming === true,
@@ -778,6 +790,16 @@ export class MemoryProvider implements ChatProvider {
       threadOpen: recorded.threadOpen !== false,
       loopCard: recorded.loopCard !== false,
     };
+    if (recorded.lookups !== false) {
+      this.channelState = async (channel) => {
+        if (room.lookupFails()) return "no answer";
+        return room.knows(channel) ? "there" : "gone";
+      };
+      this.threadState = async (ref) => {
+        if (room.lookupFails()) return "no answer";
+        return room.knowsThread(ref) ? "there" : "gone";
+      };
+    }
     if (recorded.index !== undefined) {
       const page = recorded.index.page;
       this.index = {
@@ -824,7 +846,7 @@ export class MemoryProvider implements ChatProvider {
   }
 
   channel(channel: string): ChannelChat {
-    return new MemoryChannel(this.#room, channel);
+    return new MemoryChannel(this.#room, channel, this.capabilities.channelLists);
   }
 
   escape(text: string, markup: Markup): string {
@@ -850,15 +872,10 @@ export class MemoryProvider implements ChatProvider {
     return this.#room.cleanupControl ?? undefined;
   }
 
-  async channelState(channel: string): Promise<Presence> {
-    if (this.#room.lookupFails()) return "no answer";
-    return this.#room.knows(channel) ? "there" : "gone";
-  }
-
-  async threadState(ref: ThreadRef): Promise<Presence> {
-    if (this.#room.lookupFails()) return "no answer";
-    return this.#room.knowsThread(ref) ? "there" : "gone";
-  }
+  /** Present with `lookups`. */
+  readonly channelState?: (channel: string) => Promise<Presence>;
+  /** Present with `lookups`. */
+  readonly threadState?: (ref: ThreadRef) => Promise<Presence>;
 
   agentAccount(account: AgentAccount | null): void {
     this.#room.accounts.push(account);

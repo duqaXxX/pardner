@@ -488,6 +488,8 @@ export interface WorldOptions {
   readonly noUnshare?: boolean;
   /** With `diff`: the thread chat has no `share`, though the chat declares `fileUpload`. */
   readonly noShare?: boolean;
+  /** A channel of the chat has no `offer`, as in the relay chat. */
+  readonly noChannelLists?: boolean;
   /** With `diff`: the chat draws a diff of up to this many characters in the list's own message. */
   readonly fits?: number;
   /** Calls of a thread's chat held until the test lets them go (without `reactions`). */
@@ -631,6 +633,7 @@ export class MessagesWorld {
         ...(options.fits !== undefined && { fits: options.fits }),
         ...(options.noUnshare === true && { unshare: false }),
         ...(options.noShare === true && { share: false }),
+        ...(options.noChannelLists === true && { channelLists: false }),
       });
     const provider = await chat.build({
       variables: {},
