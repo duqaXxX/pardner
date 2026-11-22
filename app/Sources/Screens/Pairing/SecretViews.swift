@@ -152,10 +152,13 @@ final class KeyCaptureView: NSView {
         let dot: CGFloat = 9, step: CGFloat = 13, groupGap: CGFloat = 8, columns = 7
         effectiveAppearance.performAsCurrentDrawingAppearance {
             let ink = NSColor(PardnerColor.text).cgColor, line = NSColor(PardnerColor.muted).cgColor
+            // Typed step by step: one mixed Int and CGFloat expression is past an older compiler's type-check budget.
+            let groupWidth: CGFloat = 4 * step + groupGap
             for i in 0..<count {
                 let group = i / 4
-                let x = CGFloat(group % columns) * (4 * step + groupGap) + CGFloat(i % 4) * step + 2
-                let y = bounds.height - CGFloat(group / columns) * 24 - dot - 4
+                let column = CGFloat(group % columns), row = CGFloat(group / columns), place = CGFloat(i % 4)
+                let x: CGFloat = column * groupWidth + place * step + 2
+                let y: CGFloat = bounds.height - row * 24 - dot - 4
                 let rect = CGRect(x: x, y: y, width: dot, height: dot)
                 if i < typed {
                     context.setFillColor(ink)

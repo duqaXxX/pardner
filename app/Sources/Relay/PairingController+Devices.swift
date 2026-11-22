@@ -47,7 +47,7 @@ struct Gate {
 extension PairingController {
     // MARK: the one queue
 
-    func serially<T>(_ work: () async throws -> T) async rethrows -> T {
+    func serially<T: Sendable>(_ work: () async throws -> T) async rethrows -> T {
         if gate.busy {
             await withCheckedContinuation { gate.waiters.append($0) } // the finishing act hands `busy` over, so none slips in between
         } else {

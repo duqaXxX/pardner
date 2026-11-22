@@ -6,6 +6,9 @@ import SwiftUI
 
 /// The pairing screens until the device is paired, then `paired`'s content (the main window).
 public struct PairingRoot<Paired: View>: View {
+    /// The pairing screens' least width: the 600-point recovery key sheet never overhangs the window.
+    static var pairingLeastWidth: CGFloat { 680 }
+
     let model: PairingModel
     let paired: Paired
 
@@ -15,7 +18,7 @@ public struct PairingRoot<Paired: View>: View {
         if case .paired = model.phase {
             paired
         } else {
-            PairingScreen(model: model)
+            PairingScreen(model: model).frame(minWidth: Self.pairingLeastWidth)
         }
     }
 }
