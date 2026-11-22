@@ -65,7 +65,7 @@ final class ScreensTests: XCTestCase {
         let items = controller.splitViewItems
         XCTAssertEqual(items.map(\.minimumThickness), [200, 420, 320])
         XCTAssertEqual(items.map(\.canCollapse), [false, false, false], "the person collapses no column")
-        XCTAssertEqual(items.map(\.maximumThickness), [360, NSSplitViewItem.unspecifiedDimension, 640])
+        XCTAssertEqual(items.map(\.maximumThickness), [360, NSSplitViewItem.unspecifiedDimension, 320], "a split with no room yet bounds the panel at its least; the room sets it at each layout")
         XCTAssertTrue(controller.splitView.autosaveName?.hasPrefix("ScreensTests.limits.") ?? false)
         XCTAssertEqual(controller.splitView.dividerThickness, Columns.divider, "the thin divider")
         XCTAssertEqual(items[1].minimumThickness + items[0].minimumThickness + controller.splitView.dividerThickness, MainWindow.leastWidth(threadOpen: false))
@@ -233,6 +233,56 @@ final class ScreensTests: XCTestCase {
             let launch = Launch(name: name, defaults: defaults, width: 1400, thread: true)
             XCTAssertEqual(launch.widths[0], 248)
             XCTAssertEqual(launch.widths[2], 380)
+        }
+    }
+
+    /// The panel has no most width of its own: it grows until the conversation is at its least.
+    @MainActor
+    func testThePanelGrowsUntilTheConversationIsAtItsLeast() {
+        withLaunches { name, defaults in
+            let launch = Launch(name: name, defaults: defaults, width: 1900, thread: true)
+            launch.drag(divider: 1, to: launch.controller.splitView.bounds.width - 900 - 1)
+            XCTAssertEqual(launch.widths[2], 900, "the panel is as wide as it was dragged")
+            launch.drag(divider: 1, to: 300)
+            XCTAssertEqual(launch.widths, [248, 420, 1230], "the conversation keeps its least width, the sidebar its own, the panel takes the rest")
+            XCTAssertEqual(launch.controller.splitViewItems[2].maximumThickness, 1230, "the most width is the room beside the sidebar and the conversation's least")
+        }
+    }
+
+    /// A window narrowed while the panel is at its widest takes the width from the panel: the sidebar keeps the width the person set.
+    @MainActor
+    func testANarrowedWindowTakesItsWidthFromAPanelAtItsWidest() {
+        withLaunches { name, defaults in
+            let launch = Launch(name: name, defaults: defaults, width: 1900, thread: true)
+            launch.drag(divider: 0, to: 300)
+            launch.drag(divider: 1, to: 300)
+            XCTAssertEqual(launch.widths, [300, 420, 1178])
+            launch.window.setContentSize(NSSize(width: 1700, height: 800))
+            launch.settle()
+            XCTAssertEqual(launch.contentWidth, 1700)
+            XCTAssertEqual(launch.widths, [300, 420, 978])
+        }
+    }
+
+    /// A panel left wider than a narrower window can hold comes back within that window, in the same launch and in the next one.
+    @MainActor
+    func testAPanelWiderThanTheWindowComesBackWithinIt() {
+        withLaunches { name, defaults in
+            let first = Launch(name: name, defaults: defaults, width: 1900, thread: true)
+            first.drag(divider: 1, to: 300)
+            XCTAssertEqual(first.widths[2], 1230)
+            first.show(thread: false)
+            first.window.setContentSize(NSSize(width: 1000, height: 800))
+            first.settle()
+            first.show(thread: true)
+            XCTAssertEqual(first.contentWidth, 1000, "the window keeps its width")
+            XCTAssertEqual(first.widths, [248, 420, 330])
+            first.show(thread: false)
+            first.window.close()
+            let second = Launch(name: name, defaults: defaults, width: 1000, thread: false)
+            second.show(thread: true)
+            XCTAssertEqual(second.contentWidth, 1000, "the window keeps its width")
+            XCTAssertEqual(second.widths, [248, 420, 330])
         }
     }
 

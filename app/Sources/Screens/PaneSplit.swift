@@ -8,7 +8,8 @@ import SwiftUI
 enum Columns {
     static let sidebarLeast: CGFloat = 200, sidebarMost: CGFloat = 360, sidebarDefault: CGFloat = 248
     static let conversationLeast: CGFloat = 420
-    static let panelLeast: CGFloat = 320, panelMost: CGFloat = 640, panelDefault: CGFloat = 380
+    /// The panel has no fixed most width: it grows until the conversation is at its least (`ColumnsController.boundPanel`).
+    static let panelLeast: CGFloat = 320, panelDefault: CGFloat = 380
     /// The window's least height.
     static let leastHeight: CGFloat = 560
     /// The system's thin divider.
@@ -102,15 +103,31 @@ final class ColumnsController: NSSplitViewController {
         conversation.holdingPriority = NSLayoutConstraint.Priority(249) // the lowest: it gives way first
         let panel = NSSplitViewItem(viewController: hosts[2])
         panel.minimumThickness = Columns.panelLeast
-        panel.maximumThickness = Columns.panelMost
         panel.canCollapse = false // the person cannot collapse it; the code does, when no thread is open
         panel.holdingPriority = NSLayoutConstraint.Priority(260)
         for item in [sidebar, conversation, panel] { addSplitViewItem(item) }
         super.viewDidLoad()
     }
 
+    /// The panel's most width is the room the split has: all of it but the sidebar as it stands, the conversation's least and the
+    /// dividers. A most width is what stops a drag and bounds a width that comes back (a thread opened again, a new launch), so the
+    /// panel never takes width from the sidebar.
+    private func boundPanel() {
+        guard splitView.bounds.width > 0, splitView.arrangedSubviews.count == 3 else { return }
+        let room = splitView.bounds.width - splitView.arrangedSubviews[0].frame.width - Columns.conversationLeast - 2 * splitView.dividerThickness
+        let most = max(Columns.panelLeast, room.rounded(.down))
+        if abs(panel.maximumThickness - most) >= 1 { panel.maximumThickness = most }
+    }
+
+    /// A divider that moved changes the room: the sidebar's own drag does not lay the controller's view out again.
+    override func splitViewDidResizeSubviews(_ notification: Notification) {
+        super.splitViewDidResizeSubviews(notification)
+        boundPanel()
+    }
+
     override func viewDidLayout() {
         super.viewDidLayout()
+        boundPanel()
         // An autosave restored after the first update can open a panel no thread asked for.
         if !threadOpen, !panel.isCollapsed { panel.isCollapsed = true }
         applyFirstLaunch()
@@ -124,6 +141,7 @@ final class ColumnsController: NSSplitViewController {
         hosts[1].rootView = conversation
         hosts[2].rootView = content
         if panel.isCollapsed == threadOpen {
+            boundPanel() // before the panel comes back at the width it had
             panel.isCollapsed = !threadOpen
             applyFirstLaunch()
         }
