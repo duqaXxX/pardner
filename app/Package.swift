@@ -1,6 +1,7 @@
 // swift-tools-version: 6.0
-// The lowest tools version with `.macOS(.v15)`: CI keeps the runner image's default Xcode, older than
-// the one on the development Mac. The floor is macOS 15 for `String(validating:as:)` in utf8Decode.
+// The lowest tools version with `.macOS(.v15)`: CI's Xcode is older than the one on the development Mac (the
+// latest runner's default; 26.3 on the macOS 15 runner, whose default 16.4 does not compile the package). The
+// floor is macOS 15 for `String(validating:as:)` in utf8Decode.
 import PackageDescription
 
 let package = Package(
