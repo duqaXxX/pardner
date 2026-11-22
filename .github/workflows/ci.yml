@@ -96,6 +96,6 @@ jobs:
           persist-credentials: false
       # The floor is the system the app runs on, not the compiler: the image's default Xcode (16.4) fails to compile the package
       # (sendability and actor-isolation checks), so the job builds with the image's Xcode 26.3, a 26.x Xcode as on the macOS 26 runner.
-      - run: cd app && perl -e 'alarm 900; exec @ARGV' swift test --filter 'ScreensTests/(testAFirstLaunch|testADragged|testTheFirstThread|testAPanel|testTheSplitItems|testEachFirstLaunch|testThePanelsDefault)'
+      - run: cd app && perl -e 'alarm 900; exec @ARGV' swift test --filter 'ScreensTests/(testAFirstLaunch|testADragged|testTheFirstThread|testAPanel|testTheSplitItems|testEachFirstLaunch|testThePanelsDefault|testTheRealWindow)'
         env:
           DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer

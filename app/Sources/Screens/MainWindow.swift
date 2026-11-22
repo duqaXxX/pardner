@@ -49,6 +49,8 @@ public struct MainWindow: View {
 
     /// The window's least width: the columns' least widths and their dividers, the thread panel's too while a thread is open.
     static func leastWidth(threadOpen: Bool) -> CGFloat { Columns.leastWidth(threadOpen: threadOpen) }
+    /// The window's least height, which the app's window sets and the columns' split answers SwiftUI's smallest-size probe with.
+    public static let leastHeight = Columns.leastHeight
 
     // The panel shows a thread only while the channel shown holds it.
     private var openThread: MessageThread? { Self.openThread(in: shown, key: thread) }

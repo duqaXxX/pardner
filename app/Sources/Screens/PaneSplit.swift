@@ -9,6 +9,8 @@ enum Columns {
     static let sidebarLeast: CGFloat = 200, sidebarMost: CGFloat = 360, sidebarDefault: CGFloat = 248
     static let conversationLeast: CGFloat = 420
     static let panelLeast: CGFloat = 320, panelMost: CGFloat = 640, panelDefault: CGFloat = 380
+    /// The window's least height.
+    static let leastHeight: CGFloat = 560
     /// The system's thin divider.
     static let divider: CGFloat = 1
 
@@ -157,6 +159,13 @@ struct PaneSplit: NSViewControllerRepresentable {
     let panel: AnyView
 
     func makeNSViewController(context: Context) -> ColumnsController { ColumnsController(defaults: .standard) }
+
+    /// The split takes the size it is offered, never below the window's least. Without this SwiftUI reads its fitting size (the columns'
+    /// widths now) as the window's, and a drag of the panel's divider shrank the window instead of growing the panel (measured, #98). The
+    /// clamp keeps SwiftUI's smallest-size probe (it proposes 0) at the real least size, which bounds the window.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsViewController: ColumnsController, context: Context) -> CGSize? {
+        CGSize(width: max(proposal.width ?? 0, Columns.leastWidth(threadOpen: threadOpen)), height: max(proposal.height ?? 0, Columns.leastHeight))
+    }
 
     func updateNSViewController(_ controller: ColumnsController, context: Context) {
         controller.update(sidebar: sidebar, conversation: conversation, panel: panel, threadOpen: threadOpen)
