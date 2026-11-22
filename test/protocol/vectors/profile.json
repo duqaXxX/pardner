@@ -140,10 +140,40 @@
    "output": "{\"name\":\"mi ni\"}"
   },
   {
-   "name": "U+202E: the reader applies no Unicode table",
+   "name": "U+200B, a zero width space",
+   "op": "profile-read",
+   "text": "{\"name\":\"mi​ni\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "U+202E, a right-to-left override",
    "op": "profile-read",
    "text": "{\"name\":\"mi‮ni\"}",
-   "output": "{\"name\":\"mi‮ni\"}"
+   "fails": "bad-input"
+  },
+  {
+   "name": "U+FE0F, a variation selector",
+   "op": "profile-read",
+   "text": "{\"name\":\"mi️ni\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "U+3164, a Hangul filler (Lo)",
+   "op": "profile-read",
+   "text": "{\"name\":\"miㅤni\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "U+E0001, a tag character outside the BMP",
+   "op": "profile-read",
+   "text": "{\"name\":\"mi󠀁ni\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "U+2010 is no ignorable code point",
+   "op": "profile-read",
+   "text": "{\"name\":\"mi‐ni\"}",
+   "output": "{\"name\":\"mi‐ni\"}"
   },
   {
    "name": "an account with a plan",
@@ -228,6 +258,18 @@
    "op": "profile-read",
    "text": "{\"name\":\"mini\",\"account\":{\"name\":\"\",\"plan\":null}}",
    "output": "{\"name\":\"mini\",\"account\":{\"name\":\"\",\"plan\":null}}"
+  },
+  {
+   "name": "an account name with U+202E",
+   "op": "profile-read",
+   "text": "{\"name\":\"mini\",\"account\":{\"name\":\"own‮er\",\"plan\":null}}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "an account plan with U+200B",
+   "op": "profile-read",
+   "text": "{\"name\":\"mini\",\"account\":{\"name\":\"owner\",\"plan\":\"Max​\"}}",
+   "fails": "bad-input"
   },
   {
    "name": "an account name with U+0000",

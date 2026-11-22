@@ -333,7 +333,7 @@ The `RELAY_*` and `PARDNER_BOT_*` variables are the relay chat's; the others bel
 | `RELAY_ADDRESS` | the relay's address as `host:port` |
 | `RELAY_KEY` | the relay's public key, 130 hex digits |
 | `RELAY_OWNER` | your person id, 64 hex digits; the setup pairs the bot with it and prints the string your device adds |
-| `PARDNER_BOT_NAME` | optional: the name your devices show for this bot, 1 to 32 characters (64 bytes of UTF-8 at most) with no `@`; when absent, the Mac's host name up to its first dot, followed by `-<instance>` for a named instance |
+| `PARDNER_BOT_NAME` | optional: the name your devices show for this bot, 1 to 32 characters (64 bytes of UTF-8 at most) with no `@`, no control character and no invisible one (a zero width space, a directional mark, a variation selector), the rule of a device's name; when absent, the Mac's host name up to its first dot, followed by `-<instance>` for a named instance |
 | `PARDNER_BOT_ICON` | optional: the absolute path of the bot's icon, a square PNG or JPEG of 16 to 256 pixels a side and 65,536 bytes at most; none when absent |
 | `ALLOWED_ROOT` | the directory `/bind` accepts paths under, for example `~/code` |
 | `PARDNER_AGENT` | optional: the agent pardner drives; `claude` when absent, the only one this release has |
