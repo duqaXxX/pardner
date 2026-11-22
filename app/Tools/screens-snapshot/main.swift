@@ -287,6 +287,31 @@ MainActor.assumeIsolated {
                 ("channel-sheet-bind", ChannelsModel(devices: DevicesModel(state: busy), sheet: .bind(channel: channelSample.channel), folder: "projects/docs")),
             ]
             for (name, model) in sheetStates { try render(appearance, ChannelSheet(model: model, names: botNames), size: nil, to: "\(name)-\(theme).png") }
+            // The channel's panel (channel folder design, 2): a usable folder, an untrusted one, and a channel with no bind field yet.
+            func boundModel(_ state: String?) -> ReadingModel {
+                var model = ReadingModel()
+                let (alice, bot) = (Data(repeating: 0x2a, count: 32), Data(repeating: 0x2b, count: 32))
+                func put(_ at: Int, kind: Int, sender: Data, json: [String: Any], to: Data? = nil, re: Data? = nil) {
+                    model.take(view: .object([
+                        "do": .string("message"), "position": .number(Double(at)), "channel": .bytes(channelSample.channel), "sender": .bytes(sender),
+                        "name": .bytes(Data(repeating: UInt8(at), count: 16)), "epoch": .bytes(Data(repeating: 9, count: 32)),
+                        "time": .number(1_763_600_000_000.0 + Double(at) * 60_000), "kind": .number(Double(kind)), "to": to.map { .bytes($0) } ?? .null,
+                        "blobs": .array([]), "files": .array([]), "again": .bool(false),
+                        "re": re.map { .object(["device": .bytes(alice), "name": .bytes(Data(repeating: UInt8($0[0]), count: 16))]) } ?? .null,
+                        "text": .string(String(decoding: try! JSONSerialization.data(withJSONObject: json), as: UTF8.self)),
+                    ]))
+                }
+                put(1, kind: 2, sender: alice, json: ["text": "/bind /srv/code/demo"], to: bot)
+                var answer: [String: Any] = ["say": "notice", "markdown": "Bound this channel to `/srv/code/demo`."]
+                if let state { answer["bind"] = ["folder": "/srv/code/demo", "state": state] }
+                put(2, kind: 1, sender: bot, json: answer, re: Data([1]))
+                return model
+            }
+            for (name, state) in [("channel-panel", "usable"), ("channel-panel-untrusted", "untrusted"), ("channel-panel-unknown", nil)] as [(String, String?)] {
+                let reading = boundModel(state)
+                let channels = ChannelsModel(devices: DevicesModel(state: busy), sheet: .settings(channel: channelSample.channel))
+                try render(appearance, ChannelPanelView(model: reading, channels: channels, id: channelSample.channel), size: nil, to: "\(name)-\(theme).png")
+            }
             // The name sheets (names design 4.1 to 4.3), and the window with the names the link shows.
             let nameSheets: [(String, ChannelsModel.NameTarget, String, String?)] = [
                 ("name-sheet-person", .person, "Ada Lovelace", nil),

@@ -124,9 +124,11 @@ public struct MainWindow: View {
                 SettingsPanel(model: settings, bots: bots, icons: icons, renameThisMac: channels == nil ? nil : { settings.closeForRename() })
             }
         }
-        .background(Color.clear.sheet(isPresented: Binding(get: { channels?.sheet != nil }, set: { if !$0 { channels?.close() } })) {
+        .background(Color.clear.sheet(isPresented: Binding(get: { channels?.sheet != nil }, set: { if !$0 { channels?.close() } }), onDismiss: { channels?.takeBind() }) {
             if let channels {
-                if case .rename? = channels.sheet { NameSheet(model: channels, channelNames: model.names.channels) } else { ChannelSheet(model: channels, names: model.profiles.mapValues(\.name), channelNames: model.names.channels) }
+                if case .rename? = channels.sheet { NameSheet(model: channels, channelNames: model.names.channels) } else if case .settings(let id)? = channels.sheet {
+                    ChannelPanelView(model: model, channels: channels, id: id)
+                } else { ChannelSheet(model: channels, names: model.profiles.mapValues(\.name), channelNames: model.names.channels) }
             }
         })
         .background(PardnerColor.bg)

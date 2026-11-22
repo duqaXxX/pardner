@@ -685,4 +685,57 @@ extension ConversationTests {
         XCTAssertNil(model.names.channels[channel], "a name that no longer shows is dropped")
         XCTAssertEqual(model.names.persons[person], "Ada", "the others stay")
     }
+
+    // MARK: the bind answer (channel folder design, 2)
+
+    private func bindAnswer(_ w: inout World, text: String = "/bind /srv/code/demo", bind: [String: Any]? = ["folder": "/srv/code/demo", "state": "usable"],
+                            from sender: Data? = nil, markdown: String = "Bound this channel to `/srv/code/demo`.") -> MessageRef {
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": text], to: w.bot)
+        var content: [String: Any] = ["say": "notice", "markdown": markdown]
+        if let bind { content["bind"] = bind }
+        w.deliver(kind: 1, from: sender ?? w.bot, json: content, re: root)
+        return root
+    }
+
+    func testABindPromptWhoseAnswerCarriesTheFieldIsNotDrawnAndNorIsItsLine() {
+        var w = World()
+        let root = bindAnswer(&w)
+        XCTAssertEqual(w.c.timeline, [], "the prompt is hidden")
+        XCTAssertEqual(w.c.threads[root.hex]?.items.count, 1, "its line stays under it, undrawn with it")
+        XCTAssertEqual(w.c.bound?.bind, Bind(folder: "/srv/code/demo", state: .usable))
+        XCTAssertEqual(w.c.bound?.bot, w.bot)
+        XCTAssertEqual(w.c.bound?.text, "Bound this channel to `/srv/code/demo`.")
+    }
+
+    func testABindPromptWithNoSuchAnswerIsDrawnAsToday() {
+        var w = World()
+        _ = bindAnswer(&w, bind: nil, markdown: "That folder is not allowed.")
+        XCTAssertEqual(w.c.timeline, [10], "an answer with no field: prompt and refusal stay")
+        XCTAssertNil(w.c.bound)
+        let lone = w.deliver(kind: 2, from: w.alice, json: ["text": "/bind /srv/code/other"], to: w.bot)
+        XCTAssertEqual(w.c.timeline, [10, 12], "no answer yet")
+        XCTAssertNotNil(w.c.threads[lone.hex])
+    }
+
+    func testTheFieldCountsOnlyFromTheBotThePromptWentTo() {
+        var w = World()
+        _ = bindAnswer(&w, from: w.alice)
+        XCTAssertTrue(w.c.timeline.contains(10), "another sender's line is no answer: the prompt stays")
+        XCTAssertNil(w.c.bound)
+    }
+
+    func testThePromptsTextDoesNotDecide() {
+        var w = World()
+        _ = bindAnswer(&w, text: " /Bind\n/srv/code/demo")
+        XCTAssertEqual(w.c.timeline, [], "the bot parses it as a bind, so the field is what counts")
+        XCTAssertNotNil(w.c.bound)
+    }
+
+    func testANewerFieldReplacesTheOlder() {
+        var w = World()
+        _ = bindAnswer(&w)
+        _ = bindAnswer(&w, text: "/bind /srv/code/other", bind: ["folder": "/srv/code/other", "state": "missing"])
+        XCTAssertEqual(w.c.bound?.bind, Bind(folder: "/srv/code/other", state: .missing))
+        XCTAssertEqual(w.c.timeline, [])
+    }
 }

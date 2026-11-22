@@ -163,6 +163,7 @@ struct ChannelActions: View {
     var body: some View {
         let on = Menus.channelEntries(channels, channel.id)
         Button("Rename…") { channels.openRename(.channel(channel.id), current: model.names.channels[channel.id]) }.disabled(!on.rename)
+        Button("Channel Settings…") { channels.openSettings(channel: channel.id) }
         Button("Bind to a folder…") { channels.openBind(channel: channel.id, bot: ChannelsModel.bot(of: channel)) }.disabled(!on.bind)
     }
 }

@@ -140,6 +140,13 @@ public struct MessageThread: Sendable, Equatable {
     }
 }
 
+/// What a bot answered to a `/bind`: its name, the field and the text it wrote.
+public struct BindAnswer: Sendable, Equatable {
+    public let bot: Data
+    public let bind: Bind
+    public let text: String
+}
+
 public struct Channel: Sendable, Equatable {
     public let id: Data
     /// Every message read, in position order.
@@ -154,6 +161,8 @@ public struct Channel: Sendable, Equatable {
     // The replies of the owner's read, by their reference: the request each answers and the bot it went to. What the bot says to one is its
     // verdict, found by `re` (the body's `thread` may be empty), and never a prompt's state or a thread item.
     var replies: [MessageRef: ReplyRecord] = [:]
+    /// The newest bind answer of the channel: the bot's line to a `/bind` prompt that carries the field (channel folder design, 2).
+    public internal(set) var bound: BindAnswer?
 
     /// The sessions, by their last reply, newest first (first-screens decision 8); the key breaks a tie.
     public var sessions: [MessageThread] {
@@ -175,6 +184,11 @@ public struct Channel: Sendable, Equatable {
         if case .text = m.body, m.thread == nil, let re = m.re, let key = threadOf[re], threads[key]?.answers(line: m) == true {
             threadOf[m.ref] = key
             threads[key]?.take(line: m)
+            // A prompt answered with a bind field (whatever its text, the bot parses it) is the panel's, not the conversation's: it and the line under it are not drawn.
+            if let bind = m.bind, case .text(let markdown, _) = m.body {
+                bound = BindAnswer(bot: m.sender, bind: bind, text: markdown)
+                timeline.removeAll { $0 == threads[key]?.root?.position }
+            }
             return
         }
         let key: String?

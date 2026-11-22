@@ -49,6 +49,23 @@ public enum Body: Sendable, Equatable {
     case unreadable
 }
 
+/// The folder a bot's answer to `/bind` says the channel is bound to, and whether the bot can use it (channel folder design, 1).
+public struct Bind: Sendable, Equatable {
+    public enum State: String, Sendable, Equatable { case usable, untrusted, missing, unreadable }
+    public let folder: String
+    public let state: State
+
+    /// A bind of `folder` in `state`.
+    public init(folder: String, state: State) { (self.folder, self.state) = (folder, state) }
+
+    /// The `bind` of a kind 1 content; nil unless it is an object with a folder and one of the four states: the text is then drawn alone.
+    init?(_ value: Any?) {
+        guard let o = value as? [String: Any], let folder = o["folder"] as? String, let name = o["state"] as? String,
+              let state = State(rawValue: name) else { return nil }
+        self.init(folder: folder, state: state)
+    }
+}
+
 public struct Message: Sendable, Equatable {
     public let position: Int
     public let channel: Data
@@ -64,6 +81,8 @@ public struct Message: Sendable, Equatable {
     public let files: [FileInfo]
     /// A kind 5 that says its prompt's thread holds no session (`"session": false`): the prompt was answered as a word, or refused.
     public let noSession: Bool
+    /// A kind 1 that carries a bind field (the bot's answer to `/bind`).
+    public let bind: Bind?
 
     public var ref: MessageRef { MessageRef(device: sender, name: name) }
 
@@ -86,6 +105,7 @@ public struct Message: Sendable, Equatable {
         }
         let fields = view["text"]?.stringValue.flatMap(Self.object)
         thread = fields?["thread"] as? String
+        bind = kind == 1 ? Bind(fields?["bind"]) : nil
         noSession = kind == 5 && fields?["session"] as? Bool == false
         body = fields.map { Self.body(kind: Int(kind), $0, text: view["text"]?.stringValue ?? "") } ?? .unreadable
     }
