@@ -127,7 +127,9 @@ test("C14: setup is refused while the instance lock is held, before .env or any 
       /this instance is running, or another setup is: stop it, then run setup again/,
     );
     assert.ok(!/[0-9a-f]{200,}/.test(text));
-    assert.deepEqual(readdirSync(dir), []);
+    // What the held lock leaves in the directory is per platform (src/core/lock.ts header): nothing
+    // for the flock of macOS and the named pipe of Windows, the `lock.sock` socket on Linux.
+    assert.deepEqual(readdirSync(dir), process.platform === "linux" ? ["lock.sock"] : []);
   } finally {
     await held.release();
   }
