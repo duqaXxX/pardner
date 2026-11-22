@@ -3,8 +3,15 @@
  * the rule of which profile a device shows. Written once for the bot and the app.
  */
 
+import { bytesEqual } from "./bytes.ts";
 import { idKey } from "./device-log.ts";
-import { KIND_PROFILE, type MessageHeader } from "./messages.ts";
+import {
+  KIND_CHANNEL_NAME,
+  KIND_DEVICE_NAME,
+  KIND_PERSON_NAME,
+  KIND_PROFILE,
+  type MessageHeader,
+} from "./messages.ts";
 import { hidden, hiddenInName } from "./name-rule.ts";
 import type { Bytes } from "./platform.ts";
 import { fail, ok, type Result } from "./result.ts";
@@ -202,5 +209,124 @@ export class Profiles {
     for (const n of this.#bots.get(idKey(bot))?.values() ?? [])
       if (n.profile && (!shown || n.position > shown.position)) shown = n;
     return shown?.profile;
+  }
+}
+
+// A channel's name is ASCII, as Slack's rule is (names design, header of 2026-11-22).
+const CHANNEL_NAME = /^[a-z0-9_-]{1,80}$/;
+
+/**
+ * Whether `name` may name something that a message of `kind` names: a channel in ASCII `a-z 0-9 - _`,
+ * 1 to 80 characters; a person or a device in free text of 1 to 64 code points under `hiddenInName`,
+ * no space at either end, and a person without `@` (a person may be mentioned once a second exists).
+ */
+function nameFits(kind: number, name: unknown): name is string {
+  if (kind === KIND_CHANNEL_NAME) return typeof name === "string" && CHANNEL_NAME.test(name);
+  if (kind !== KIND_PERSON_NAME && kind !== KIND_DEVICE_NAME) return false;
+  return (
+    text(name, 1, 64) &&
+    !name.startsWith(" ") &&
+    !name.endsWith(" ") &&
+    (kind === KIND_DEVICE_NAME || !name.includes("@"))
+  );
+}
+
+/**
+ * The name a message of `kind` (14, 15 or 16) carries (names design 2.1), or `bad-input`. A field it
+ * does not know is ignored; one that does not read is no name, and the device shows the previous one.
+ */
+export function readName(kind: number, content: string): Result<string> {
+  let json: unknown;
+  try {
+    json = JSON.parse(content);
+  } catch {
+    return fail("bad-input");
+  }
+  return record(json) && nameFits(kind, json.name) ? ok(json.name) : fail("bad-input");
+}
+
+/** The content of a name message of `kind`; a name `readName` would refuse throws. */
+export function encodeName(kind: number, name: string): string {
+  if (!nameFits(kind, name)) throw new RangeError("a name readName refuses");
+  return JSON.stringify({ name });
+}
+
+/** A name message's header as `Names` takes it: where it is, what it names, and who sent it. */
+type NameHeader = Pick<MessageHeader, "kind" | "channel" | "sender" | "name">;
+const copyKey = (h: NameHeader): string =>
+  `${h.kind} ${idKey(h.channel)} ${idKey(h.sender)} ${idKey(h.name)}`;
+interface Copy {
+  kind: number;
+  channel: Bytes;
+  sender: Bytes;
+  /** The place of the first copy seen, from its header, whether or not the body opened. */
+  first: number;
+  /** The place of the first copy opened, and its name when it reads and carries no file. */
+  opened?: number;
+  shown?: string | undefined;
+}
+
+/**
+ * Which name a device shows (names design 3, the model's `channelNameOf`, `personNameOf` and
+ * `deviceNameOf`). The caller hands in the header of every message of kinds 14 to 16 it accepted
+ * (SD 5.6), opened or not, and the content of those it opened, in any order, each with its place in
+ * the relay's sequence. Copies of one name count once, at the place of the first copy, which the
+ * header gives; the latest place wins whatever arrived last; a body that does not read or carries
+ * files is no name. Kinds 15 and 16 count in the space the caller names alone. A caller builds a new
+ * one when the reading starts again from the start, as it does its `Profiles`.
+ */
+export class Names {
+  // By kind, channel, sender and message name: the same name sent into two channels, or as two kinds, is two messages.
+  #copies = new Map<string, Copy>();
+
+  /** The header of an accepted message: the place of its sender's first copy of this name. */
+  see(position: number, h: NameHeader): void {
+    if (h.kind < KIND_CHANNEL_NAME || h.kind > KIND_DEVICE_NAME) return;
+    const key = copyKey(h);
+    const had = this.#copies.get(key);
+    if (!had || position < had.first)
+      this.#copies.set(key, {
+        ...had,
+        kind: h.kind,
+        channel: h.channel,
+        sender: h.sender,
+        first: position,
+      });
+  }
+
+  /** A message once opened. The same place is the same message, taken again: it replaces what was taken. */
+  take(position: number, h: NameHeader & Pick<MessageHeader, "blobs">, content: string): void {
+    this.see(position, h);
+    const copy = this.#copies.get(copyKey(h));
+    if (!copy || (copy.opened !== undefined && copy.opened < position)) return;
+    const read = h.blobs.length === 0 ? readName(h.kind, content) : undefined;
+    copy.opened = position;
+    copy.shown = read?.ok ? read.value : undefined;
+  }
+
+  #latest(of: (c: Copy) => boolean): string | undefined {
+    let at = -1;
+    let shown: string | undefined;
+    for (const c of this.#copies.values())
+      if (c.shown !== undefined && c.first > at && of(c)) [at, shown] = [c.first, c.shown];
+    return shown;
+  }
+
+  /** The name of a conversation channel. */
+  channel(channel: Bytes): string | undefined {
+    return this.#latest((c) => c.kind === KIND_CHANNEL_NAME && bytesEqual(c.channel, channel));
+  }
+
+  /** The person's name, from `space` alone. */
+  person(space: Bytes): string | undefined {
+    return this.#latest((c) => c.kind === KIND_PERSON_NAME && bytesEqual(c.channel, space));
+  }
+
+  /** The name of `device`, from `space` alone and sent by that device itself. */
+  device(space: Bytes, device: Bytes): string | undefined {
+    return this.#latest(
+      (c) =>
+        c.kind === KIND_DEVICE_NAME && bytesEqual(c.channel, space) && bytesEqual(c.sender, device),
+    );
   }
 }

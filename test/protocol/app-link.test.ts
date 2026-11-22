@@ -30,7 +30,7 @@ import { decodeMessage, KIND_PROFILE, sealMessage } from "../../src/protocol/mes
 import { Run } from "../../src/protocol/outbox.ts";
 import { shortForm } from "../../src/protocol/pairing-string.ts";
 import type { Bytes, Platform } from "../../src/protocol/platform.ts";
-import { encodeProfile } from "../../src/protocol/profile.ts";
+import { encodeName, encodeProfile } from "../../src/protocol/profile.ts";
 import { platform } from "../relay/support.ts";
 import { epochEntry, fill, type Keyed, keyed, message, signedBy } from "../relay/world.ts";
 import { makeProof } from "./proof.ts";
@@ -1627,4 +1627,189 @@ test("the recovery-log effect names both recovery keys of a log whose reset repl
   assert.ok(told?.do === "recovery-log");
   assert.deepEqual(told.recoveries, [s.alice.recovery.recoveryId, next.recoveryId]);
   assert.deepEqual(told.recovery, next.recoveryId);
+});
+
+/** A name message (kind 14 to 16) of alice's first device in `channel`, sealed in `epoch`. */
+function nameIn(
+  s: Scene,
+  channel: Bytes,
+  epoch: { id: Bytes; key: Bytes },
+  kind: number,
+  content: string,
+  n: number,
+) {
+  return signedBy(
+    s.alice.first,
+    sealMessage(
+      platform,
+      epoch.key,
+      {
+        channel,
+        counter: n,
+        epoch: epoch.id,
+        sender: s.alice.first.id,
+        run: fill(4, 16),
+        incarnation: s.wire.incarnation,
+        time: 1_700_000_000_000,
+        kind,
+        name: fill(80 + n, 16),
+      },
+      { files: [], content },
+    ),
+  );
+}
+const namesOf = (fx: AppEffect[]) =>
+  fx.flatMap((e) =>
+    e.do === "names" ? e.names.map((n) => [n.kind, idKey(n.target), n.name] as const) : [],
+  );
+
+test("names 3: a channel's, the person's and a device's names are told from their own channels, the latest place winning", () => {
+  const s = scene({ space: true });
+  const home = s.epoch();
+  const talk = addChannel(s, fill(9, 16));
+  const spare = addChannel(s, spaceNonce(platform, s.alice.id), "bot");
+  s.wire.put(4, nameIn(s, talk.id, talk.epoch(), 14, encodeName(14, "docs"), 1));
+  s.wire.put(4, nameIn(s, s.channel, home, 15, encodeName(15, "Alice"), 2));
+  s.wire.put(4, nameIn(s, s.channel, home, 16, encodeName(16, "Mac one"), 3));
+  s.wire.put(4, nameIn(s, spare.id, spare.epoch(), 15, encodeName(15, "From a spare"), 4));
+  s.wire.put(4, nameIn(s, talk.id, talk.epoch(), 14, encodeName(14, "web"), 5));
+  s.wire.put(4, nameIn(s, talk.id, talk.epoch(), 14, "not json", 6));
+  const r = rig(s);
+  const fx = r.connect();
+  // Told as the reading goes, one call at a time: the last word of each target is its shown name.
+  const last = new Map(namesOf(fx).map(([kind, target, name]) => [`${kind} ${target}`, name]));
+  assert.deepEqual(
+    [...last],
+    [
+      [`14 ${idKey(talk.id)}`, "web"],
+      [`15 ${idKey(s.alice.id)}`, "Alice"],
+      [`16 ${idKey(s.alice.first.id)}`, "Mac one"],
+    ],
+  );
+});
+
+test("names 3: a relay recreated reads the names again, and tells nothing when the shown one is the same", () => {
+  const s = scene({ space: true });
+  const talk = addChannel(s, fill(9, 16));
+  s.wire.put(4, nameIn(s, talk.id, talk.epoch(), 14, encodeName(14, "docs"), 1));
+  const r = rig(s);
+  assert.equal(namesOf(r.connect()).length, 1);
+  r.drop(1);
+  s.wire.incarnation = fill(8, 16);
+  assert.deepEqual(namesOf(r.connect(60_000)), []);
+});
+
+test("names 2.2 (D-N3 A): a kind 14 refused with result 1 by a relay older than the kind is no channel fault", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const sent = post(r, s.channel, { kind: 14, content: encodeName(14, "general") });
+  assert.equal(only(sent.effects, "submit").length, 1, "submitted");
+  const fx = r.give(results(sent.effects, 1), 11);
+  assert.deepEqual(fxOf(fx, "channel-fault"), [], "no fault on a refused name");
+  assert.notEqual(r.link.send(s.channel, draftTo(s), 12), "fault", "the channel goes on");
+});
+
+test("personal space 2.6, review K4: a kind 15 refused with result 1 in the space drops the item and is no fault", () => {
+  const s = scene({ space: true });
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const sent = post(r, s.channel, { kind: 15, content: encodeName(15, "Alice") });
+  assert.equal(only(sent.effects, "submit").length, 1, "submitted");
+  const fx = r.give(results(sent.effects, 1), 11);
+  assert.deepEqual(fxOf(fx, "channel-fault"), [], "no fault in the space");
+  assert.equal(itemsOf(r.outWrites.at(-1), s.channel).length, 0, "dropped");
+});
+
+test("names 2.1: a name is queued only in its own class and only when its content reads, with no file", () => {
+  const conv = scene();
+  conv.epoch();
+  const rc = appRig(conv);
+  rc.connect();
+  const space = scene({ space: true });
+  space.epoch();
+  const rs = appRig(space);
+  rs.connect();
+  const bytes = new Uint8Array([1]);
+  const file = [{ bytes, type: "text/plain", name: "a" }];
+  assert.equal(
+    rc.link.send(conv.channel, { kind: 15, content: encodeName(15, "Alice") }, 10),
+    "bad-input",
+    "a person name in a conversation channel",
+  );
+  assert.equal(
+    rc.link.send(conv.channel, { kind: 16, content: encodeName(16, "Mac") }, 10),
+    "bad-input",
+    "a device name in a conversation channel",
+  );
+  assert.equal(
+    rs.link.send(space.channel, { kind: 14, content: encodeName(14, "docs") }, 10),
+    "bad-input",
+    "a channel name in the space",
+  );
+  assert.equal(
+    rc.link.send(conv.channel, { kind: 14, content: JSON.stringify({ name: "Docs" }) }, 10),
+    "bad-input",
+    "a content readName refuses",
+  );
+  assert.equal(
+    rc.link.send(conv.channel, { kind: 14, content: encodeName(14, "docs"), files: file }, 10),
+    "bad-input",
+    "a name with a file",
+  );
+  assert.equal(
+    typeof rc.link.send(conv.channel, { kind: 14, content: encodeName(14, "docs") }, 10),
+    "object",
+  );
+  assert.equal(
+    typeof rs.link.send(space.channel, { kind: 16, content: encodeName(16, "Mac") }, 10),
+    "object",
+  );
+});
+
+test("names 3: a name whose message opens in a later call, when its epoch key arrives, is told then", () => {
+  const s = scene();
+  const { epoch, seal } = lateEpoch(s);
+  s.wire.put(4, nameIn(s, s.channel, epoch, 14, encodeName(14, "docs"), 1));
+  const r = rig(s);
+  assert.deepEqual(namesOf(r.connect()), [], "no key yet");
+  r.drop(1);
+  s.wire.seals = [seal()];
+  assert.deepEqual(namesOf(r.connect(60_000, s.wire.items.length)), [
+    [14, idKey(s.channel), "docs"],
+  ]);
+});
+
+test("names 3: a first copy the device cannot open still places its later copy", () => {
+  const s = scene();
+  const late = lateEpoch(s); // its key never arrives
+  const open = s.epoch();
+  s.wire.put(4, nameIn(s, s.channel, late.epoch, 14, encodeName(14, "docs"), 1)); // the first copy of "docs"
+  s.wire.put(4, nameIn(s, s.channel, open, 14, encodeName(14, "web"), 2));
+  s.wire.put(4, nameIn(s, s.channel, open, 14, encodeName(14, "docs"), 1)); // the same name sent again, after "web"
+  const last = namesOf(rig(s).connect()).at(-1);
+  assert.deepEqual(last, [14, idKey(s.channel), "web"]);
+});
+
+test("names 3: a relay put back to before a history seal loses the epoch key, and the name that key opened is told as none", () => {
+  const s = scene();
+  const { epoch, seal } = lateEpoch(s);
+  s.wire.put(4, nameIn(s, s.channel, epoch, 14, encodeName(14, "docs"), 1));
+  s.wire.seals = [seal()];
+  const r = rig(s);
+  assert.deepEqual(
+    namesOf(r.connect()).map((n) => n[2]),
+    ["docs"],
+    "shown once the history seal opened it",
+  );
+  r.drop(1);
+  s.wire.incarnation = fill(8, 16); // a relay started again: a new incarnation, the same items
+  s.wire.seals = []; // its seals put back to before the history seal (SD 5.10)
+  assert.deepEqual(
+    namesOf(r.connect(60_000)).map((n) => n[2]),
+    [null],
+    "the key is gone with the rewind: the name is told as none",
+  );
 });

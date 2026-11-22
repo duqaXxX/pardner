@@ -71,9 +71,15 @@ export const KIND_START = 3;
 export const KIND_BUILD = 12;
 /** The kind of a bot's profile (6.4, 6.8): it names its sender alone, so it has no `to` and no `re`. */
 export const KIND_PROFILE = 13;
-/** The kinds of a person's space, which no conversation channel holds; every other kind is the conversation channels' (personal space design 4, S5). Kinds 15 and 16 are the names', not in the table yet. */
-const SPACE_KINDS: readonly number[] = [KIND_PROFILE, 15, 16];
-// By kind, 1 to 13: how 6.4's table treats `to` and `re` (0 none, 1 required, 2 either), and who sends it.
+/** The kind of a channel's name (6.4, 6.8): sent by an app into its own conversation channel. */
+export const KIND_CHANNEL_NAME = 14;
+/** The kind of a person's name: sent by an app into the person's space. */
+export const KIND_PERSON_NAME = 15;
+/** The kind of a device's name: sent by that app into the person's space. */
+export const KIND_DEVICE_NAME = 16;
+/** The kinds of a person's space, which no conversation channel holds; every other kind, a channel's name included, is the conversation channels' (personal space design 4, S5). */
+const SPACE_KINDS: readonly number[] = [KIND_PROFILE, KIND_PERSON_NAME, KIND_DEVICE_NAME];
+// By kind, 1 to 16: how 6.4's table treats `to` and `re` (0 none, 1 required, 2 either), and who sends it.
 const KINDS = [
   [0, 2, undefined],
   [1, 0, "app"],
@@ -88,6 +94,9 @@ const KINDS = [
   [2, 1, undefined],
   [0, 0, "bot"],
   [0, 0, "bot"],
+  [0, 0, "app"],
+  [0, 0, "app"],
+  [0, 0, "app"],
 ] as const;
 /** Whether only a bot may send `kind` (6.4's table, sender column): `fits` reads the `to` and `re` columns alone. */
 export const botOnly = (kind: number): boolean => KINDS[kind - 1]?.[2] === "bot";

@@ -18,6 +18,9 @@ import { encodeMemberEntry } from "./member-log.ts";
 import {
   botOnly,
   decodeMessage,
+  KIND_CHANNEL_NAME,
+  KIND_DEVICE_NAME,
+  KIND_PERSON_NAME,
   KIND_PROFILE,
   type Message,
   type MessageBody,
@@ -29,7 +32,7 @@ import {
 import { build, type Draft, type OutboxItem, queue, Run, readBack, rebuild } from "./outbox.ts";
 import { checkPairingProof, shortForm } from "./pairing-string.ts";
 import type { Bytes, Platform } from "./platform.ts";
-import { encodeProfile, type Profile, Profiles } from "./profile.ts";
+import { encodeProfile, Names, type Profile, Profiles, readName } from "./profile.ts";
 import type { Identity, Kept, Out } from "./reading.ts";
 import type { RecoverOptions } from "./recover.ts";
 import type { PlatformError, Result } from "./result.ts";
@@ -137,8 +140,15 @@ export type CreateError = "not-ready" | "busy" | PlatformError;
 /** Why `send` queued nothing: the draft is refused (6.4's table, files, a length), the channel is not one the reading holds or is being created, it is faulted, or the store failed. */
 export type SendError = "bad-input" | "not-member" | "fault" | "not-ready";
 
+/** The name a device now shows for a channel (kind 14), the person (15, `target` the person) or a device (16), or `null` when it shows none. */
+export interface NameShown {
+  kind: number;
+  target: Bytes;
+  name: string | null;
+}
+
 /**
- * `Link`'s effects with `deliver` reduced to a `View` and `persist` to what the store writes, and the shown profile of a bot when it changes (design 5).
+ * `Link`'s effects with `deliver` reduced to a `View` and `persist` to what the store writes, the shown profile of a bot when it changes (design 5), and `names` the names a device shows when one changes (names design 3).
  * Of the app's own outbox (new channel design 3): `write` ends its list as `persist` does, never in one with it, and the driver answers it with
  * `written`; `store-failed` after a failed write; `outbox` the items of a channel that changed; `channel-refused` a new channel the relay refused; `channel-fault` a channel stopped on a relay answer no check explains; `creating` the channel being created with its bot and folder (at `start` for a stored one, and at `createChannel`), or `channel: null` once none is pending (read back or refused).
  */
@@ -154,6 +164,7 @@ export type AppEffect =
   | { do: "creating"; channel: Bytes; bot: Bytes; folder: string }
   | { do: "creating"; channel: null }
   | { do: "profile"; bot: Bytes; profile: Profile | null }
+  | { do: "names"; names: NameShown[] }
   | { do: "recovery"; outcome: Exclude<RecoveryOutcome, { log: readonly LoggedEntry[] }> }
   | {
       do: "recovery-log";
@@ -224,6 +235,10 @@ export class AppLink {
   #shown = new Map<string, { bot: Bytes; profile: Profile }>(); // the profile last told to Swift
   #touched = new Map<string, Bytes>(); // the bots whose profile a message of this call may have changed
   #recheck = new Map<string, Bytes>(); // bots shown before a rewind: checked again at the next rest
+  #names = new Names();
+  #nameShown = new Map<string, NameShown>(); // the names last told to Swift, by kind and target
+  #nameTouched = new Map<string, NameShown>(); // the targets whose name a message of this call may have changed
+  #nameRecheck = new Map<string, NameShown>(); // names shown before a rewind: checked again at the next rest
   // The keeper (design 3.11): run once at each rest, and what it sent, so nothing is sent twice while its answer is pending.
   #owed = false; // a rest was delivered and the keeper has not run since
   #asked = new Map<number, (code: number | "unanswered") => void>(); // request -> what its answer undoes
@@ -380,6 +395,16 @@ export class AppLink {
     )
       return "bad-input"; // two items of one name would be built and read back as one
     if (botOnly(draft.kind)) return "bad-input"; // the table says who sends a kind
+    // A name goes only into its own class, with a content the reading would accept and no file (names design 2.1).
+    if (draft.kind >= KIND_CHANNEL_NAME && draft.kind <= KIND_DEVICE_NAME) {
+      const space = this.#link.reading.channel(channel)?.space === true;
+      if (
+        space !== (draft.kind !== KIND_CHANNEL_NAME) ||
+        draft.files?.length ||
+        !readName(draft.kind, draft.content).ok
+      )
+        return "bad-input";
+    }
     const queued = draft.files?.length
       ? undefined
       : queue(this.#platform, this.#boxes.items(channel), draft);
@@ -512,6 +537,7 @@ export class AppLink {
       ...this.#notes.splice(0),
       ...this.#retry(),
       ...this.#told(),
+      ...this.#namesTold(),
       ...this.#listing(),
       ...this.#outboxTold(),
       ...(tail.length ? tail : this.#own()),
@@ -542,6 +568,8 @@ export class AppLink {
       this.#starting.clear(); // a start sent under the old incarnation is not pending under the new
       this.#profiles = new Profiles();
       for (const [k, { bot }] of this.#shown) this.#recheck.set(k, bot);
+      this.#names = new Names();
+      for (const [k, n] of this.#nameShown) this.#nameRecheck.set(k, n);
     }
     if (out.do === "rest") {
       this.#rested = this.#owed = true;
@@ -554,10 +582,13 @@ export class AppLink {
       if (this.#entry === "tried") this.#entry = undefined;
       for (const [k, bot] of this.#recheck) this.#touched.set(k, bot);
       this.#recheck.clear();
+      for (const [k, n] of this.#nameRecheck) this.#nameTouched.set(k, n);
+      this.#nameRecheck.clear();
     }
     if (out.do !== "message") return [{ do: "deliver", out }];
     const h = out.message.header;
     this.#readBack(h);
+    this.#seeName(out.position, h);
     const key = this.#link.reading.key(h.channel, h.epoch);
     if (key) return this.#open(out.message, out.position, key, false);
     const at = `${idKey(h.channel)} ${idKey(h.epoch)}`;
@@ -633,7 +664,28 @@ export class AppLink {
       this.#profiles.take(position, h, body.value.content);
       this.#touched.set(idKey(h.sender), h.sender);
     }
+    if (body.ok && h.kind >= KIND_CHANNEL_NAME && h.kind <= KIND_DEVICE_NAME) {
+      this.#names.take(position, h, body.value.content);
+      this.#touchName(h); // a message that opens in a later call, once its key arrives, is told then
+    }
     return r.channel(h.channel)?.space ? [] : [{ do: "deliver", out: view }];
+  }
+
+  // A message of kinds 14 to 16 that passed the check, opened or not: its header places the first copy of its name (names design 3).
+  #seeName(position: number, h: MessageHeader): void {
+    if (h.kind < KIND_CHANNEL_NAME || h.kind > KIND_DEVICE_NAME) return;
+    this.#names.see(position, h);
+    this.#touchName(h);
+  }
+
+  #touchName(h: MessageHeader): void {
+    const target =
+      h.kind === KIND_CHANNEL_NAME
+        ? h.channel
+        : h.kind === KIND_PERSON_NAME
+          ? this.#person
+          : h.sender;
+    this.#nameTouched.set(`${h.kind} ${idKey(target)}`, { kind: h.kind, target, name: null });
   }
 
   /**
@@ -891,9 +943,10 @@ export class AppLink {
         r.channel(channel)?.space === true,
       )(signed, signature);
       // Kind, class, `to` and `re` depend on the draft and its channel alone: a refusal by them is the app's own, not the relay's (SD 4, I3).
-      // In the space any refusal drops the item and never stops the channel (design 2.6).
+      // In the space any refusal drops the item and never stops the channel (design 2.6), and a relay older than the kinds 13 to 16 refuses one anywhere: never a fault (names design 2.2, D-N3 A).
       if (
         r.channel(channel)?.space ||
+        (held.kind >= KIND_PROFILE && held.kind <= KIND_DEVICE_NAME) ||
         (!verdict.ok && ["kind", "class", "to", "re"].includes(verdict.rule))
       )
         this.#drop(channel, held);
@@ -940,6 +993,27 @@ export class AppLink {
     }
     this.#touched.clear();
     return fx;
+  }
+
+  // Once per call, the names whose shown value changed in it; 15 and 16 are read from the channel `space()` names alone.
+  #namesTold(): AppEffect[] {
+    const space = this.#link.reading.space();
+    const names: NameShown[] = [];
+    for (const [k, t] of this.#nameTouched) {
+      const name =
+        t.kind === KIND_CHANNEL_NAME
+          ? this.#names.channel(t.target)
+          : space &&
+            (t.kind === KIND_PERSON_NAME
+              ? this.#names.person(space)
+              : this.#names.device(space, t.target));
+      if ((this.#nameShown.get(k)?.name ?? undefined) === name) continue;
+      if (name === undefined) this.#nameShown.delete(k);
+      else this.#nameShown.set(k, { ...t, name });
+      names.push({ kind: t.kind, target: t.target, name: name ?? null });
+    }
+    this.#nameTouched.clear();
+    return names.length ? [{ do: "names", names }] : [];
   }
 
   // At a rest, the devices the log names when it is not the one last told (design 4.2).
