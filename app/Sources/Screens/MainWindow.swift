@@ -112,6 +112,8 @@ public struct MainWindow: View {
                 }
             }))
         .frame(minWidth: Self.leastWidth(threadOpen: threadOpen))
+        // The window's top edge is the window's own, under the hidden title bar; each pane's host keeps its 32 point inset for the traffic lights.
+        .ignoresSafeArea(.container, edges: .top)
         .onChange(of: shown?.id) { thread = nil }
         .sheet(isPresented: Binding(get: { settings?.pane != nil }, set: { if !$0 { settings?.close() } }), onDismiss: {
             guard let settings, settings.takeRename() else { return }
@@ -131,7 +133,16 @@ public struct MainWindow: View {
     }
 
     private func pane<Content: View>(_ content: Content, background: Color = PardnerColor.bg) -> AnyView {
-        AnyView(content.font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(PardnerColor.text).background(background))
+        AnyView(content.font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(PardnerColor.text).background(background)
+            .onExitCommand { closeThreadOnEscape() })
+    }
+
+    /// `onExitCommand` runs when `cancelOperation:` has travelled up the responder chain unanswered, so the composer's `@` list and a text
+    /// field take Escape first; a request card's `onKeyPress` runs before the chain and returns `.handled` when it takes the key. Each pane
+    /// carries it because the panes are hosted apart.
+    private func closeThreadOnEscape() {
+        guard Menus.escapeClosesThread(threadOpen: openThread != nil, settings: settings, channels: channels) else { return }
+        thread = nil
     }
 }
 

@@ -32,7 +32,11 @@ struct RequestCardView: View {
         .focused(focus, equals: card.request.ref)
         .onTapGesture { if field == nil { focus.wrappedValue = card.request.ref } }
         .onKeyPress(.return) { focus.wrappedValue == card.request.ref && card.returnPressed(fieldFocused: field != nil) ? .handled : .ignored }
-        .onKeyPress(.escape) { focus.wrappedValue == card.request.ref && card.escapePressed(fieldFocused: field != nil) ? .handled : .ignored }
+        .onKeyPress(.escape) {
+            // Escape in the Other field is the field's: it leaves the field, and the key goes no further (the window would close the thread).
+            if field != nil { field = nil; return .handled }
+            return focus.wrappedValue == card.request.ref && card.escapePressed() ? .handled : .ignored
+        }
     }
 
     private func isEnded(_ phase: RequestPhase) -> Bool {

@@ -37,6 +37,19 @@ final class MenuRulesTests: XCTestCase {
         XCTAssertTrue(Menus.sheetIsUp(settings: settings, channels: channels))
     }
 
+    func testEscapeClosesTheThreadOnlyWhileOneIsOpenAndNoSheetIsUp() {
+        let devices = devices(), channels = ChannelsModel(devices: devices), settings = SettingsModel(devices: devices)
+        XCTAssertTrue(Menus.escapeClosesThread(threadOpen: true, settings: settings, channels: channels))
+        XCTAssertFalse(Menus.escapeClosesThread(threadOpen: false, settings: settings, channels: channels), "no thread open, nothing to close")
+        settings.open(.general)
+        XCTAssertFalse(Menus.escapeClosesThread(threadOpen: true, settings: settings, channels: channels), "the Settings panel takes Escape")
+        settings.close()
+        channels.openNew()
+        XCTAssertFalse(Menus.escapeClosesThread(threadOpen: true, settings: settings, channels: channels), "so does the channel sheet")
+        channels.close()
+        XCTAssertTrue(Menus.escapeClosesThread(threadOpen: true, settings: nil, channels: nil), "the samples have no models and no sheet")
+    }
+
     func testASheetIsUpBetweenTheDevicesSheetClosingAndTheNameSheetOpening() {
         let devices = devices(), channels = ChannelsModel(devices: devices), settings = SettingsModel(devices: devices)
         devices.isOpen = true
