@@ -4,10 +4,12 @@
 import DesignSystem
 import SwiftUI
 
-struct Logo: View {
-    var size: CGFloat = 28
+public struct Logo: View {
+    public var size: CGFloat = 28
 
-    var body: some View {
+    public init(size: CGFloat = 28) { self.size = size }
+
+    public var body: some View {
         Canvas { context, canvas in
             let s = canvas.width / 64
             context.scaleBy(x: s, y: s)

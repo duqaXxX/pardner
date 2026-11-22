@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The app has an icon: the Pardner mark on a rounded tile, from an asset catalog in the app target (`app/Shell/Assets.xcassets`). `icon-render` draws it again from the code.
 - The app's main window has resizable columns. Drag the divider between the sidebar and the conversation (200 to 360 points) or between the conversation and the
   thread panel (320 to 640); a double click on a divider restores its first-launch width (248 and 380). The widths are kept across launches, no column collapses, and
   the window's least width follows from the columns (942 points with a thread open, 621 without; the pairing screens' least width goes from 1050 to 680).

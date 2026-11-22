@@ -28,6 +28,8 @@ let package = Package(
         .executableTarget(name: "screens-snapshot", dependencies: ["Screens", "DesignSystem", "Platform", "ProtocolHost", "Relay", "Conversation"], path: "Tools/screens-snapshot"),
         // The colour tokens (one JSON resource, read at first use) and the three bundled font families.
         .target(name: "DesignSystem", resources: [.copy("tokens.json"), .copy("Fonts")]),
+        // Renders the app icon (the mark on the macOS icon grid) into the Xcode target's asset catalog.
+        .executableTarget(name: "icon-render", dependencies: ["Screens", "DesignSystem"], path: "Tools/icon-render"),
         // Test-only: `seal` for Node to open (the other direction of the cross-engine check).
         .executableTarget(name: "vector-tool", dependencies: ["Platform"], path: "Tools/vector-tool"),
         // Test-only code (the software key store, importKey, withSecret) lives here and ships in no module.

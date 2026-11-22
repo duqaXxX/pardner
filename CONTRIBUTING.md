@@ -196,6 +196,9 @@ xcodebuild -project app/Pardner.xcodeproj -scheme Pardner -configuration Release
 
 `node --test test/protocol/jsc.test.ts` runs the app's Swift suites with the scripts they need.
 
+The app icon is rendered from `Screens/AppIcon.swift`, the mark on the macOS icon grid. After a change to the mark or the
+colours, run `swift run icon-render` from `app/` to rewrite the PNGs in `app/Shell/Assets.xcassets/AppIcon.appiconset`.
+
 ### Running your own build
 
 To run the daemon from a clone instead of the version on the npm registry:
