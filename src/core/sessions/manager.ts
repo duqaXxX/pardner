@@ -123,6 +123,18 @@ export class SessionManager {
     return this.get(channelId, threadId) !== null;
   }
 
+  /**
+   * Whether `get` would give the thread a session, asked with no effect: nothing is touched,
+   * rebuilt or registered, so a closed session stays closed and its idle timer runs on.
+   */
+  holds(channelId: string, threadId: string): boolean {
+    return (
+      !this.closed &&
+      this.deps.state.thread(channelId, threadId) !== null &&
+      !this.heldThreads.has(keyOf(channelId, threadId))
+    );
+  }
+
   private refuseWhenClosed(): void {
     if (this.closed) throw new SessionClosed();
   }

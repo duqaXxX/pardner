@@ -3,7 +3,7 @@
  * starts in. The core decides which folders the list holds and what the answer says; the chat
  * draws the list.
  */
-import type { ListPick } from "../../chat/seam.ts";
+import type { ListPick, MessageId } from "../../chat/seam.ts";
 import { compareCodePoints } from "../../text.ts";
 import { errorName } from "../../values.ts";
 import { type Refusal, resolveDirectory, untrustedNotice } from "../sessions/directory.ts";
@@ -56,13 +56,18 @@ export function binding(deps: FlowDeps, talk: Talk): Binding {
   const inNotice = (text: string): string => chat.escape(text, "notice");
 
   /** The folder a typed path or a pick names, inside the allowed root; null, told, otherwise. */
-  const folderNamed = async (channel: string, path: string): Promise<string | null> => {
+  const folderNamed = async (
+    channel: string,
+    path: string,
+    answers?: MessageId,
+  ): Promise<string | null> => {
     const resolved = resolveDirectory(path, allowedRoot);
     if ("directory" in resolved) return resolved.directory;
     const refusal = REFUSALS[resolved.refused];
     await talk.inChannel(
       channel,
       fill(refusal, { path: inNotice(path), root: inNotice(allowedRoot) }),
+      answers,
     );
     return null;
   };
@@ -80,7 +85,11 @@ export function binding(deps: FlowDeps, talk: Talk): Binding {
 
   // Thread entries keep their own folder either side of the bind (`StateStore.bind`), so the
   // old folders can be read now: those of the channel's threads that differ from the new one.
-  const announce = async (channel: string, directory: string): Promise<void> => {
+  const announce = async (
+    channel: string,
+    directory: string,
+    answers?: MessageId,
+  ): Promise<void> => {
     const unavailable = await sessions.unavailable(directory);
     const record = state.channel(channel);
     const threads = record === null ? [] : [...record.threads.values()];
@@ -92,18 +101,19 @@ export function binding(deps: FlowDeps, talk: Talk): Binding {
     await talk.inChannel(
       channel,
       [boundText(directory, unavailable, oldFolders, inNotice), ...below].join("\n"),
+      answers,
     );
   };
 
   return {
-    async to(channel, path) {
-      const directory = await folderNamed(channel, path);
+    async to(channel, path, answers) {
+      const directory = await folderNamed(channel, path, answers);
       if (directory === null) return;
       if (!(await sessions.bind(channel, directory))) {
-        await talk.inChannel(channel, texts.BIND_BUSY);
+        await talk.inChannel(channel, texts.BIND_BUSY, answers);
         return;
       }
-      await announce(channel, directory);
+      await announce(channel, directory, answers);
     },
 
     async list(channel) {

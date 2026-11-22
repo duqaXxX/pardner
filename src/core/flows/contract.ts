@@ -76,8 +76,9 @@ export interface ResumeFlow {
   /**
    * `/resume` typed in a channel; `ref` is the thread of the owner's word. With no `target` it
    * offers the folder's sessions; with one it resumes the session it names into that thread.
+   * `answers`: the top-level prompt of the word, which its channel lines are drawn under.
    */
-  word(ref: ThreadRef, target: string): Promise<void>;
+  word(ref: ThreadRef, target: string, answers?: MessageId): Promise<void>;
 }
 
 /** `/fork`. */
@@ -130,7 +131,7 @@ export interface RewindFlow {
 /** `/bind`. */
 export interface BindFlow {
   /** `/bind <folder>` typed in a channel. */
-  to(channel: string, path: string): Promise<void>;
+  to(channel: string, path: string, answers?: MessageId): Promise<void>;
   /** `/bind` alone: the folders a session can start in, offered as a list. */
   list(channel: string): Promise<void>;
 }
@@ -140,9 +141,9 @@ export interface PardnerFlow {
   /** `/pardner`: the version that runs and the latest, as a reference. */
   show(): Promise<string>;
   /** `/pardner update` typed in a channel: the offer of the latest version, or why there is none. */
-  update(channel: string): Promise<void>;
+  update(channel: string, answers?: MessageId): Promise<void>;
   /** `/pardner restart` typed in a channel. */
-  restart(channel: string): Promise<void>;
+  restart(channel: string, answers?: MessageId): Promise<void>;
   /** The owner pressed the control that installs a version, on an offer or on the chat's own page. */
   picked(pick: Extract<ListPick, { type: "update" }>): Promise<void>;
   /**

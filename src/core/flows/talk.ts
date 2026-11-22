@@ -108,34 +108,40 @@ export class Talk {
 
   /**
    * A reference the owner reads (`/help`, `/guide`, `/status`), at full size: in the thread, or
-   * in the channel when `thread` is null.
+   * in the channel when `thread` is null. `answers`: the top-level prompt a channel line answers;
+   * ignored with a thread, whose lines sit under the owner's message there.
    */
   async say(
     channel: string,
     thread: string | null,
     markdown: string,
-    options: { readonly ownerOnly?: boolean } = {},
+    options: { readonly ownerOnly?: boolean; readonly answers?: MessageId } = {},
   ): Promise<void> {
     if (this.stopped) return;
-    if (thread === null) await this.deps.chat.channel(channel).say(markdown);
-    else await this.thread({ channel, thread }).say(markdown, options);
+    if (thread === null) await this.deps.chat.channel(channel).say(markdown, options.answers);
+    else await this.thread({ channel, thread }).say(markdown, { ownerOnly: options.ownerOnly });
   }
 
   /**
    * Answer in the channel itself: where a word typed in the channel, or a pick from a list
-   * posted there, is answered.
+   * posted there, is answered. `answers`: the top-level prompt of the owner's it answers, which a
+   * chat can draw it under; absent for a line that answers no prompt.
    */
-  async inChannel(channel: string, text: string): Promise<void> {
-    await this.postInChannel(channel, text);
+  async inChannel(channel: string, text: string, answers?: MessageId): Promise<void> {
+    await this.postInChannel(channel, text, answers);
   }
 
   /**
    * `inChannel`, resolving with the message posted: for an answer the daemon rewrites later.
    * Null when the chat cannot say which message it is, or the daemon has stopped.
    */
-  async postInChannel(channel: string, text: string): Promise<MessageId | null> {
+  async postInChannel(
+    channel: string,
+    text: string,
+    answers?: MessageId,
+  ): Promise<MessageId | null> {
     if (this.stopped) return null;
-    return this.deps.chat.channel(channel).notice(text);
+    return this.deps.chat.channel(channel).notice(text, answers);
   }
 
   /** The mark that a word took effect, on the owner's own message, where the chat has one. */
@@ -188,10 +194,10 @@ export class Talk {
    * Tells the channel it is not bound to a folder, in the words of an agent that keeps a record
    * of trust or of one that does not.
    */
-  unbound(channel: string): Promise<void> {
+  unbound(channel: string, answers?: MessageId): Promise<void> {
     const { agent, names, allowedRoot } = this.deps;
     const text = agent.capabilities.folderTrust ? named(texts.UNBOUND, names) : texts.UNBOUND_ANY;
-    return this.inChannel(channel, fill(text, { root: allowedRoot }));
+    return this.inChannel(channel, fill(text, { root: allowedRoot }), answers);
   }
 
   /** The request's message has done its job: removed from the chat and from what repair reads. */
@@ -281,12 +287,14 @@ export class Talk {
 
   /**
    * Tell the owner their message was not taken because the daemon is stopping, and which
-   * threads the stop waits for: only they can answer or `/stop` those.
+   * threads the stop waits for: only they can answer or `/stop` those. `answers`: the top-level
+   * prompt that has no session thread to hold the line, which gets it as a channel line instead.
    */
-  async refuseRestarting(ref: ThreadRef): Promise<void> {
+  async refuseRestarting(ref: ThreadRef, answers?: MessageId): Promise<void> {
     const waits = await this.restartWaits();
     let text: string = texts.RESTARTING;
     if (waits) text = [text, texts.RESTART_WAITS_FOR, waits].join("\n");
-    await this.tell(ref, text);
+    if (answers === undefined) await this.tell(ref, text);
+    else await this.inChannel(ref.channel, text, answers);
   }
 }

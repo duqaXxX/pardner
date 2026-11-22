@@ -705,7 +705,8 @@ test("while an install runs a session goes on and a new one is not started", asy
   assert.ok((await world.prompts()).includes("and more"));
   // a message that opens a new thread is refused, and starts nothing
   const fresh = await world.says("a new topic");
-  assert.equal(world.shown(fresh.ref).at(-1), texts.RESTARTING);
+  // No session holds the new thread: the refusal is a channel line that names the prompt.
+  assert.equal(world.inChannel().at(-1), texts.RESTARTING);
   assert.equal(started(world), before);
   assert.equal(world.state.thread(fresh.ref.channel, fresh.ref.thread), null, "nothing was opened");
   release();
@@ -744,7 +745,8 @@ test("while another process updates a new thread is refused and starts nothing, 
   await world.says("and more", connected.thread);
   assert.ok((await world.prompts()).includes("and more"));
   const fresh = await world.says("a new topic");
-  assert.equal(world.shown(fresh.ref).at(-1), texts.RESTARTING);
+  // No session holds the new thread: the refusal is a channel line that names the prompt.
+  assert.equal(world.inChannel().at(-1), texts.RESTARTING);
   assert.equal(started(world), before);
   assert.equal(world.state.thread(fresh.ref.channel, fresh.ref.thread), null, "nothing was opened");
   host.updating = false;
@@ -766,7 +768,12 @@ test("once the install succeeded no process starts before the exit", async (t) =
   const list = await offered(world);
   await world.chat.as(OWNER).picks(list.message, VERSION);
   const fresh = await world.says("a new topic");
-  assert.equal(world.shown(fresh.ref).at(-1), texts.RESTARTING);
+  // No session holds the new thread: the refusal is a channel line that names the prompt.
+  assert.equal(world.inChannel().at(-1), texts.RESTARTING);
+  assert.deepEqual(
+    world.chat.calls("answers").map((call) => call.args),
+    [["notice", texts.RESTARTING, fresh.id]],
+  );
   assert.equal(started(world), 0);
 });
 
@@ -984,7 +991,15 @@ test("a message that opens a thread while a stop closes the sessions is told, an
   release();
   const sent = await sending;
   await world.settle();
-  assert.ok(world.shown(sent.ref).some((line) => line.includes(texts.SESSION_CLOSED)));
+  assert.ok(world.inChannel().some((line) => line.includes(texts.SESSION_CLOSED)));
+  assert.ok(
+    world.chat
+      .calls("answers")
+      .some(
+        (call) => String(call.args[1]).includes(texts.SESSION_CLOSED) && call.args[2] === sent.id,
+      ),
+    "the line names the prompt",
+  );
   assert.equal(started(world), 0, "no agent process was started");
 });
 

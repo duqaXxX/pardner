@@ -202,6 +202,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A word typed at the top of a channel (`/bind demo`, `/stop`, `/bypass on`) or a prompt the bot refused before its session opened is no
+  longer drawn by the app as a session that never ran (#68). The bot tells whether the prompt's thread holds a session
+  (`InboundMessage.handled(session)`; the relay writes `"session": false` in that prompt's answer) and writes its lines that answer a
+  top-level prompt as texts with `re` the prompt (`ChannelChat.notice` and `say` take the prompt's id). The reading model settles a
+  top-level prompt by the first sign of its bot: a setup request, a part, a text in its thread other than a `tell` or an answer without `"session": false`
+  make a session; a text of the bot with `re` the prompt or an answer with `"session": false` make a message, drawn with the bot's
+  lines under it and never in Sessions; a not-read before any sign reads `Not run`. A cut settles nothing: the prompt reads
+  `Interrupted` and a later sign decides. A prompt the bot started and has shown no sign for yet says `Started`, and keeps the summary
+  that opens its thread, so it is listed in Sessions until its answer. A refusal after the session opened (a folder Claude Code does
+  not trust, a start blocked) stays a session: the bot holds its entry, and a reply runs the setup again.
+
 - Every error the app shows is a sentence: what failed, the reason in words, and the next step (`Setup could not finish: the disk
   could not be read or written. Check the relay's values and try again.`). A case name, a raw description or a bridged system
   message alone is never shown; an error that only one step fixes gives that step (a build with no protocol script says to install

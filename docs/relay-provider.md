@@ -36,9 +36,9 @@ its replies or empty). With none, a restart shows the prompt cut although it ran
 shows it answered although a crash cut it. `ChatInbound.message` is no signal: measured on 2026-11-17
 with the memory chat and the plain agent, it resolves when the prompt reaches the agent, with the turn
 still held, and at once for a prompt sent during a turn and for a `/word`. The seam therefore has
-`InboundMessage.handled?()`, which the core calls once when it no longer works on the message: when the
-turn that took it ends (`Turn.done`), or, for a word, a drop or a refusal, when its flow ends. The core calls it after `replyOnFailure`, so a failure's text is in the thread before the prompt closes.
-The memory chat does not set it. The relay's inbound sets it and writes the answer and the decision in one store write. A prompt whose work in the core ends after the provider was stopped is not answered, so the next
+`InboundMessage.handled?(session)`, which the core calls once when it no longer works on the message: when the
+turn that took it ends (`Turn.done`), or, for a word, a drop or a refusal, when its flow ends. The core calls it after `replyOnFailure`, so a failure's text is written before the prompt closes.
+`session` says whether the prompt's thread holds a session then: false for a top-level prompt answered as a word, or refused before any session opened. The relay writes `"session": false` in that prompt's answer (and in its own answer to a top-level prompt it could not hand on, "The bot did not run this prompt."; a core that throws still calls `handled`, which says whether it opened a session), and nothing otherwise. A line of the daemon's that answers a top-level prompt (`ChannelChat.notice` and `say` take the prompt's id) is written as a text (kind 1) with `re` the prompt, so the app draws it under that prompt. The update notice answers no prompt and names none. The memory chat records the id (`calls("answers")`) and ignores the verdict. The relay's inbound sets it and writes the answer and the decision in one store write. A prompt whose work in the core ends after the provider was stopped is not answered, so the next
 start reads it as cut.
 
 

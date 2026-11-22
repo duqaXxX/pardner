@@ -286,14 +286,18 @@ export function updating(deps: FlowDeps, updates: Updates, talk: Talk): PardnerF
       return lines.join("\n");
     },
 
-    async update(channel) {
+    async update(channel, answers) {
       const running = updates.phase;
       if (running.kind === "installing" || running.kind === "restarting") {
-        await talk.inChannel(channel, fill(texts.UPDATE_UNDER_WAY, { version: running.version }));
+        await talk.inChannel(
+          channel,
+          fill(texts.UPDATE_UNDER_WAY, { version: running.version }),
+          answers,
+        );
         return;
       }
       if (sessions.draining) {
-        await talk.inChannel(channel, texts.UPDATE_DRAINING);
+        await talk.inChannel(channel, texts.UPDATE_DRAINING, answers);
         return;
       }
       await updates.check();
@@ -302,16 +306,24 @@ export function updating(deps: FlowDeps, updates: Updates, talk: Talk): PardnerF
       const copy = updates.copy;
       const newer = updates.newer;
       if (refusal !== null) {
-        await talk.inChannel(channel, outside(refusal, "notice"));
+        await talk.inChannel(channel, outside(refusal, "notice"), answers);
       } else if (failure !== null) {
-        await talk.inChannel(channel, fill(texts.UPDATE_UNKNOWN, { reason: whyUnknown(failure) }));
+        await talk.inChannel(
+          channel,
+          fill(texts.UPDATE_UNKNOWN, { reason: whyUnknown(failure) }),
+          answers,
+        );
       } else if (newer !== null && copy === null) {
         // A newer version, and no answer yet about the copy: it is being replaced right now.
-        await talk.inChannel(channel, texts.UPDATE_ELSEWHERE);
+        await talk.inChannel(channel, texts.UPDATE_ELSEWHERE, answers);
       } else if (newer === null || copy === null) {
-        await talk.inChannel(channel, fill(texts.UPDATE_LATEST, { installed: updates.installed }));
+        await talk.inChannel(
+          channel,
+          fill(texts.UPDATE_LATEST, { installed: updates.installed }),
+          answers,
+        );
       } else if (!host.supervised()) {
-        await talk.inChannel(channel, notAService());
+        await talk.inChannel(channel, notAService(), answers);
       } else {
         await chat.channel(channel).offer(
           {
@@ -326,14 +338,18 @@ export function updating(deps: FlowDeps, updates: Updates, talk: Talk): PardnerF
       }
     },
 
-    async restart(channel) {
+    async restart(channel, answers) {
       const running = updates.phase;
       if (running.kind === "installing" || running.kind === "restarting") {
-        await talk.inChannel(channel, fill(texts.UPDATE_UNDER_WAY, { version: running.version }));
+        await talk.inChannel(
+          channel,
+          fill(texts.UPDATE_UNDER_WAY, { version: running.version }),
+          answers,
+        );
         return;
       }
       if (sessions.draining || restartAsked) {
-        await talk.inChannel(channel, texts.RESTARTING);
+        await talk.inChannel(channel, texts.RESTARTING, answers);
         return;
       }
       // (sync) Claimed before the first await: a second `/pardner restart` (a double send, an
@@ -343,11 +359,11 @@ export function updating(deps: FlowDeps, updates: Updates, talk: Talk): PardnerF
       try {
         if (await host.updateHeld()) {
           // Another process is replacing the copy: a restart now would start from half of it.
-          await talk.inChannel(channel, texts.UPDATE_ELSEWHERE);
+          await talk.inChannel(channel, texts.UPDATE_ELSEWHERE, answers);
         } else if (!host.supervised()) {
-          await talk.inChannel(channel, notAService());
+          await talk.inChannel(channel, notAService(), answers);
         } else {
-          const message = await talk.postInChannel(channel, texts.UPDATE_RESTART);
+          const message = await talk.postInChannel(channel, texts.UPDATE_RESTART, answers);
           if (message !== null) remember({ channel, message, version: null });
           host.restart();
           asked = true;

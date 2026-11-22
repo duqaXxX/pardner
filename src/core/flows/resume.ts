@@ -116,6 +116,7 @@ export function resuming(deps: FlowDeps, talk: Talk): Resuming {
     directory: string,
     chosen: ListedSession,
     list: MessageId | null = null,
+    answers?: MessageId,
   ): Promise<boolean> => {
     const { channel, thread } = ref;
     // (sync) From here to `sessions.resume`, which opens the thread's entry inside the call:
@@ -123,17 +124,17 @@ export function resuming(deps: FlowDeps, talk: Talk): Resuming {
     // to the resume itself.
     // A thread being deleted still holds its session's entry, and hands out no session.
     if (sessions.get(channel, thread) !== null || sessions.held(channel, thread)) {
-      await talk.inChannel(channel, texts.RESUME_HELD);
+      await talk.inChannel(channel, texts.RESUME_HELD, answers);
       return false;
     }
     const holder = state.holder(chosen.id);
     if (holder !== null) {
-      await talk.inChannel(channel, await heldElsewhere(holder));
+      await talk.inChannel(channel, await heldElsewhere(holder), answers);
       return false;
     }
     const record = state.channel(channel);
     if (record === null || record.directory !== directory) {
-      await talk.inChannel(channel, texts.RESUME_GONE);
+      await talk.inChannel(channel, texts.RESUME_GONE, answers);
       return false;
     }
     const session = await sessions.resume(channel, thread, chosen.id);
@@ -155,15 +156,15 @@ export function resuming(deps: FlowDeps, talk: Talk): Resuming {
   };
 
   return {
-    async word(ref, target) {
+    async word(ref, target, answers) {
       const { channel } = ref;
       const record = state.channel(channel);
       if (record === null) {
-        await talk.unbound(channel);
+        await talk.unbound(channel, answers);
         return;
       }
       if (!agent.capabilities.sessionListing) {
-        await talk.inChannel(channel, named(texts.RESUME_UNLISTED, names));
+        await talk.inChannel(channel, named(texts.RESUME_UNLISTED, names), answers);
         return;
       }
       const directory = record.directory;
@@ -192,10 +193,11 @@ export function resuming(deps: FlowDeps, talk: Talk): Resuming {
         await talk.inChannel(
           channel,
           fill(template, { directory: inNotice(directory), target: inNotice(target) }),
+          answers,
         );
         return;
       }
-      await resumeInto(ref, directory, only);
+      await resumeInto(ref, directory, only, null, answers);
     },
 
     async picked(pick) {

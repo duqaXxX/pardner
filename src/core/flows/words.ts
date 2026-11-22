@@ -34,6 +34,8 @@ export interface WordPlace {
   readonly aborted: number;
   /** The word's own ticket, taken by `/fork` only: a stop of its thread ends the wait. */
   readonly ticket: Ticket | null;
+  /** The top-level prompt this word answers, which its channel lines are drawn under; undefined elsewhere. */
+  readonly answers: MessageId | undefined;
 }
 
 /**
@@ -208,7 +210,7 @@ export function wordFlow(
     }
   }
 
-  return async (ref, message, command, { session, outside, aborted, ticket }) => {
+  return async (ref, message, command, { session, outside, aborted, ticket, answers }) => {
     const { channel, thread } = ref;
     const where = session === null ? null : thread;
     const quiet = session !== null;
@@ -227,7 +229,7 @@ export function wordFlow(
           unserved,
           agent.capabilities.folderTrust,
         ),
-        { ownerOnly: quiet },
+        { ownerOnly: quiet, answers },
       );
     };
     switch (command.kind) {
@@ -246,6 +248,7 @@ export function wordFlow(
         } else {
           await talk.say(channel, where, [line, command.rule].filter(Boolean).join("\n"), {
             ownerOnly: quiet,
+            answers,
           });
         }
         return;
@@ -276,21 +279,24 @@ export function wordFlow(
           shell: have.shellCommands && deps.shellCommands,
           updates: pardner !== undefined,
         };
-        await talk.say(channel, where, guideText(names, offered), { ownerOnly: quiet });
+        await talk.say(channel, where, guideText(names, offered), {
+          ownerOnly: quiet,
+          answers,
+        });
         return;
       }
       case "bind":
         if (session !== null || (outside && command.path)) {
           await talk.tell(ref, fill(texts.WORD_IN_THREAD, { word: WORD.bind }));
         } else if (command.path) {
-          await others.bind.to(channel, command.path);
+          await others.bind.to(channel, command.path, answers);
         } else {
           await others.bind.list(channel);
         }
         return;
       case "bypass": {
         if (session === null) {
-          await talk.inChannel(channel, texts.BYPASS_TOP_LEVEL);
+          await talk.inChannel(channel, texts.BYPASS_TOP_LEVEL, answers);
           return;
         }
         let switched: boolean;
@@ -317,12 +323,12 @@ export function wordFlow(
       }
       case "plan": {
         if (command.on === null) {
-          if (session === null) await talk.inChannel(channel, texts.PLAN_TAKES_NO_TEXT);
+          if (session === null) await talk.inChannel(channel, texts.PLAN_TAKES_NO_TEXT, answers);
           else await talk.tell(ref, texts.PLAN_TAKES_NO_TEXT);
           return;
         }
         if (session === null) {
-          await talk.inChannel(channel, texts.PLAN_TOP_LEVEL);
+          await talk.inChannel(channel, texts.PLAN_TOP_LEVEL, answers);
           return;
         }
         let switched: boolean;
@@ -345,7 +351,7 @@ export function wordFlow(
         return;
       }
       case "status":
-        if (session === null) await status(channel);
+        if (session === null) await status(channel, answers);
         else await talk.say(channel, thread, await session.status(), { ownerOnly: true });
         return;
       case "stop":
@@ -358,7 +364,11 @@ export function wordFlow(
           // channel (`Not sent.` or the note, from the session); no second notice, since nothing
           // the agent was doing stopped.
           if (stopped !== null) {
-            await talk.inChannel(channel, stopped ? texts.STOPPED_CHANNEL : texts.NOTHING_TO_STOP);
+            await talk.inChannel(
+              channel,
+              stopped ? texts.STOPPED_CHANNEL : texts.NOTHING_TO_STOP,
+              answers,
+            );
           }
         } else {
           await stopThread(ref, session, aborted);
@@ -367,7 +377,7 @@ export function wordFlow(
       case "memory":
       case "skills":
         if (session === null) {
-          await talk.inChannel(channel, texts.LOADED_TOP_LEVEL);
+          await talk.inChannel(channel, texts.LOADED_TOP_LEVEL, answers);
         } else if (!agent.capabilities.loadedContext) {
           await talk.tell(ref, named(texts.LOADED_UNAVAILABLE, names));
         } else {
@@ -382,7 +392,7 @@ export function wordFlow(
         return;
       case "fork":
         if (session === null) {
-          await talk.inChannel(channel, texts.FORK_TOP_LEVEL);
+          await talk.inChannel(channel, texts.FORK_TOP_LEVEL, answers);
         } else {
           if (ticket === null) throw new TypeError("a /fork reached its flow with no ticket");
           await fork.word(ref, message, session, command.prompt, ticket);
@@ -390,35 +400,35 @@ export function wordFlow(
         return;
       case "diff":
         if (session === null) {
-          await talk.inChannel(channel, texts.DIFF_TOP_LEVEL);
+          await talk.inChannel(channel, texts.DIFF_TOP_LEVEL, answers);
         } else {
           await others.diff.word(ref, session);
         }
         return;
       case "rewind":
         if (session === null) {
-          await talk.inChannel(channel, texts.REWIND_TOP_LEVEL);
+          await talk.inChannel(channel, texts.REWIND_TOP_LEVEL, answers);
         } else {
           await others.rewind.word(ref, session);
         }
         return;
       case "next":
         if (session === null) {
-          await talk.inChannel(channel, texts.NEXT_TOP_LEVEL);
+          await talk.inChannel(channel, texts.NEXT_TOP_LEVEL, answers);
         } else {
           await next.word(ref, session);
         }
         return;
       case "terminal":
         if (session === null) {
-          await talk.inChannel(channel, texts.TERMINAL_TOP_LEVEL);
+          await talk.inChannel(channel, texts.TERMINAL_TOP_LEVEL, answers);
         } else {
           await others.terminal.move(ref, session);
         }
         return;
       case "open":
         if (session === null) {
-          await talk.inChannel(channel, texts.OPEN_TOP_LEVEL);
+          await talk.inChannel(channel, texts.OPEN_TOP_LEVEL, answers);
         } else if (!chat.capabilities.fileUpload || chat.openFile === undefined) {
           await talk.tell(ref, named(texts.OPEN_UNAVAILABLE, names));
         } else {
@@ -428,7 +438,7 @@ export function wordFlow(
       case "tag":
       case "untag": {
         if (session === null) {
-          await talk.inChannel(channel, texts.TAG_TOP_LEVEL);
+          await talk.inChannel(channel, texts.TAG_TOP_LEVEL, answers);
           return;
         }
         if (!chat.capabilities.threadTags || chat.tagThread === undefined) {
@@ -452,7 +462,7 @@ export function wordFlow(
       case "pin":
       case "unpin": {
         if (session === null) {
-          await talk.inChannel(channel, texts.PIN_TOP_LEVEL);
+          await talk.inChannel(channel, texts.PIN_TOP_LEVEL, answers);
           return;
         }
         if (!chat.capabilities.threadPins || chat.pinThread === undefined) {
@@ -471,7 +481,7 @@ export function wordFlow(
       }
       case "delete-thread":
         if (session === null && !outside) {
-          await talk.inChannel(channel, texts.DELETE_THREAD_TOP_LEVEL);
+          await talk.inChannel(channel, texts.DELETE_THREAD_TOP_LEVEL, answers);
         } else if (!chat.capabilities.threadDelete || chat.deleteThread === undefined) {
           await talk.tell(ref, named(texts.DELETE_THREAD_UNAVAILABLE, names));
         } else if (outside && sessions.held(channel, thread)) {
@@ -493,33 +503,36 @@ export function wordFlow(
         if (session !== null || outside) {
           await talk.tell(ref, fill(texts.WORD_IN_THREAD, { word: WORD["clean-channel"] }));
         } else if (!chat.capabilities.channelClean || chat.cleanChannel === undefined) {
-          await talk.inChannel(channel, named(texts.CLEAN_UNAVAILABLE, names));
+          await talk.inChannel(channel, named(texts.CLEAN_UNAVAILABLE, names), answers);
         } else {
           // The deleter cleans only a bound channel: nothing is asked of what it would not touch.
           if (state.channels().includes(channel)) await chat.cleanChannel(channel);
-          else await talk.inChannel(channel, texts.CLEAN_UNBOUND);
+          else await talk.inChannel(channel, texts.CLEAN_UNBOUND, answers);
         }
         return;
       case "pardner":
         if (pardner === undefined) {
           await showHelp("");
         } else if (command.action === "show") {
-          await talk.say(channel, where, await pardner.show(), { ownerOnly: quiet });
+          await talk.say(channel, where, await pardner.show(), {
+            ownerOnly: quiet,
+            answers,
+          });
         } else if (session !== null || outside) {
           // The offer lives in the channel, so a word that makes one is refused in a thread.
           const word = `${WORD.pardner} ${command.action}`;
           await talk.tell(ref, fill(texts.WORD_IN_THREAD, { word }));
         } else if (command.action === "update") {
-          await pardner.update(channel);
+          await pardner.update(channel, answers);
         } else {
-          await pardner.restart(channel);
+          await pardner.restart(channel, answers);
         }
         return;
       case "resume":
         if (session !== null || outside) {
           await talk.tell(ref, fill(texts.WORD_IN_THREAD, { word: WORD.resume }));
         } else {
-          await others.resume.word(ref, command.target);
+          await others.resume.word(ref, command.target, answers);
         }
         return;
     }

@@ -5,7 +5,7 @@
  * too large at full size).
  */
 import type { ListedSession } from "../../agent/seam.ts";
-import type { SessionStatus } from "../../chat/seam.ts";
+import type { MessageId, SessionStatus } from "../../chat/seam.ts";
 import { errorName } from "../../values.ts";
 import { oneLine, TITLE_LIMIT } from "../reply/words.ts";
 import type { ThreadSession } from "../sessions/session.ts";
@@ -34,8 +34,8 @@ function outcome(status: SessionStatus | null | undefined): SessionStatus | null
   return status === "done" || status === "error" ? status : null;
 }
 
-/** The answer to `/status` typed in `channel`. */
-export type ChannelStatus = (channel: string) => Promise<void>;
+/** The answer to `/status` typed in `channel`; `answers`: the top-level prompt it answers. */
+export type ChannelStatus = (channel: string, answers?: MessageId) => Promise<void>;
 
 /** One thread the answer may show: what is kept of it, and its session when that is live. */
 interface Shown {
@@ -131,10 +131,10 @@ export function channelStatus(deps: FlowDeps, talk: Talk): ChannelStatus {
     return known;
   }
 
-  return async (channel) => {
+  return async (channel, answers) => {
     const record = state.channel(channel);
     if (record === null) {
-      await talk.unbound(channel);
+      await talk.unbound(channel, answers);
       return;
     }
     const lines = [fill(texts.STATUS_CHANNEL_HEADER, { directory: record.directory })];
@@ -172,10 +172,10 @@ export function channelStatus(deps: FlowDeps, talk: Talk): ChannelStatus {
         lines.push(fill(texts.STATUS_CHANNEL_MORE, { count: all.length - shown.length }));
       }
     }
-    await talk.inChannel(channel, lines.join("\n"));
+    await talk.inChannel(channel, lines.join("\n"), answers);
     const waits = await talk.restartWaits(channel);
     if (waits) {
-      await talk.inChannel(channel, [texts.RESTART_WAITS_HEADER, waits].join("\n"));
+      await talk.inChannel(channel, [texts.RESTART_WAITS_HEADER, waits].join("\n"), answers);
     }
   };
 }

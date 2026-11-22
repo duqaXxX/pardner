@@ -829,10 +829,12 @@ export interface ChannelChat {
   /**
    * A line of the daemon's own, small and grey, as a message of the channel; a notice's markup.
    * Resolves with the message posted, which `rewrite` takes; null when the chat cannot say.
+   * `answers`: the top-level prompt of the owner's this line answers, for a chat that draws it
+   * under that prompt.
    */
-  notice(text: string): Promise<MessageId | null>;
-  /** A reference at full size, in Markdown; a long one continues in further messages. */
-  say(markdown: string): Promise<void>;
+  notice(text: string, answers?: MessageId): Promise<MessageId | null>;
+  /** A reference at full size, in Markdown; a long one continues in further messages. `answers` as for `notice`. */
+  say(markdown: string, answers?: MessageId): Promise<void>;
   /**
    * Posts `markdown` as a message of the channel that starts a thread of its own, in one message,
    * and resolves with that thread. Present with `threadOpen`. `root`: `lead`, a prefix of
@@ -910,9 +912,10 @@ export interface InboundMessage {
    * Called by the core once, when it no longer works on this message: the turn that took it
    * ended, its word was answered, or it was dropped. A chat that must say a prompt is done
    * (the relay's answer) reads it; `ChatInbound.message` resolves earlier, when the prompt
-   * reaches the agent, so it is no such signal.
+   * reaches the agent, so it is no such signal. `session`: the prompt's thread holds a session
+   * now; false for a top-level prompt answered as a word or refused before any session opened.
    */
-  handled?(): void;
+  handled?(session: boolean): void;
 }
 
 /**

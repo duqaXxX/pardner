@@ -146,7 +146,8 @@ test(
     await sending;
     await world.settle();
     assert.ok(!world.shown(ref).includes(texts.STOP_OUTSIDE_SESSION));
-    assert.equal(notSent(world.shown(ref)), 1);
+    // Before the open no session holds the thread: `Not sent.` is a channel line that names the prompt.
+    assert.equal(notSent(world.inChannel()), 1);
     assert.equal(world.chat.requests().length, 0);
   },
 );
@@ -184,8 +185,8 @@ test(
     release.set();
     await sending;
     await world.settle();
-    assert.equal(notSent(world.shown(ref)), 1);
-    assert.ok(!world.shown(ref).includes(texts.RESTARTING));
+    assert.equal(notSent(world.inChannel()), 1);
+    assert.ok(!world.inChannel().includes(texts.RESTARTING));
     assert.equal(world.state.thread(ref.channel, ref.thread), null);
   },
 );

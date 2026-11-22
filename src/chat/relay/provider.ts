@@ -108,12 +108,20 @@ export class RelayProvider implements ChatProvider {
   }
 
   /** A text of the bot's own (3.8): `say` says how the app draws it. */
-  async #text(channel: string, say: "notice" | "say" | "tell", markdown: string, thread?: string) {
+  async #text(
+    channel: string,
+    say: "notice" | "say" | "tell",
+    markdown: string,
+    thread?: string,
+    answers?: MessageId,
+  ) {
+    // A line that answers a top-level prompt names it (`re`), which is how the app draws it under that prompt.
+    const re = answers ? referenceOf(answers) : undefined;
     // A long text is several texts, each at most 64 KiB (3.8).
     const pieces = splitParts(markdown);
     for (const piece of pieces.length ? pieces : [markdown]) {
       const content = JSON.stringify({ ...(thread ? { thread } : {}), say, markdown: piece });
-      const queued = await this.#outbox.queue(fromHex(channel), { kind: 1, content });
+      const queued = await this.#outbox.queue(fromHex(channel), { kind: 1, re, content });
       if (!queued) throw new ChatError("relay_not_queued", { failure: "failed" });
     }
   }
@@ -248,15 +256,15 @@ export class RelayProvider implements ChatProvider {
   }
 
   channel(channel: string): ChannelChat {
-    const text = (say: "notice" | "say" | "tell") => (markdown: string) =>
-      this.#text(channel, say, markdown);
+    const text = (say: "notice" | "say" | "tell") => (markdown: string, answers?: MessageId) =>
+      this.#text(channel, say, markdown, undefined, answers);
     return {
-      notice: async (markdown) => {
-        await text("notice")(markdown);
+      notice: async (markdown, answers) => {
+        await text("notice")(markdown, answers);
         return null;
       },
       say: text("say"),
-      tell: text("tell"),
+      tell: (markdown) => text("tell")(markdown),
       offer: async () => {}, // `/bind` alone offers folders: the owner types the folder (section 5)
       withdraw: async () => false,
       rewrite: async () => {},

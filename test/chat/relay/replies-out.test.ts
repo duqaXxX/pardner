@@ -74,8 +74,8 @@ test(
       );
       assert.equal(parts.map((p) => r.body(p).markdown).join(""), `${long} end`);
       assert.deepEqual(await kind(r, 5), [], "no answer before the core is done");
-      message.handled?.();
-      message.handled?.(); // once: a second call writes nothing
+      message.handled?.(true);
+      message.handled?.(true); // once: a second call writes nothing
       await b.until(async () => (await kind(r, 5)).length === 1);
       const [answer] = await kind(r, 5);
       assert.equal(hex(answer?.name as Uint8Array), hex(answerName));
@@ -101,12 +101,12 @@ test(
       b.connection.start();
       await b.rested();
       const first = await prompted(r, b, "/status");
-      first.message.handled?.();
+      first.message.handled?.(true);
       await b.until(async () => (await kind(r, 5)).length === 1);
       assert.equal(r.body((await kind(r, 5))[0] as never).markdown, "");
       const second = await prompted(r, b, "again");
       b.inbound.start(undefined); // what `RelayProvider.stop` does
-      second.message.handled?.();
+      second.message.handled?.(true);
       await new Promise((s) => setTimeout(s, 400));
       assert.equal(
         (await kind(r, 5)).length,
@@ -193,7 +193,7 @@ test(
       const { chat, message } = await prompted(r, b);
       const reply = chat.openReply(() => {}, message.id);
       await reply.text("BEFORE");
-      message.handled?.();
+      message.handled?.(true);
       await b.until(async () => (await kind(r, 5)).length === 1);
       await reply.text("AFTER");
       const report = chat.openReply(() => {}); // a report turn: no prompt
@@ -215,6 +215,87 @@ test(
         "AFTER",
         "REPORT",
       ]);
+    } finally {
+      await b.stop();
+      await r.stop();
+    }
+  },
+);
+
+test(
+  "a top-level prompt answered as no session says so in its answer, and its channel lines name it (#68)",
+  DARWIN,
+  async () => {
+    const r = await rig();
+    const b = botOn(r);
+    try {
+      b.connection.start();
+      await b.rested();
+      const { message } = await prompted(r, b, "/bypass on");
+      const channel = provider(r, b).channel(message.ref.channel);
+      await channel.notice("Bypass applies inside a session.", message.id);
+      await channel.say("A reference.", message.id);
+      await channel.notice("A line of no prompt.");
+      message.handled?.(false);
+      await b.until(async () => (await kind(r, 5)).length === 1);
+      const [answer] = await kind(r, 5);
+      assert.deepEqual(r.body(answer as never), {
+        thread: message.ref.thread,
+        markdown: "",
+        session: false,
+      });
+      const lines = await kind(r, 1);
+      assert.equal(lines.length, 3);
+      const [first, second, third] = lines;
+      for (const line of [first, second]) {
+        assert.equal(hex(line?.re?.device as Uint8Array), message.id.slice(0, 64));
+      }
+      assert.equal(third?.re, undefined, "a line that answers no prompt names none");
+      assert.deepEqual(r.body(first as never), {
+        say: "notice",
+        markdown: "Bypass applies inside a session.",
+      });
+    } finally {
+      await b.stop();
+      await r.stop();
+    }
+  },
+);
+
+test(
+  "an answer of a prompt whose thread holds a session carries no flag (#68)",
+  DARWIN,
+  async () => {
+    const r = await rig();
+    const b = botOn(r);
+    try {
+      b.connection.start();
+      await b.rested();
+      const { message } = await prompted(r, b, "hello");
+      message.handled?.(true);
+      await b.until(async () => (await kind(r, 5)).length === 1);
+      assert.equal("session" in r.body((await kind(r, 5))[0] as never), false);
+    } finally {
+      await b.stop();
+      await r.stop();
+    }
+  },
+);
+
+test(
+  "a throw of the core after it took a prompt leaves the flag to the core's own done signal (#68)",
+  DARWIN,
+  async () => {
+    const r = await rig();
+    const b = botOn(r, { rejects: true });
+    try {
+      b.connection.start();
+      await b.rested();
+      const { message } = await prompted(r, b, "hello");
+      await new Promise((s) => setTimeout(s, 200)); // the rejection has been handled
+      message.handled?.(true); // the core opened a session, then the turn ended
+      await b.until(async () => (await kind(r, 5)).length === 1);
+      assert.equal("session" in r.body((await kind(r, 5))[0] as never), false);
     } finally {
       await b.stop();
       await r.stop();

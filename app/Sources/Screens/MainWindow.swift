@@ -51,8 +51,11 @@ public struct MainWindow: View {
     // The panel shows a thread only while the channel shown holds it.
     private var openThread: MessageThread? { Self.openThread(in: shown, key: thread) }
 
-    /// The thread the panel shows: `key` while `channel` holds it, else nil (the panel stays closed).
-    static func openThread(in channel: Channel?, key: String?) -> MessageThread? { key.flatMap { channel?.threads[$0] } }
+    /// The thread the panel shows: `key` while `channel` holds it, else nil (the panel stays closed). A thread that settles as a word or
+    /// as never run closes the panel: it has no composer to keep.
+    static func openThread(in channel: Channel?, key: String?) -> MessageThread? {
+        key.flatMap { channel?.threads[$0] }.flatMap { $0.isWord ? nil : $0 }
+    }
 
     // The channel shown: the one chosen while the model holds it, else the first, so channels that arrive later
     // or a relay recreated never leave the window on a channel that is gone.
