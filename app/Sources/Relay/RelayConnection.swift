@@ -34,6 +34,35 @@ public struct Enrolment: Sendable, CustomStringConvertible, CustomDebugStringCon
     public var debugDescription: String { description }
 }
 
+/// A recovery's connection (recovery design 2.3): the recovery key typed (its id, and the name its signing key is held under) and, once the
+/// questions are answered, the reset's inputs. With no `reset` the link reads the device log, tells it and stops; with one it builds the reset on each
+/// recovery connection itself, from the log that connection reads, until the relay serves this device (`RelayEvent.recovered`).
+public struct RecoverRequest: Sendable, Equatable {
+    public struct Reset: Sendable, Equatable {
+        public var proof: Data
+        public var trusted: [Data]
+        public var replacement: PairingRecoveryKeys?
+
+        public init(proof: Data, trusted: [Data], replacement: PairingRecoveryKeys?) { (self.proof, self.trusted, self.replacement) = (proof, trusted, replacement) }
+    }
+
+    public var key: Data
+    public var signName: String
+    public var reset: Reset?
+
+    public init(key: Data, signName: String, reset: Reset? = nil) { (self.key, self.signName, self.reset) = (key, signName, reset) }
+
+    var value: HostValue {
+        var o: [String: HostValue] = ["key": .object(["id": .bytes(key), "sign": .string(signName)])]
+        if let reset {
+            var r: [String: HostValue] = ["proof": .bytes(reset.proof), "trusted": .array(reset.trusted.map(HostValue.bytes))]
+            if let n = reset.replacement { r["replacement"] = .object(["signing": .bytes(n.signing), "receiving": .bytes(n.receiving)]) }
+            o["reset"] = .object(r)
+        }
+        return .object(o)
+    }
+}
+
 /// What the connection tells its owner: each dial, what the link delivers (its `View`, as a value), a bot's shown profile, and the end.
 public enum RelayEvent: Sendable {
     case dialing
@@ -47,6 +76,12 @@ public enum RelayEvent: Sendable {
     /// The relay refused the secret on a connection that carried it (reason 2): the link dropped it. The owner types it again and the
     /// app builds a new connection with that `Enrolment` (device pairing design 3.5); a setter on a running connection comes with the app's first-device flow.
     case enrolRefused
+    /// A recovery connection read the device log and the link stopped: the `recovery-log` effect, with `devices` (each with `id` and `active`) and `recoveries`.
+    case recoveryLog(HostValue)
+    /// A recovery connection ended with an answer: the `recovery` effect's `outcome`, a `refused` reason, a relay `code` or a `fault` text.
+    case recovery(HostValue)
+    /// The relay first served a link given a recovery's reset: the reset is in the log (recovery design 2.3 step 8).
+    case recovered
     /// A connection became ready: the relay was reached over TLS with its pinned key, before anything it answered.
     case reached
     /// A dial ended without ever becoming ready: nothing reached the relay on it.
@@ -98,6 +133,33 @@ public enum BuildOutcome: Sendable, Equatable {
     case refused(String)
 }
 
+/// What "done" needs of the link (recovery design 2.6): each epoch read with whether its key is held and who its seals are to, every recovery key the log named, and the current one.
+public struct RecoveryReading: Sendable, Equatable {
+    public struct Epoch: Sendable, Equatable {
+        public var channel: Data
+        public var epoch: Data
+        public var open: Bool
+        public var sealedTo: [Data]
+
+        public init(channel: Data, epoch: Data, open: Bool, sealedTo: [Data]) { (self.channel, self.epoch, self.open, self.sealedTo) = (channel, epoch, open, sealedTo) }
+
+        /// The link's `epochs` entry; nil for any other shape, since a reading that drops an epoch could declare done over it.
+        init?(_ value: HostValue) {
+            guard let channel = value["channel"]?.bytesValue, channel.count == 32, let epoch = value["epoch"]?.bytesValue, epoch.count == 32,
+                  case .bool(let open)? = value["open"], let list = value["sealedTo"]?.arrayValue else { return nil }
+            let sealed = list.compactMap(\.bytesValue)
+            guard sealed.count == list.count, sealed.allSatisfy({ $0.count == 32 }) else { return nil }
+            self.init(channel: channel, epoch: epoch, open: open, sealedTo: sealed)
+        }
+    }
+
+    public var epochs: [Epoch]
+    public var recoveries: [Data]
+    public var current: Data?
+
+    public init(epochs: [Epoch] = [], recoveries: [Data] = [], current: Data? = nil) { (self.epochs, self.recoveries, self.current) = (epochs, recoveries, current) }
+}
+
 enum Event: Sendable {
     case opened(Int, Data)
     case received(Int, Data)
@@ -107,6 +169,8 @@ enum Event: Sendable {
     case submit(UInt8, Data, Data, CheckedContinuation<SubmitOutcome, Error>)
     case count(CheckedContinuation<Int, Never>)
     case enrol(Enrolment, CheckedContinuation<Bool, Never>)
+    case hold(id: Data, receiving: String, CheckedContinuation<Bool, Never>)
+    case reading(CheckedContinuation<RecoveryReading?, Never>)
     case build(DeviceAct, CheckedContinuation<BuildOutcome, Error>)
     case createChannel(bot: Data, folder: String, CheckedContinuation<CreateOutcome, Error>)
     case send(channel: Data, draft: OutboxDraft, CheckedContinuation<SendOutcome, Error>)
@@ -205,11 +269,15 @@ public final class RelayConnection: @unchecked Sendable {
     private let endpoint: RelayEndpoint
     private var options: [String: HostValue] // `run` removes the enrolment secret once the link holds it
     private let linkStore: LinkStore
+    private let recover: HostValue? // given to the link by `recover` after it is made: the constructor's options do not carry it
     private let claimed = OSAllocatedUnfairLock(initialState: true) // this connection holds the store's claim
     // A store write flushes to the drive: it runs here, off the task's cooperative thread, and the task awaits it.
     private let writes = DispatchQueue(label: "pardner.relay.store")
     private let origin = ContinuousClock.now
     private let lifecycle = OSAllocatedUnfairLock(initialState: Lifecycle())
+    private let purposes = OSAllocatedUnfairLock<[String]>(initialState: [])
+    /// The purpose of each dial the link asked for (`active`, `upload`, `recover`), in order: for the tests of what a connection was given.
+    var dialPurposes: [String] { purposes.withLock { $0 } }
 
     private struct Lifecycle {
         var started = false
@@ -237,12 +305,12 @@ public final class RelayConnection: @unchecked Sendable {
     /// `store` holds the device's keys as `device.sign` and `device.receive`, and `host` was made on that store; `person`
     /// is the id the device was paired for. `linkStore` is the process's one store of the link's state (design 3.2: its
     /// lock lives as long as the process holds it), for the same keys and relay; a store that cannot be read now throws.
-    public convenience init(host: ProtocolHost, store: KeyStore, person: Data, endpoint: RelayEndpoint, linkStore: LinkStore, enrol: Enrolment? = nil) throws {
-        try self.init(host: host, store: store, person: person, endpoint: endpoint, linkStore: linkStore, constants: [:], enrol: enrol)
+    public convenience init(host: ProtocolHost, store: KeyStore, person: Data, endpoint: RelayEndpoint, linkStore: LinkStore, enrol: Enrolment? = nil, recover: RecoverRequest? = nil) throws {
+        try self.init(host: host, store: store, person: person, endpoint: endpoint, linkStore: linkStore, constants: [:], enrol: enrol, recover: recover)
     }
 
     /// For tests, through `@testable import`: `constants` shortens the link's `first`, `max`, `patience` and `ask`.
-    init(host: ProtocolHost, store: KeyStore, person: Data, endpoint: RelayEndpoint, linkStore: LinkStore, constants: [String: HostValue], enrol: Enrolment? = nil) throws {
+    init(host: ProtocolHost, store: KeyStore, person: Data, endpoint: RelayEndpoint, linkStore: LinkStore, constants: [String: HostValue], enrol: Enrolment? = nil, recover: RecoverRequest? = nil) throws {
         self.host = host
         self.endpoint = endpoint
         let signing = try store.publicKey("device.sign"), receiving = try store.publicKey("device.receive")
@@ -262,6 +330,7 @@ public final class RelayConnection: @unchecked Sendable {
             throw error
         }
         if let enrol { options["enrol"] = .object(["secret": .bytes(enrol.secret), "signed": .bytes(enrol.signed), "sig": .bytes(enrol.sig)]) }
+        self.recover = recover?.value
         if !constants.isEmpty { options["constants"] = .object(constants) }
         self.options = options
         (events, out) = AsyncStream.makeStream(of: RelayEvent.self)
@@ -319,6 +388,20 @@ public final class RelayConnection: @unchecked Sendable {
         }
     }
 
+    /// Gives the link a recovery key held under `receiving`, for opening the epochs sealed to it (recovery design 2.6): the epochs it opens are delivered at once. False when the link refused it or the connection ended.
+    public func holdRecovery(id: Data, receiving: String) async -> Bool {
+        await withCheckedContinuation { continuation in
+            if case .terminated = feed.yield(.hold(id: id, receiving: receiving, continuation)) { continuation.resume(returning: false) }
+        }
+    }
+
+    /// The epochs read, the recovery keys the log named and the current one; nil when the connection ended.
+    public func recoveryReading() async -> RecoveryReading? {
+        await withCheckedContinuation { continuation in
+            if case .terminated = feed.yield(.reading(continuation)) { continuation.resume(returning: nil) }
+        }
+    }
+
     /// Queues a message in a channel's outbox (new channel design 3.3); `.ended` when the connection has ended.
     public func send(channel: Data, draft: OutboxDraft) async throws -> SendOutcome {
         try await withCheckedThrowingContinuation { continuation in
@@ -353,6 +436,9 @@ public final class RelayConnection: @unchecked Sendable {
         do {
             link = try await host.construct("appLink", [.object(options)])
             options["enrol"] = nil
+            if let recover {
+                guard try await host.call(link!, "recover", [recover])["ok"] == .bool(true) else { throw HostError.faulted("the link refused the recovery's options") }
+            }
             // An exporter under another label gives a binding no relay accepts: fail loudly, never dial.
             guard let exporter = try await host.call(link!, "exporterLabel").stringValue, !exporter.isEmpty else {
                 throw HostError.faulted("the protocol script gave no exporter label")
@@ -390,6 +476,28 @@ public final class RelayConnection: @unchecked Sendable {
             guard taken["ok"] == .bool(true) else { continuation.resume(returning: false); return }
             continuation.resume(returning: true)
             try await perform(try await call("networkUp")) // a back-off cut short, as when the network returns
+        case .hold(let id, let receiving, let continuation):
+            let held: HostValue
+            do { held = try await call("holdRecovery", [.object(["id": .bytes(id), "receiving": .string(receiving)])]) } catch {
+                continuation.resume(returning: false)
+                throw error
+            }
+            guard held["ok"] == .bool(true) else { return continuation.resume(returning: false) }
+            continuation.resume(returning: true)
+            try await perform(held["effects"] ?? .null)
+        case .reading(let continuation):
+            do {
+                let epochs = (try await host.call(link!, "epochs")).arrayValue ?? []
+                let parsed = epochs.compactMap(RecoveryReading.Epoch.init)
+                let ids = (try await host.call(link!, "recoveries")).arrayValue ?? []
+                let recoveries = ids.compactMap(\.bytesValue)
+                // A value of another shape refuses the whole reading: done is never declared over an epoch or a key that was dropped.
+                guard parsed.count == epochs.count, recoveries.count == ids.count else { return continuation.resume(returning: nil) }
+                continuation.resume(returning: RecoveryReading(epochs: parsed, recoveries: recoveries, current: try await host.call(link!, "currentRecovery").bytesValue))
+            } catch {
+                continuation.resume(returning: nil)
+                throw error
+            }
         case .build(let act, let continuation):
             do { continuation.resume(returning: try await built(act)) } catch {
                 continuation.resume(throwing: error)
@@ -499,7 +607,7 @@ public final class RelayConnection: @unchecked Sendable {
     /// The effects in order.
     private func perform(_ effects: HostValue) async throws { try await perform(effects.arrayValue ?? []) }
 
-    private func perform(_ effects: [HostValue]) async throws {
+    func perform(_ effects: [HostValue]) async throws { // not private: the tests give it the effects a recovery connection ends on
         for fx in effects {
             switch fx["do"]?.stringValue {
             case "dial": dial(fx)
@@ -537,6 +645,15 @@ public final class RelayConnection: @unchecked Sendable {
                 }
                 if firstOutboxWrite == nil { firstOutboxWrite = true }
                 try await perform(try await call("written", [.bool(stored)]))
+            case "recovery-log":
+                out.yield(.recoveryLog(fx))
+                final = true // the link stopped itself after the log: the connection gives the store's claim back
+            case "recovery":
+                let outcome = fx["outcome"] ?? .null
+                out.yield(.recovery(outcome))
+                if outcome["fault"] != nil || [2, 3, 6].contains(outcome["refused"]?.numberValue.map(Int.init)) { final = true } // the link stops after these
+
+            case "recovered": out.yield(.recovered)
             case "enrolled": out.yield(.enrolled)
             case "enrol-refused": out.yield(.enrolRefused)
             case "persist":
@@ -607,6 +724,7 @@ public final class RelayConnection: @unchecked Sendable {
     private func dial(_ fx: HostValue) {
         guard let conn = fx["conn"]?.numberValue.map({ Int($0) }) else { return }
         out.yield(.dialing)
+        purposes.withLock { $0.append(fx["purpose"]?.stringValue ?? "") }
         let tls = NWProtocolTLS.Options()
         let security = tls.securityProtocolOptions
         sec_protocol_options_set_min_tls_protocol_version(security, .TLSv13)
@@ -647,6 +765,8 @@ public final class RelayConnection: @unchecked Sendable {
             case .submit(_, _, _, let continuation): continuation.resume(returning: .ended)
             case .count(let continuation): continuation.resume(returning: 0)
             case .enrol(_, let continuation): continuation.resume(returning: false)
+            case .hold(_, _, let continuation): continuation.resume(returning: false)
+            case .reading(let continuation): continuation.resume(returning: nil)
             case .build(_, let continuation): continuation.resume(returning: .refused("ended"))
             case .createChannel(_, _, let continuation): continuation.resume(returning: .ended)
             case .send(_, _, let continuation): continuation.resume(returning: .ended)

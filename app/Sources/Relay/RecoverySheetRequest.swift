@@ -12,13 +12,16 @@ final class SheetGate: @unchecked Sendable { // sound: `result` is read and writ
     private let answered = DispatchSemaphore(value: 0)
     private var result: Bool?
 
-    /// Records the answer once; later ones change nothing. From another thread it waits for a draw in progress to end.
-    func answer(_ confirmed: Bool) {
+    /// Records the answer once; later ones change nothing. From another thread it waits for a draw in progress to end. True when this call recorded it.
+    @discardableResult
+    func answer(_ confirmed: Bool, whenRecorded: () -> Void = {}) -> Bool {
         state.lock()
         defer { state.unlock() }
-        guard result == nil else { return }
+        guard result == nil else { return false }
         result = confirmed
+        whenRecorded() // under the lock: nothing that runs `whileOpen` is inside it
         answered.signal()
+        return true
     }
 
     /// Blocks until answered. It returns only after any `whileOpen` body has ended, even one that answered itself, so the

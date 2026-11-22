@@ -13,7 +13,8 @@ public struct RecoverySheetView: View {
         VStack(alignment: .leading, spacing: PardnerMetrics.gap * 2) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Write down your recovery key").font(PardnerFont.display(size: 22, weight: .bold))
-                Text("If every device of yours is lost, this key opens your history. Write it down and keep it away from your Macs.")
+                Text(model.isRecovery ? RecoveryScreenWords.newKeyOnSheet + " Write it down and keep it away from your Macs."
+                                      : "If every device of yours is lost, this key opens your history. Write it down and keep it away from your Macs.")
                     .foregroundStyle(PardnerColor.muted)
             }
             publicPart
@@ -24,8 +25,8 @@ public struct RecoverySheetView: View {
                     .foregroundStyle(PardnerColor.delText).font(PardnerFont.ui(size: 13, weight: .regular))
             }
             HStack {
-                Text("Recovery with this key comes in a later version of Pardner.")
-                    .font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                Text(model.isRecovery ? RecoveryScreenWords.keepKeys : "")
+                    .font(PardnerFont.ui(size: 12, weight: .semibold)).foregroundStyle(PardnerColor.agentText)
                 Spacer()
                 Button("Cancel") { model.close() }
                     .keyboardShortcut(.cancelAction).buttonStyle(PardnerButton(prominent: false))
@@ -77,7 +78,7 @@ public struct RecoverySheetView: View {
     private var typedBack: some View {
         VStack(alignment: .leading, spacing: PardnerMetrics.gap) {
             Label("Type it back")
-            KeyCapture(model: model)
+            KeyCapture(model: model, label: "Type the recovery key back")
                 .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
                 .padding(PardnerMetrics.gap * 1.5).card()
             Text("\(model.typed) of \(RecoverySheetModel.symbolCount) characters. Case and dashes do not matter.")

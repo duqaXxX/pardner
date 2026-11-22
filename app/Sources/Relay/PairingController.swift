@@ -28,6 +28,8 @@ public protocol RelayLinking: AnyObject, Sendable {
     func build(_ act: DeviceAct) async throws -> BuildOutcome
     func createChannel(bot: Data, folder: String) async throws -> CreateOutcome
     func send(channel: Data, draft: OutboxDraft) async throws -> SendOutcome
+    func holdRecovery(id: Data, receiving: String) async -> Bool
+    func recoveryReading() async -> RecoveryReading?
 }
 
 extension RelayConnection: RelayLinking {}
@@ -36,6 +38,8 @@ extension RelayConnection: RelayLinking {}
 public enum UnpairedNote: Sendable, Equatable {
     /// A sheet written for the attempt that stopped opens nothing: the enrolment secret was in memory only (design 3.5).
     case staleSheet
+    /// A new recovery key made in a recovery that stopped opens nothing (recovery design 2.7).
+    case staleRecoveryKey
 }
 
 public enum PairingFaultKind: Sendable, Equatable {
@@ -64,6 +68,8 @@ public enum PairingPhase: Sendable, Equatable {
     case enrolling(asksSecret: Bool)
     /// The join waits for the other device's add (design 3.7).
     case joining(JoiningInfo)
+    /// A recovery with the recovery key waits at this step (recovery design 2.3).
+    case recovering(RecoveryStep)
     case paired
     /// This device was removed (design 3.10): the only action is `pairAgain()`.
     case removed
@@ -147,7 +153,7 @@ public actor PairingController {
     public static let unreachableWarning = "The relay may already hold your first entry and then has an owner nobody holds. The way back is pardner relay init on a new directory, or later the recovery sheet."
 
     public typealias MakeHost = @Sendable (any KeyStore, RecoveryPerson) async throws -> ProtocolHost
-    public typealias Connect = @Sendable (ProtocolHost, any KeyStore, Data, RelayEndpoint, LinkStore, Enrolment?) throws -> any RelayLinking
+    public typealias Connect = @Sendable (ProtocolHost, any KeyStore, Data, RelayEndpoint, LinkStore, Enrolment?, RecoverRequest?) throws -> any RelayLinking
 
     static let signName = "device.sign", receiveName = "device.receive", recoveryName = "recovery"
 
@@ -195,6 +201,12 @@ public actor PairingController {
     var acceptedOn: Int?
     var heldAtLength: Int?
     var gate = Gate()
+    var attempt = RecoveryAttempt()
+    /// The recovery keys given to the link for opening, in order, with the name each is held under; and the keys the person said they no longer have. Memory only.
+    var heldRecovery: [(id: Data, name: String)] = []
+    var gaveUp = Set<Data>()
+    var earlierKeys = 0 // the n of `recovery.earlier.<n>`, from 1
+    var atRest = false // a rest of this connection was seen: what the link read is all it will read until the log moves
     /// What the Devices screen reads; every change is also yielded on `deviceStates`.
     public internal(set) var deviceList = DevicesState() { didSet { deviceOut.yield(deviceList) } }
     public nonisolated let deviceStates: AsyncStream<DevicesState>
@@ -217,8 +229,8 @@ public actor PairingController {
     /// The app's own script and a `RelayConnection`.
     public static func bundledHost(_ keys: any KeyStore, _ person: RecoveryPerson) async throws -> ProtocolHost { try await ProtocolHost(store: keys, person: person) }
 
-    public static func relayConnection(_ host: ProtocolHost, _ keys: any KeyStore, _ person: Data, _ endpoint: RelayEndpoint, _ linkStore: LinkStore, _ enrolment: Enrolment?) throws -> any RelayLinking {
-        try RelayConnection(host: host, store: keys, person: person, endpoint: endpoint, linkStore: linkStore, enrol: enrolment)
+    public static func relayConnection(_ host: ProtocolHost, _ keys: any KeyStore, _ person: Data, _ endpoint: RelayEndpoint, _ linkStore: LinkStore, _ enrolment: Enrolment?, _ recover: RecoverRequest?) throws -> any RelayLinking {
+        try RelayConnection(host: host, store: keys, person: person, endpoint: endpoint, linkStore: linkStore, enrol: enrolment, recover: recover)
     }
 
     // MARK: launch (design 3.5 table, 3.10, 4.1)
@@ -240,10 +252,11 @@ public actor PairingController {
                 return
             }
             switch state.stage {
+            case .keysMade(.recover), .recovering, .recovered: try await launchRecovery(state)
             case .keysMade(let intent):
                 // No sheet and no secret survive the stop (keys first, the store last): the attempt starts over.
                 try await eraseAll()
-                phase = .unpaired(intent == .enrol ? .staleSheet : nil)
+                phase = .unpaired(intent == .enrol ? .staleSheet : nil) // `.recover` is taken above
             case .enrolling, .joining, .paired:
                 guard keys.has(Self.signName), keys.has(Self.receiveName) else { return phase = .keysMissing }
                 stored = state
@@ -295,7 +308,7 @@ public actor PairingController {
                 recoverySigning: recovery.signing, recoveryReceiving: recovery.receiving)
             // Nothing that carries entry 0 is written before the sheet is confirmed (step 4).
             guard !cancelRequested else { return await abandon() }
-            let context = "Person: \(StoreDisk.hex(genesis.id))\nRelay: \(relay.host):\(relay.port)\nRelay key: \(StoreDisk.hex(relay.key))"
+            let context = "Person: \(StoreDisk.hex(genesis.id))\nRelay: \(relay.address)\nRelay key: \(StoreDisk.hex(relay.key))"
             let confirmed = try await host.showRecovery(Self.recoveryName, context: context)
             guard confirmed, !cancelRequested else { return await abandon() }
             state.stage = .enrolling
@@ -341,6 +354,8 @@ public actor PairingController {
             cancelRequested = true
             request.answer(false)
             return .abandoning
+        case .recovering:
+            return await cancelRecovery()
         case .joining:
             return await eraseForCancel() // the add that lands later names a device nobody holds: the person removes it (design 3.7, step 5)
         case .enrolling:
@@ -409,7 +424,7 @@ public actor PairingController {
     public func submit(kind: UInt8, signed: Data, sig: Data) async throws -> SubmitOutcome {
         guard let link else { return .ended }
         let outcome = try await link.submit(kind: kind, signed: signed, sig: sig)
-        if outcome == .code(5), stored?.stage == .paired { await markRemoved() }
+        if outcome == .code(5), removable { await markRemoved() }
         return outcome
     }
 
@@ -438,6 +453,7 @@ public actor PairingController {
         cancelRequested = true
         isShutDown = true
         if case .showingSheet(let request) = phase { request.answer(false) }
+        if case .recovering(.typeKey(let request)) = phase { request.answer(false) }
         await stopConnection()
         phaseOut.finish()
         readingOut.finish()
@@ -465,12 +481,17 @@ public actor PairingController {
         default: break
         }
         switch event {
-        case .dialing: secretRetyped = false // `refused` stays until the person types the secret again: no later dial carries `enrol`
+        case .dialing:
+            atRest = false // a new dial reads again from the cursor: nothing is declared from the partial read before the next rest
+            secretRetyped = false // `refused` stays until the person types the secret again: no later dial carries `enrol`
         case .reached: reachable = true
         case .unreached: reachable = false
         case .enrolled: await becomePaired()
         // The link gives `enrol-refused` and then the delivered `refused 2`: the person is asked once (the app-link ledger, "For P3").
         case .enrolRefused: askForSecret()
+        case .recoveryLog(let effect): await recoveryLogRead(effect)
+        case .recovery(let outcome): await recoveryAnswered(outcome)
+        case .recovered: await recoveryPlaced()
         case .devices(let effect):
             reachable = true
             await becomePaired() // a restart never gets `enrolled`: the first reading effect says entry 0 was placed
@@ -480,10 +501,12 @@ public actor PairingController {
             switch (view["do"]?.stringValue, view["reason"]?.numberValue.map(Int.init)) {
             case ("rest", _):
                 await becomePaired()
+                atRest = true
+                await evaluateRecovery()
                 await settle() // every rest: a pending entry is read back, sent again or rebuilt (design 3.6)
             case ("refused", 2?) where stored?.stage == .enrolling: askForSecret()
             case ("refused", 2?) where stored?.stage == .joining: waitForAdd()
-            case ("refused", 1?) where stored?.stage == .paired || stored?.stage == .joining: await markRemoved()
+            case ("refused", 1?) where removable: await markRemoved()
             case ("put-back", _): await linkEnded(.putBack(PairingPhase.putBackAdvice))
             case ("fault", _): await linkEnded(.linkFaulted(PairingPhase.linkFaultAdvice))
             default: break
@@ -533,6 +556,7 @@ public actor PairingController {
 
     /// A host that faulted is over for good: the next action makes a new one.
     func hostFaulted(_ message: String) async {
+        await dropRecoveryKeys()
         host = nil
         await stopConnection()
         phase = .fault(.failed, message)
@@ -540,6 +564,7 @@ public actor PairingController {
 
     /// The link delivered a final view and ended: nothing is erased.
     private func linkEnded(_ ended: PairingPhase) async {
+        await dropRecoveryKeys()
         await stopConnection()
         phase = ended
     }
@@ -566,7 +591,11 @@ public actor PairingController {
         phase = .paired
     }
 
+    /// A stage whose device the relay may refuse as removed (design 3.10, recovery design 2.5).
+    var removable: Bool { [.paired, .joining, .recovering, .recovered].contains(stored?.stage) }
+
     func markRemoved() async {
+        await dropRecoveryKeys() // a removal is a stop of a recovery too (recovery design 2.2)
         await stopConnection()
         phase = .removed
     }
@@ -582,26 +611,42 @@ public actor PairingController {
             let request = RecoverySheetRequest(context: context, secret: secret, gate: gate)
             Task { await self.present(request) }
             return gate.wait()
-        }, enter: { _ in nil })
+        }, enter: { [weak self] secret in
+            guard let self else { return nil }
+            let gate = SheetGate()
+            let request = RecoveryEntryRequest(gate: gate)
+            Task { await self.presentEntry(request) }
+            guard gate.wait() else { return nil }
+            defer { request.entry.wipe() }
+            do { try request.entry.read(into: secret) } catch { return nil } // a key that does not read is a decline
+            return 32
+        })
         let made = try await makeHost(keys, person)
+        forgetHeldKeys() // a new host holds none of the recovery keys the last one did
         host = made
         return made
     }
 
     /// The sheet reached the actor: shown, or declined when the attempt is already over.
     private func present(_ request: RecoverySheetRequest) {
-        guard case .settingUp = phase, !cancelRequested else { return request.answer(false) }
+        switch phase {
+        case .settingUp, .recovering(.starting): break
+        default: return request.answer(false)
+        }
+        guard !cancelRequested else { return request.answer(false) }
         phase = .showingSheet(request)
     }
 
-    func startConnection(_ state: PairingState, enrolment: Enrolment?) async throws {
+    func startConnection(_ state: PairingState, enrolment: Enrolment?, recover: RecoverRequest? = nil) async throws {
         guard let person = state.person else { throw PairingFault(description: "the pairing holds no person") }
         let host = try await hostMade()
         guard !isShutDown else { return } // the app quit while the host was made: no connection starts after the streams finished
         let linkStore = try LinkStore(folder: linkFolder, identity: LinkIdentity(
             signing: try keys.publicKey(Self.signName), receiving: try keys.publicKey(Self.receiveName), relay: state.relay.key))
-        let connection = try connect(host, keys, person, RelayEndpoint(host: state.relay.host, port: state.relay.port, pin: state.relay.key), linkStore, enrolment)
+        let connection = try connect(host, keys, person, RelayEndpoint(host: state.relay.host, port: state.relay.port, pin: state.relay.key), linkStore, enrolment, recover)
         connectionID += 1
+        atRest = false
+        forgetHeldKeys() // a new link holds no recovery key
         let id = connectionID
         // The new link reads the sequence from position 0: the model starts empty and is rebuilt in order, rather than patched one
         // position at a time over what the last connection drew (a rebuild of the channel per message).
@@ -617,6 +662,7 @@ public actor PairingController {
     /// The connection ended and its store given back, so the link's files can be erased.
     func stopConnection() async {
         connectionID += 1
+        atRest = false
         // What an ended connection told is not the next one's, except the refusals the screen has not taken: a stop must not lose them (`eraseAll` does).
         let untaken = channels.undelivered
         channels = ChannelsState()
@@ -644,15 +690,16 @@ public actor PairingController {
 
     /// Keys first, the link's state, the pairing last: a stop between leaves a store that the next launch reads again. It takes its turn
     /// on the devices queue, so an act that copied the store and waits on the link cannot write it back after the erase.
-    func eraseAll() async throws {
+    func eraseAll(keepingPairing: Bool = false) async throws {
         try await serially {
             await stopConnection()
+            await dropRecoveryKeys()
             // Once the connection is stopped nothing of it is yielded again; the next pairing may read another person's sequence, so
             // nothing read under this one stays drawn, even when an erase below fails.
             readingOut.yield(.reset)
             for name in [Self.signName, Self.receiveName] where keys.has(name) { try keys.delete(name) }
             try LinkStore.erase(folder: linkFolder)
-            try pairing.erase()
+            if !keepingPairing { try pairing.erase() }
             stored = nil
             (snapshot, joiningScreen, deviceList, channels) = (nil, nil, DevicesState(), ChannelsState())
         }

@@ -67,7 +67,7 @@ final class DevicesControllerTests: XCTestCase {
         return PairingController(
             keys: keys, pairing: pairing, linkFolder: linkFolder,
             makeHost: { keys, person in try await ProtocolHost(scriptPath: script, store: keys, person: person) },
-            connect: { _, _, _, _, _, enrolment in
+            connect: { _, _, _, _, _, enrolment, _ in
                 let link = FakeLink()
                 links.all.append(link)
                 links.enrolments.append(enrolment)

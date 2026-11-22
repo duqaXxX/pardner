@@ -6,13 +6,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BotReader } from "../../src/protocol/bot-reader.ts";
+import { bytesEqual } from "../../src/protocol/bytes.ts";
 import { recipientsOf } from "../../src/protocol/device-log.ts";
 import { sealEpochKey } from "../../src/protocol/epochs.ts";
 import { Run } from "../../src/protocol/outbox.ts";
 import { openAt, Reading } from "../../src/protocol/reading.ts";
 import { platform } from "../relay/support.ts";
 import { fill, keyed, person } from "../relay/world.ts";
-import { historySeal, kinds, play, prompt, scene, Wire } from "./reading-world.ts";
+import { historySeal, kinds, play, prompt, receivingOf, scene, Wire } from "./reading-world.ts";
 
 /** A reading that has been served by `wire` and has read it to the end. */
 function read(s = scene()) {
@@ -571,4 +572,81 @@ test("openAt: the epoch's device heads are the log's length and no member-set ch
     true,
     "a change the epoch already counted",
   );
+});
+
+// A device placed by a reset reads before any seal is made to it: the recovery key's own seal opens the past (security design 5.3).
+function recovering(s = scene()) {
+  const fresh = keyed();
+  const who = { ...s.who, self: fresh.id, receiving: receivingOf(fresh) };
+  const identity = { id: s.alice.recovery.recoveryId, receiving: receivingOf(s.alice.recovery) };
+  return { fresh, who, identity };
+}
+
+test("a second identity of the reading, a recovery key, opens an epoch by its seal when the device has none", () => {
+  const s = scene();
+  const epoch = s.epoch();
+  const { who, identity } = recovering(s);
+  const alone = new Reading(who);
+  play(alone, [s.wire.served(), ...s.wire.read()]);
+  assert.equal(alone.channel(s.channel)?.key, undefined, "no seal to this device");
+  const r = new Reading({ ...who, recoveries: [identity] });
+  play(r, [s.wire.served(), ...s.wire.read()]);
+  assert.deepEqual(r.channel(s.channel)?.key, epoch.key);
+  const [state] = r.epochStates();
+  assert.equal(state?.open, true);
+  assert.equal(state?.sealedTo.length, recipientsOf(platform, s.log).length);
+  assert.ok(
+    state?.sealedTo.some((id) => bytesEqual(id, identity.id)),
+    "its entry names the recovery key",
+  );
+});
+
+test("a recovery key held after the read opens the epochs it was sealed in; a seal that fails the commitment is left aside", () => {
+  const s = scene();
+  const epoch = s.epoch();
+  const { who, identity } = recovering(s);
+  const stray = keyed();
+  const r = new Reading(who);
+  play(r, [s.wire.served(), ...s.wire.read()]);
+  assert.equal(r.channel(s.channel)?.key, undefined);
+  r.hold({ id: s.alice.recovery.recoveryId, receiving: receivingOf(stray) }); // the id names the key; the key held is another
+  assert.equal(
+    r.channel(s.channel)?.key,
+    undefined,
+    "a key that does not open the seal opens nothing",
+  );
+  assert.equal(r.epochStates()[0]?.open, false);
+  r.hold(identity);
+  assert.deepEqual(r.channel(s.channel)?.key, epoch.key);
+  assert.equal(r.epochStates()[0]?.open, true);
+});
+
+test("a history seal to a recovery key opens an epoch that its entry sealed to none the device holds", () => {
+  const s = scene();
+  const wrong = platform.random(32);
+  const seals = recipientsOf(platform, s.log).map((x) => {
+    const sealed = sealEpochKey(platform, s.channel, undefined, x.id, x.receiving, wrong);
+    assert.ok(sealed.ok);
+    return sealed.value;
+  });
+  const epoch = s.epoch({ seals });
+  const held = s.epochs.at(-1);
+  assert.ok(held);
+  const { who, identity } = recovering(s);
+  const next = keyed();
+  s.wire.seals = [historySeal(held, s.alice.first, { ...next, id: next.recoveryId }, epoch.key)];
+  const r = new Reading({
+    ...who,
+    recoveries: [{ id: next.recoveryId, receiving: receivingOf(next) }],
+  });
+  play(r, [s.wire.served(), ...s.wire.read()]);
+  assert.deepEqual(r.channel(s.channel)?.key, epoch.key);
+  assert.deepEqual(
+    r.epochStates()[0]?.sealedTo.at(-1),
+    next.recoveryId,
+    "the history seal counts as a seal to it",
+  );
+  const without = new Reading({ ...who, recoveries: [identity] });
+  play(without, [s.wire.served(), ...s.wire.read()]);
+  assert.equal(without.channel(s.channel)?.key, undefined);
 });

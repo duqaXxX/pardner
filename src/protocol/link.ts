@@ -12,6 +12,7 @@ import type { Effect, LinkState, Persist } from "./link-types.ts";
 import type { Bytes } from "./platform.ts";
 import { type Proof, sessionOf, signProof } from "./proofs.ts";
 import { type Kept, type Out, Reading, type Who } from "./reading.ts";
+import { type RecoverOptions, Recovery, shapedRecover } from "./recover.ts";
 import { Requests } from "./requests.ts";
 import { fail, ok, type Result } from "./result.ts";
 import { type Outcome, Upload } from "./upload.ts";
@@ -42,6 +43,12 @@ export interface LinkOptions {
    * or a refusal 2 on a connection that carried it (device pairing design 3.5). A value that cannot be framed throws a `RangeError`.
    */
   enrol?: Enrol;
+  /**
+   * A recovery (recovery design 2.3): without `reset` the link reads the device log on a recovery connection, tells it and stops;
+   * with one every connection tries `prove-active` first, and a refusal that is not a removal sends the reset on a recovery connection
+   * of its own, until the first `served` (see `RecoverOptions`).
+   */
+  recover?: RecoverOptions;
   /** Tests shorten these; the drivers never do. */
   constants?: Partial<{ first: number; max: number; patience: number; ask: number }>;
 }
@@ -61,10 +68,10 @@ const snap = (k: Kept) =>
 export class Link {
   /** The Reading the link drives, for the driver and its logs to read and never to change. */
   readonly reading: Reading;
-  #o: Omit<LinkOptions, "enrol">; // the secret is kept in `#enrol` alone, which `served` empties
+  #o: Omit<LinkOptions, "enrol" | "recover">; // the secret is kept in `#enrol` alone, which `served` empties
   #c: Required<NonNullable<LinkOptions["constants"]>>;
   #s: LinkState = "unstarted";
-  #up: Upload | undefined; // the give-back connection while the link is `uploading`
+  #up: Upload | Recovery | undefined; // the give-back or recovery connection while the link is `uploading` or `recovering`
   #conn = 0; // the one current connection; 0 when none
   #count = 0;
   #proven = false; // a proof was sent on it: the frames now decode and encode as proven
@@ -72,6 +79,8 @@ export class Link {
   #enrolled = false; // the link told `enrolled`: the setter takes nothing more
   #enrol: Enrol | undefined; // dropped at the first `served` (entry 0 was placed) or a refusal 2 that followed it
   #carried = false; // the current connection sent it
+  #recover: RecoverOptions | undefined; // dropped at the first `served` of a reset recovery
+  #next: "active" | "recover" = "active"; // the purpose of the next dial: a reading recovery stays on `recover`, a reset one goes there only after a refusal
   #cutter = new FrameCutter();
   // A `persist` waits for `persisted`: no frame is cut meanwhile, and `next` is the rest of the call
   // that emitted it.
@@ -90,7 +99,7 @@ export class Link {
   #rested = false;
 
   constructor(options: LinkOptions) {
-    const { enrol, ...rest } = options;
+    const { enrol, recover, ...rest } = options;
     const { who, kept, stored = {}, constants } = rest;
     if (enrol && !framable(enrol))
       throw new RangeError(
@@ -98,6 +107,8 @@ export class Link {
       );
     this.#o = rest;
     this.#enrol = enrol;
+    if (recover && !this.recover(recover).ok)
+      throw new RangeError("recover: a key id, a proof and keys of their lengths");
     this.#c = { first: 1000, max: 60_000, patience: 30_000, ask: 600_000, ...constants };
     this.#delay = this.#c.first;
     this.#reqs = new Requests(this.#c.patience);
@@ -110,6 +121,13 @@ export class Link {
   enrol(value: Enrol): Result<undefined> {
     if (this.#enrolled || !framable(value)) return fail("bad-input");
     this.#enrol = value;
+    return ok(undefined);
+  }
+
+  /** A recovery for a link not yet started, as the option gives it; `bad-input` once the link started. */
+  recover(value: RecoverOptions): Result<undefined> {
+    if (this.#s !== "unstarted" || !shapedRecover(value)) return fail("bad-input");
+    [this.#recover, this.#next] = [value, value.reset ? "active" : "recover"];
     return ok(undefined);
   }
 
@@ -127,7 +145,7 @@ export class Link {
       this.#s = state;
       const out: Out = state === "fault" ? { do: state, why: "stored" } : { do: state };
       fx.push({ do: "deliver", out });
-    } else this.#dial("active", now, fx);
+    } else this.#dial(this.#next, now, fx);
     return this.#finish(fx);
   }
 
@@ -184,7 +202,7 @@ export class Link {
     // a state with no deadline (unstarted, final) does nothing.
     if (this.#reqs.late(now).length) this.#end(now, fx, this.#late(now));
     else if (now >= (this.#own() ?? Infinity)) {
-      if (this.#s === "waiting") this.#dial("active", now, fx);
+      if (this.#s === "waiting") this.#dial(this.#next, now, fx);
       else if (this.#s === "rest" && !this.#asked) this.#ask(now, fx);
       else this.#end(now, fx, this.#late(now));
     }
@@ -194,7 +212,7 @@ export class Link {
   /** The network came back (the app only): a dead connection is found in `patience`, a back-off cut short. */
   networkUp(now: number): Effect[] {
     const fx = this.#fx();
-    if (this.#s === "waiting" && !this.#slow) this.#dial("active", now, fx);
+    if (this.#s === "waiting" && !this.#slow) this.#dial(this.#next, now, fx);
     else if ((this.#s === "reading" || this.#s === "rest") && !this.#asked) this.#ask(now, fx);
     return this.#finish(fx);
   }
@@ -263,13 +281,22 @@ export class Link {
     }
   }
 
-  #dial(purpose: "active" | "upload", now: number, fx: Effect[]): void {
+  #dial(purpose: "active" | "upload" | "recover", now: number, fx: Effect[]): void {
     [this.#conn, this.#proven, this.#carried] = [++this.#count, false, false];
-    this.#s = purpose === "upload" ? "uploading" : "dialing";
+    this.#s = { active: "dialing", upload: "uploading", recover: "recovering" }[
+      purpose
+    ] as LinkState;
     this.#until = now + this.#c.patience;
     if (purpose === "upload") {
       const head = this.reading.kept.head as NonNullable<Kept["head"]>;
       this.#up = new Upload({ ...this.#o, head, patience: this.#c.patience }, now);
+    }
+    if (purpose === "recover") {
+      this.#up = new Recovery(
+        { ...this.#o, ...(this.#recover as RecoverOptions), patience: this.#c.patience },
+        now,
+      );
+      if (this.#recover?.reset) this.#next = "active"; // whatever ends it, the next connection tries `prove-active` again
     }
     fx.push({ do: "dial", conn: this.#conn, purpose });
   }
@@ -293,8 +320,10 @@ export class Link {
 
   /** The `why` of the deadline that passed at `now`: what the link was waiting for. */
   #late(now: number): string {
-    // An upload waits for the hello until its proof is sent, then for the answer.
-    const give = this.#proven ? "answer to the give-back" : "hello";
+    // An upload or a recovery waits for the hello until its proof is sent, then for the answer.
+    const give = this.#proven
+      ? `answer to the ${this.#s === "recovering" ? "recovery" : "give-back"}`
+      : "hello";
     const waits = this.#reqs.late(now).length
       ? "answer to a request"
       : ((this.#up ? give : WAITS[this.#s]) ?? "frame");
@@ -344,6 +373,10 @@ export class Link {
     const r = this.reading;
     if (this.#s === "hello" && f.type === "hello") return void this.#prove(f.relayNonce, now, fx);
     this.#seen = now;
+    if (f.type === "served" && this.#recover?.reset) {
+      this.#recover = undefined; // the reset is in the log: an ordinary link from here
+      fx.push({ do: "recovered" });
+    }
     if (f.type === "served" && this.#enrol) {
       this.#enrol = undefined;
       this.#enrolled = true;
@@ -374,7 +407,7 @@ export class Link {
   }
 
   /** The upload's frames to send, or its end: the Reading hears the outcome in `#end`. */
-  #upload(up: Upload, f: Frame, now: number, fx: Effect[]): void {
+  #upload(up: Upload | Recovery, f: Frame, now: number, fx: Effect[]): void {
     const step = up.frame(f, now);
     if (step && "send" in step) for (const g of step.send) this.#send(g, fx);
     else if (step) this.#end(now, fx, true, step.done);
@@ -424,6 +457,8 @@ export class Link {
         break;
       }
       case "refused":
+        // Not a removal: the device is not in the log yet, or the reset is what the relay still waits for.
+        if (this.#recover?.reset && out.reason !== 1) this.#next = "recover";
         this.#slow = [1, 5].includes(out.reason) || (out.reason === 2 && !!this.reading.kept.head);
         // The secret did not hold (3.5): sent again on the back-off it would earn a ban, so the app is asked for it.
         if (out.reason === 2 && this.#carried) {
@@ -448,9 +483,20 @@ export class Link {
   /** Everything a drop does (2.1, 9), and the upload's end (10); `close` is true, or the reason, to close the socket too. */
   #end(now: number, fx: Effect[], close: boolean | string, outcome?: Outcome): void {
     // An upload connection ends with its answer: the Reading hears it before the wait is chosen.
-    if (outcome?.slow) [this.#slow, close] = [true, `give-back refused, reason ${outcome.refusal}`];
+    const { recovery } = outcome ?? {};
+    if (outcome?.slow)
+      [this.#slow, close] = [
+        true,
+        recovery ? "recovery refused" : `give-back refused, reason ${outcome.refusal}`,
+      ];
     const outs = this.#up ? this.reading.gaveBack(outcome?.code, outcome?.refusal) : [];
-    this.#perform(outs, now, fx, (later, at) => this.#drop(at, later, close));
+    if (recovery) fx.push({ do: "recovery", outcome: recovery });
+    // Retrying cannot change the log of a reading, a refusal 2 or 3 or a fault: the link ends. A refusal 6 puts the relay back, as on the active path.
+    const refused = recovery && "refused" in recovery ? recovery.refused : 0;
+    if (refused === 6) outs.push(...this.reading.take({ type: "refused", reason: 6 }));
+    if (recovery && ("log" in recovery || "fault" in recovery || refused === 2 || refused === 3))
+      fx.push(...this.stop(now));
+    else this.#perform(outs, now, fx, (later, at) => this.#drop(at, later, close));
   }
 
   /** Answers, tells the Reading, then dials the upload, stops, or waits. */

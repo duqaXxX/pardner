@@ -7,6 +7,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Recovery with the recovery key, in the app. The first screen offers Recover with your recovery key (and the two dead ends, This Mac was removed and This Mac's keys are missing, offer it beside Pair again): paste what Copy gave for the recovery key's public part or type the person id, relay address and relay key, then type the recovery key into a field that refuses a wrong check symbol. The app reads the device log with the key and asks Could someone else have one of your devices? (No keeps every active device, Yes this Mac alone) and Make a new recovery key?; the recovery is stored before it is sent and goes on after a restart (the key is typed again). The past is opened with the key typed and any earlier recovery key, and the recovery is done only when every epoch an earlier key opens is read and the relay shows a seal to the current key; a key that was lost can be given up with I no longer have this key, which leaves its conversations unreadable on this Mac. At the end the app names the recovery keys that can be destroyed. A relay address with an IPv6 host is written with brackets wherever it is copied.
+- Recovery, the link's part. `Link` takes a `recover` option (and `AppLink.recover`, before `start`): without a reset it proves with the recovery key on a
+  recovery connection, reads the whole device log, checks it from entry 0 and stops, and `AppLink` tells it as a `recovery-log` effect with the devices the
+  log names; with one, every connection tries `prove-active` first, a refusal that is not a removal sends the reset on a recovery connection of its own (this
+  device and the trusted devices still active in the log read, rebuilt without asking when the log moved), and the first `served` ends the recovery with a
+  `recovered` effect. `AppLink.holdRecovery`, `epochs` and `currentRecovery` give the app what opening the past and "done" need, and `enterRecoveryKey` and
+  `buildReset` are exported to the app. `AppLink.recoveries` and the `recovery-log` effect name every recovery key the person's log named, to tell them from other
+  recipients of a seal. The link stops after an outcome retrying cannot change (a refusal 2 or 3, a fault), marks put-back on a refusal 6 and asks again only after
+  `ask` on a refusal 5. Nothing the owner sees changes yet.
+- Recovery, protocol part. `buildReset` builds and signs a reset with a recovery key the caller names, with the new recovery key's public keys optional. The
+  reading takes a list of recovery identities (a recovery key's id and the name its receiving key is held under) and opens an epoch by a seal to this device or,
+  failing that, a seal to any of them, in the epoch's entry or in a history seal; `Reading.hold` adds one after the read and `Reading.epochStates` says which
+  epochs are open and who each is sealed to. Nothing the owner sees changes yet.
 - The app has an icon: the Pardner mark on a rounded tile, from an asset catalog in the app target (`app/Shell/Assets.xcassets`). `icon-render` draws it again from the code.
 - The app's main window has resizable columns. Drag the divider between the sidebar and the conversation (200 to 360 points) or between the conversation and the
   thread panel (320 to 640); a double click on a divider restores its first-launch width (248 and 380). The widths are kept across launches, no column collapses, and

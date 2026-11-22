@@ -30,6 +30,14 @@ final class FakeLink: RelayLinking, @unchecked Sendable { // one test thread at 
     var sends: [(channel: Data, draft: OutboxDraft)] = []
     private let putBack: Bool
     var stopGate: Latch?
+    /// The recovery keys the controller gave the link to open with, what it reads back, and a hook run as one is given.
+    var holds: [(id: Data, receiving: String)] = []
+    var reading: RecoveryReading? = RecoveryReading()
+    var onHold: ((Data) -> Void)?
+    var holdResult = true
+    /// Holds `recoveryReading` until the test lets it go, and counts the readings waiting: two evaluations can then be inside their await together.
+    var readingGate: Latch?
+    var readingsWaiting = 0
 
     /// `putBack`: the link store holds the put-back mark, which a real link delivers at its start and never dials (link.ts).
     init(putBack: Bool = false) {
@@ -55,6 +63,17 @@ final class FakeLink: RelayLinking, @unchecked Sendable { // one test thread at 
     func send(channel: Data, draft: OutboxDraft) async throws -> SendOutcome {
         sends.append((channel, draft))
         return sendOutcome
+    }
+    func holdRecovery(id: Data, receiving: String) async -> Bool {
+        holds.append((id, receiving))
+        onHold?(id)
+        return holdResult
+    }
+    func recoveryReading() async -> RecoveryReading? {
+        readingsWaiting += 1
+        await readingGate?.wait()
+        readingsWaiting -= 1
+        return reading
     }
     func build(_ act: DeviceAct) async throws -> BuildOutcome {
         await buildGate?.wait()
@@ -127,7 +146,7 @@ final class PairingControllerTests: XCTestCase {
                 await latch?.wait()
                 return try await ProtocolHost(scriptPath: script, store: keys, person: person)
             },
-            connect: { _, _, _, _, _, enrolment in
+            connect: { _, _, _, _, _, enrolment, _ in
                 let link = FakeLink(putBack: harness.putBackStored)
                 harness.links.append(link)
                 harness.enrolments.append(enrolment)
@@ -143,7 +162,7 @@ final class PairingControllerTests: XCTestCase {
         let controller = PairingController(
             keys: rig.keys, pairing: rig.pairing, linkFolder: rig.linkFolder,
             makeHost: { keys, person in try await ProtocolHost(scriptPath: script, store: keys, person: person) },
-            connect: { _, _, _, _, _, enrolment in
+            connect: { _, _, _, _, _, enrolment, _ in
                 let link = FakeLink(putBack: harness.putBackStored)
                 harness.links.append(link)
                 harness.enrolments.append(enrolment)
@@ -246,7 +265,7 @@ final class PairingControllerTests: XCTestCase {
 
     /// Design 4.1: a file written by a newer app is the newer app's: nothing is erased and no action is offered but updating.
     func testANewerVersionStoreErasesNothingAndRefusesPairAgain() async throws {
-        let rig = try rig(keys: true, rawStore: #"{"version": 2}"#)
+        let rig = try rig(keys: true, rawStore: #"{"version": 3}"#)
         await rig.controller.launch()
         let phase = await rig.controller.phase
         guard case .fault(.newerStore, let advice) = phase else { return XCTFail("\(phase)") }

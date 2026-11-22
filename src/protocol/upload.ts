@@ -6,6 +6,7 @@
  */
 import type { DeviceKeys } from "./device-log.ts";
 import type { Frame } from "./frames.ts";
+import type { RecoveryOutcome } from "./link-types.ts";
 import type { Bytes } from "./platform.ts";
 import { type Proof, type RelayHead, sessionOf, signProof } from "./proofs.ts";
 import type { Who } from "./reading.ts";
@@ -19,8 +20,13 @@ export interface UploadOptions {
   patience: number;
 }
 
-/** How an upload ended: the relay's result code or its refusal reason, neither on a drop; `slow` asks again only after `ask`, and is only ever raised: false never clears it. */
-export type Outcome = { code?: number; refusal?: number; slow: boolean };
+/** How an upload ended: the relay's result code or its refusal reason, neither on a drop; `recovery` is a recovery connection's own answer; `slow` asks again only after `ask`, and is only ever raised: false never clears it. */
+export type Outcome = {
+  code?: number;
+  refusal?: number;
+  slow: boolean;
+  recovery?: RecoveryOutcome;
+};
 
 /** What a frame of the relay makes the upload do: send frames, end, or nothing. */
 export type Step = { send: Frame[] } | { done: Outcome } | undefined;

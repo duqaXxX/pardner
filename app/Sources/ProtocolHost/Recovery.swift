@@ -9,15 +9,34 @@ public struct RecoveryRefused: Error, Equatable {
 }
 
 extension ProtocolHost {
-    /// Makes the recovery secret, holds it in the host's memory under `name` and returns its two public keys; nothing is shown.
-    public func createRecovery(_ name: String) async throws -> (signing: Data, receiving: Data) {
-        let answer = try await callExported("createRecoveryKey", [.string(name)])
-        guard case .bool(let made)? = answer["ok"] else { throw HostError.faulted("createRecoveryKey answered no result") }
+    /// Makes the recovery secret, holds it in the host's memory under `name` and returns its two public keys and its id; nothing is shown.
+    public func createRecovery(_ name: String) async throws -> (signing: Data, receiving: Data, id: Data) {
+        try await recoveryKeys("createRecoveryKey", name)
+    }
+
+    /// Takes the recovery secret from the person's `enter` (it never reaches JavaScript) and holds the two private keys under
+    /// `<name>.sign` and `<name>.receive`; `deleteRecoveryKeys` removes them. A person who declines, or a secret of the wrong size, is refused as `bad-input`.
+    public func enterRecovery(_ name: String) async throws -> (signing: Data, receiving: Data, id: Data) {
+        try await recoveryKeys("enterRecoveryKey", name)
+    }
+
+    private func recoveryKeys(_ method: String, _ name: String) async throws -> (signing: Data, receiving: Data, id: Data) {
+        let answer = try await callExported(method, [.string(name)])
+        guard case .bool(let made)? = answer["ok"] else { throw HostError.faulted("\(method) answered no result") }
         guard made else { throw RecoveryRefused(reason: answer["error"]?.stringValue ?? "unknown") }
-        guard let value = answer["value"], let signing = value["signing"]?.bytesValue, let receiving = value["receiving"]?.bytesValue else {
-            throw HostError.faulted("createRecoveryKey answered malformed keys")
+        guard let value = answer["value"], let signing = value["signing"]?.bytesValue, let receiving = value["receiving"]?.bytesValue, let id = value["id"]?.bytesValue else {
+            throw HostError.faulted("\(method) answered malformed keys")
         }
-        return (signing, receiving)
+        return (signing, receiving, id)
+    }
+
+    /// Removes the two keys `enterRecovery` held under `name`: `deleteKey(name)` alone does nothing for them.
+    public func deleteRecoveryKeys(_ name: String) async throws {
+        var first: Error?
+        for suffix in [".sign", ".receive"] {
+            do { try await deleteKey(name + suffix) } catch { first = first ?? error } // both are attempted
+        }
+        if let first { throw first }
     }
 
     /// Shows the held secret with the sheet's `context` through the host's `RecoveryPerson`, then wipes it, whatever the answer.

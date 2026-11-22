@@ -6,18 +6,20 @@ import {
   buildAdd,
   buildGenesis,
   buildRemove,
+  buildReset,
   readDeviceEntry,
   type SignedEntry,
 } from "../../src/protocol/device-builders.ts";
 import {
   checkDeviceEntry,
+  currentRecovery,
   type DeviceKeys,
   decodeDeviceEntry,
   encodeDeviceEntry,
   type LoggedEntry,
   type PublicKeys,
 } from "../../src/protocol/device-log.ts";
-import { deviceId, signedId } from "../../src/protocol/ids.ts";
+import { deviceId, recoveryKeyId, signedId } from "../../src/protocol/ids.ts";
 import type { Result } from "../../src/protocol/result.ts";
 import { makeProof } from "./proof.ts";
 
@@ -192,4 +194,76 @@ test("bytes that are no add or remove do not read back", () => {
   const genesis = log[0];
   assert.ok(genesis);
   assert.equal(readDeviceEntry(platform, encodeDeviceEntry(genesis.entry)).ok, false);
+});
+
+test("a reset is signed by the recovery key named by the caller, at the log's end, with or without a new recovery key", () => {
+  const { first, recovery, log } = started();
+  const second = party();
+  const fresh = party();
+  const next = party();
+  const person = log[0]?.id as Uint8Array;
+  append(
+    log,
+    buildAdd(
+      platform,
+      first.name,
+      log,
+      first.id,
+      second.device,
+      makeProof(platform, second.name, person, second.device),
+    ),
+  );
+  const proof = makeProof(platform, fresh.name, person, fresh.device);
+  const recoveryId = recoveryKeyId(platform, recovery.keys.signing, recovery.keys.receiving);
+  const kept = append(
+    log,
+    buildReset(platform, recovery.name, log, recoveryId, [fresh.id, second.id], {
+      device: fresh.device,
+      proof,
+    }),
+  );
+  const read = decodeDeviceEntry(kept.signed);
+  assert.ok(read.ok && read.value.kind === "reset");
+  assert.equal(read.value.recovery, undefined, "no new recovery key unless asked");
+  assert.deepEqual(read.value.signer, recoveryId);
+  assert.equal(log.length, 3);
+  assert.deepEqual(currentRecovery(platform, log), recovery.keys, "the typed key stays current");
+  const replaced = append(
+    log,
+    buildReset(platform, recovery.name, log, recoveryId, [fresh.id], undefined, next.keys),
+  );
+  const again = decodeDeviceEntry(replaced.signed);
+  assert.ok(again.ok && again.value.kind === "reset");
+  assert.deepEqual(again.value.recovery, next.keys);
+  assert.deepEqual(currentRecovery(platform, log), next.keys);
+});
+
+test("a reset the log would refuse, or built from a value outside its field, is a failure", () => {
+  const { first, recovery, log } = started();
+  const fresh = party();
+  const person = log[0]?.id as Uint8Array;
+  const proof = makeProof(platform, fresh.name, person, fresh.device);
+  const recoveryId = recoveryKeyId(platform, recovery.keys.signing, recovery.keys.receiving);
+  const cases = [
+    buildReset(platform, recovery.name, log, first.id, [first.id]), // a device is not the recovery key
+    buildReset(platform, recovery.name, log, recoveryId, []), // an empty set
+    buildReset(platform, recovery.name, log, recoveryId, [fresh.id]), // a device never named
+    buildReset(platform, recovery.name, log, recoveryId, [first.id, first.id]), // an id twice
+    buildReset(platform, recovery.name, log, recoveryId, [new Uint8Array(31)]),
+    buildReset(platform, recovery.name, log, recoveryId, [fresh.id], {
+      device: fresh.device,
+      proof: new Uint8Array(63),
+    }),
+    buildReset(platform, recovery.name, [], recoveryId, [first.id]),
+    buildReset(platform, first.name, log, recoveryId, [first.id]), // signed by another key
+  ];
+  for (const c of cases) assert.equal(c.ok, false);
+  assert.equal(
+    buildReset(platform, recovery.name, log, recoveryId, [fresh.id], {
+      device: fresh.device,
+      proof,
+    }).ok,
+    true,
+    "the same call with a new device in the set is taken",
+  );
 });

@@ -53,6 +53,10 @@ public struct PairingScreen: View {
             JoinForm(model: model)
         case .settingUp:
             SettingUp(model: model)
+        case .recoverForm:
+            RecoveryForm(model: model)
+        case .recovery:
+            RecoveryFlow(model: model)
         case .enrolling:
             if case .enrolling(let asksSecret) = model.phase { Enrolling(model: model, asksSecret: asksSecret) }
         case .joining:
@@ -60,11 +64,11 @@ public struct PairingScreen: View {
         case .paired:
             EmptyView()
         case .removed:
-            notice("This Mac was removed from your devices",
-                   "Another device of yours removed this Mac. Nothing on it has been erased yet. Pair again erases this Mac's device keys and starts from the first screen.")
+            deadEnd("This Mac was removed from your devices",
+                    "Another device of yours removed this Mac. Nothing on it has been erased yet. Pair again erases this Mac's device keys and starts from the first screen.")
         case .keysMissing:
-            notice("This Mac's keys are missing",
-                   "Pardner remembers a pairing, but the device keys that belong to it are gone, as after a restore from a backup. Pair again makes this Mac a new device; remove the old entry from another device of yours.")
+            deadEnd("This Mac's keys are missing",
+                    "Pardner remembers a pairing, but the device keys that belong to it are gone, as after a restore from a backup. Pair again makes this Mac a new device; remove the old entry from another device of yours.")
         case .putBack:
             notice("Your relay was put back", text)
         case .linkFaulted:
@@ -87,6 +91,11 @@ public struct PairingScreen: View {
         var second: (label: String, run: () -> Void)?
         if model.offersRetryToo { second = ("Retry", model.retry) }
         return Notice(title: "This Mac cannot join yet", text: text, action: ("Pair again", model.pairAgain), second: second)
+    }
+
+    /// Pair again, and beside it the recovery with the recovery key (recovery design 2.1): the two dead ends offer both.
+    private func deadEnd(_ title: String, _ text: String) -> Notice {
+        Notice(title: title, text: text, action: ("Pair again", model.pairAgain), second: (RecoveryScreenWords.choice, model.openRecover))
     }
 
     /// A notice with the action the model offers for the phase, if any.
@@ -130,11 +139,9 @@ struct FirstScreen: View {
             Text("The relay is a small server you run yourself. It carries your messages, encrypted, between your devices and your bots.")
                 .foregroundStyle(PardnerColor.muted)
             if note == .staleSheet {
-                Text("The recovery key from the attempt that stopped opens nothing: its secret lived in memory only. Setting up again makes a new key.")
-                    .padding(PardnerMetrics.gap * 1.5).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(PardnerColor.agentSoft, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
-                    .foregroundStyle(PardnerColor.agentText)
+                stale("The recovery key from the attempt that stopped opens nothing: its secret lived in memory only. Setting up again makes a new key.")
             }
+            if note == .staleRecoveryKey { stale(RecoveryScreenWords.staleKey) }
             Choice(title: "This is my first device", prominent: true,
                    line: "For a relay just made with pardner relay init. This Mac becomes your first device and makes your recovery key. You need the relay's address, key and enrolment secret.") {
                 model.showForm = true
@@ -143,7 +150,15 @@ struct FirstScreen: View {
                    line: "Your other device approves this Mac. You need the three values its Devices screen shows under Add a device.") {
                 model.openJoin()
             }
+            Choice(title: RecoveryScreenWords.choice, prominent: false, line: RecoveryScreenWords.choiceLine) { model.openRecover() }
         }
+    }
+
+    private func stale(_ text: String) -> some View {
+        Text(text)
+            .padding(PardnerMetrics.gap * 1.5).frame(maxWidth: .infinity, alignment: .leading)
+            .background(PardnerColor.agentSoft, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
+            .foregroundStyle(PardnerColor.agentText)
     }
 
     /// One way in: the button, and under it what it does and what it needs.

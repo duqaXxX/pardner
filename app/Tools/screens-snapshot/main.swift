@@ -160,6 +160,47 @@ MainActor.assumeIsolated {
         let screens: [(String, () -> PairingModel)] = [
             ("first", { PairingModel(phase: .unpaired(nil)) }),
             ("first-stale-sheet", { PairingModel(phase: .unpaired(.staleSheet)) }),
+            ("first-stale-recovery-key", { PairingModel(phase: .unpaired(.staleRecoveryKey)) }),
+            ("recover-form", {
+                let m = PairingModel(phase: .unpaired(nil))
+                m.openRecover()
+                return m
+            }),
+            ("recover-form-errors", {
+                let m = PairingModel(phase: .unpaired(nil), refused: .relayKey)
+                m.openRecover()
+                (m.recoverPerson, m.recoverAddress, m.recoverKey) = (String(repeating: "0123456789abcdef", count: 4), "relay.example.net:7443", "04a1b2c3")
+                return m
+            }),
+            ("recover-type-key", {
+                let request = RecoveryEntryRequest()
+                let m = PairingModel(phase: .recovering(.typeKey(request)))
+                for c in SyntheticKey().typed(21) { m.entry?.key(c) }
+                return m
+            }),
+            ("recover-reading", { PairingModel(phase: .recovering(.reading)) }),
+            ("recover-ask-devices", { PairingModel(phase: .recovering(.askDevices(others: 2))) }),
+            ("recover-ask-new-key", { PairingModel(phase: .recovering(.askNewKey)) }),
+            ("recover-sending", { PairingModel(phase: .recovering(.sending)) }),
+            ("recover-opening", {
+                let channel = Data(repeating: 0xC1, count: 32)
+                let missing = RecoveryProgress.Missing(key: Data(repeating: 2, count: 32), epochs: [.init(channel: channel, epoch: Data(repeating: 9, count: 32))])
+                let current = RecoveryProgress.Missing(key: Data(repeating: 3, count: 32), epochs: [], isCurrent: true)
+                return PairingModel(phase: .recovering(.opening(RecoveryProgress(waiting: [missing, current], unsealed: 0))))
+            }),
+            ("recover-done", { PairingModel(phase: .recovering(.done(RecoveryDone(destroyable: [Data(repeating: 2, count: 32)], keep: Data(repeating: 1, count: 32))))) }),
+            ("recover-refused", { PairingModel(phase: .recovering(.refused(.notCurrent))) }),
+            ("recover-refused-stored", { PairingModel(phase: .recovering(.refused(.noLongerCurrent))) }),
+            ("recover-opening-current-only", {
+                let current = RecoveryProgress.Missing(key: Data(repeating: 3, count: 32), epochs: [], isCurrent: true)
+                return PairingModel(phase: .recovering(.opening(RecoveryProgress(waiting: [current], unsealed: 0))))
+            }),
+            ("recover-form-dead-end", {
+                let m = PairingModel(phase: .removed)
+                m.openRecover()
+                return m
+            }),
+            ("recover-refused-new-key", { PairingModel(phase: .recovering(.refused(.yourNewKey))) }),
             ("form", { PairingModel(phase: .unpaired(nil), form: true) }),
             ("form-errors", {
                 let m = PairingModel(phase: .unpaired(nil), form: true, refused: .relayKey)
@@ -296,6 +337,9 @@ MainActor.assumeIsolated {
             let source = SyntheticKey()
             let empty = RecoverySheetModel(source: source)
             try render(appearance, RecoverySheetView(model: empty), size: nil, to: "recovery-sheet-\(theme).png")
+            let recovering = RecoverySheetModel(source: source)
+            recovering.isRecovery = true
+            try render(appearance, RecoverySheetView(model: recovering), size: nil, to: "recovery-sheet-recovery-\(theme).png")
             let partial = RecoverySheetModel(source: source)
             source.typed(31).forEach { partial.key($0) }
             try render(appearance, RecoverySheetView(model: partial), size: nil, to: "recovery-sheet-typing-\(theme).png")

@@ -33,11 +33,23 @@ final class PairingStoreTests: XCTestCase {
         paired.labels = [Data(repeating: 8, count: 32): "Studio", Data(repeating: 9, count: 32): "Laptop"]
         paired.seen = [Data(repeating: 8, count: 32): 1_790_000_000.5]
         paired.removal = PairingRemoval(devices: [Data(repeating: 8, count: 32), Data(repeating: 9, count: 32)], length: 6, left: [Data(repeating: 7, count: 32)])
+        let reset = PairingReset(key: Data(repeating: 4, count: 32), keepOthers: true, active: [Data(repeating: 8, count: 32), Data(repeating: 9, count: 32)],
+                                 replacement: PairingRecoveryKeys(signing: Data(repeating: 6, count: 65), receiving: Data(repeating: 5, count: 65)),
+                                 previous: [Data(repeating: 4, count: 32)])
+        var recovering = PairingState(stage: .recovering, relay: relay, person: person)
+        (recovering.proof, recovering.recovery) = (Data(repeating: 5, count: 64), PairingRecovery(made: [Data(repeating: 2, count: 32)], reset: reset))
+        var recovered = recovering
+        (recovered.stage, recovered.proof) = (.recovered, nil)
+        var yes = recovering // the answer `Yes`: this device alone
+        yes.recovery?.reset = PairingReset(key: reset.key, keepOthers: false, active: [], replacement: nil, previous: [])
+        var started = PairingState(stage: .keysMade(.recover), relay: relay, person: person)
+        started.recovery = PairingRecovery(made: [Data(repeating: 2, count: 32), Data(repeating: 3, count: 32)])
         return [
             PairingState(stage: .keysMade(.enrol), relay: relay),
             PairingState(stage: .keysMade(.join), relay: relay, person: person),
             enrolling, joining, paired,
             PairingState(stage: .paired, relay: relay, person: person),
+            started, recovering, recovered, yes,
         ]
     }
 
@@ -89,7 +101,7 @@ final class PairingStoreTests: XCTestCase {
         try fault("")
         try fault("[]")
         try fault("{\"version\":1")
-        try fault(good.replacingOccurrences(of: "\"version\":1", with: "\"version\":2"))
+        try fault(good.replacingOccurrences(of: "\"version\":1", with: "\"version\":3"))
         try fault(good.replacingOccurrences(of: "\"stage\":\"paired\"", with: "\"stage\":\"done\""))
         try fault("{\"extra\":1," + good.dropFirst())
         try fault(good.replacingOccurrences(of: "\"port\":8443", with: "\"port\":70000"))
@@ -107,6 +119,9 @@ final class PairingStoreTests: XCTestCase {
             case .enrolling: bare.genesis = nil
             case .joining: bare.name = nil
             case .paired: bare.person = nil
+            case .keysMade(.recover): bare.recovery = nil
+            case .recovering: bare.proof = nil
+            case .recovered: bare.recovery?.reset = nil
             }
             try faultFrom(bare)
         }
@@ -116,6 +131,18 @@ final class PairingStoreTests: XCTestCase {
         var stray = states()[5]
         stray.genesis = entry(1)
         try faultFrom(stray)
+        // A recovery's ids belong to its stages alone, and a reset to `recovering` and `recovered` alone.
+        for plain in states()[0..<6] {
+            var holding = plain
+            holding.recovery = PairingRecovery()
+            try faultFrom(holding)
+        }
+        var started = states()[6]
+        started.recovery?.reset = states()[7].recovery?.reset
+        try faultFrom(started)
+        var kept = states()[8]
+        kept.proof = Data(repeating: 5, count: 64)
+        try faultFrom(kept)
     }
 
     private func faultFrom(_ state: PairingState, line: UInt = #line) throws {
@@ -199,11 +226,37 @@ final class PairingStoreTests: XCTestCase {
     }
 
     func testAnIntentBelongsToKeysMadeAlone() throws {
-        for state in states() where state.stage != .keysMade(.enrol) && state.stage != .keysMade(.join) {
+        for state in states() where ![.keysMade(.enrol), .keysMade(.join), .keysMade(.recover)].contains(state.stage) {
             let text = String(decoding: try PairingStore.encode(state), as: UTF8.self)
             try fault("{\"intent\":\"enrol\"," + text.dropFirst())
             try fault("{\"intent\":5," + text.dropFirst())
         }
+    }
+
+    /// The ids of keys made in recoveries that stopped must read back as the list they were, and a malformed one is a fault.
+    func testARecoveryThatDoesNotReadIsAFault() throws {
+        let good = String(decoding: try PairingStore.encode(states()[7]), as: UTF8.self)
+        try fault(good.replacingOccurrences(of: String(repeating: "02", count: 32), with: "02"))
+        try fault(good.replacingOccurrences(of: "\"keep\":true", with: "\"keep\":1"))
+        try fault(good.replacingOccurrences(of: "\"made\":[\"" + String(repeating: "02", count: 32) + "\"]", with: "\"made\":[\"" + String(repeating: "02", count: 32) + "\",\"" + String(repeating: "02", count: 32) + "\"]"))
+        try fault(good.replacingOccurrences(of: "\"recovery\":{", with: "\"recovery\":{\"extra\":1,"))
+    }
+
+    /// A recovery is version 2, so an app that reads version 1 only calls the file newer and erases nothing (design 4.1); every other state stays version 1.
+    func testAFileThatHoldsARecoveryIsVersionTwoAndTheRestStayVersionOne() throws {
+        for state in states() {
+            let text = String(decoding: try PairingStore.encode(state), as: UTF8.self)
+            XCTAssertTrue(text.contains(state.recovery == nil ? "\"version\":1" : "\"version\":2"), "\(state.stage)")
+        }
+        let recovering = String(decoding: try PairingStore.encode(states()[7]), as: UTF8.self)
+        XCTAssertThrowsError(try PairingStore.decode(Data(recovering.replacingOccurrences(of: "\"version\":2", with: "\"version\":1").utf8))) { error in
+            XCTAssertEqual((error as? PairingFault)?.isNewerVersion, false, "a recovery in a version 1 file is malformed, not newer")
+        }
+        XCTAssertThrowsError(try PairingStore.decode(Data(recovering.replacingOccurrences(of: "\"version\":2", with: "\"version\":3").utf8))) { error in
+            XCTAssertEqual((error as? PairingFault)?.isNewerVersion, true)
+        }
+        let plain = String(decoding: try PairingStore.encode(states()[5]), as: UTF8.self)
+        XCTAssertEqual(try PairingStore.decode(Data(plain.replacingOccurrences(of: "\"version\":1", with: "\"version\":2").utf8)), states()[5], "version 2 reads a plain state too")
     }
 
     func testEnrollingNamesTheGenesisIdAsThePerson() throws {

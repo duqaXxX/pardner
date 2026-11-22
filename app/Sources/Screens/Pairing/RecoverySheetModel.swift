@@ -59,6 +59,8 @@ public final class RecoverySheetModel: Identifiable {
     /// Whether the typed text reads back to the same 32 bytes.
     public private(set) var matches = false
     public private(set) var isClosed = false
+    /// The sheet shows a new recovery key made in a recovery (recovery design 2.3 step 5): its words say when the key opens the history.
+    public var isRecovery = false
 
     public static let symbolCount = RecoveryText.symbolCount
 

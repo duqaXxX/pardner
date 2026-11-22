@@ -24,6 +24,7 @@ import { checkMemberEntry, decodeMemberEntry, type LoggedMember } from "./member
 import { decodeMessage, type Message, messageChecker } from "./messages.ts";
 import type { Bytes, Platform } from "./platform.ts";
 import { chainLink, checkHead, type RelayHead } from "./proofs.ts";
+import { fail, type Result } from "./result.ts";
 
 /** What a device keeps of the relay between runs: the id read at each position, the last head the relay signed, and whether it must be recreated. */
 export interface Kept {
@@ -32,13 +33,20 @@ export interface Kept {
   putBack: boolean;
 }
 
-/** Who reads: the person it was paired for, its own id, the name of its receiving key, and the relay's pinned key. */
+/** A recovery key the reading opens epochs with: its id and the name its receiving key is held under (security design 5.3). */
+export interface Identity {
+  id: Bytes;
+  receiving: string;
+}
+
+/** Who reads: the person it was paired for, its own id, the name of its receiving key, and the relay's pinned key; `recoveries` are the second identities, tried after the device's own. */
 export interface Who {
   platform: Platform;
   relay: Bytes;
   person: Bytes;
   self: Bytes;
   receiving: string;
+  recoveries?: readonly Identity[];
 }
 
 export type State = "reading" | "rest" | "giving-back" | "refused" | "put-back" | "fault";
@@ -107,6 +115,7 @@ export class Reading {
   // `id`: the seal's own, never its signature (crypto.md 4); `ok`: its maker and signature checked against the log (crypto.md 9)
   #seals: { seal: HistorySeal; sig: Bytes; id: Bytes; ok: boolean }[] = [];
   #seen = new Seen();
+  #recoveries: Identity[];
 
   /**
    * `stored` is what the caller's store holds: the incarnation last read under (a full pass is still owed
@@ -118,6 +127,7 @@ export class Reading {
     stored: { incarnation?: Bytes; fault?: boolean } = {},
   ) {
     this.#r = reader;
+    this.#recoveries = [...(reader.recoveries ?? [])];
     this.#incarnation = stored.incarnation;
     this.kept = kept;
     if (kept.putBack) this.#state = "put-back";
@@ -152,6 +162,29 @@ export class Reading {
       key: last && c.keys.get(idKey(last.id)),
       open: openAt(last, c.members, this.#log.length),
     };
+  }
+
+  /** Holds one more recovery key as a second identity, and opens at once the epochs it opens. */
+  hold(identity: Identity): void {
+    this.#recoveries.push(identity);
+    this.#unlock();
+  }
+
+  /** Every epoch read: whether this device holds its key, and the recipients of its entry's seals and of the history seals read. */
+  epochStates(): { channel: Bytes; epoch: Bytes; open: boolean; sealedTo: Bytes[] }[] {
+    return [...this.#channels.values()].flatMap((c) =>
+      c.epochs.map((e) => ({
+        channel: e.entry.channel,
+        epoch: e.id,
+        open: c.keys.has(idKey(e.id)),
+        sealedTo: [
+          ...e.entry.seals.map((x) => x.recipient),
+          ...this.#seals
+            .filter((h) => h.ok && bytesEqual(h.seal.epoch, e.id))
+            .map((h) => h.seal.recipient),
+        ],
+      })),
+    );
   }
 
   /** The history seals read, whatever their recipient: the relay serves every active device all of them. */
@@ -401,27 +434,36 @@ export class Reading {
     });
   }
 
-  /** The key of each epoch this device holds: its own seal in the entry, or a history seal another device made (5.3). */
+  /** The key of each epoch this device holds: a seal to it, or to a recovery key it holds (5.3), in the entry or made by another device. */
   #unlock(): void {
     const { platform, self, receiving } = this.#r;
     this.#verifySeals();
+    const holders: Identity[] = [{ id: self, receiving }, ...this.#recoveries];
+    // A seal that fails its commitment leaves the epoch to the next identity, and the app names it when none opens (5.3).
+    const open = (e: LoggedEpoch, who: Identity): Result<Bytes> => {
+      let key = openEpochSeal(platform, who.receiving, e, who.id);
+      for (const h of this.#seals) {
+        if (key.ok) break;
+        if (!h.ok || !bytesEqual(h.seal.recipient, who.id) || !bytesEqual(h.seal.epoch, e.id))
+          continue;
+        key = openHistorySeal(
+          platform,
+          who.receiving,
+          this.#log,
+          encodeHistorySeal(h.seal),
+          h.sig,
+          e,
+        );
+      }
+      return key;
+    };
     for (const c of this.#channels.values())
       for (const e of c.epochs) {
         if (c.keys.has(idKey(e.id))) continue;
-        let key = openEpochSeal(platform, receiving, e, self);
-        for (const h of this.#seals) {
-          if (key.ok) break;
-          if (!h.ok || !bytesEqual(h.seal.recipient, self) || !bytesEqual(h.seal.epoch, e.id))
-            continue;
-          key = openHistorySeal(
-            platform,
-            receiving,
-            this.#log,
-            encodeHistorySeal(h.seal),
-            h.sig,
-            e,
-          );
-        }
+        const key = holders.reduce<Result<Bytes>>(
+          (k, who) => (k.ok ? k : open(e, who)),
+          fail("open-failed"),
+        );
         if (key.ok) c.keys.set(idKey(e.id), key.value);
       }
   }
