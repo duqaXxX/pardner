@@ -478,6 +478,7 @@ public actor PairingController {
         case .creating(let effect): creationChanged(effect)
         case .channelRefused(let effect): creationRefused(effect)
         case .channelFault(let effect): if let channel = effect["channel"]?.bytesValue { channels.faulted.insert(channel) }
+        case .channelFaultDropped(let effect): if let channel = effect["channel"]?.bytesValue { channels.faulted.remove(channel) }
         default: break
         }
         switch event {
@@ -516,7 +517,7 @@ public actor PairingController {
             await stopConnection()
             phase = .fault(.failed, PairingPhase.storeFailedAdvice)
         case .faulted(let message): await hostFaulted(message)
-        case .profile, .outbox, .creating, .channelRefused, .channelFault: break
+        case .profile, .outbox, .creating, .channelRefused, .channelFault, .channelFaultDropped: break
         }
     }
 

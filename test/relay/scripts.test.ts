@@ -244,3 +244,32 @@ test("a push cut by the end-of-run read is the relay's normal way, and no proble
     fake.close();
   }
 });
+
+for (const [items, ok] of [
+  ['["g","a2"]', true],
+  ['["a2","g"]', false],
+  ['["g","g"]', false],
+] as const)
+  test(
+    `review P8: others keeps the named items in order, each matched once: ${items}`,
+    DARWIN,
+    async () => {
+      const r = await relay();
+      try {
+        const script = [
+          '{"op":"prove","device":"app1","enrol":"sheet1","as":"g","expect":"served"}',
+          '{"op":"submit","entry":"add","device":"app2","as":"a2","expect":"result 0"}',
+          '{"op":"submit","entry":"add","device":"app3","expect":"result 0"}',
+          `{"op":"read","expect":{"items":${items},"others":1,"n":3}}`,
+        ].join("\n");
+        if (ok) await run(parse(script), r.target);
+        else
+          await assert.rejects(
+            run(parse(script), r.target),
+            (e) => e instanceof Failure && /^line 4: item/.test(e.message),
+          );
+      } finally {
+        await r.stop();
+      }
+    },
+  );

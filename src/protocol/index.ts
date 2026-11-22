@@ -14,7 +14,7 @@ import { makeSeal, sealKey, seals, soleHolders, startOf, starts } from "./keeper
 import { EXPORTER_LABEL } from "./labels.ts";
 import { type Effect, Link, type LinkOptions, type Persist } from "./link.ts";
 import type { RecoveryOutcome } from "./link-types.ts";
-import { encodeMemberEntry } from "./member-log.ts";
+import { encodeMemberEntry, spaceNonce } from "./member-log.ts";
 import {
   botOnly,
   decodeMessage,
@@ -137,7 +137,7 @@ export type DeviceAct = { ok: true; value: SignedEntry } | { ok: false; error: D
 
 /** Why `createChannel` made nothing: the device does not read its own log active, a creation is pending, the bot is not an active bot of the person, or the platform's own refusal. */
 export type CreateError = "not-ready" | "busy" | PlatformError;
-/** Why `send` queued nothing: the draft is refused (6.4's table, files, a length), the channel is not one the reading holds or is being created, it is faulted, or the store failed. */
+/** Why `send` queued nothing: the draft is refused (6.4's table, files, a length), the channel is not one the reading holds or is being created (a spare of the space is none), it is faulted, or the store failed. */
 export type SendError = "bad-input" | "not-member" | "fault" | "not-ready";
 
 /** The name a device now shows for a channel (kind 14), the person (15, `target` the person) or a device (16), or `null` when it shows none. */
@@ -150,7 +150,7 @@ export interface NameShown {
 /**
  * `Link`'s effects with `deliver` reduced to a `View` and `persist` to what the store writes, the shown profile of a bot when it changes (design 5), and `names` the names a device shows when one changes (names design 3).
  * Of the app's own outbox (new channel design 3): `write` ends its list as `persist` does, never in one with it, and the driver answers it with
- * `written`; `store-failed` after a failed write; `outbox` the items of a channel that changed; `channel-refused` a new channel the relay refused; `channel-fault` a channel stopped on a relay answer no check explains; `creating` the channel being created with its bot and folder (at `start` for a stored one, and at `createChannel`), or `channel: null` once none is pending (read back or refused).
+ * `written`; `store-failed` after a failed write; `outbox` the items of a channel that changed; `channel-refused` a new channel the relay refused; `channel-fault` a channel stopped on a relay answer no check explains; `channel-fault-dropped` a stored fault on the person's space or a spare, dropped at the first rest (personal space design 2.6); `creating` the channel being created with its bot and folder (at `start` for a stored one, and at `createChannel`), or `channel: null` once none is pending (read back or refused).
  */
 export type AppEffect =
   | Exclude<Effect, { do: "deliver" | "persist" | "recovery" }>
@@ -161,6 +161,7 @@ export type AppEffect =
   | { do: "outbox"; channel: Bytes; items: OutboxView[] }
   | { do: "channel-refused"; channel: Bytes; code: number }
   | { do: "channel-fault"; channel: Bytes }
+  | { do: "channel-fault-dropped"; channel: Bytes }
   | { do: "creating"; channel: Bytes; bot: Bytes; folder: string }
   | { do: "creating"; channel: null }
   | { do: "profile"; bot: Bytes; profile: Profile | null }
@@ -261,8 +262,12 @@ export class AppLink {
   #accepted = new Map<string, Set<string>>(); // channel -> names given result 0 since the last rest
   #late = new Map<string, string>(); // channel -> the epoch that answered 3 or 4, where nothing is built again
   #rolled = new Map<string, string>(); // channel -> the epoch in which a build met the counter limit
-  #entryRequest = 0; // the request of the entry 0 in flight
-  #entry: "flying" | "tried" | undefined; // the pending entry 0: submitted and not answered, or answered and owed again at the next rest
+  #spaceAsked = false; // the space's entry 0 was made in this incarnation: not made again until the relay is another
+  // The entry 0 of each slot (a channel being created, the person's space): submitted and not answered, or answered and owed again at the next rest; and its request in flight.
+  #entries = {
+    pending: { state: undefined as "flying" | "tried" | undefined, request: 0 },
+    space: { state: undefined as "flying" | "tried" | undefined, request: 0 },
+  };
 
   constructor(platform: Platform, o: AppLinkOptions) {
     this.#platform = platform;
@@ -384,7 +389,7 @@ export class AppLink {
   ): { name: Bytes; effects: AppEffect[] } | SendError {
     const pending = this.#boxes.pending;
     const known =
-      this.#link.reading.channel(channel) ||
+      (this.#link.reading.channel(channel) && !this.#spare(channel)) ||
       (pending && bytesEqual(signedId(this.#platform, pending.signed), channel));
     if (this.#failed) return "not-ready";
     if (!known) return "not-member";
@@ -561,11 +566,12 @@ export class AppLink {
     if (out.do === "incarnation") this.#incarnation = out.incarnation;
     if (out.do === "incarnation" && out.changed) {
       this.#flying.clear(); // what was sent under the old incarnation is not pending under the new: its answer frees nothing
-      if (this.#entry === "flying") this.#entry = undefined;
+      for (const e of Object.values(this.#entries)) if (e.state === "flying") e.state = undefined;
       // The Reading rewinds and every position comes again (design 4.2, 5). A bot shown before is checked
       // again once the pass reaches rest, and told `null` only if the new sequence names it nowhere.
       this.#waiting.clear();
       this.#starting.clear(); // a start sent under the old incarnation is not pending under the new
+      this.#spaceAsked = false; // a relay gone back may lack the space it placed
       this.#profiles = new Profiles();
       for (const [k, { bot }] of this.#shown) this.#recheck.set(k, bot);
       this.#names = new Names();
@@ -579,9 +585,10 @@ export class AppLink {
       this.#accepted.clear(); // what the pass did not read back is sent again, as the same bytes
       this.#late.clear();
       this.#stuck.clear();
-      if (this.#entry === "tried") this.#entry = undefined;
+      for (const e of Object.values(this.#entries)) if (e.state === "tried") e.state = undefined;
       for (const [k, bot] of this.#recheck) this.#touched.set(k, bot);
       this.#recheck.clear();
+      this.#spaceAtRest();
       for (const [k, n] of this.#nameRecheck) this.#nameTouched.set(k, n);
       this.#nameRecheck.clear();
     }
@@ -744,6 +751,61 @@ export class AppLink {
     return sent.flatMap((fx) => this.#reduce(fx));
   }
 
+  // A channel of the space class that is not the person's space: nothing is written into it (personal space design 2.3).
+  #spare(channel: Bytes): boolean {
+    const r = this.#link.reading;
+    const home = r.space();
+    return r.channel(channel)?.space === true && !(home && bytesEqual(home, channel));
+  }
+
+  /**
+   * What the space needs at a rest (personal space design 2.3, 2.6): a stored fault on it or on a spare is dropped
+   * (it could not be before the reading named the space) and told once; the items of a spare are dropped as
+   * not delivered; with no space read, this device makes it as a channel is made, with the space's own nonce and no prompt.
+   */
+  #spaceAtRest(): void {
+    const r = this.#link.reading;
+    const home = this.#boxes.space;
+    // Another device's space is read: this device's own entry 0 is not sent (a second space would be a spare).
+    if (
+      home &&
+      r.space() &&
+      !bytesEqual(r.space() as Bytes, signedId(this.#platform, home.signed))
+    ) {
+      this.#boxes.space = null;
+      this.#entries.space.state = undefined;
+      this.#dirty = true;
+    }
+    // Nothing is dropped or told once a write failed: the store still holds it, and the next start tells it again.
+    if (this.#failed) return;
+    for (const channel of this.#boxes.snapshot().faults) {
+      if (!r.channel(channel)?.space) continue;
+      this.#boxes.unfault(channel);
+      this.#dirty = true;
+      this.#notes.push({ do: "channel-fault-dropped", channel });
+    }
+    // A spare's items go without a word: no screen shows a spare, so none would clear a refused row.
+    for (const channel of this.#boxes.channels())
+      if (this.#spare(channel)) {
+        this.#boxes.set(channel, []);
+        this.#dirty = true;
+      }
+    if (r.space() || this.#spaceAsked || this.#boxes.space || this.#failed) return;
+    if (!foldLog(this.#platform, r.devices).active.has(idKey(this.#self))) return;
+    const signed = encodeMemberEntry({
+      seq: 0,
+      kind: "create",
+      nonce: spaceNonce(this.#platform, this.#person),
+      signerPerson: this.#person,
+      signerDevice: this.#self,
+    });
+    const sig = this.#platform.sign(SIGN, signed);
+    if (!sig.ok) return;
+    this.#spaceAsked = true;
+    this.#boxes.space = { signed, sig: sig.value };
+    this.#dirty = true;
+  }
+
   // The creation of `channel` as a screen draws it: its bot and folder are the bind prompt's, the first item of its outbox.
   #creating(channel: Bytes): AppEffect {
     const bind = this.#boxes.items(channel)[0];
@@ -812,38 +874,47 @@ export class AppLink {
     const r = this.#link.reading;
     if (!r.sendable || this.#dirty || this.#writing || this.#failed) return [];
     const sent: Effect[] = [];
-    this.#creation(sent, now);
+    this.#creation(sent, now, "pending");
+    this.#creation(sent, now, "space");
     for (const channel of this.#boxes.channels()) this.#step(channel, sent, now);
     return sent.flatMap((fx) => this.#reduce(fx));
   }
 
-  #creation(sent: Effect[], now: number): void {
-    const pending = this.#boxes.pending;
-    if (!pending) return;
-    const channel = signedId(this.#platform, pending.signed);
+  // Entry 0 of the channel being created (`pending`) or of the person's space (`space`), submitted as the same bytes until it is read back.
+  #creation(sent: Effect[], now: number, slot: "pending" | "space"): void {
+    const held = this.#boxes[slot];
+    if (!held) return;
+    const mine = this.#entries[slot];
+    const channel = signedId(this.#platform, held.signed);
     if (this.#link.reading.channel(channel)) {
       // Entry 0 is not a delivery: its being read is what says it was placed. The keeper owes the first epoch.
-      this.#boxes.pending = null;
-      this.#notes.push({ do: "creating", channel: null });
+      this.#boxes[slot] = null;
+      if (slot === "pending") this.#notes.push({ do: "creating", channel: null });
       this.#dirty = this.#owed = true;
-      this.#entry = undefined;
+      mine.state = undefined;
       return;
     }
-    if (this.#entry) return;
-    const send = this.#sendKept(() => this.#link.submit(2, pending.signed, pending.sig, now));
+    if (mine.state) return;
+    const send = this.#sendKept(() => this.#link.submit(2, held.signed, held.sig, now));
     if (!send || send === "busy") return;
-    this.#entry = "flying";
-    this.#entryRequest = send.request;
+    mine.state = "flying";
+    mine.request = send.request;
     this.#asked.set(send.request, (code) => {
-      if (this.#entryRequest !== send.request) return; // sent under an earlier incarnation: its answer is not this entry's
+      if (mine.request !== send.request) return; // sent under an earlier incarnation: its answer is not this entry's
       if (code !== 1 && code !== 2 && code !== 5) {
-        if (this.#entry === "flying") this.#entry = "tried"; // 0, or none: owed again at the next rest
+        if (mine.state === "flying") mine.state = "tried"; // 0, or none: owed again at the next rest
         return;
       }
-      // Refused (2 cannot happen for a new id): the channel never was, and its outbox goes with it.
-      this.#boxes.pending = null;
+      this.#boxes[slot] = null;
+      this.#dirty = true; // a creation with no outbox (the space's) changes nothing else
+      mine.state = undefined;
+      // The space is no sheet's channel and has no outbox: a second device that placed it first answers this one 2 and the next read finds it
+      // (design 3). Any other refusal, 1 or 5, is dropped as well and holds `#spaceAsked` for the run, with no fault and no owner line (2.6):
+      // 1 cannot meet an active device's correct entry on an updated relay, 5 (a removed device) ends at the next prove-active, and a retry
+      // at every rest would loop. The app has no log channel.
+      if (slot === "space") return;
+      // Refused (a random id cannot be taken, so 2 is the relay's own verdict, treated as 1): the channel never was, and its outbox goes with it.
       this.#notes.push({ do: "creating", channel: null });
-      this.#entry = undefined;
       for (const item of this.#boxes.items(channel)) this.#drop(channel, item); // told as refused
       this.#notes.push({ do: "channel-refused", channel, code });
     });
@@ -858,6 +929,7 @@ export class AppLink {
     const incarnation = this.#incarnation;
     if (
       !view ||
+      this.#spare(channel) ||
       !last ||
       !incarnation ||
       this.#flying.has(k) ||

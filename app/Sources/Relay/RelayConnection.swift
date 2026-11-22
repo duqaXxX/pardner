@@ -94,6 +94,8 @@ public enum RelayEvent: Sendable {
     case creating(HostValue)
     /// The link stopped sending in a channel after an answer no check explains: its `channel-fault` effect, with `channel`.
     case channelFault(HostValue)
+    /// A stored fault on the person's space or a spare was dropped at the first rest: the link's `channel-fault-dropped` effect, with `channel` (personal space design 2.6).
+    case channelFaultDropped(HostValue)
     /// A write of the app's outbox failed: nothing is created or sent from here, and the owner ends the connection (new channel design 3.1).
     case storeFailed
     /// The host faulted: the connection is over for the life of the host, and does not retry. The sentence the person is shown.
@@ -632,6 +634,7 @@ public final class RelayConnection: @unchecked Sendable {
             case "creating": out.yield(.creating(fx))
             case "channel-refused": out.yield(.channelRefused(fx))
             case "channel-fault": out.yield(.channelFault(fx))
+            case "channel-fault-dropped": out.yield(.channelFaultDropped(fx))
             case "store-failed": out.yield(.storeFailed)
             case "write":
                 // A `write` ends its list as a `persist` does, and is answered by the link's own call: the connection is serial, so no call

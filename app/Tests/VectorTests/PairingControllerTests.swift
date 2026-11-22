@@ -793,6 +793,17 @@ final class PairingControllerTests: XCTestCase {
         XCTAssertEqual(phase, .paired, "a channel's fault stops that channel alone")
     }
 
+    func testAFaultDroppedAtRestUnmarksTheChannel() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        rig.harness.link.emit(.channelFault(.object(["do": .string("channel-fault"), "channel": .bytes(channelID(4))])))
+        rig.harness.link.emit(.channelFault(.object(["do": .string("channel-fault"), "channel": .bytes(channelID(5))])))
+        _ = await channelState(rig.controller, "no fault") { $0.faulted.count == 2 }
+        rig.harness.link.emit(.channelFaultDropped(.object(["do": .string("channel-fault-dropped"), "channel": .bytes(channelID(4))])))
+        let state = await channelState(rig.controller, "fault not dropped") { $0.faulted.count == 1 }
+        XCTAssertEqual(state.faulted, [channelID(5)], "the space's fault is withdrawn, a conversation channel's stays")
+    }
+
     func testTheChannelStatesAreStreamedAndOnlyTheNewestIsKept() async throws {
         let rig = try rig(keys: true, state: stored(.paired))
         await rig.controller.launch()

@@ -242,6 +242,7 @@ extension LinkStoreTests {
         let plain: HostValue = .object(["name": bytes(2, 16), "kind": .number(2), "content": .string("hello"), "files": .array([])])
         return .object([
             "pending": .object(["signed": bytes(3, 70), "sig": bytes(3, 64)]),
+            "space": .object(["signed": bytes(8, 70), "sig": bytes(8, 64)]),
             "channels": .array([.object(["channel": id(5), "items": .array([full, plain])])]),
             "faults": .array([id(6)]),
         ])
@@ -259,6 +260,20 @@ extension LinkStoreTests {
         try store!.writeOutbox(outbox())
         store = nil
         XCTAssertEqual(try LinkStore(folder: place, identity: identity).loadOutbox(), outbox())
+    }
+
+    func testAnOutboxWrittenBeforeTheSpaceHadASlotIsStillRead() throws {
+        let place = folder()
+        var store: LinkStore? = try LinkStore(folder: place, identity: identity)
+        try store!.writeOutbox(outbox())
+        store = nil
+        var file = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: outboxFile(place))) as? [String: Any])
+        XCTAssertNotNil(file["space"], "the space's creation is written in its own field")
+        file["space"] = nil
+        try JSONSerialization.data(withJSONObject: file).write(to: outboxFile(place))
+        let loaded = try XCTUnwrap(try LinkStore(folder: place, identity: identity).loadOutbox())
+        XCTAssertNil(loaded["space"], "an older file has none: the link reads its `pending` as it finds it")
+        XCTAssertNotNil(loaded["pending"]?["signed"])
     }
 
     func testAnEmptyOutboxIsGivenBackWithItsCreationNull() throws {
