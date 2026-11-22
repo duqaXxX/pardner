@@ -63,7 +63,8 @@
       "user_message_uuids:array": "2.1.304",
       "model_usage_since_last_result.*.cacheCreationEphemeral1hInputTokens:number": "2.1.316",
       "model_usage_since_last_result.*.cacheCreationEphemeral5mInputTokens:number": "2.1.316",
-      "credential_expires_at:string": "2.1.318"
+      "credential_expires_at:string": "2.1.318",
+      "begun_message_ids:array": "2.1.330"
     },
     "result/success": {
       "modelUsage.*.cacheCreationEphemeral1hInputTokens:number": "2.1.312",
@@ -88,7 +89,8 @@
       "credential_expires_at:string": "2.1.318",
       "first_request_cache_read_input_tokens:number": "2.1.321",
       "api_error_type:string": "2.1.327",
-      "origin.handbackToolUseId:string": "2.1.327"
+      "origin.handbackToolUseId:string": "2.1.327",
+      "begun_message_ids:array": "2.1.330"
     },
     "stream_event/message_delta": {
       "event.context_management:null": "2.1.304",
@@ -110,7 +112,8 @@
       "user_message_uuids:array": "2.1.304",
       "ultrathink_available:boolean": "2.1.316",
       "ultrathink_typed_raises:boolean": "2.1.318",
-      "plugins[].version:string": "2.1.319"
+      "plugins[].version:string": "2.1.319",
+      "served_by_anthropic:boolean": "2.1.330"
     },
     "user": {
       "message.content[].content[].source.data:string": "2.1.304",
@@ -161,6 +164,9 @@
   "tools": {
     "SendToProject": "2.1.316",
     "SendToProjectContext": "2.1.316",
-    "LSP": "2.1.319"
+    "LSP": "2.1.319",
+    "ListMcpResourcesTool": "2.1.330",
+    "ReadMcpResourceDirTool": "2.1.330",
+    "ReadMcpResourceTool": "2.1.330"
   }
 }
