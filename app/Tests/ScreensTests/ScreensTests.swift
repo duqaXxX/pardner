@@ -226,7 +226,9 @@ final class ScreensTests: XCTestCase {
             first.drag(divider: 1, to: first.controller.splitView.bounds.width - 340 - 1)
             XCTAssertEqual(first.widths[2], 340)
             first.window.close()
-            let second = Launch(name: name, defaults: defaults, width: 1000, thread: true)
+            // The app always launches with no thread open (`LiveMainWindow` passes none), then the person opens one.
+            let second = Launch(name: name, defaults: defaults, width: 1000, thread: false)
+            second.show(thread: true)
             XCTAssertEqual(second.widths[2], 340, "the next launch keeps the width the person dragged")
         }
     }
