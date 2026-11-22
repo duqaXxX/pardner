@@ -87,9 +87,11 @@ final class PairingModelTests: XCTestCase {
         let devices = DevicesModel(state: DevicesState(), page: .add, pasted: "00")
         devices.isOpen = true
         let model = PairingModel(phase: .paired, devices: devices)
+        model.settings.open(.general)
         model.apply(.removed)
         XCTAssertFalse(devices.isOpen)
         XCTAssertEqual(devices.pasted, "")
+        XCTAssertNil(model.settings.pane, "the Settings panel goes with it")
     }
 
     func testTheSetupNameHintSaysTheNameIsTheSameOnEveryDevice() {

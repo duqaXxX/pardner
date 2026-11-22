@@ -1,5 +1,5 @@
-// The Devices sheet (device pairing design 3.1, 3.4, 3.6, 3.9): the list of devices, the form that adds one and the confirmation that
-// removes some, as three pages of one sheet over the main window. Colours, radii and the gap are the design system's tokens; every
+// The Devices pane of the Settings panel (device pairing design 3.1, 3.4, 3.6, 3.9): the list of devices, the form that adds one and the
+// confirmation that removes some, as three pages of one pane. Colours, radii and the gap are the design system's tokens; every
 // control carries an accessibility label.
 import AppKit
 import DesignSystem
@@ -13,14 +13,14 @@ enum Clipboard {
     }
 }
 
-public struct DevicesSheet: View {
+struct DevicesPane: View {
     @Bindable var model: DevicesModel
+    /// `Done` on the list: closes the panel.
+    let done: () -> Void
     /// Renames this Mac (names design 4.3); nil where the window has no pairing.
     let renameThisMac: (() -> Void)?
 
-    public init(model: DevicesModel, renameThisMac: (() -> Void)? = nil) { (self.model, self.renameThisMac) = (model, renameThisMac) }
-
-    public var body: some View {
+    var body: some View {
         VStack(spacing: 0) {
             header
             Divider().overlay(PardnerColor.line)
@@ -35,10 +35,6 @@ public struct DevicesSheet: View {
                 .padding(PardnerMetrics.gap * 2.5).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .frame(width: 600, height: 640)
-        .background(PardnerColor.bg)
-        .foregroundStyle(PardnerColor.text)
-        .font(PardnerFont.ui(size: 14, weight: .regular))
     }
 
     private var header: some View {
@@ -46,8 +42,8 @@ public struct DevicesSheet: View {
             Text(title).font(PardnerFont.display(size: 20, weight: .bold)).accessibilityAddTraits(.isHeader)
             Spacer()
             if model.page == .list {
-                Button("Done") { model.close() }
-                    .keyboardShortcut(.cancelAction).buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Close the devices")
+                Button("Done", action: done)
+                    .keyboardShortcut(.cancelAction).buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Close the settings")
             } else {
                 Button("Back") { model.back() }
                     .keyboardShortcut(.cancelAction).buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Back to the devices")

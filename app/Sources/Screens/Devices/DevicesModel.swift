@@ -8,10 +8,10 @@ import Relay
 
 @MainActor @Observable
 public final class DevicesModel {
-    /// The sheet's pages: the list, the form that adds a device and the confirmation that removes devices.
+    /// The Devices pane's pages: the list, the form that adds a device and the confirmation that removes devices.
     public enum Page: Equatable { case list, add, remove }
 
-    /// The sheet is open; the menu item and the sidebar's button set it.
+    /// The Devices pane is open; only `SettingsModel` sets it.
     public var isOpen = false
     public private(set) var page: Page = .list
     public private(set) var state = DevicesState()
@@ -91,9 +91,9 @@ public final class DevicesModel {
         return order != .orderedSame ? order == .orderedAscending : a.1.lexicographicallyPrecedes(b.1)
     }
 
-    /// A bot of the sidebar. Its profile names it once a channel carries it; until then the label its pairing string gave (a claim, drawn
+    /// A bot of the Bots pane. Its profile names it once a channel carries it; until then the label its pairing string gave (a claim, drawn
     /// in quotes like the Devices screen draws it) or the short id.
-    public struct SidebarBot: Equatable, Identifiable {
+    public struct ListedBot: Equatable, Identifiable {
         public let id: Data
         public let profile: BotProfile?
         public let label: String?
@@ -102,9 +102,9 @@ public final class DevicesModel {
     }
 
     /// Every active bot of the person, a removed one gone, in the pickers' order.
-    public func sidebarBots(profiles: [Data: BotProfile]) -> [SidebarBot] {
+    public func listedBots(profiles: [Data: BotProfile]) -> [ListedBot] {
         state.rows.filter { $0.kind == .bot && $0.active }
-            .map { SidebarBot(id: $0.id, profile: profiles[$0.id], label: $0.label) }
+            .map { ListedBot(id: $0.id, profile: profiles[$0.id], label: $0.label) }
             .sorted { Self.precedes(($0.name, $0.id), ($1.name, $1.id)) }
     }
 
@@ -161,9 +161,9 @@ public final class DevicesModel {
         }
     }
 
-    // MARK: the sheet
+    // MARK: the pane
 
-    /// A sheet that was left open earlier does not come back half done.
+    /// A pane that was left open earlier does not come back half done.
     public func open() {
         guard !isOpen else { return }
         isOpen = true

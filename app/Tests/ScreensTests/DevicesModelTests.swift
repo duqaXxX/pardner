@@ -332,21 +332,33 @@ final class DevicesModelTests: XCTestCase {
         XCTAssertTrue(model.canAdd)
     }
 
-    // MARK: the sidebar's bots
+    // MARK: the listed bots
 
-    func testTheSidebarListsEveryActiveBotFromTheDeviceList() {
+    func testTheBotsPaneListsEveryActiveBotFromTheDeviceList() {
         var s = state()
         s.rows += [row(6, kind: .bot, label: "Zed", position: 6), row(7, kind: .bot, label: "Gone", position: 7, active: false),
                    row(8, kind: .bot, label: "Alpha", position: 8)]
         let model = DevicesModel(state: s)
         let read = BotProfile(name: "mini", account: "a@example.com", plan: nil, icon: nil)
-        let bots = model.sidebarBots(profiles: [Self.id(8): read])
+        let bots = model.listedBots(profiles: [Self.id(8): read])
         XCTAssertEqual(bots.map(\.id), [Self.id(2), Self.id(8), Self.id(6)],
                        "by the name shown, as Finder sorts: the bot with neither by its short id, mini (its profile), Zed (its label); a removed bot and the apps are not listed")
-        XCTAssertEqual(bots.map(\.name), model.activeBots(names: [Self.id(8): "mini"]).map(\.name), "the pickers name and order the bots as the sidebar does")
+        XCTAssertEqual(bots.map(\.name), model.activeBots(names: [Self.id(8): "mini"]).map(\.name), "the pickers name and order the bots as the Bots pane does")
         XCTAssertEqual(bots.first { $0.id == Self.id(8) }?.profile, read, "a read profile names the bot")
         XCTAssertEqual(bots.first { $0.id == Self.id(6) }?.label, "Zed")
-        XCTAssertTrue(DevicesModel(state: DevicesState()).sidebarBots(profiles: [Self.id(8): read]).isEmpty, "a profile alone lists no bot before the device list is read")
+        XCTAssertTrue(DevicesModel(state: DevicesState()).listedBots(profiles: [Self.id(8): read]).isEmpty, "a profile alone lists no bot before the device list is read")
+    }
+
+    func testThePaneAndTheHintReadTheSameBots() {
+        var s = state()
+        s.rows += [row(8, kind: .bot, label: "Alpha", position: 8)]
+        let model = DevicesModel(state: s)
+        let read = BotProfile(name: "mini", account: "a@example.com", plan: nil, icon: nil)
+        let profiles = [Self.id(9): read]
+        XCTAssertEqual(MainWindow.listedBots(devices: model, profiles: profiles), model.listedBots(profiles: profiles), "the device list once it is read")
+        XCTAssertEqual(MainWindow.listedBots(devices: model, profiles: profiles).map(\.id), [Self.id(2), Self.id(8)], "a profile alone adds no bot to a read list")
+        XCTAssertEqual(MainWindow.listedBots(devices: nil, profiles: profiles).map(\.id), [Self.id(9)], "the bots whose profile a channel carries, with no pairing")
+        XCTAssertEqual(MainWindow.listedBots(devices: DevicesModel(state: DevicesState()), profiles: profiles).map(\.id), [Self.id(9)], "and before the list is read")
     }
 
     func testTheEmptyWindowSaysTheNextStep() {

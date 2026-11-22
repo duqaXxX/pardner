@@ -240,7 +240,14 @@ MainActor.assumeIsolated {
         ]
         let joining = JoiningInfo(pairingString: "0a" + String(repeating: "3f9c1d", count: 40) + "5761726d", shortForm: "aaaa-bbbb-cccc-dddd", name: "Studio Mac")
         for (appearance, theme) in themes {
-            for (name, make) in sheets { try render(appearance, DevicesSheet(model: make()), size: NSSize(width: 600, height: 640), to: "\(name)-\(theme).png") }
+            for (name, make) in sheets {
+                // Open already, so that `open(.devices)` keeps the page the sample was made on.
+                let devices = make()
+                devices.isOpen = true
+                let settings = SettingsModel(devices: devices)
+                settings.open(.devices)
+                try render(appearance, SettingsPanel(model: settings), size: NSSize(width: 600, height: 640), to: "\(name)-\(theme).png")
+            }
             let joinForm = PairingModel(phase: .unpaired(nil), join: true)
             (joinForm.joinAddress, joinForm.joinName) = ("relay.example.net:7443", "Studio Mac")
             try render(appearance, PairingScreen(model: joinForm), size: page, to: "join-form-\(theme).png")
@@ -359,7 +366,25 @@ MainActor.assumeIsolated {
             threaded.composer(channel: live.channel, thread: live.queuedThread).edited("And add the new folder to the guide.")
             try render(appearance, window(threaded, thread: live.queuedThread), size: big, to: "composer-thread-queued-\(theme).png")
             let sample = Samples.model()
-            try render(appearance, MainWindow(model: sample.model, devices: DevicesModel(), channel: sample.channel, thread: sample.thread), size: NSSize(width: 1280, height: 800), to: "window-devices-\(theme).png")
+            let paired = DevicesModel()
+            try render(appearance, MainWindow(model: sample.model, devices: paired, settings: SettingsModel(devices: paired), channel: sample.channel, thread: sample.thread), size: NSSize(width: 1280, height: 800), to: "window-devices-\(theme).png")
+            try render(appearance, MainWindow(model: sample.model, devices: paired, settings: SettingsModel(devices: paired), channel: sample.channel, thread: sample.thread), size: NSSize(width: 1900, height: 1050), to: "window-wide-\(theme).png")
+            let settings = SettingsModel(devices: paired)
+            settings.open(.general)
+            try render(appearance, SettingsPanel(model: settings), size: NSSize(width: 600, height: 640), to: "settings-general-\(theme).png")
+            settings.open(.bots)
+            // The samples' two bots carry a profile; a third, with a label alone, has not been seen in a channel yet.
+            let profiles = Samples.model().model.profiles
+            let unseenBot = Data(repeating: 0x2c, count: 32)
+            var threeBots = sampleDevices()
+            threeBots.rows = threeBots.rows.filter { $0.kind == .app }
+            for (n, botId) in (profiles.keys.sorted { $0.lexicographicallyPrecedes($1) } + [unseenBot]).enumerated() {
+                threeBots.rows.append(DeviceRow(id: botId, kind: .bot, label: botId == unseenBot ? "studio-dev" : nil, shortForm: "", adder: .none, position: (threeBots.rows.map(\.position).max() ?? 0) + 1 + n, active: true, isThisMac: false,
+                                                seenAt: nil, onlyHolderEpochs: 0, addedWhileRemoving: false))
+            }
+            let listed = DevicesModel(state: threeBots).listedBots(profiles: profiles)
+            let icons = profiles.compactMapValues { $0.icon.flatMap(NSImage.init(data:)) }
+            try render(appearance, SettingsPanel(model: settings, bots: listed, icons: icons), size: NSSize(width: 600, height: 640), to: "settings-bots-\(theme).png")
         }
         for (appearance, theme) in themes {
             let sample = Samples.model()
