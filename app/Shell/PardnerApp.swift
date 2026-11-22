@@ -83,7 +83,7 @@ struct PardnerApp: App {
         Window("Pardner", id: "main") {
             // The pairing screens until this Mac is paired; then the main window over what the link delivered.
             PairingRoot(model: delegate.pairing) { LiveMainWindow(conversation: delegate.pairing.conversation, devices: delegate.pairing.devices, channels: delegate.pairing.channels, composers: delegate.pairing.composers) }
-                .frame(minHeight: 560)
+                .frame(minHeight: MainWindow.leastHeight)
                 .task { delegate.pairing.start() }
                 .onAppear { delegate.showWindow = { openWindow(id: "main") } }
                 .onChange(of: theme) { _, value in (Theme(rawValue: value) ?? .light).apply() }

@@ -170,6 +170,63 @@ final class ScreensTests: XCTestCase {
         body(name, defaults)
     }
 
+    /// `MainWindow` over the samples with a thread open, in a window whose size follows its SwiftUI content as the app's does, with its
+    /// own autosave and first-launch state cleared before and after. `body` runs while the window is open; it is closed before the cleanup.
+    @MainActor
+    private func withRealWindow(_ body: (_ window: NSWindow, _ split: ColumnSplitView, _ settle: () -> Void) throws -> Void) throws {
+        _ = NSApplication.shared
+        _ = PardnerFonts.register()
+        let saved = ["NSSplitView Subview Frames MainWindow.columns", FirstLaunch.sidebarKey, FirstLaunch.panelKey]
+        for key in saved { UserDefaults.standard.removeObject(forKey: key) }
+        let sample = Samples.model()
+        let window = UnconstrainedWindow(contentViewController: NSHostingController(rootView: MainWindow(model: sample.model, channel: sample.channel, thread: sample.thread)))
+        defer {
+            window.close()
+            for key in saved { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        window.styleMask = [.titled, .resizable]
+        window.setContentSize(NSSize(width: 1400, height: 800))
+        window.makeKeyAndOrderFront(nil)
+        func settle() { RunLoop.main.run(until: Date().addingTimeInterval(0.4)); window.contentView?.layoutSubtreeIfNeeded() }
+        settle()
+        // Every width asserted here assumes the window kept the one asked for: a failure here is the environment's.
+        XCTAssertEqual(window.contentView?.frame.width, 1400, "the test window was resized by its environment")
+        func find(_ view: NSView) -> ColumnSplitView? { (view as? ColumnSplitView) ?? view.subviews.lazy.compactMap(find).first }
+        try body(window, try XCTUnwrap(find(try XCTUnwrap(window.contentView))), settle)
+    }
+
+    /// The window cannot be made narrower than the columns' least width nor lower than the app's least height.
+    @MainActor
+    func testTheRealWindowKeepsTheColumnsLeastSize() throws {
+        try withRealWindow { window, _, _ in
+            XCTAssertGreaterThanOrEqual(window.contentMinSize.width, MainWindow.leastWidth(threadOpen: true))
+            XCTAssertGreaterThanOrEqual(window.contentMinSize.height, MainWindow.leastHeight)
+        }
+    }
+
+    /// A drag is the tracking loop `NSSplitView.mouseDown` runs on the queued drags and mouse-up.
+    @MainActor
+    func testTheRealWindowsPanelFollowsADragOfItsDivider() throws {
+        try withRealWindow { window, split, settle in
+        let frame = window.frame
+        for (divider, dx) in [(0, CGFloat(40)), (1, CGFloat(-60))] {
+            let widths = split.arrangedSubviews.map { $0.frame.width }
+            let edge = split.arrangedSubviews[divider].frame.maxX
+            let start = split.convert(NSPoint(x: edge + 0.5, y: 100), to: nil)
+            func event(_ type: NSEvent.EventType, _ moved: CGFloat) -> NSEvent {
+                NSEvent.mouseEvent(with: type, location: NSPoint(x: start.x + moved, y: start.y), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            }
+            for step in stride(from: CGFloat(10), through: abs(dx), by: 10) { NSApp.postEvent(event(.leftMouseDragged, dx < 0 ? -step : step), atStart: false) }
+            NSApp.postEvent(event(.leftMouseUp, dx), atStart: false)
+            split.mouseDown(with: event(.leftMouseDown, 0))
+            settle()
+            XCTAssertEqual(window.frame, frame, "dragging divider \(divider) leaves the window alone")
+            XCTAssertEqual(split.arrangedSubviews[divider].frame.maxX, edge + dx, accuracy: 1, "divider \(divider) follows the drag")
+            XCTAssertEqual(split.arrangedSubviews[2].frame.width, widths[2] + (divider == 1 ? -dx : 0), accuracy: 1)
+        }
+        }
+    }
+
     @MainActor
     func testAFirstLaunchDrawsTheDefaultWidths() {
         withLaunches { name, defaults in

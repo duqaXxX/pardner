@@ -245,6 +245,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Dragging the divider between the conversation and the thread panel resizes the panel. The columns took the window's size from their own widths, so the drag shrank the window and the panel kept its width (#98).
 - A word typed at the top of a channel (`/bind demo`, `/stop`, `/bypass on`) or a prompt the bot refused before its session opened is no
   longer drawn by the app as a session that never ran (#68). The bot tells whether the prompt's thread holds a session
   (`InboundMessage.handled(session)`; the relay writes `"session": false` in that prompt's answer) and writes its lines that answer a
