@@ -90,6 +90,9 @@ const ALLOWED: Record<number, string[]> = {
   11: ["re", "to+re"],
   12: ["none"],
   13: ["none"],
+  14: ["none"],
+  15: ["none"],
+  16: ["none"],
 };
 const shapes: Record<string, { to: boolean; re: boolean }> = {
   none: { to: false, re: false },
@@ -117,7 +120,7 @@ test("a header of each kind encodes and decodes back to the same bytes", () => {
 });
 
 test("the kind table both ways: the decoder takes exactly the shapes the table allows", () => {
-  for (let kind = 1; kind <= 13; kind++)
+  for (let kind = 1; kind <= 16; kind++)
     for (const [shape, flags] of Object.entries(shapes)) {
       const allowed = (ALLOWED[kind] as string[]).includes(shape);
       assert.equal(decodeHeader(raw({ kind, ...flags })).ok, allowed, `kind ${kind} ${shape}`);
@@ -132,7 +135,7 @@ test("the kind table both ways: the decoder takes exactly the shapes the table a
 });
 
 test("a kind outside the table fails to decode, and does not encode", () => {
-  for (const kind of [0, 14, 255]) {
+  for (const kind of [0, 17, 255]) {
     assert.equal(decodeHeader(raw({ kind })).ok, false);
     assert.throws(() => encodeHeader(header({ kind })), RangeError);
   }

@@ -1,0 +1,926 @@
+{
+ "structure": "name",
+ "version": 1,
+ "source": "names design 2.1 and 3 and its header of 2026-11-22, 2026-11-22, written in gen-names.mjs; synthetic ids and names; the verdicts are the design's rules",
+ "cases": [
+  {
+   "name": "a channel name of lowercase letters",
+   "op": "name-read",
+   "kind": 14,
+   "text": "{\"name\":\"docs\"}",
+   "output": "docs"
+  },
+  {
+   "name": "a channel name with digits, a hyphen and an underscore",
+   "op": "name-read",
+   "kind": 14,
+   "text": "{\"name\":\"web-2_dev\"}",
+   "output": "web-2_dev"
+  },
+  {
+   "name": "a channel name of one character",
+   "op": "name-read",
+   "kind": 14,
+   "text": "{\"name\":\"x\"}",
+   "output": "x"
+  },
+  {
+   "name": "a channel name of 80 characters",
+   "op": "name-read",
+   "kind": 14,
+   "text": "{\"name\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+   "output": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+   "name": "a channel name of 81 characters",
+   "op": "name-read",
+   "kind": 14,
+   "text": "{\"name\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "an empty channel name",
+   "op": "name-read",
+   "kind": 14,
+   "text": "{\"name\":\"\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a channel name with an uppercase letter",
+   "op": "name-read",
+   "kind": 14,
+   "text": "{\"name\":\"Docs\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a channel name with a space",
+   "op": "name-read",
+   "kind": 14,
+   "text": "{\"name\":\"my docs\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a channel name with an accented letter",
+   "op": "name-read",
+   "kind": 14,
+   "text": "{\"name\":\"café\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a channel name with a full-width letter",
+   "op": "name-read",
+   "kind": 14,
+   "text": "{\"name\":\"ｄocs\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a channel name with a dot",
+   "op": "name-read",
+   "kind": 14,
+   "text": "{\"name\":\"a.b\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a channel name with @",
+   "op": "name-read",
+   "kind": 14,
+   "text": "{\"name\":\"a@b\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a channel name with a newline at the end",
+   "op": "name-read",
+   "kind": 14,
+   "text": "{\"name\":\"docs\\n\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a person name",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{\"name\":\"Alice Rowe\"}",
+   "output": "Alice Rowe"
+  },
+  {
+   "name": "a device name",
+   "op": "name-read",
+   "kind": 16,
+   "text": "{\"name\":\"MacBook Air\"}",
+   "output": "MacBook Air"
+  },
+  {
+   "name": "a person name in another script",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{\"name\":\"日本語\"}",
+   "output": "日本語"
+  },
+  {
+   "name": "a person name of 64 code points, the last outside the BMP",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{\"name\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀\"}",
+   "output": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"
+  },
+  {
+   "name": "a person name of 65 code points",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{\"name\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a device name of 64 code points",
+   "op": "name-read",
+   "kind": 16,
+   "text": "{\"name\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}",
+   "output": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  {
+   "name": "a device name of 65 code points",
+   "op": "name-read",
+   "kind": 16,
+   "text": "{\"name\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "an empty person name",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{\"name\":\"\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "an empty device name",
+   "op": "name-read",
+   "kind": 16,
+   "text": "{\"name\":\"\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a person name with @",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{\"name\":\"a@b\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a device name with @",
+   "op": "name-read",
+   "kind": 16,
+   "text": "{\"name\":\"a@b\"}",
+   "output": "a@b"
+  },
+  {
+   "name": "a person name with a space at the start",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{\"name\":\" Alice\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a device name with a space at the end",
+   "op": "name-read",
+   "kind": 16,
+   "text": "{\"name\":\"Mac \"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a person name with a tab",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{\"name\":\"Da\\tvide\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a device name with a newline",
+   "op": "name-read",
+   "kind": 16,
+   "text": "{\"name\":\"Mac\\nair\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a person name with U+0000",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{\"name\":\"Da\\u0000vide\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a person name with a C1 control",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{\"name\":\"Davide\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a person name with a line separator",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{\"name\":\"Da vide\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a person name with a zero width space",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{\"name\":\"Da​vide\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a device name with a right-to-left mark",
+   "op": "name-read",
+   "kind": 16,
+   "text": "{\"name\":\"Mac‏\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a device name with a variation selector",
+   "op": "name-read",
+   "kind": 16,
+   "text": "{\"name\":\"Mac️\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a person name with a byte order mark",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{\"name\":\"﻿Alice\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a person name with a lone surrogate",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{\"name\":\"Da\\ud800vide\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "content that is not JSON",
+   "op": "name-read",
+   "kind": 15,
+   "text": "Alice",
+   "fails": "bad-input"
+  },
+  {
+   "name": "content that is a JSON array",
+   "op": "name-read",
+   "kind": 15,
+   "text": "[\"Alice\"]",
+   "fails": "bad-input"
+  },
+  {
+   "name": "content that is JSON null",
+   "op": "name-read",
+   "kind": 15,
+   "text": "null",
+   "fails": "bad-input"
+  },
+  {
+   "name": "content with no name",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a name that is not a string",
+   "op": "name-read",
+   "kind": 16,
+   "text": "{\"name\":7}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a field that is not known is ignored: it does not read as a name without one",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{\"title\":\"x\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a field that is not known beside a name",
+   "op": "name-read",
+   "kind": 15,
+   "text": "{\"name\":\"Alice\",\"later\":1}",
+   "output": "Alice"
+  },
+  {
+   "name": "a text is no name",
+   "op": "name-read",
+   "kind": 1,
+   "text": "{\"name\":\"docs\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "a profile is no name",
+   "op": "name-read",
+   "kind": 13,
+   "text": "{\"name\":\"docs\"}",
+   "fails": "bad-input"
+  },
+  {
+   "name": "encoding a channel name",
+   "op": "name-encode",
+   "kind": 14,
+   "text": "docs",
+   "output": "{\"name\":\"docs\"}"
+  },
+  {
+   "name": "encoding a person name",
+   "op": "name-encode",
+   "kind": 15,
+   "text": "Alice Rowe",
+   "output": "{\"name\":\"Alice Rowe\"}"
+  },
+  {
+   "name": "encoding a device name with @",
+   "op": "name-encode",
+   "kind": 16,
+   "text": "a@b",
+   "output": "{\"name\":\"a@b\"}"
+  },
+  {
+   "name": "encoding an uppercase channel name",
+   "op": "name-encode",
+   "kind": 14,
+   "text": "Docs",
+   "fails": "throws",
+   "error": "RangeError"
+  },
+  {
+   "name": "encoding a person name with @",
+   "op": "name-encode",
+   "kind": 15,
+   "text": "a@b",
+   "fails": "throws",
+   "error": "RangeError"
+  },
+  {
+   "name": "encoding an empty device name",
+   "op": "name-encode",
+   "kind": 16,
+   "text": "",
+   "fails": "throws",
+   "error": "RangeError"
+  },
+  {
+   "name": "encoding a name for a kind that is no name",
+   "op": "name-encode",
+   "kind": 1,
+   "text": "docs",
+   "fails": "throws",
+   "error": "RangeError"
+  },
+  {
+   "name": "one channel name",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}"
+    }
+   ],
+   "text": "14:1111111111111111111111111111111111111111111111111111111111111111",
+   "output": "docs"
+  },
+  {
+   "name": "no name of that channel",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}"
+    }
+   ],
+   "text": "14:1212121212121212121212121212121212121212121212121212121212121212",
+   "output": "none"
+  },
+  {
+   "name": "the later place wins",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}"
+    },
+    {
+     "position": 7,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+     "name": "02020202020202020202020202020202",
+     "content": "{\"name\":\"web\"}"
+    }
+   ],
+   "text": "14:1111111111111111111111111111111111111111111111111111111111111111",
+   "output": "web"
+  },
+  {
+   "name": "history loaded in the other order",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 7,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+     "name": "02020202020202020202020202020202",
+     "content": "{\"name\":\"web\"}"
+    },
+    {
+     "position": 3,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}"
+    }
+   ],
+   "text": "14:1111111111111111111111111111111111111111111111111111111111111111",
+   "output": "web"
+  },
+  {
+   "name": "two channels, each its own",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}"
+    },
+    {
+     "position": 5,
+     "kind": 14,
+     "channel": "1212121212121212121212121212121212121212121212121212121212121212",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "02020202020202020202020202020202",
+     "content": "{\"name\":\"web\"}"
+    }
+   ],
+   "text": "14:1212121212121212121212121212121212121212121212121212121212121212",
+   "output": "web"
+  },
+  {
+   "name": "a rename back to an earlier name, under a new message name",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}"
+    },
+    {
+     "position": 5,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "02020202020202020202020202020202",
+     "content": "{\"name\":\"web\"}"
+    },
+    {
+     "position": 9,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "03030303030303030303030303030303",
+     "content": "{\"name\":\"docs\"}"
+    }
+   ],
+   "text": "14:1111111111111111111111111111111111111111111111111111111111111111",
+   "output": "docs"
+  },
+  {
+   "name": "an old copy sent again after a newer name is at its first copy's place",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}"
+    },
+    {
+     "position": 5,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "02020202020202020202020202020202",
+     "content": "{\"name\":\"web\"}"
+    },
+    {
+     "position": 9,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}"
+    }
+   ],
+   "text": "14:1111111111111111111111111111111111111111111111111111111111111111",
+   "output": "web"
+  },
+  {
+   "name": "a first copy the device cannot open still places its later copy",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101"
+    },
+    {
+     "position": 5,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "02020202020202020202020202020202",
+     "content": "{\"name\":\"web\"}"
+    },
+    {
+     "position": 9,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}"
+    }
+   ],
+   "text": "14:1111111111111111111111111111111111111111111111111111111111111111",
+   "output": "web"
+  },
+  {
+   "name": "the copy alone, its first copy unseen, counts at its own place",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 9,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}"
+    },
+    {
+     "position": 5,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "02020202020202020202020202020202",
+     "content": "{\"name\":\"web\"}"
+    }
+   ],
+   "text": "14:1111111111111111111111111111111111111111111111111111111111111111",
+   "output": "docs"
+  },
+  {
+   "name": "a header seen and no body opened shows nothing",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101"
+    }
+   ],
+   "text": "14:1111111111111111111111111111111111111111111111111111111111111111",
+   "output": "none"
+  },
+  {
+   "name": "a body that does not read leaves the earlier name",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}"
+    },
+    {
+     "position": 7,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "02020202020202020202020202020202",
+     "content": "{\"name\":\"Not Valid\"}"
+    }
+   ],
+   "text": "14:1111111111111111111111111111111111111111111111111111111111111111",
+   "output": "docs"
+  },
+  {
+   "name": "a body with files is no name",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}"
+    },
+    {
+     "position": 7,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "02020202020202020202020202020202",
+     "content": "{\"name\":\"web\"}",
+     "files": 1
+    }
+   ],
+   "text": "14:1111111111111111111111111111111111111111111111111111111111111111",
+   "output": "docs"
+  },
+  {
+   "name": "the first copy with files: its later copy is no name either",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}",
+     "files": 1
+    },
+    {
+     "position": 9,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}"
+    }
+   ],
+   "text": "14:1111111111111111111111111111111111111111111111111111111111111111",
+   "output": "none"
+  },
+  {
+   "name": "a person name in the space",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 15,
+     "channel": "2121212121212121212121212121212121212121212121212121212121212121",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"Alice\"}"
+    }
+   ],
+   "text": "15:2121212121212121212121212121212121212121212121212121212121212121",
+   "output": "Alice"
+  },
+  {
+   "name": "a person name: the later place wins, from either device",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 15,
+     "channel": "2121212121212121212121212121212121212121212121212121212121212121",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"Alice\"}"
+    },
+    {
+     "position": 6,
+     "kind": 15,
+     "channel": "2121212121212121212121212121212121212121212121212121212121212121",
+     "sender": "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+     "name": "02020202020202020202020202020202",
+     "content": "{\"name\":\"Alice R\"}"
+    }
+   ],
+   "text": "15:2121212121212121212121212121212121212121212121212121212121212121",
+   "output": "Alice R"
+  },
+  {
+   "name": "a person name in a spare changes no name",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 15,
+     "channel": "2121212121212121212121212121212121212121212121212121212121212121",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"Alice\"}"
+    },
+    {
+     "position": 8,
+     "kind": 15,
+     "channel": "2222222222222222222222222222222222222222222222222222222222222222",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "02020202020202020202020202020202",
+     "content": "{\"name\":\"From a spare\"}"
+    }
+   ],
+   "text": "15:2121212121212121212121212121212121212121212121212121212121212121",
+   "output": "Alice"
+  },
+  {
+   "name": "a person name in a spare alone is none",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 15,
+     "channel": "2222222222222222222222222222222222222222222222222222222222222222",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"From a spare\"}"
+    }
+   ],
+   "text": "15:2121212121212121212121212121212121212121212121212121212121212121",
+   "output": "none"
+  },
+  {
+   "name": "a device name of its own sender",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 16,
+     "channel": "2121212121212121212121212121212121212121212121212121212121212121",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"Mac one\"}"
+    },
+    {
+     "position": 4,
+     "kind": 16,
+     "channel": "2121212121212121212121212121212121212121212121212121212121212121",
+     "sender": "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+     "name": "02020202020202020202020202020202",
+     "content": "{\"name\":\"Mac two\"}"
+    }
+   ],
+   "text": "16:2121212121212121212121212121212121212121212121212121212121212121:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+   "output": "Mac one"
+  },
+  {
+   "name": "a device name of the other device",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 16,
+     "channel": "2121212121212121212121212121212121212121212121212121212121212121",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"Mac one\"}"
+    },
+    {
+     "position": 4,
+     "kind": 16,
+     "channel": "2121212121212121212121212121212121212121212121212121212121212121",
+     "sender": "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+     "name": "02020202020202020202020202020202",
+     "content": "{\"name\":\"Mac two\"}"
+    }
+   ],
+   "text": "16:2121212121212121212121212121212121212121212121212121212121212121:b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+   "output": "Mac two"
+  },
+  {
+   "name": "a device with no name of its own",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 16,
+     "channel": "2121212121212121212121212121212121212121212121212121212121212121",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"Mac one\"}"
+    }
+   ],
+   "text": "16:2121212121212121212121212121212121212121212121212121212121212121:b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+   "output": "none"
+  },
+  {
+   "name": "a device name in a spare changes no name",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 16,
+     "channel": "2222222222222222222222222222222222222222222222222222222222222222",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"Spare Mac\"}"
+    }
+   ],
+   "text": "16:2121212121212121212121212121212121212121212121212121212121212121:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+   "output": "none"
+  },
+  {
+   "name": "a person name is no channel name",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 15,
+     "channel": "2121212121212121212121212121212121212121212121212121212121212121",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"Alice\"}"
+    }
+   ],
+   "text": "14:2121212121212121212121212121212121212121212121212121212121212121",
+   "output": "none"
+  },
+  {
+   "name": "a channel name is no person name",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 14,
+     "channel": "2121212121212121212121212121212121212121212121212121212121212121",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}"
+    }
+   ],
+   "text": "15:2121212121212121212121212121212121212121212121212121212121212121",
+   "output": "none"
+  },
+  {
+   "name": "an edit naming a name changes nothing",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}"
+    },
+    {
+     "position": 9,
+     "kind": 11,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "02020202020202020202020202020202",
+     "content": "{\"name\":\"web\"}"
+    }
+   ],
+   "text": "14:1111111111111111111111111111111111111111111111111111111111111111",
+   "output": "docs"
+  },
+  {
+   "name": "the same message taken again once it opens",
+   "op": "name-shown",
+   "values": [
+    {
+     "position": 3,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101"
+    },
+    {
+     "position": 3,
+     "kind": 14,
+     "channel": "1111111111111111111111111111111111111111111111111111111111111111",
+     "sender": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+     "name": "01010101010101010101010101010101",
+     "content": "{\"name\":\"docs\"}"
+    }
+   ],
+   "text": "14:1111111111111111111111111111111111111111111111111111111111111111",
+   "output": "docs"
+  }
+ ]
+}

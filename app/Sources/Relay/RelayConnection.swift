@@ -626,6 +626,7 @@ public final class RelayConnection: @unchecked Sendable {
                 if ["put-back", "fault"].contains(view["do"]?.stringValue) { final = true }
                 out.yield(.delivered(view))
             case "profile": out.yield(.profile(fx))
+            case "names": break // the names a device shows reach the screens with step N2 of the names design; until then the link tells them and the app ignores them
             case "devices": out.yield(.devices(fx))
             case "outbox": out.yield(.outbox(fx))
             case "creating": out.yield(.creating(fx))

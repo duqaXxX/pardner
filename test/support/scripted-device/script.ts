@@ -395,7 +395,10 @@ export async function run(
       re: reference(step.re),
       name: named(step.name ?? step.as),
     };
-    return sign(by, sealMessage(platform, epoch.key, header, { files, content: "{}" }));
+    return sign(
+      by,
+      sealMessage(platform, epoch.key, header, { files, content: String(step.content ?? "{}") }),
+    );
   }
 
   async function prove(step: Step) {

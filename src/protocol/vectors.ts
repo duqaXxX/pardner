@@ -49,7 +49,15 @@ import {
   unreadName,
 } from "./messages.ts";
 import type { Bytes, Platform } from "./platform.ts";
-import { encodeProfile, type Profile, Profiles, readProfile } from "./profile.ts";
+import {
+  encodeName,
+  encodeProfile,
+  Names,
+  type Profile,
+  Profiles,
+  readName,
+  readProfile,
+} from "./profile.ts";
 import {
   checkHead,
   checkProof,
@@ -166,6 +174,8 @@ interface Case {
   signature?: string;
   valid?: boolean;
   text?: string;
+  /** `name.json`: the kind of the message whose name is read or written. */
+  kind?: number;
   bytes?: string;
   signing?: string;
   receiving?: string;
@@ -823,6 +833,12 @@ interface ShownJson {
   files?: number;
 }
 
+/** A `name-shown` case's message: its place, kind, channel, sender and name (hex), its content when it opened, and how many files it lists. */
+interface NameShownJson extends Omit<ShownJson, "content"> {
+  channel: string;
+  content?: string;
+}
+
 /**
  * A `profile.json` case: `profile-read` reads `c.text` and writes the profile back; `profile-encode`
  * writes `c.inputs` (its icon in hex); `profile-shown` hands `c.values` to a `Profiles` in their
@@ -852,6 +868,46 @@ function profileCase(c: Case): string {
           m.content,
         );
       return profiles.of(fromHex(c.text))?.name ?? "none";
+    }
+  }
+}
+
+/**
+ * A `name.json` case: `name-read` reads `c.text` as the content of a message of kind `c.kind` and
+ * gives the name; `name-encode` writes the name `c.text` for that kind; `name-shown` hands
+ * `c.values` to a `Names` in their order (a value with no `content` is a header the device could not
+ * open) and answers `c.text`: "14:<channel>", "15:<space>" or "16:<space>:<device>".
+ */
+function nameCase(c: Case): string {
+  switch (c.op) {
+    case "name-read": {
+      const r = readName(c.kind ?? 0, c.text ?? "");
+      return r.ok ? r.value : `error:${r.error}`;
+    }
+    case "name-encode":
+      return encodeName(c.kind ?? 0, c.text ?? "");
+    default: {
+      const names = new Names();
+      for (const m of (c.values ?? []) as NameShownJson[]) {
+        const h = {
+          kind: m.kind,
+          channel: fromHex(m.channel),
+          sender: fromHex(m.sender),
+          name: fromHex(m.name),
+          blobs: Array.from({ length: m.files ?? 0 }, (_, i) => new Uint8Array(32).fill(i)),
+        };
+        if (m.content === undefined) names.see(m.position, h);
+        else names.take(m.position, h, m.content);
+      }
+      const [kind, id, device] = (c.text ?? "").split(":");
+      const at = fromHex(id ?? "");
+      const name =
+        kind === "14"
+          ? names.channel(at)
+          : kind === "15"
+            ? names.person(at)
+            : names.device(at, fromHex(device ?? ""));
+      return name ?? "none";
     }
   }
 }
@@ -902,6 +958,10 @@ function outcome(
     case "profile-encode":
     case "profile-shown":
       return profileCase(c);
+    case "name-read":
+    case "name-encode":
+    case "name-shown":
+      return nameCase(c);
     case "blob-open": {
       const opened = openBlob(p, given(c.id), key, input);
       return opened.ok ? toHex(opened.value) : `error:${opened.error}`;
@@ -1081,6 +1141,7 @@ const STRUCTURES = [
   "chain",
   "profile",
   "space",
+  "name",
 ];
 
 /**
