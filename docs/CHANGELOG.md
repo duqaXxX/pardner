@@ -35,7 +35,7 @@ All notable changes to this project are documented here. The format follows
   epochs are open and who each is sealed to. Nothing the owner sees changes yet.
 - The app has an icon: the Pardner mark on a rounded tile, from an asset catalog in the app target (`app/Shell/Assets.xcassets`). `icon-render` draws it again from the code.
 - The app's main window has resizable columns. Drag the divider between the sidebar and the conversation (200 to 360 points) or between the conversation and the
-  thread panel (320 to 640); a double click on a divider restores its first-launch width (248 and 380). The widths are kept across launches, no column collapses, and
+  thread panel (from 320 points, until the conversation is at its least width of 420, never taking width from the sidebar); a double click on a divider restores its first-launch width (248 and 380). The widths are kept across launches, no column collapses, and
   the window's least width follows from the columns (942 points with a thread open, 621 without; the pairing screens' least width goes from 1050 to 680).
 - The app answers the bot's requests and stops a session. A request in a thread is a card with the controls of its type: setup (a model picker, an effort
   picker and a bypass switch, preset from the request; Start), a tool's approval (the tool, its description and input as indented JSON, or the plan, cut at
