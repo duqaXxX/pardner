@@ -191,6 +191,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- `@anthropic-ai/claude-agent-sdk` is pinned to 0.3.330, which bundles Claude Code 2.1.330. The release probe
+  certified it; the three tools and the three stream paths it adds (`begun_message_ids` on a result,
+  `served_by_anthropic` on the init record), which the Claude back end does not read, are accepted in
+  `probe/accepted-shapes.json`.
 - The platform's recovery call is split in two, so the recovery sheet can name the person id, which is the id of the
   device log's entry 0 and exists only after the recovery keys are made. `createRecovery` makes the secret, keeps it in
   the platform's memory under the name (a `SecretBuffer` in the app, a `Uint8Array` on Node, zeroed when wiped) and
