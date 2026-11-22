@@ -36,6 +36,7 @@ import { encodeName, encodeProfile, Names, type Profile, Profiles, readName } fr
 import type { Identity, Kept, Out } from "./reading.ts";
 import type { RecoverOptions } from "./recover.ts";
 import type { PlatformError, Result } from "./result.ts";
+import { plausibleRange } from "./time-range.ts";
 
 // The first device's entry 0 (design 3.5): the app calls it through `ProtocolHost.callExported`, before any `AppLink` exists.
 export { buildGenesis, buildReset, readDeviceEntry } from "./device-builders.ts";
@@ -222,6 +223,13 @@ const shaped = (p: { device?: Partial<DeviceKeys>; proof?: unknown } | undefined
     proof.length === 64
   );
 };
+
+/** Messages held unopened in an epoch: the count and the range of their plausible times (`AppLink.epochs`). */
+export interface Unopened {
+  count: number;
+  first?: number;
+  last?: number;
+}
 
 /**
  * The device's connection to the relay for the app: `Link`'s calls, with effects a driver in Swift
@@ -506,9 +514,26 @@ export class AppLink {
     return recoveryIds(this.#platform, this.#link.reading.devices);
   }
 
-  /** What "done" needs (2.6): every epoch read, whether its key is held, and who it is sealed to. */
-  epochs(): ReturnType<Link["reading"]["epochStates"]> {
-    return this.#link.reading.epochStates();
+  /**
+   * What "done" needs (2.6): every epoch read, whether its key is held, who it is sealed to, and whether its channel is of the space class (the list leaves those out). An epoch not open adds
+   * `unopened`: how many messages it holds unopened and the smallest and largest of their plausible times, the senders'
+   * signed clocks, for display only (epoch dates design 2): the list never decides done.
+   */
+  epochs(): (ReturnType<Link["reading"]["epochStates"]>[number] & {
+    space: boolean;
+    unopened?: Unopened;
+  })[] {
+    const now = this.#platform.now();
+    return this.#link.reading.epochStates().map((e) => {
+      const space = this.#link.reading.channel(e.channel)?.space === true;
+      if (e.open) return { ...e, space };
+      const held = this.#waiting.get(`${idKey(e.channel)} ${idKey(e.epoch)}`) ?? [];
+      const range = plausibleRange(
+        held.map((w) => w.message.header.time),
+        now,
+      );
+      return { ...e, space, unopened: { count: held.length, ...range } };
+    });
   }
 
   /** The id of the recovery key the device log names now (2.6, done reads it again): `undefined` before any log. */

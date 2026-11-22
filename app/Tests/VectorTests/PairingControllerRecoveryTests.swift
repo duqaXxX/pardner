@@ -609,7 +609,7 @@ final class PairingControllerRecoveryTests: XCTestCase {
     private let (channel, epochA, epochB) = (Data(repeating: 0xC1, count: 32), Data(repeating: 0xE1, count: 32), Data(repeating: 0xE2, count: 32))
     private let current = Data(repeating: 0xCC, count: 32)
 
-    private func epoch(_ id: Data, open: Bool, _ sealedTo: [Data]) -> RecoveryReading.Epoch { .init(channel: channel, epoch: id, open: open, sealedTo: sealedTo) }
+    private func epoch(_ id: Data, open: Bool, _ sealedTo: [Data]) -> RecoveryReading.Epoch { .init(channel: channel, epoch: id, open: open, sealedTo: sealedTo, unopened: open ? nil : Unopened(count: 0)) }
 
     /// A recovery placed in this run: the key typed to start is held and given to the link.
     private func placed(_ keepKey: Bool = true) async throws -> Rig {
@@ -863,10 +863,74 @@ final class PairingControllerRecoveryTests: XCTestCase {
     }
 
     func testAnEpochOfAnUnexpectedShapeRefusesTheWholeReading() {
-        let good = HostValue.object(["channel": .bytes(Data(repeating: 1, count: 32)), "epoch": .bytes(Data(repeating: 2, count: 32)), "open": .bool(true), "sealedTo": .array([.bytes(Data(repeating: 3, count: 32))])])
+        let good = HostValue.object(["channel": .bytes(Data(repeating: 1, count: 32)), "epoch": .bytes(Data(repeating: 2, count: 32)), "open": .bool(true), "space": .bool(false), "sealedTo": .array([.bytes(Data(repeating: 3, count: 32))])])
         XCTAssertNotNil(RecoveryReading.Epoch(good))
-        XCTAssertNil(RecoveryReading.Epoch(.object(["channel": .bytes(Data()), "epoch": .bytes(Data(repeating: 2, count: 32)), "open": .string("yes"), "sealedTo": .array([])])))
-        XCTAssertNil(RecoveryReading.Epoch(.object(["channel": .bytes(Data(repeating: 1, count: 32)), "epoch": .bytes(Data(repeating: 2, count: 32)), "open": .bool(true), "sealedTo": .array([.number(1)])])), "a recipient that is no bytes")
+        XCTAssertNil(RecoveryReading.Epoch(.object(["channel": .bytes(Data()), "epoch": .bytes(Data(repeating: 2, count: 32)), "open": .string("yes"), "space": .bool(false), "sealedTo": .array([])])))
+        XCTAssertNil(RecoveryReading.Epoch(.object(["channel": .bytes(Data(repeating: 1, count: 32)), "epoch": .bytes(Data(repeating: 2, count: 32)), "open": .bool(true), "space": .bool(false), "sealedTo": .array([.number(1)])])), "a recipient that is no bytes")
+    }
+
+    private func shape(open: Bool, _ unopened: HostValue?) -> HostValue {
+        var fields: [String: HostValue] = ["channel": .bytes(Data(repeating: 1, count: 32)), "epoch": .bytes(Data(repeating: 2, count: 32)), "open": .bool(open), "sealedTo": .array([]), "space": .bool(false)]
+        fields["unopened"] = unopened
+        return .object(fields)
+    }
+
+    private let floorMs = 1_794_614_400_000.0
+
+    func testTheDatesOfAnEpochNotOpenAreParsedAndEveryOtherShapeRefusesTheReading() {
+        let times: HostValue = .object(["count": .number(2), "first": .number(floorMs), "last": .number(floorMs + 4_000)])
+        let parsed = RecoveryReading.Epoch(shape(open: false, times))
+        XCTAssertEqual(parsed?.unopened, Unopened(count: 2, first: Date(timeIntervalSince1970: floorMs / 1000), last: Date(timeIntervalSince1970: floorMs / 1000 + 4)))
+        XCTAssertEqual(RecoveryReading.Epoch(shape(open: false, .object(["count": .number(0)])))?.unopened, Unopened(count: 0))
+        XCTAssertNil(RecoveryReading.Epoch(shape(open: false, nil))?.unopened)
+        XCTAssertNotNil(RecoveryReading.Epoch(shape(open: true, nil)))
+        for bad: HostValue? in [nil, .object([:]), .object(["count": .number(-1)]), .object(["count": .number(1.5)]), .object(["count": .string("2")]),
+                                 .object(["count": .number(1), "first": .number(1)]), .object(["count": .number(1), "last": .number(1)]),
+                                 .object(["count": .number(1), "first": .number(floorMs + 9), "last": .number(floorMs)]), .object(["count": .number(1), "first": .string("1"), "last": .number(1)]),
+                                 .object(["count": .number(1), "first": .number(.infinity), "last": .number(.infinity)]), .object(["count": .number(1), "first": .number(.nan), "last": .number(.nan)]),
+                                 .object(["count": .number(1), "first": .number(1_000), "last": .number(5_000)]), .object(["count": .number(1), "first": .number(floorMs), "last": .number(4e15)]),
+                                 .object(["count": .number(0), "first": .number(floorMs), "last": .number(floorMs)])] {
+            XCTAssertNil(RecoveryReading.Epoch(shape(open: false, bad)), "\(String(describing: bad))")
+        }
+        XCTAssertNil(RecoveryReading.Epoch(shape(open: true, times)), "an open epoch holds nothing unopened")
+        var noSpace = shape(open: true, nil)
+        if case .object(var fields) = noSpace { fields["space"] = nil; noSpace = .object(fields) }
+        XCTAssertNil(RecoveryReading.Epoch(noSpace), "the class of the channel is always told")
+    }
+
+    func testTheDatesNeverChangeWhatDoneWaitsOn() {
+        let key = Data(repeating: 0xAB, count: 32)
+        let plain = [epoch(epochA, open: false, [key, current]), epoch(epochB, open: true, [key])]
+        var dated = plain
+        dated[0].unopened = Unopened(count: 4, first: Date(timeIntervalSince1970: 1), last: Date(timeIntervalSince1970: 9))
+        for (index, other) in [plain, dated].enumerated() {
+            let progress = PairingController.progress(RecoveryReading(epochs: other, recoveries: [key, current], current: current), held: [], gaveUp: [])
+            XCTAssertEqual(progress.waiting.map(\.key), [key, current], "run \(index)")
+            XCTAssertEqual(progress.waiting.map(\.epochs.count), [1, 1], "run \(index)")
+            XCTAssertEqual(progress.unsealed, 1, "run \(index)")
+        }
+    }
+
+    func testProgressGivesEachEpochItsPlaceInItsChannelAndItsDates() {
+        let key = Data(repeating: 0xAB, count: 32)
+        let other = Data(repeating: 0xC2, count: 32)
+        let counted = Unopened(count: 3, first: Date(timeIntervalSince1970: 1), last: Date(timeIntervalSince1970: 2))
+        var a = epoch(epochA, open: false, [key]), b = epoch(epochB, open: true, [key])
+        let c = RecoveryReading.Epoch(channel: channel, epoch: Data(repeating: 0xE3, count: 32), open: false, sealedTo: [key], unopened: Unopened(count: 0))
+        let d = RecoveryReading.Epoch(channel: other, epoch: Data(repeating: 0xE4, count: 32), open: false, sealedTo: [key], unopened: Unopened(count: 1))
+        a.unopened = counted
+        b.unopened = nil
+        let progress = PairingController.progress(RecoveryReading(epochs: [a, b, c, d], recoveries: [key, current], current: current), held: [], gaveUp: [])
+        let epochs = progress.waiting.first?.epochs ?? []
+        XCTAssertEqual(epochs.map(\.place), [0, 2, 0], "a readable epoch in between keeps its place")
+        XCTAssertEqual(epochs.map(\.unopened), [counted, Unopened(count: 0), Unopened(count: 1)])
+    }
+
+    func testAnEpochOfTheSpaceStaysInWhatDoneWaitsOnAndIsMarkedForTheList() {
+        let key = Data(repeating: 0xAB, count: 32)
+        let home = RecoveryReading.Epoch(channel: Data(repeating: 0xC9, count: 32), epoch: epochB, open: false, sealedTo: [key], unopened: Unopened(count: 1), space: true)
+        let progress = PairingController.progress(RecoveryReading(epochs: [epoch(epochA, open: false, [key]), home], recoveries: [key, current], current: current), held: [], gaveUp: [])
+        XCTAssertEqual(progress.waiting.first?.epochs.map(\.space), [false, true])
     }
 
     func testAnEpochNamesAKeyOnceWhateverTimesItIsSealedToIt() async throws {

@@ -84,6 +84,34 @@ final class RecoveryModelTests: XCTestCase {
         XCTAssertNil(model.problem, "the step moved on")
     }
 
+    func testAProblemOfTheOpeningStepSurvivesARestThatOnlyChangesTheDates() {
+        let earlier = Data(repeating: 2, count: 32)
+        func progress(_ count: Int) -> RecoveryProgress {
+            RecoveryProgress(waiting: [.init(key: earlier, epochs: [.init(channel: Data(repeating: 1, count: 32), epoch: Data(repeating: 3, count: 32), unopened: Unopened(count: count))])], unsealed: 0)
+        }
+        let model = PairingModel(phase: .recovering(.opening(progress(1))))
+        model.finishAnswer(PairingInputError.person)
+        XCTAssertNotNil(model.problem)
+        model.apply(.recovering(.opening(progress(2))))
+        XCTAssertNotNil(model.problem, "the step did not change, only a count")
+        model.apply(.recovering(.sending))
+        XCTAssertNil(model.problem)
+    }
+
+    func testAProblemDoesNotOutliveTheKeyTheStepAsksFor() {
+        func progress(_ key: UInt8) -> RecoveryProgress { RecoveryProgress(waiting: [.init(key: Data(repeating: key, count: 32), epochs: [])], unsealed: 0) }
+        let model = PairingModel(phase: .recovering(.opening(progress(2))))
+        model.finishAnswer(PairingInputError.person)
+        model.apply(.recovering(.opening(progress(3))))
+        XCTAssertNil(model.problem, "another key is asked for: a new step")
+    }
+
+    func testTheGiveUpSentenceNamesNoListWhenNoConversationStaysUnreadable() {
+        XCTAssertEqual(RecoveryWords.unreadable([]), "No conversation stays unreadable on this device. This may be a recovery key Pardner told you could be destroyed.")
+        XCTAssertEqual(RecoveryWords.unreadable(["#a, no messages", "#b, dates unknown"]),
+                       "These conversations stay unreadable on this device: #a, no messages; #b, dates unknown. This may be a recovery key Pardner told you could be destroyed.")
+    }
+
     func testAGiveUpConfirmationEndsWhenItsKeyIsNoLongerWaiting() {
         let earlier = Data(repeating: 2, count: 32)
         let waiting = RecoveryProgress(waiting: [.init(key: earlier, epochs: [])], unsealed: 0)
@@ -283,5 +311,56 @@ final class RecoveryModelTests: XCTestCase {
     func testTheNewKeyAnswersEachHaveALine() {
         XCTAssertFalse(RecoveryScreenWords.makeNewKeyLine.isEmpty)
         XCTAssertFalse(RecoveryScreenWords.keepMyKeyLine.isEmpty)
+    }
+
+    // MARK: the dates of the conversations that stay unreadable (epoch dates design 2, 6)
+
+    private func stretch(_ channel: UInt8, place: Int, _ count: Int, _ first: Double? = nil, _ last: Double? = nil) -> RecoveryProgress.Epoch {
+        .init(channel: Data(repeating: channel, count: 32), epoch: Data(repeating: UInt8(place), count: 32), place: place,
+              unopened: Unopened(count: count, first: first.map(Date.init(timeIntervalSince1970:)), last: last.map(Date.init(timeIntervalSince1970:))))
+    }
+
+    private let noon = 1_795_000_000.0 // a day in November 2026
+    private let utc = TimeZone(identifier: "UTC")!
+    private func lines(_ epochs: [RecoveryProgress.Epoch]) -> [String] {
+        RecoveryScreenWords.conversations(epochs, locale: Locale(identifier: "en_GB"), timeZone: utc)
+    }
+
+    func testConsecutiveUnreadableEpochsOfOneConversationMakeOneRange() {
+        let day = 86_400.0
+        let out = lines([stretch(1, place: 0, 2, noon, noon + day), stretch(1, place: 1, 1, noon + 3 * day, noon + 4 * day)])
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out.first, "#01010101, from 18 Nov 2026 to 22 Nov 2026")
+    }
+
+    func testAReadableEpochBetweenSplitsTheRangeInTwo() {
+        let out = lines([stretch(1, place: 0, 1, noon, noon), stretch(1, place: 2, 1, noon + 86_400 * 5, noon + 86_400 * 5)])
+        XCTAssertEqual(out, ["#01010101, on 18 Nov 2026", "#01010101, on 23 Nov 2026"])
+    }
+
+    func testAnEmptyEpochInsideARunAddsNoDate() {
+        let out = lines([stretch(1, place: 0, 1, noon, noon), stretch(1, place: 1, 0), stretch(1, place: 2, 1, noon + 86_400, noon + 86_400)])
+        XCTAssertEqual(out, ["#01010101, from 18 Nov 2026 to 19 Nov 2026"])
+    }
+
+    func testTheThreeCasesOfAStretchHaveTheirThreeTexts() {
+        XCTAssertEqual(lines([stretch(2, place: 0, 3, noon, noon + 86_400)]), ["#02020202, from 18 Nov 2026 to 19 Nov 2026"])
+        XCTAssertEqual(lines([stretch(2, place: 0, 3)]), ["#02020202, dates unknown"])
+        XCTAssertEqual(lines([stretch(2, place: 0, 0)]), ["#02020202, no messages"])
+    }
+
+    func testTheSameDayAtBothEndsIsWrittenOnThatDay() {
+        XCTAssertEqual(lines([stretch(3, place: 0, 2, noon, noon + 60)]), ["#03030303, on 18 Nov 2026"])
+    }
+
+    func testTheSpaceAndItsSparesAreNoConversationOfTheList() {
+        let home = RecoveryProgress.Epoch(channel: Data(repeating: 7, count: 32), epoch: Data(repeating: 1, count: 32), unopened: Unopened(count: 1), space: true)
+        XCTAssertEqual(lines([home, stretch(2, place: 0, 0)]), ["#02020202, no messages"])
+        XCTAssertEqual(lines([home]), [])
+    }
+
+    func testConversationsKeepTheOrderOfTheirFirstEpoch() {
+        let out = lines([stretch(5, place: 0, 0), stretch(4, place: 0, 0), stretch(5, place: 1, 0)])
+        XCTAssertEqual(out, ["#05050505, no messages", "#04040404, no messages"])
     }
 }
