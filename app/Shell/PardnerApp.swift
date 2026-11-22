@@ -4,14 +4,6 @@ import os
 import Screens
 import SwiftUI
 
-/// The app's theme: Light or Dark, the app's own setting (design system, section 7, decision 1).
-enum Theme: String, CaseIterable {
-    case light = "Light", dark = "Dark"
-
-    // One setting for every window, sheet and menu the app draws, rather than a colour scheme per window.
-    func apply() { NSApplication.shared.appearance = NSAppearance(named: self == .dark ? .darkAqua : .aqua) }
-}
-
 /// Holds the pairing model, ends the controller on quit (which runs whether or not a window is open) and keeps the standard Mac
 /// behaviour of a main window: closing it leaves the app running, and the Dock icon opens it again. A single `Window` scene would quit
 /// the app when it closed, so the delegate says otherwise. A window with the recovery sheet attached does not close (`performClose`
@@ -67,14 +59,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct PardnerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @AppStorage("theme") private var theme = Theme.light.rawValue
+    @AppStorage(Theme.storageKey) private var theme = Theme.fallback.rawValue
     @Environment(\.openWindow) private var openWindow
 
     init() {
         let log = Logger(subsystem: "io.github.duqaxxx.pardner", category: "fonts")
         for failure in PardnerFonts.register() { log.error("a font did not register: \(failure.description, privacy: .public)") }
         // Before the first window, so that it never draws once in the system's appearance.
-        (Theme(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .light).apply()
+        (Theme(rawValue: UserDefaults.standard.string(forKey: Theme.storageKey) ?? "") ?? Theme.fallback).apply()
     }
 
     var body: some Scene {
@@ -82,32 +74,41 @@ struct PardnerApp: App {
         // secure-input flag. The scene has no New Window command.
         Window("Pardner", id: "main") {
             // The pairing screens until this Mac is paired; then the main window over what the link delivered.
-            PairingRoot(model: delegate.pairing) { LiveMainWindow(conversation: delegate.pairing.conversation, devices: delegate.pairing.devices, channels: delegate.pairing.channels, composers: delegate.pairing.composers) }
+            PairingRoot(model: delegate.pairing) { LiveMainWindow(conversation: delegate.pairing.conversation, devices: delegate.pairing.devices, settings: delegate.pairing.settings, channels: delegate.pairing.channels, composers: delegate.pairing.composers) }
                 .frame(minHeight: MainWindow.leastHeight)
                 .task { delegate.pairing.start() }
                 .onAppear { delegate.showWindow = { openWindow(id: "main") } }
-                .onChange(of: theme) { _, value in (Theme(rawValue: value) ?? .light).apply() }
+                .onChange(of: theme) { _, value in (Theme(rawValue: value) ?? Theme.fallback).apply() }
         }
         // Room for the three columns at their first-launch widths and a thread open.
         .defaultSize(width: 1280, height: 800)
         .commands {
-            // The Devices sheet and the new channel's sheet over the main window, once this Mac is paired and while no sheet is up.
+            // The Settings panel (Devices is one of its panes) and the new channel's sheet over the main window, once this Mac is paired and while no sheet is up.
+            CommandGroup(replacing: .appSettings) {
+                let pairing = delegate.pairing
+                Button("Settings…") {
+                    guard Menus.canOpenSettings(paired: pairing.screen == .paired, settings: pairing.settings, channels: pairing.channels) else { return }
+                    pairing.settings.open(.general)
+                    delegate.showWindow?() // the window may be closed: the panel opens over the window the Dock would show
+                }
+                .keyboardShortcut(",", modifiers: .command).disabled(!Menus.canOpenSettings(paired: pairing.screen == .paired, settings: pairing.settings, channels: pairing.channels))
+            }
             CommandGroup(after: .newItem) {
                 let pairing = delegate.pairing
                 let paired = pairing.screen == .paired
                 Button("New Channel…") {
                     // The menu item is off while a sheet is up; the rule is read again at the act, as a key can arrive before the menu redraws.
-                    guard Menus.canMakeChannel(paired: pairing.screen == .paired, devices: pairing.devices, channels: pairing.channels) else { return }
+                    guard Menus.canMakeChannel(paired: pairing.screen == .paired, settings: pairing.settings, channels: pairing.channels) else { return }
                     pairing.channels.openNew()
                     delegate.showWindow?()
                 }
-                .keyboardShortcut("n", modifiers: .command).disabled(!Menus.canMakeChannel(paired: paired, devices: pairing.devices, channels: pairing.channels))
+                .keyboardShortcut("n", modifiers: .command).disabled(!Menus.canMakeChannel(paired: paired, settings: pairing.settings, channels: pairing.channels))
                 Button("Devices…") {
-                    guard Menus.canOpenDevices(paired: pairing.screen == .paired, devices: pairing.devices, channels: pairing.channels) else { return }
-                    pairing.devices.open()
-                    delegate.showWindow?() // the window may be closed: the sheet opens over the window the Dock would show
+                    guard Menus.canOpenDevices(paired: pairing.screen == .paired, settings: pairing.settings, channels: pairing.channels) else { return }
+                    pairing.settings.open(.devices)
+                    delegate.showWindow?() // the window may be closed: the panel opens over the window the Dock would show
                 }
-                .keyboardShortcut("d", modifiers: [.command, .shift]).disabled(!Menus.canOpenDevices(paired: paired, devices: pairing.devices, channels: pairing.channels))
+                .keyboardShortcut("d", modifiers: [.command, .shift]).disabled(!Menus.canOpenDevices(paired: paired, settings: pairing.settings, channels: pairing.channels))
             }
             CommandGroup(after: .toolbar) {
                 Picker("Appearance", selection: $theme) {

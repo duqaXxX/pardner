@@ -20,49 +20,59 @@ final class MenuRulesTests: XCTestCase {
         return DevicesModel(state: s)
     }
 
-    func testASheetIsUpWhileDevicesOrTheChannelSheetIsOpen() {
-        let devices = devices(), channels = ChannelsModel(devices: devices)
-        XCTAssertFalse(Menus.sheetIsUp(devices: devices, channels: channels))
+    func testASheetIsUpWhileThePanelDevicesOrTheChannelSheetIsOpen() {
+        let devices = devices(), channels = ChannelsModel(devices: devices), settings = SettingsModel(devices: devices)
+        XCTAssertFalse(Menus.sheetIsUp(settings: settings, channels: channels))
+        settings.open(.general)
+        XCTAssertTrue(Menus.sheetIsUp(settings: settings, channels: channels))
+        settings.close()
         devices.isOpen = true
-        XCTAssertTrue(Menus.sheetIsUp(devices: devices, channels: channels))
+        XCTAssertTrue(Menus.sheetIsUp(settings: settings, channels: channels))
         devices.isOpen = false
         channels.openNew()
-        XCTAssertTrue(Menus.sheetIsUp(devices: devices, channels: channels), "the channel sheet counts, and so does the name sheet")
+        XCTAssertTrue(Menus.sheetIsUp(settings: settings, channels: channels), "the channel sheet counts, and so does the name sheet")
         channels.close()
-        XCTAssertFalse(Menus.sheetIsUp(devices: devices, channels: channels))
+        XCTAssertFalse(Menus.sheetIsUp(settings: settings, channels: channels))
         channels.openRename(.person, current: nil)
-        XCTAssertTrue(Menus.sheetIsUp(devices: devices, channels: channels))
+        XCTAssertTrue(Menus.sheetIsUp(settings: settings, channels: channels))
     }
 
     func testASheetIsUpBetweenTheDevicesSheetClosingAndTheNameSheetOpening() {
-        let devices = devices(), channels = ChannelsModel(devices: devices)
+        let devices = devices(), channels = ChannelsModel(devices: devices), settings = SettingsModel(devices: devices)
         devices.isOpen = true
         devices.closeForRename()
         XCTAssertFalse(devices.isOpen)
-        XCTAssertTrue(Menus.sheetIsUp(devices: devices, channels: channels))
-        XCTAssertFalse(Menus.canMakeChannel(paired: true, devices: devices, channels: channels))
-        XCTAssertFalse(Menus.canOpenDevices(paired: true, devices: devices, channels: channels))
+        XCTAssertTrue(Menus.sheetIsUp(settings: settings, channels: channels))
+        XCTAssertFalse(Menus.canMakeChannel(paired: true, settings: settings, channels: channels))
+        XCTAssertFalse(Menus.canOpenSettings(paired: true, settings: settings, channels: channels))
+        XCTAssertFalse(Menus.canOpenDevices(paired: true, settings: settings, channels: channels))
         XCTAssertTrue(devices.takeRename())
-        XCTAssertFalse(Menus.sheetIsUp(devices: devices, channels: channels))
+        XCTAssertFalse(Menus.sheetIsUp(settings: settings, channels: channels))
     }
 
     func testNewChannelNeedsAPairedMacReadyChannelsAndNoSheet() {
         let ready = devices()
-        let channels = ChannelsModel(devices: ready)
-        XCTAssertTrue(Menus.canMakeChannel(paired: true, devices: ready, channels: channels))
-        XCTAssertFalse(Menus.canMakeChannel(paired: false, devices: ready, channels: channels))
+        let channels = ChannelsModel(devices: ready), settings = SettingsModel(devices: ready)
+        XCTAssertTrue(Menus.canMakeChannel(paired: true, settings: settings, channels: channels))
+        XCTAssertFalse(Menus.canMakeChannel(paired: false, settings: settings, channels: channels))
         let unread = devices(read: false)
-        XCTAssertFalse(Menus.canMakeChannel(paired: true, devices: unread, channels: ChannelsModel(devices: unread)), "not before the log is read")
-        ready.isOpen = true
-        XCTAssertFalse(Menus.canMakeChannel(paired: true, devices: ready, channels: channels))
+        XCTAssertFalse(Menus.canMakeChannel(paired: true, settings: SettingsModel(devices: unread), channels: ChannelsModel(devices: unread)), "not before the log is read")
+        settings.open(.general)
+        XCTAssertFalse(Menus.canMakeChannel(paired: true, settings: settings, channels: channels), "Command-N is off under the panel")
     }
 
-    func testDevicesNeedsAPairedMacAndNoSheet() {
-        let devices = devices(), channels = ChannelsModel(devices: devices)
-        XCTAssertTrue(Menus.canOpenDevices(paired: true, devices: devices, channels: channels))
-        XCTAssertFalse(Menus.canOpenDevices(paired: false, devices: devices, channels: channels))
+    func testSettingsAndDevicesNeedAPairedMacAndNoSheet() {
+        let devices = devices(), channels = ChannelsModel(devices: devices), settings = SettingsModel(devices: devices)
+        XCTAssertTrue(Menus.canOpenSettings(paired: true, settings: settings, channels: channels))
+        XCTAssertTrue(Menus.canOpenDevices(paired: true, settings: settings, channels: channels))
+        XCTAssertFalse(Menus.canOpenSettings(paired: false, settings: settings, channels: channels))
+        XCTAssertFalse(Menus.canOpenDevices(paired: false, settings: settings, channels: channels))
         channels.openNew()
-        XCTAssertFalse(Menus.canOpenDevices(paired: true, devices: devices, channels: channels), "a second sheet over the channel sheet is never asked for")
+        XCTAssertFalse(Menus.canOpenSettings(paired: true, settings: settings, channels: channels), "a second sheet over the channel sheet is never asked for")
+        XCTAssertFalse(Menus.canOpenDevices(paired: true, settings: settings, channels: channels))
+        channels.close()
+        settings.open(.general)
+        XCTAssertFalse(Menus.canOpenSettings(paired: true, settings: settings, channels: channels), "nor a second panel over the panel")
     }
 
     func testAChannelMenuOffersRenameAndBindExceptForAFaultedChannel() {

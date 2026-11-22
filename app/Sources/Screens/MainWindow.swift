@@ -10,21 +10,24 @@ import SwiftUI
 public struct LiveMainWindow: View {
     let conversation: ConversationModel
     let devices: DevicesModel
+    let settings: SettingsModel
     let channels: ChannelsModel
     let composers: Composers
 
-    public init(conversation: ConversationModel, devices: DevicesModel, channels: ChannelsModel, composers: Composers) {
-        (self.conversation, self.devices, self.channels, self.composers) = (conversation, devices, channels, composers)
+    public init(conversation: ConversationModel, devices: DevicesModel, settings: SettingsModel, channels: ChannelsModel, composers: Composers) {
+        (self.conversation, self.devices, self.settings, self.channels, self.composers) = (conversation, devices, settings, channels, composers)
     }
 
-    public var body: some View { MainWindow(model: conversation.reading, devices: devices, channels: channels, composers: composers) }
+    public var body: some View { MainWindow(model: conversation.reading, devices: devices, settings: settings, channels: channels, composers: composers) }
 }
 
 /// The window's content for a reading model; `channel` and `thread` start the selection.
 public struct MainWindow: View {
     let model: ReadingModel
-    /// The Devices sheet's model; nil in the samples, which have no pairing.
+    /// The Devices pane's model; nil in the samples, which have no pairing.
     let devices: DevicesModel?
+    /// The Settings panel's model; nil in the samples, which have no pairing.
+    let settings: SettingsModel?
     /// The channel acts' model; nil in the samples, which have no pairing.
     let channels: ChannelsModel?
     /// The composers; nil in the samples.
@@ -36,9 +39,10 @@ public struct MainWindow: View {
     enum Tab: String, CaseIterable { case conversation = "Conversation", sessions = "Sessions" }
 
     /// The window over `model`, with a channel and a thread open when given.
-    public init(model: ReadingModel, devices: DevicesModel? = nil, channels: ChannelsModel? = nil, composers: Composers? = nil, channel: Data? = nil, thread: String? = nil) {
+    public init(model: ReadingModel, devices: DevicesModel? = nil, settings: SettingsModel? = nil, channels: ChannelsModel? = nil, composers: Composers? = nil, channel: Data? = nil, thread: String? = nil) {
         self.model = model
         self.devices = devices
+        self.settings = settings
         self.channels = channels
         self.composers = composers
         _channel = State(initialValue: channel)
@@ -67,11 +71,11 @@ public struct MainWindow: View {
 
     static func ordered(_ model: ReadingModel) -> [Data] { model.channels.keys.sorted { $0.lexicographicallyPrecedes($1) } }
 
-    /// The sidebar's bots: the person's active bots from the device list. Until that list is read (and in the samples, which have no
-    /// pairing), the bots whose profile a channel carries.
-    private var bots: [DevicesModel.SidebarBot] {
-        if let devices, devices.ready { return devices.sidebarBots(profiles: model.profiles) }
-        return model.profiles.map { DevicesModel.SidebarBot(id: $0.key, profile: $0.value, label: nil) }
+    /// The bots the Bots pane lists and the empty window's hint counts: the person's active bots from the device list. Until that list is
+    /// read (and in the samples, which have no pairing), the bots whose profile a channel carries.
+    static func listedBots(devices: DevicesModel?, profiles: [Data: BotProfile]) -> [DevicesModel.ListedBot] {
+        if let devices, devices.ready { return devices.listedBots(profiles: profiles) }
+        return profiles.map { DevicesModel.ListedBot(id: $0.key, profile: $0.value, label: nil) }
             .sorted { DevicesModel.precedes(($0.name, $0.id), ($1.name, $1.id)) }
     }
 
@@ -87,12 +91,12 @@ public struct MainWindow: View {
         // Each bot's icon decoded once per drawing, not once per row; the protocol bounds it (PD 6.8: 65,536 bytes,
         // a PNG or a JPEG of at most 256 pixels a side, read from its own header).
         let icons = model.profiles.compactMapValues { $0.icon.flatMap(NSImage.init(data:)) }
-        let bots = bots
+        let bots = Self.listedBots(devices: devices, profiles: model.profiles)
         let threadOpen = openThread != nil
         // The panes are hosted apart, so each one carries the window's font, colour and background itself.
         PaneSplit(
             threadOpen: threadOpen,
-            sidebar: pane(Sidebar(model: model, bots: bots, icons: icons, selected: shown?.id, choose: { channel = $0 }, openDevices: devices.map { devices in { devices.open() } },
+            sidebar: pane(Sidebar(model: model, selected: shown?.id, choose: { channel = $0 }, openSettings: settings.map { settings in { settings.open(.general) } },
                                   channels: channels), background: PardnerColor.side),
             conversation: pane(Group {
                 if let c = shown {
@@ -109,13 +113,13 @@ public struct MainWindow: View {
             }))
         .frame(minWidth: Self.leastWidth(threadOpen: threadOpen))
         .onChange(of: shown?.id) { thread = nil }
-        .sheet(isPresented: Binding(get: { devices?.isOpen ?? false }, set: { if !$0 { devices?.close() } }), onDismiss: {
-            guard let devices, devices.takeRename() else { return }
-            let this = devices.rows.first(where: \.isThisMac)
+        .sheet(isPresented: Binding(get: { settings?.pane != nil }, set: { if !$0 { settings?.close() } }), onDismiss: {
+            guard let settings, settings.takeRename() else { return }
+            let this = settings.devices.rows.first(where: \.isThisMac)
             channels?.openRename(.device, current: this.flatMap { model.names.devices[$0.id] ?? $0.label })
         }) {
-            if let devices {
-                DevicesSheet(model: devices, renameThisMac: channels == nil ? nil : { devices.closeForRename() })
+            if let settings {
+                SettingsPanel(model: settings, bots: bots, icons: icons, renameThisMac: channels == nil ? nil : { settings.closeForRename() })
             }
         }
         .background(Color.clear.sheet(isPresented: Binding(get: { channels?.sheet != nil }, set: { if !$0 { channels?.close() } })) {
@@ -179,12 +183,10 @@ struct Avatar: View {
 
 struct Sidebar: View {
     let model: ReadingModel
-    let bots: [DevicesModel.SidebarBot]
-    let icons: [Data: NSImage]
     let selected: Data?
     let choose: (Data) -> Void
-    /// Opens the Devices sheet; nil where the window has no pairing.
-    var openDevices: (() -> Void)?
+    /// Opens the Settings panel; nil where the window has no pairing.
+    var openSettings: (() -> Void)?
     /// The channel acts; nil where the window has no pairing.
     var channels: ChannelsModel?
 
@@ -214,28 +216,8 @@ struct Sidebar: View {
                         .contextMenu { if let channels, let channel = model.channels[id] { ChannelActions(model: model, channels: channels, channel: channel) } }
                 }
             }
-            Section("Bots") {
-                ForEach(bots) { bot in
-                    HStack(spacing: PardnerMetrics.gap) {
-                        Avatar(name: bot.profile?.name ?? bot.label ?? Naming.short(bot.id), isBot: true, icon: icons[bot.id], size: 20)
-                        VStack(alignment: .leading, spacing: 0) {
-                            if let p = bot.profile {
-                                Text(p.name)
-                                if let account = p.account {
-                                    Text(account).font(PardnerFont.ui(size: 11, weight: .regular)).foregroundStyle(PardnerColor.muted)
-                                }
-                            } else {
-                                if let label = bot.label { NameText(name: label, font: PardnerFont.ui(size: 14, weight: .regular)) } else { Text(Naming.short(bot.id)) }
-                                // The profile comes with the first channel that carries the bot.
-                                Text("Not seen yet").font(PardnerFont.ui(size: 11, weight: .regular)).foregroundStyle(PardnerColor.muted)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, PardnerMetrics.gap)
-                }
-            }
             Spacer()
-            // The person's row and the Devices button, under a rule.
+            // The person's row and the Settings button, under a rule.
             HStack(spacing: 4) {
                 if let channels {
                     Button { channels.openRename(.person, current: model.personName) } label: {
@@ -251,9 +233,9 @@ struct Sidebar: View {
                 } else {
                     Spacer()
                 }
-                if let openDevices {
-                    Button(action: openDevices) { Image(systemName: "laptopcomputer.and.iphone").foregroundStyle(PardnerColor.muted).frame(width: 30, height: 30).contentShape(Rectangle()) }
-                        .buttonStyle(.plain).pointerStyle(.link).help("Devices…").accessibilityLabel("Devices…")
+                if let openSettings {
+                    Button(action: openSettings) { Image(systemName: "gearshape").foregroundStyle(PardnerColor.muted).frame(width: 30, height: 30).contentShape(Rectangle()) }
+                        .buttonStyle(.plain).pointerStyle(.link).help("Settings…").accessibilityLabel("Settings…")
                 }
             }
             .padding(.top, PardnerMetrics.gap + 2)

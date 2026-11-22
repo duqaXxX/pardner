@@ -1,21 +1,24 @@
 // What the menu commands and the context menus offer. The shell has no test target, so each rule a command reads is a function here.
 import Foundation
 
-/// The rules behind the File menu's commands and the channel's menus.
+/// The rules behind the menu commands and the channel's menus.
 @MainActor
 public enum Menus {
-    /// A sheet is up while the Devices sheet or the channel or name sheet is open, or the name sheet waits for the Devices sheet to go: a menu command fires while a sheet is up, and a second sheet over the first must never be asked for.
-    public static func sheetIsUp(devices: DevicesModel, channels: ChannelsModel) -> Bool { devices.isOpen || devices.renamePending || channels.sheet != nil }
+    /// A sheet is up while the Settings panel (Devices is a pane of it) or the channel or name sheet is open, or the name sheet waits for the panel to go: a menu command fires while a sheet is up, and a second sheet over the first must never be asked for.
+    public static func sheetIsUp(settings: SettingsModel, channels: ChannelsModel) -> Bool { settings.holdsSheet || channels.sheet != nil }
 
     /// `New Channel…`: this Mac is paired, the channels are ready and no sheet is up.
-    public static func canMakeChannel(paired: Bool, devices: DevicesModel, channels: ChannelsModel) -> Bool {
-        paired && channels.ready && !sheetIsUp(devices: devices, channels: channels)
+    public static func canMakeChannel(paired: Bool, settings: SettingsModel, channels: ChannelsModel) -> Bool {
+        paired && channels.ready && !sheetIsUp(settings: settings, channels: channels)
     }
 
-    /// `Devices…`: this Mac is paired and no sheet is up.
-    public static func canOpenDevices(paired: Bool, devices: DevicesModel, channels: ChannelsModel) -> Bool {
-        paired && !sheetIsUp(devices: devices, channels: channels)
+    /// `Settings…` and `Devices…`: this Mac is paired and no sheet is up.
+    public static func canOpenSettings(paired: Bool, settings: SettingsModel, channels: ChannelsModel) -> Bool {
+        paired && !sheetIsUp(settings: settings, channels: channels)
     }
+
+    /// `Devices…` follows the rule of `Settings…`.
+    public static func canOpenDevices(paired: Bool, settings: SettingsModel, channels: ChannelsModel) -> Bool { canOpenSettings(paired: paired, settings: settings, channels: channels) }
 
     /// Which entries of a channel's menu are on, for the header's menu and the sidebar row's alike.
     struct ChannelEntries: Equatable { let rename: Bool, bind: Bool }
