@@ -967,6 +967,7 @@ const WORDS_ALLOWED: Readonly<Record<string, string>> = {
     "a field name of the texts filled with the agent's words (`AgentWords.login`)",
   "core/texts.ts:logout":
     "a field name of the texts filled with the agent's words (`AgentWords.logout`)",
+  "protocol/device-builders.ts:reset": "the same name, in the builder of a reset entry",
   "protocol/device-log.ts:reset": "the name of a device-log entry's kind (protocol design 6.1)",
   "protocol/vectors.ts:reset": "the same name, in the runner of the device-entry vectors",
   "relay/sequence.ts:reset":

@@ -1423,3 +1423,152 @@ test("review: at a rest the accepted items go back to waiting and the screen is 
     ["waiting"],
   );
 });
+
+test("a reading recovery tells the devices of the log it read, with the id of the recovery key, and stops (recovery design 2.3, 2.4)", () => {
+  const s = scene();
+  s.epoch();
+  const fresh = keyed();
+  const r = rig(s, {}, fresh);
+  const key = { id: s.alice.recovery.recoveryId, sign: s.alice.recovery.sign };
+  assert.deepEqual(r.link.recover({ key }), { ok: true, value: undefined });
+  const dial = r.settle(r.link.start(0), 0).find((e) => e.do === "dial");
+  assert.ok(dial?.do === "dial" && dial.purpose === "recover");
+  r.settle(r.link.opened(dial.conn, BINDING, 0), 0);
+  const entries = s.wire.items.filter((i) => i.kind === 1);
+  const fx = [
+    { type: "hello", relayNonce: fill(4) },
+    { type: "log", request: 1, entries },
+    { type: "result", request: 1, code: 0 },
+  ].flatMap((f, i) => r.settle(r.link.received(dial.conn, encodeFrame(f as Frame, i > 0), 1), 1));
+  const told = fx.find((e) => e.do === "recovery-log");
+  assert.ok(told?.do === "recovery-log");
+  assert.deepEqual(told.person, s.alice.id);
+  assert.equal(told.length, 2);
+  assert.deepEqual(told.recovery, s.alice.recovery.recoveryId);
+  assert.deepEqual(told.recoveries, [s.alice.recovery.recoveryId]);
+  assert.deepEqual(
+    told.devices.map((d) => [d.active, d.kind]),
+    [
+      [true, "app"],
+      [true, "bot"],
+    ],
+    "no secret and no entry crosses: the devices as the person sees them",
+  );
+  assert.equal(
+    r.link.tick(10 ** 9).some((e) => e.do === "dial"),
+    false,
+    "the link is spent",
+  );
+  assert.deepEqual(r.link.recover({ key }), { ok: false, error: "bad-input" });
+});
+
+test("a recovery key held after the read opens the epochs it was sealed in, and done reads the epochs and the current recovery key from the link", () => {
+  const s = scene();
+  const epoch = s.epoch();
+  s.wire.put(4, prompt(s, epoch));
+  const fresh = keyed();
+  const r = rig(s, {}, fresh);
+  const fx = r.connect();
+  assert.deepEqual(
+    messages(fx).map((m) => m.text),
+    [undefined],
+    "no seal to this device: delivered unopened",
+  );
+  assert.deepEqual(r.link.currentRecovery(), s.alice.recovery.recoveryId);
+  assert.equal(r.link.epochs()[0]?.open, false);
+  const opened = r.link.holdRecovery(
+    { id: s.alice.recovery.recoveryId, receiving: receivingOf(s.alice.recovery) },
+    2,
+  );
+  assert.equal(r.link.epochs()[0]?.open, true);
+  assert.ok(opened.ok);
+  assert.equal(
+    messages(opened.ok ? opened.effects : []).length,
+    1,
+    "the waiting message is opened and delivered again",
+  );
+});
+
+test("the recovery keys this person's log named come in order from the link and on the recovery-log effect, apart from the keys other seals name (recovery design 2.6)", () => {
+  const s = scene();
+  const epoch = s.epoch();
+  const held = s.epochs.at(-1);
+  assert.ok(held);
+  const other = keyed(); // an id a device of the person sealed to, outside the log
+  s.wire.seals = [historySeal(held, s.alice.first, { ...other, id: other.recoveryId }, epoch.key)];
+  const next = keyed();
+  const reset = s.alice.entry(
+    s.log,
+    {
+      kind: "reset",
+      set: [s.alice.first.id],
+      recovery: next.keys,
+    },
+    s.alice.recovery,
+  );
+  s.entry(reset);
+  const fresh = keyed();
+  const r = rig(s, {}, fresh);
+  r.connect();
+  const ids = r.link.recoveries();
+  assert.deepEqual(
+    ids,
+    [s.alice.recovery.recoveryId, next.recoveryId],
+    "oldest first; the last is current",
+  );
+  assert.deepEqual(r.link.currentRecovery(), next.recoveryId);
+  const sealed = r.link.epochs()[0]?.sealedTo ?? [];
+  assert.ok(
+    sealed.some((id) => bytesEqual(id, other.recoveryId)),
+    "another key is among the seals",
+  );
+  assert.equal(
+    ids.some((id) => bytesEqual(id, other.recoveryId)),
+    false,
+  );
+});
+
+test("AppLink.recover and holdRecovery refuse values of the wrong shape as bad input", () => {
+  const s = scene();
+  const r = rig(s, {}, keyed());
+  assert.deepEqual(r.link.recover({ key: { id: new Uint8Array(3), sign: "x" } }), {
+    ok: false,
+    error: "bad-input",
+  });
+  const bad = r.link.holdRecovery({ id: new Uint8Array(3), receiving: "x" }, 0);
+  assert.deepEqual(bad, { ok: false, error: "bad-input" });
+  const good = r.link.holdRecovery({ id: fill(1), receiving: "x" }, 0);
+  assert.ok(good.ok);
+});
+
+test("the recovery-log effect names both recovery keys of a log whose reset replaced the first, the current last", () => {
+  const s = scene();
+  s.epoch();
+  const next = keyed();
+  s.entry(
+    s.alice.entry(
+      s.log,
+      { kind: "reset", set: [s.alice.first.id], recovery: next.keys },
+      s.alice.recovery,
+    ),
+  );
+  const r = rig(s, {}, keyed());
+  assert.deepEqual(r.link.recover({ key: { id: next.recoveryId, sign: next.sign } }), {
+    ok: true,
+    value: undefined,
+  });
+  const dial = r.settle(r.link.start(0), 0).find((e) => e.do === "dial");
+  assert.ok(dial?.do === "dial");
+  r.settle(r.link.opened(dial.conn, BINDING, 0), 0);
+  const entries = s.wire.items.filter((i) => i.kind === 1);
+  const told = [
+    { type: "hello", relayNonce: fill(4) },
+    { type: "log", request: 1, entries },
+    { type: "result", request: 1, code: 0 },
+  ]
+    .flatMap((f, i) => r.settle(r.link.received(dial.conn, encodeFrame(f as Frame, i > 0), 1), 1))
+    .find((e) => e.do === "recovery-log");
+  assert.ok(told?.do === "recovery-log");
+  assert.deepEqual(told.recoveries, [s.alice.recovery.recoveryId, next.recoveryId]);
+  assert.deepEqual(told.recovery, next.recoveryId);
+});

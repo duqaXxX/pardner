@@ -23,11 +23,23 @@ public final class PairingModel {
     public var joinKey = ""
     public var joinPerson = ""
     public var joinName = ""
+    /// The recovery form (recovery design 2.2): the first screen's fourth page, and the three public values of the recovery key.
+    public var showRecover = false
+    public var recoverPerson = ""
+    public var recoverAddress = ""
+    public var recoverKey = ""
+    /// The recovery key's field while the controller waits for it, and the earlier key the person is asked to confirm giving up.
+    public private(set) var entry: RecoveryEntryModel?
+    var givingUp: Data?
+    private var inRecovery = false
+    /// The recovery got as far as opening the past, so a key asked for now is an earlier one (recovery design 2.6).
+    private var lastOpening: RecoveryProgress?
+    var typingEarlier: Bool { lastOpening?.asksEarlierKey ?? false }
     /// The field the controller's check refused.
-    public private(set) var refused: PairingInputError?
+    public internal(set) var refused: PairingInputError?
     /// A failure that belongs to no field.
-    public private(set) var problem: String?
-    public private(set) var working = false
+    public internal(set) var problem: String?
+    public internal(set) var working = false
     public var retypedSecret = ""
     public private(set) var retypeProblem: String?
     public private(set) var cancelNote: CancelNote?
@@ -36,7 +48,7 @@ public final class PairingModel {
         case waitForAnswer, confirmUnreachable, failed(String)
     }
 
-    private let controller: PairingController?
+    let controller: PairingController?
     /// False when the data folders could not be opened at launch: no controller exists, so Retry would do nothing and is not offered.
     private let storesOpen: Bool
     private var watching: Task<Void, Never>?
@@ -88,6 +100,7 @@ public final class PairingModel {
         channels.composers = composers
         (controller, self.phase, showForm, showJoin, self.refused, cancelNote, self.storesOpen, self.devices, self.channels, self.conversation, self.composers) =
             (nil, phase, form, join, refused, note, storesOpen, devices, channels, conversation, composers)
+        if case .recovering(.typeKey(let request)) = phase { entry = RecoveryEntryModel(request: request) } // a fixed phase has no controller to apply it
     }
 
     /// The model over this Mac's own stores. A folder that cannot be opened (another Pardner holds it, a link where a folder
@@ -104,19 +117,21 @@ public final class PairingModel {
 
     /// The screen a phase draws (the form is the first screen's second page).
     public enum Screen: Equatable {
-        case starting, first, form, joinForm, settingUp, enrolling, joining, paired, removed, keysMissing, putBack, linkFaulted, malformedStore, newerStore, needsNewPairing, joinUnmade, failed
+        case starting, first, form, joinForm, recoverForm, recovery, settingUp, enrolling, joining, paired, removed, keysMissing, putBack, linkFaulted, malformedStore, newerStore, needsNewPairing, joinUnmade, failed
     }
 
     public var screen: Screen {
         switch phase {
         case .starting: .starting
-        case .unpaired: showJoin ? .joinForm : showForm ? .form : .first
-        case .settingUp, .showingSheet: .settingUp
+        case .unpaired: showJoin ? .joinForm : showRecover ? .recoverForm : showForm ? .form : .first
+        case .recovering: .recovery
+        case .showingSheet: inRecovery ? .recovery : .settingUp
+        case .settingUp: .settingUp
         case .enrolling: .enrolling
         case .joining: .joining
         case .paired: .paired
-        case .removed: .removed
-        case .keysMissing: .keysMissing
+        case .removed: showRecover ? .recoverForm : .removed
+        case .keysMissing: showRecover ? .recoverForm : .keysMissing
         case .putBack: .putBack
         case .linkFaulted: .linkFaulted
         case .fault(.malformedStore, _): .malformedStore
@@ -163,10 +178,37 @@ public final class PairingModel {
     }
 
     func apply(_ next: PairingPhase) {
+        if case .recovering(.typeKey(let request)) = next {
+            if entry?.request !== request {
+                entry?.decline()
+                entry = RecoveryEntryModel(request: request)
+            }
+        } else {
+            entry?.decline() // whichever way the controller moved on, a key field still open is declined and wiped
+            entry = nil
+        }
+        switch next {
+        case .recovering(.opening(let progress)): (inRecovery, lastOpening) = (true, progress)
+        case .recovering(.placed), .recovering(.starting), .recovering(.typeKey): inRecovery = true
+        case .recovering: (inRecovery, lastOpening) = (true, nil)
+        case .showingSheet: break
+        default: (inRecovery, lastOpening, givingUp) = (false, nil, nil)
+        }
+        // The recovery form and what was typed in it belong to the first screen and the dead ends, and to the recovery itself.
+        switch next {
+        case .unpaired, .removed, .keysMissing, .recovering, .showingSheet: break
+        default: (showRecover, recoverPerson, recoverAddress, recoverKey) = (false, "", "", "")
+        }
+        // A confirmation belongs to the key it names while that key is waiting; a problem belongs to the step it was made in.
+        if let key = givingUp {
+            if case .recovering(.opening(let progress)) = next, progress.waiting.contains(where: { $0.key == key && !$0.isCurrent }) {} else { givingUp = nil }
+        }
+        if case .recovering = next, next != phase { problem = nil }
         if case .showingSheet(let request) = next {
             if sheet?.source !== request {
                 sheet?.close()
                 sheet = RecoverySheetModel(source: request)
+                sheet?.isRecovery = inRecovery
             }
         } else {
             sheet?.close() // whichever way the controller moved on, a sheet still open is declined and wiped
@@ -176,7 +218,7 @@ public final class PairingModel {
             // A note belongs to the phase it was made in; a return to the first screen starts at its first page (design 3.10), except
             // from a setup that ended unpaired (a declined sheet, a failure): it stays on the form, where its message is drawn.
             cancelNote = nil
-            if case .unpaired = next, !phase.isUnpaired, !phase.isSettingUp { (showForm, showJoin) = (false, false) }
+            if case .unpaired = next, !phase.isUnpaired, !phase.isSettingUp, !phase.isRecovering { (showForm, showJoin, showRecover) = (false, false, false) }
             if case .paired = next {} else { devices.reset() } // the Devices sheet and its half-made acts do not outlive the pairing
             // A failed write ends the connection with `fault(.failed)` and Retry brings the pairing back: the new-channel sheet and its folder wait for
             // the answer (`notSaved`) there, and go only when the pairing ends.
@@ -193,7 +235,10 @@ public final class PairingModel {
 
     /// The app is quitting: the view's sheet is closed and its buffers wiped. Called once the controller has shut down (or at the quit
     /// deadline), so the controller, not this decline, decides what a stopped setup leaves behind.
-    public func closeSheetForQuit() { sheet?.close() }
+    public func closeSheetForQuit() {
+        sheet?.close()
+        entry?.decline()
+    }
 
     /// The app is quitting: the connection ends and the link store is given back (`PairingController.shutdown()`). Off the main
     /// actor, so a quit that waits in a nested loop can run it; it reads no state of the model.
@@ -266,7 +311,7 @@ public final class PairingModel {
 
     /// The form's Back: the first screen again, with no secret kept.
     public func back() {
-        (showForm, showJoin) = (false, false)
+        (showForm, showJoin, showRecover) = (false, false, false)
         enrolmentSecret = ""
         edited()
     }
@@ -337,4 +382,5 @@ extension PairingPhase {
     var isUnpaired: Bool { if case .unpaired = self { true } else { false } }
     /// The setup is running: the keys are being made or the recovery sheet is on screen.
     var isSettingUp: Bool { switch self { case .settingUp, .showingSheet: true; default: false } }
+    var isRecovering: Bool { if case .recovering = self { true } else { false } }
 }

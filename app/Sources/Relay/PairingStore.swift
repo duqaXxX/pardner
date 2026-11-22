@@ -28,7 +28,7 @@ public struct PairingStateRefused: Error, CustomStringConvertible {
     public let description: String
 }
 
-public enum PairingIntent: String, Sendable, Equatable { case enrol, join }
+public enum PairingIntent: String, Sendable, Equatable { case enrol, join, recover }
 
 /// How far the pairing has got (design 3.5 and 3.7).
 public enum PairingStage: Sendable, Equatable {
@@ -38,6 +38,10 @@ public enum PairingStage: Sendable, Equatable {
     case enrolling
     /// The proof is signed and kept until the other device's add lands.
     case joining
+    /// The reset's inputs are kept and the reset is not yet known placed (recovery design 2.3 step 6).
+    case recovering
+    /// The reset is placed; the past is not yet re-sealed (recovery design 2.3 step 8).
+    case recovered
     case paired
 }
 
@@ -48,6 +52,9 @@ public struct PairingRelay: Sendable, Equatable {
     public var key: Data
 
     public init(host: String, port: UInt16, key: Data) { (self.host, self.port, self.key) = (host, port, key) }
+
+    /// `host:port`, an IPv6 host in brackets: the form the setup and the recovery forms take, so what is copied is what is pasted.
+    public var address: String { "\(host.contains(":") ? "[\(host)]" : host):\(port)" }
 }
 
 /// A removal in progress (design 3.9): the devices chosen, in the order they go, and the log's length when it began.
@@ -60,6 +67,42 @@ public struct PairingRemoval: Sendable, Equatable {
     public init(devices: [Data], length: Int, left: [Data] = []) { (self.devices, self.length, self.left) = (devices, length, left) }
 }
 
+/// A recovery key's two public keys: P-256 points, 65 bytes each.
+public struct PairingRecoveryKeys: Sendable, Equatable {
+    public var signing: Data
+    public var receiving: Data
+
+    public init(signing: Data, receiving: Data) { (self.signing, self.receiving) = (signing, receiving) }
+}
+
+/// The inputs of the reset the link builds on every recovery connection (recovery design 2.3 step 6): no secret, only public ids and keys.
+public struct PairingReset: Sendable, Equatable {
+    /// The id of the recovery key typed to start.
+    public var key: Data
+    /// The answer `No` to "Could someone else have one of your devices?": the devices active in the log read stay.
+    public var keepOthers: Bool
+    /// The devices active in the log read at step 3.
+    public var active: [Data]
+    /// The new recovery key's public keys, when the person chose to make one.
+    public var replacement: PairingRecoveryKeys?
+    /// The ids of the recovery keys the log held before this reset.
+    public var previous: [Data]
+
+    public init(key: Data, keepOthers: Bool, active: [Data], replacement: PairingRecoveryKeys?, previous: [Data]) {
+        (self.key, self.keepOthers, self.active, self.replacement, self.previous) = (key, keepOthers, active, replacement, previous)
+    }
+}
+
+/// What a recovery keeps between launches (recovery design 2.3).
+public struct PairingRecovery: Sendable, Equatable {
+    /// The ids of the new recovery keys made in attempts that stopped: carried through every rewrite, so one typed back can be named (2.5).
+    public var made: [Data]
+    /// From stage `recovering` on.
+    public var reset: PairingReset?
+
+    public init(made: [Data] = [], reset: PairingReset? = nil) { (self.made, self.reset) = (made, reset) }
+}
+
 public struct PairingState: Sendable, Equatable {
     public var stage: PairingStage
     public var relay: PairingRelay
@@ -67,7 +110,7 @@ public struct PairingState: Sendable, Equatable {
     public var person: Data?
     /// Entry 0 and its signature, while enrolling.
     public var genesis: SignedEntry?
-    /// The proof of possession and this Mac's name, while joining.
+    /// The proof of possession, while joining or recovering; the name is the joining's alone.
     public var proof: Data?
     public var name: String?
     /// Device entries made and not yet read back: at most one (design 3.6).
@@ -77,13 +120,16 @@ public struct PairingState: Sendable, Equatable {
     /// Device id to the time (seconds since 1970) this Mac first read its add.
     public var seen: [Data: Double] = [:]
     public var removal: PairingRemoval?
+    /// A recovery's ids and inputs: the stages `keys-made` of a recovery, `recovering` and `recovered` hold it, no other does.
+    public var recovery: PairingRecovery?
 
     public init(stage: PairingStage, relay: PairingRelay, person: Data? = nil) { (self.stage, self.relay, self.person) = (stage, relay, person) }
 }
 
 /// Reads and writes the pairing in one folder: one process holds it (the lock).
 public final class PairingStore: @unchecked Sendable {
-    private static let version = 1
+    /// Version 2 is a file that holds a recovery: an app that reads version 1 only calls it newer and erases nothing (design 4.1).
+    private static let version = 2, plainVersion = 1
     private let folder: URL
     private var lock: Int32 = -1
     private let calls = OSAllocatedUnfairLock()
@@ -140,7 +186,7 @@ public final class PairingStore: @unchecked Sendable {
 
     // MARK: the file
 
-    private static let keys: Set<String> = ["version", "stage", "intent", "relay", "person", "genesis", "proof", "name", "pending", "labels", "seen", "removal"]
+    private static let keys: Set<String> = ["version", "stage", "intent", "relay", "person", "genesis", "proof", "name", "pending", "labels", "seen", "removal", "recovery"]
 
     /// The JSON of a state, whole; a time that is not finite is refused before the serializer sees it, which raises an Objective-C exception on one.
     static func encode(_ s: PairingState) throws -> Data {
@@ -148,7 +194,7 @@ public final class PairingStore: @unchecked Sendable {
         func hex(_ data: Data) -> String { StoreDisk.hex(data) }
         let entry = { (e: SignedEntry) -> [String: Any] in ["signed": hex(e.signed), "sig": hex(e.sig), "id": hex(e.id)] }
         var o: [String: Any] = [
-            "version": version,
+            "version": s.recovery == nil ? plainVersion : version,
             "relay": ["host": s.relay.host, "port": Int(s.relay.port), "key": hex(s.relay.key)],
             "labels": Dictionary(uniqueKeysWithValues: s.labels.map { (hex($0.key), $0.value) }),
             "seen": Dictionary(uniqueKeysWithValues: s.seen.map { (hex($0.key), $0.value) }),
@@ -157,6 +203,8 @@ public final class PairingStore: @unchecked Sendable {
         case .keysMade(let intent): (o["stage"], o["intent"]) = ("keys-made", intent.rawValue)
         case .enrolling: o["stage"] = "enrolling"
         case .joining: o["stage"] = "joining"
+        case .recovering: o["stage"] = "recovering"
+        case .recovered: o["stage"] = "recovered"
         case .paired: o["stage"] = "paired"
         }
         if let person = s.person { o["person"] = hex(person) }
@@ -165,6 +213,15 @@ public final class PairingStore: @unchecked Sendable {
         if let name = s.name { o["name"] = name }
         if let pending = s.pending { o["pending"] = entry(pending) }
         if let removal = s.removal { o["removal"] = ["devices": removal.devices.map(hex), "length": removal.length, "left": removal.left.map(hex)] }
+        if let recovery = s.recovery {
+            var r: [String: Any] = ["made": recovery.made.map(hex)]
+            if let x = recovery.reset {
+                var reset: [String: Any] = ["key": hex(x.key), "keep": x.keepOthers, "active": x.active.map(hex), "previous": x.previous.map(hex)]
+                if let n = x.replacement { reset["replacement"] = ["signing": hex(n.signing), "receiving": hex(n.receiving)] }
+                r["reset"] = reset
+            }
+            o["recovery"] = r
+        }
         return try JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])
     }
 
@@ -178,7 +235,7 @@ public final class PairingStore: @unchecked Sendable {
             return n
         }
         func int(_ value: Any?) -> Int? { number(value).flatMap { $0 as? Int } }
-        guard int(o["version"]) == version else {
+        guard let fileVersion = int(o["version"]), [plainVersion, version].contains(fileVersion), fileVersion == plainVersion ? o["recovery"] == nil : true else {
             let newer = int(o["version"]).map { $0 > version } ?? false
             throw PairingFault(description: refuse("another version").description, isNewerVersion: newer)
         }
@@ -202,10 +259,13 @@ public final class PairingStore: @unchecked Sendable {
             switch intent as? String {
             case "enrol"?: stage = .keysMade(.enrol)
             case "join"?: stage = .keysMade(.join)
+            case "recover"?: stage = .keysMade(.recover)
             default: throw refuse("an unknown stage")
             }
         case "enrolling" where intent == nil: stage = .enrolling
         case "joining" where intent == nil: stage = .joining
+        case "recovering" where intent == nil: stage = .recovering
+        case "recovered" where intent == nil: stage = .recovered
         case "paired" where intent == nil: stage = .paired
         default: throw refuse("an unknown stage")
         }
@@ -234,21 +294,48 @@ public final class PairingStore: @unchecked Sendable {
             guard Set(left).count == left.count, Set(left).isDisjoint(with: devices) else { throw refuse("a malformed removal") }
             s.removal = PairingRemoval(devices: devices, length: length, left: left)
         }
+        if let recovery = o["recovery"] { s.recovery = try Self.recovery(recovery, bytes, refuse) }
         try shape(s, refuse)
         return s
+    }
+
+    private static func recovery(_ value: Any, _ bytes: (Any?, Int, String) throws -> Data, _ refuse: (String) -> PairingFault) throws -> PairingRecovery {
+        func ids(_ value: Any?, _ what: String) throws -> [Data] {
+            guard let list = value as? [Any] else { throw refuse("a malformed \(what)") }
+            let ids = try list.map { try bytes($0, 32, what) }
+            guard Set(ids).count == ids.count else { throw refuse("a malformed \(what)") }
+            return ids
+        }
+        guard let r = value as? [String: Any], Set(r.keys).isSubset(of: ["made", "reset"]) else { throw refuse("a malformed recovery") }
+        var recovery = PairingRecovery(made: try ids(r["made"], "recovery key made"))
+        guard let reset = r["reset"] else { return recovery }
+        guard let m = reset as? [String: Any], Set(m.keys).isSubset(of: ["key", "keep", "active", "replacement", "previous"]),
+              let flag = m["keep"] as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID(), let key = m["key"] else { throw refuse("a malformed reset") }
+        var replacement: PairingRecoveryKeys?
+        if let n = m["replacement"] {
+            guard let k = n as? [String: Any], Set(k.keys) == ["signing", "receiving"] else { throw refuse("a malformed reset") }
+            replacement = PairingRecoveryKeys(signing: try bytes(k["signing"], 65, "new recovery key"), receiving: try bytes(k["receiving"], 65, "new recovery key"))
+        }
+        recovery.reset = PairingReset(key: try bytes(key, 32, "recovery key id"), keepOthers: flag.boolValue, active: try ids(m["active"], "active device"),
+                                      replacement: replacement, previous: try ids(m["previous"], "earlier recovery key"))
+        return recovery
     }
 
     /// Which fields each stage holds (design 4.1): the ones it needs, and no other.
     private static func shape(_ s: PairingState, _ refuse: (String) -> PairingFault) throws {
         let present = (genesis: s.genesis != nil, proof: s.proof != nil, name: s.name != nil, person: s.person != nil)
         let later = s.pending == nil && s.removal == nil
+        let (made, reset) = (s.recovery != nil, s.recovery?.reset != nil)
         let fits: Bool
         switch s.stage {
-        case .keysMade(.enrol): fits = !present.person && !present.genesis && !present.proof && !present.name && later
-        case .keysMade(.join): fits = present.person && !present.genesis && !present.proof && !present.name && later
-        case .enrolling: fits = present.person && present.genesis && s.person == s.genesis?.id && !present.proof && !present.name && later
-        case .joining: fits = present.person && !present.genesis && present.proof && present.name && later
-        case .paired: fits = present.person && !present.genesis && !present.proof && !present.name
+        case .keysMade(.recover): fits = present.person && !present.genesis && !present.proof && !present.name && later && made && !reset
+        case .recovering: fits = present.person && !present.genesis && present.proof && !present.name && later && reset
+        case .recovered: fits = present.person && !present.genesis && !present.proof && !present.name && later && reset
+        case .keysMade(.enrol): fits = !made && !present.person && !present.genesis && !present.proof && !present.name && later
+        case .keysMade(.join): fits = !made && present.person && !present.genesis && !present.proof && !present.name && later
+        case .enrolling: fits = !made && present.person && present.genesis && s.person == s.genesis?.id && !present.proof && !present.name && later
+        case .joining: fits = !made && present.person && !present.genesis && present.proof && present.name && later
+        case .paired: fits = !made && present.person && !present.genesis && !present.proof && !present.name
         }
         guard fits else { throw refuse("fields that do not belong to the stage") }
     }

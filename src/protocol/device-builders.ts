@@ -96,6 +96,32 @@ export function buildRemove(
 }
 
 /**
+ * A reset (security design 5.3), signed with the current recovery key `recovery` whose signing key the
+ * platform holds under `signName`: `set` is every device that stays, `newDevice` the one that made `proof`
+ * once for this log's person and `replacement` the new recovery key's public keys, when the person chose one.
+ */
+export function buildReset(
+  platform: Platform,
+  signName: string,
+  log: readonly LoggedEntry[],
+  recovery: Bytes,
+  set: readonly Bytes[],
+  newDevice?: { device: DeviceKeys; proof: Bytes },
+  replacement?: PublicKeys,
+): Result<SignedEntry> {
+  const at = next(log);
+  if (!at) return fail("bad-input");
+  return seal(platform, signName, log, () => ({
+    ...at,
+    kind: "reset",
+    set: [...set],
+    newDevice,
+    recovery: replacement,
+    signer: recovery,
+  }));
+}
+
+/**
  * What an add or a remove the app kept does (design 3.6): the app reads its pending entry back to see whether the log holds its
  * effect, and rebuilds an add from its keys and proof. `device` is the id of the device named or removed.
  */

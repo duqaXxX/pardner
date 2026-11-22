@@ -6,13 +6,14 @@
 import { type AppOutbox, Boxes, type OutboxView } from "./app-outbox.ts";
 import { bytesEqual, isBytes } from "./bytes.ts";
 import { buildAdd, buildRemove, type SignedEntry } from "./device-builders.ts";
-import { type DeviceKeys, foldLog, idKey, namedDevices } from "./device-log.ts";
+import { type DeviceKeys, foldLog, idKey, type LoggedEntry, namedDevices } from "./device-log.ts";
 import { buildEpoch, type EpochClock, tickEpoch } from "./epochs.ts";
 import { encodeFrame } from "./frames.ts";
-import { deviceId, relayKeyId, signedId } from "./ids.ts";
+import { deviceId, recoveryKeyId, relayKeyId, signedId } from "./ids.ts";
 import { makeSeal, sealKey, seals, soleHolders, startOf, starts } from "./keeper.ts";
 import { EXPORTER_LABEL } from "./labels.ts";
 import { type Effect, Link, type LinkOptions, type Persist } from "./link.ts";
+import type { RecoveryOutcome } from "./link-types.ts";
 import { encodeMemberEntry } from "./member-log.ts";
 import {
   botOnly,
@@ -29,11 +30,12 @@ import { build, type Draft, type OutboxItem, queue, Run, readBack, rebuild } fro
 import { checkPairingProof, shortForm } from "./pairing-string.ts";
 import type { Bytes, Platform } from "./platform.ts";
 import { encodeProfile, type Profile, Profiles } from "./profile.ts";
-import type { Kept, Out } from "./reading.ts";
+import type { Identity, Kept, Out } from "./reading.ts";
+import type { RecoverOptions } from "./recover.ts";
 import type { PlatformError, Result } from "./result.ts";
 
 // The first device's entry 0 (design 3.5): the app calls it through `ProtocolHost.callExported`, before any `AppLink` exists.
-export { buildGenesis, readDeviceEntry } from "./device-builders.ts";
+export { buildGenesis, buildReset, readDeviceEntry } from "./device-builders.ts";
 // What a pasted or a made pairing string says and the proof a joining device signs (design 3.4, 3.7): plain functions of the platform.
 export {
   checkPairingName,
@@ -41,8 +43,8 @@ export {
   makePairingProof,
   pairingString,
 } from "./pairing-string.ts";
-// The recovery key's two halves (design 3.5 steps 3 and 5): made before entry 0 and shown after it, the app calls both the same way.
-export { createRecoveryKey, showRecoveryKey } from "./recovery.ts";
+// The recovery key's two halves (design 3.5 steps 3 and 5): made before entry 0 and shown after it, the app calls both the same way; `enterRecoveryKey` takes a typed one back (recovery design 2.2).
+export { createRecoveryKey, enterRecoveryKey, showRecoveryKey } from "./recovery.ts";
 export type { AppOutbox, OutboxView };
 export { EXPORTER_LABEL };
 
@@ -141,7 +143,7 @@ export type SendError = "bad-input" | "not-member" | "fault" | "not-ready";
  * `written`; `store-failed` after a failed write; `outbox` the items of a channel that changed; `channel-refused` a new channel the relay refused; `channel-fault` a channel stopped on a relay answer no check explains; `creating` the channel being created with its bot and folder (at `start` for a stored one, and at `createChannel`), or `channel: null` once none is pending (read back or refused).
  */
 export type AppEffect =
-  | Exclude<Effect, { do: "deliver" | "persist" }>
+  | Exclude<Effect, { do: "deliver" | "persist" | "recovery" }>
   | { do: "deliver"; out: View }
   | { do: "persist"; what: AppPersist }
   | { do: "write"; outbox: AppOutbox }
@@ -152,6 +154,17 @@ export type AppEffect =
   | { do: "creating"; channel: Bytes; bot: Bytes; folder: string }
   | { do: "creating"; channel: null }
   | { do: "profile"; bot: Bytes; profile: Profile | null }
+  | { do: "recovery"; outcome: Exclude<RecoveryOutcome, { log: readonly LoggedEntry[] }> }
+  | {
+      do: "recovery-log";
+      person: Bytes;
+      length: number;
+      last: Bytes;
+      devices: DeviceView[];
+      recovery: Bytes;
+      /** Every recovery key this person's log named, the oldest first and the current last: the keys an epoch's seal may be to, apart from other members' (2.6). */
+      recoveries: Bytes[];
+    }
   | {
       do: "devices";
       person: Bytes;
@@ -404,6 +417,48 @@ export class AppLink {
   }
 
   /**
+   * A recovery for a link not yet started (recovery design 2.3, 3): its `reset` absent, the link reads the device log, tells it as a
+   * `recovery-log` effect (the active devices for the question of 2.4) and stops; present, it tries `prove-active` first and sends the
+   * reset on a recovery connection of its own after a refusal, until `recovered`. `bad-input` once the link started or for a value of the wrong shape.
+   * The app stores the reset's inputs (`key.id`, `trusted`, `replacement`) and gives them again after a restart: the link rebuilds the reset in each recovery
+   * connection, never hands it over, and a rebuild has, at an unchanged log, the same signed bytes and id; at a moved log, a new position.
+   */
+  recover(value: RecoverOptions): Result<undefined> {
+    return this.#link.recover(value);
+  }
+
+  /** A recovery key held after the read, for opening only (2.6): the epochs it opens are delivered at once. */
+  holdRecovery(
+    identity: Identity,
+    now: number,
+  ): { ok: true; effects: AppEffect[] } | { ok: false; error: "bad-input" } {
+    if (
+      !isBytes(identity?.id) ||
+      identity.id.length !== 32 ||
+      typeof identity.receiving !== "string"
+    )
+      return { ok: false, error: "bad-input" };
+    this.#link.reading.hold(identity);
+    return { ok: true, effects: this.#view([], now) };
+  }
+
+  /** Every recovery key the device log read names, the oldest first and the current last: what tells this person's keys from the other recipients in `epochs`. */
+  recoveries(): Bytes[] {
+    return recoveryIds(this.#platform, this.#link.reading.devices);
+  }
+
+  /** What "done" needs (2.6): every epoch read, whether its key is held, and who it is sealed to. */
+  epochs(): ReturnType<Link["reading"]["epochStates"]> {
+    return this.#link.reading.epochStates();
+  }
+
+  /** The id of the recovery key the device log names now (2.6, done reads it again): `undefined` before any log. */
+  currentRecovery(): Bytes | undefined {
+    const key = foldLog(this.#platform, this.#link.reading.devices).recovery;
+    return key && recoveryKeyId(this.#platform, key.signing, key.receiving);
+  }
+
+  /**
    * The add of the device a pairing string names, built and signed against the log this link holds,
    * and not sent: the app keeps it pending, then `submit`s kind 1 (design 3.6). `busy` while the log is not at rest, as `submit`
    * answers, since a partial log would sign an entry the relay refuses. `now` is for symmetry with the other calls.
@@ -474,6 +529,7 @@ export class AppLink {
       }
     }
     if (fx.do === "persist") return [{ do: "persist", what: this.#write(fx.what) }];
+    if (fx.do === "recovery") return [this.#recovered(fx.outcome)];
     if (fx.do !== "deliver") return [fx];
     const out = fx.out;
     if (out.do === "incarnation") this.#incarnation = out.incarnation;
@@ -510,6 +566,26 @@ export class AppLink {
       { message: out.message, position: out.position },
     ]);
     return [{ do: "deliver", out: this.#message(out.message, out.position, undefined, false) }];
+  }
+
+  // A log read by a recovery connection, as the devices it names; the rest of an outcome crosses as it is.
+  #recovered(outcome: RecoveryOutcome): AppEffect {
+    if (!("log" in outcome)) return { do: "recovery", outcome };
+    const { log } = outcome;
+    const { recovery } = foldLog(this.#platform, log);
+    return {
+      do: "recovery-log",
+      person: this.#person,
+      length: log.length,
+      last: (log.at(-1) as LoggedEntry).id,
+      devices: deviceViews(this.#platform, log, new Map()),
+      recovery: recoveryKeyId(
+        this.#platform,
+        (recovery as DeviceKeys).signing,
+        (recovery as DeviceKeys).receiving,
+      ),
+      recoveries: recoveryIds(this.#platform, log),
+    };
   }
 
   #write(w: Persist): AppPersist {
@@ -868,33 +944,7 @@ export class AppLink {
     const at = `${log.length} ${idKey(last.id)} ${r.seals.length} ${held}`;
     if (at === this.#listed) return [];
     this.#listed = at;
-    const { active } = foldLog(this.#platform, log);
-    const sole = soleHolders(this.#platform, r);
-    const devices = log.flatMap(({ entry: e }): DeviceView[] => {
-      // An entry of the recovery key names its new device too, with no device as the adder.
-      const named =
-        "newDevice" in e
-          ? e.newDevice?.device
-          : e.kind === "add" || e.kind === "genesis"
-            ? e.device
-            : undefined;
-      if (!named) return [];
-      const id = deviceId(this.#platform, named.signing, named.receiving);
-      const addedBy = e.kind === "add" ? e.signer : null;
-      const on = active.has(idKey(id));
-      const onlyHolder = on ? (sole.get(idKey(id)) ?? []) : [];
-      return [
-        {
-          id,
-          kind: named.kind,
-          active: on,
-          addedBy,
-          position: e.seq,
-          onlyHolder,
-          short: shortForm(this.#platform, named),
-        },
-      ];
-    });
+    const devices = deviceViews(this.#platform, log, soleHolders(this.#platform, r));
     return [
       {
         do: "devices",
@@ -931,6 +981,46 @@ export class AppLink {
       again,
     };
   }
+}
+
+/** The ids of the recovery keys a log named, in the order it named them; the last is the current one. */
+const recoveryIds = (platform: Platform, log: readonly LoggedEntry[]): Bytes[] =>
+  [...foldLog(platform, log).recoveries.values()].map((k) =>
+    recoveryKeyId(platform, k.signing, k.receiving),
+  );
+
+/** The devices a log names, each with whether it is active, who added it and what removing the others would lose it (`sole`). */
+function deviceViews(
+  platform: Platform,
+  log: readonly LoggedEntry[],
+  sole: Map<string, { channel: Bytes; epoch: Bytes }[]>,
+): DeviceView[] {
+  const { active } = foldLog(platform, log);
+  return log.flatMap(({ entry: e }): DeviceView[] => {
+    // An entry of the recovery key names its new device too, with no device as the adder.
+    const named =
+      "newDevice" in e
+        ? e.newDevice?.device
+        : e.kind === "add" || e.kind === "genesis"
+          ? e.device
+          : undefined;
+    if (!named) return [];
+    const id = deviceId(platform, named.signing, named.receiving);
+    const addedBy = e.kind === "add" ? e.signer : null;
+    const on = active.has(idKey(id));
+    const onlyHolder = on ? (sole.get(idKey(id)) ?? []) : [];
+    return [
+      {
+        id,
+        kind: named.kind,
+        active: on,
+        addedBy,
+        position: e.seq,
+        onlyHolder,
+        short: shortForm(platform, named),
+      },
+    ];
+  });
 }
 
 const view = ({ name, kind, to, re, content }: OutboxItem) => ({ name, kind, to, re, content });

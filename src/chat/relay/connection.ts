@@ -299,7 +299,7 @@ export class Connection {
   }
 
   /** TLS up to `conn`; its events go to the queue, `closed` once, and `opened` only when the relay's key is the pinned one. */
-  #dial(conn: number, purpose: "active" | "upload"): void {
+  #dial(conn: number, purpose: "active" | "upload" | "recover"): void {
     if (purpose === "upload") this.#o.log("relay: giving back the head held");
     const { host, port } = this.#o.address();
     const socket = tls({

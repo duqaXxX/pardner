@@ -78,16 +78,30 @@ final class SecretDrawView: NSView {
     }
 }
 
+/// What a typed key's field reads and does: the sheet's typed-back key and the key typed to recover.
+@MainActor
+protocol TypedKey: AnyObject {
+    var typed: Int { get }
+    var secureInput: SecureInputGuard { get }
+    @discardableResult func key(_ character: UniChar) -> Bool
+    func deleteLast()
+}
+
+extension RecoverySheetModel: TypedKey {}
+extension RecoveryEntryModel: TypedKey {}
+
 /// Takes the typed-back key one key at a time into the model and shows only how many symbols there are.
 final class KeyCaptureView: NSView {
-    private let model: RecoverySheetModel
+    var model: any TypedKey // set again by the representable when the field's model is another one
+    private let label: String
 
-    init(model: RecoverySheetModel) {
+    init(model: any TypedKey, label: String) {
         self.model = model
+        self.label = label
         super.init(frame: NSRect(x: 0, y: 0, width: 500, height: 56))
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel("Type the recovery key back")
+        setAccessibilityLabel(label)
         setAccessibilityHelp("Type the characters of the key you wrote down. Case and dashes do not matter.")
     }
 
@@ -96,7 +110,7 @@ final class KeyCaptureView: NSView {
     override var acceptsFirstResponder: Bool { true }
     override var intrinsicContentSize: NSSize { frame.size }
     /// The count only: never a character.
-    override func accessibilityValue() -> Any? { "\(model.typed) of \(RecoverySheetModel.symbolCount) characters typed" }
+    override func accessibilityValue() -> Any? { "\(model.typed) of \(RecoveryText.symbolCount) characters typed" }
 
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
@@ -148,7 +162,7 @@ final class KeyCaptureView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
-        let count = RecoverySheetModel.symbolCount, typed = model.typed
+        let count = RecoveryText.symbolCount, typed = model.typed
         let dot: CGFloat = 9, step: CGFloat = 13, groupGap: CGFloat = 8, columns = 7
         effectiveAppearance.performAsCurrentDrawingAppearance {
             let ink = NSColor(PardnerColor.text).cgColor, line = NSColor(PardnerColor.muted).cgColor
@@ -175,10 +189,26 @@ final class KeyCaptureView: NSView {
 
 /// The sheet's window must not be shared or captured, as far as AppKit allows (design 3.8: best effort).
 final class WindowGuardView: NSView {
+    private var kept: (window: NSWindow, sharing: NSWindow.SharingType)?
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        restore() // the window is shared again as it was when the guard leaves it: it may be the app's main window
+        super.viewWillMove(toWindow: newWindow)
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        window?.sharingType = .none
+        guard let window else { return }
+        kept = (window, window.sharingType)
+        window.sharingType = .none
     }
+
+    private func restore() {
+        guard let kept else { return }
+        kept.window.sharingType = kept.sharing
+        self.kept = nil
+    }
+
 }
 
 struct SecretText: NSViewRepresentable {
@@ -188,9 +218,11 @@ struct SecretText: NSViewRepresentable {
 }
 
 struct KeyCapture: NSViewRepresentable {
-    let model: RecoverySheetModel
-    func makeNSView(context: Context) -> KeyCaptureView { KeyCaptureView(model: model) }
+    let model: any TypedKey
+    var label = "Type the recovery key back"
+    func makeNSView(context: Context) -> KeyCaptureView { KeyCaptureView(model: model, label: label) }
     func updateNSView(_ view: KeyCaptureView, context: Context) {
+        view.model = model // a new field's model: keys never go to a declined one
         _ = model.typed // redraws when the count changes
         view.needsDisplay = true
     }

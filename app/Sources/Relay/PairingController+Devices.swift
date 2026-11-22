@@ -64,8 +64,7 @@ extension PairingController {
     /// The relay's address, its key and the person id, as the three values `pardner setup` asks for; nil until this Mac is paired.
     public func handoffValues() -> PairingHandoff? {
         guard let state = stored, state.stage == .paired, let person = state.person else { return nil }
-        let host = state.relay.host.contains(":") ? "[\(state.relay.host)]" : state.relay.host
-        return PairingHandoff(relayAddress: "\(host):\(state.relay.port)", relayKey: StoreDisk.hex(state.relay.key), person: StoreDisk.hex(person))
+        return PairingHandoff(relayAddress: state.relay.address, relayKey: StoreDisk.hex(state.relay.key), person: StoreDisk.hex(person))
     }
 
     // MARK: adding a device (design 3.4, 3.6)
