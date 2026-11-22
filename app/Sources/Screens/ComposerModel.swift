@@ -215,6 +215,29 @@ public final class ComposerModel {
         return true
     }
 
+    /// Whether the field holds uncommitted text of an input method, as the field tells it: set from the live view on each edit and cleared when a field is
+    /// made, dismantled or loses the keyboard. Only the send button reads it.
+    public var hasMarkedText = false
+
+    /// The send button is off when Return would send nothing and while the field holds uncommitted text, which the button must not send.
+    public var sendOff: Bool { !canSend || hasMarkedText }
+
+    /// Set by the mention button, so that the field takes the keyboard (arrows, Return, Escape reach the list); cleared by `focusTaken` once honoured.
+    public private(set) var focusRequested = false
+
+    /// The field took the keyboard the mention button asked for.
+    public func focusTaken() { focusRequested = false }
+
+    /// The mention button is on in a channel's composer that is ready, with a bot to choose, no bot named and nothing typed: the list opens from an `@` at the start.
+    public var canMention: Bool { thread == nil && availability == .ready && label == nil && text.isEmpty && !choices().isEmpty }
+
+    /// The mention button: types the leading `@`, which opens the bot list, and asks for the field's focus.
+    public func startMention() {
+        guard canMention else { return }
+        edited("@")
+        focusRequested = true
+    }
+
     /// Escape closes the list and leaves what was typed as text.
     public func closePicker() { pickerClosed = true }
 
@@ -239,11 +262,15 @@ public final class ComposerModel {
 
     // MARK: sending
 
+    /// Whether Return sends: the composer is ready, the field holds text beyond blanks (a label alone has none), and the bot list is closed (Return picks there). Return gets the
+    /// field's live marked state itself (`returnPressed`), so `submit` never reads `hasMarkedText`.
+    public var canSend: Bool { availability == .ready && !picking && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
     /// Sends the field as one message and leaves the field empty. Nothing is sent for an empty text, a composer that is not ready, a command with no
     /// bot to read it, or a body past the frame; the last two say why. The task ends when the call has answered.
     @discardableResult
     public func submit() -> Task<Void, Never>? {
-        guard availability == .ready, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        guard canSend else { return nil }
         let bot = promptBot
         if thread == nil, let label, !choices().contains(where: { $0.id == label }) {
             notice = "This bot was removed from your devices."

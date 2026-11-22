@@ -47,6 +47,8 @@ public struct AnswerGroup: Sendable, Equatable {
     public let ref: MessageRef
     /// The position of its first part, or of the answer when no part came.
     public let position: Int
+    /// The time of its first part, or of the answer when no part came: the day the answer begins on.
+    public let time: Date
     public internal(set) var markdown: String
     public internal(set) var done: Bool
     /// The prompt it answers, once the answer names it.
@@ -233,7 +235,7 @@ extension MessageThread {
                 a.markdown += markdown
                 items[i] = .answer(a)
             } else {
-                items.append(.answer(AnswerGroup(ref: re, position: m.position, markdown: markdown, done: false)))
+                items.append(.answer(AnswerGroup(ref: re, position: m.position, time: m.time, markdown: markdown, done: false)))
             }
         case .answer(let markdown) where fromBot:
             if let re = m.re, prompts[re] != nil { prompts[re] = .answered }
@@ -242,7 +244,7 @@ extension MessageThread {
                 (a.markdown, a.done, a.prompt) = (markdown.isEmpty ? a.markdown : markdown, true, m.re)
                 items[i] = .answer(a)
             } else if !markdown.isEmpty {
-                items.append(.answer(AnswerGroup(ref: m.ref, position: m.position, markdown: markdown, done: true, prompt: m.re)))
+                items.append(.answer(AnswerGroup(ref: m.ref, position: m.position, time: m.time, markdown: markdown, done: true, prompt: m.re)))
             }
         case .request where fromBot:
             requests[m.ref] = .open

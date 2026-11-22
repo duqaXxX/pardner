@@ -549,4 +549,125 @@ final class ComposerModelTests: XCTestCase {
         late.take(state)
         XCTAssertEqual(late.composer(channel: channel).rows().count, 1, "a composer made after the restart's effect draws what waits")
     }
+
+    // MARK: the send and mention buttons (window redesign, unit 1e)
+
+    func testSendIsOffExactlyWhenReturnSendsNothing() async throws {
+        let c = composer()
+        XCTAssertFalse(c.canSend, "an empty field")
+        type(c, "  \n ")
+        XCTAssertFalse(c.canSend, "blanks alone")
+        type(c, "hello")
+        XCTAssertTrue(c.canSend)
+        XCTAssertNotNil(c.submit(), "Return sends what the button's state says it can")
+        XCTAssertFalse(c.canSend, "the field is empty after a send")
+    }
+
+    func testALabelAloneCannotBeSent() {
+        let c = composer()
+        press(c, "@")
+        c.pick(mini)
+        XCTAssertEqual(c.label, mini)
+        XCTAssertEqual(c.text, "")
+        XCTAssertFalse(c.canSend)
+        XCTAssertNil(c.submit())
+    }
+
+    func testSendFollowsTheAvailability() {
+        let r = reading()
+        let unread = composer(devices: devices(read: false))
+        type(unread, "hello")
+        XCTAssertEqual(unread.availability, .readingDevices)
+        XCTAssertFalse(unread.canSend)
+        let unknown = composer(thread: "00", reading: r.0)
+        type(unknown, "hello")
+        XCTAssertEqual(unknown.availability, .readingThread)
+        XCTAssertFalse(unknown.canSend)
+        let removed = composer(thread: r.removed, reading: r.0)
+        type(removed, "hello")
+        XCTAssertEqual(removed.availability, .botRemoved)
+        XCTAssertFalse(removed.canSend)
+        let ready = composer(thread: r.mine, reading: r.0)
+        type(ready, "hello")
+        XCTAssertEqual(ready.availability, .ready)
+        XCTAssertTrue(ready.canSend)
+    }
+
+    func testTheMentionButtonStartsTheBotListAsTypingAnAtSignDoes() {
+        let c = composer()
+        XCTAssertTrue(c.canMention)
+        c.startMention()
+        XCTAssertEqual(c.text, "@")
+        XCTAssertTrue(c.picking)
+        c.pick(mini)
+        XCTAssertFalse(c.canMention, "a bot is already named")
+    }
+
+    func testTheMentionButtonDoesNothingInAThreadOrOverText() {
+        let r = reading()
+        let thread = composer(thread: r.mine, reading: r.0)
+        XCTAssertFalse(thread.canMention, "an @ in a thread is plain text")
+        thread.startMention()
+        XCTAssertEqual(thread.text, "")
+        let typed = composer()
+        type(typed, "hello")
+        XCTAssertFalse(typed.canMention)
+        typed.startMention()
+        XCTAssertEqual(typed.text, "hello")
+        let unread = composer(devices: devices(read: false))
+        XCTAssertFalse(unread.canMention)
+    }
+
+    func testSendIsOffWhileTheBotListIsOpenAndOnAfterAPick() {
+        var m = ReadingModel()
+        m.take(profile: .object(["do": .string("profile"), "bot": .bytes(studio), "profile": .object(["name": .string("alpha")])]))
+        let c = composer(reading: m)
+        press(c, "@")
+        XCTAssertTrue(c.picking)
+        XCTAssertFalse(c.canSend, "Return picks the highlighted bot there, so the button sends nothing")
+        press(c, "al")
+        XCTAssertEqual(c.text, "@al")
+        XCTAssertTrue(c.picking)
+        XCTAssertFalse(c.canSend)
+        XCTAssertNil(c.submit())
+        c.pick(studio)
+        type(c, "run it")
+        XCTAssertTrue(c.canSend)
+    }
+
+    func testTheSendButtonIsOffWhileTheFieldHoldsUncommittedTextButReturnStillSends() {
+        let c = composer()
+        type(c, "hello")
+        XCTAssertFalse(c.sendOff)
+        c.hasMarkedText = true
+        XCTAssertTrue(c.sendOff, "the button must not send uncommitted text")
+        XCTAssertTrue(c.canSend, "Return is given the live marked state by the field, so a stale flag never swallows it")
+        XCTAssertNotNil(c.submit())
+        c.hasMarkedText = false
+        type(c, "again")
+        XCTAssertFalse(c.sendOff)
+    }
+
+    func testTheMentionButtonAsksForTheFieldsFocusUntilItIsTaken() {
+        let c = composer()
+        XCTAssertFalse(c.focusRequested)
+        c.startMention()
+        XCTAssertTrue(c.focusRequested)
+        c.focusTaken()
+        XCTAssertFalse(c.focusRequested)
+        let thread = composer(thread: reading().mine)
+        thread.startMention()
+        XCTAssertFalse(thread.focusRequested, "no request where the button does nothing")
+    }
+
+    func testTheMentionButtonIsOffWithNoActiveBot() {
+        var s = DevicesState()
+        s.rows = [DeviceRow(id: alice, kind: .app, label: nil, shortForm: "", adder: .none, position: 1, active: true, isThisMac: true, seenAt: nil,
+                            onlyHolderEpochs: 0, addedWhileRemoving: false)]
+        let c = composer(devices: DevicesModel(state: s))
+        XCTAssertEqual(c.availability, .ready)
+        XCTAssertFalse(c.canMention)
+        c.startMention()
+        XCTAssertEqual(c.text, "")
+    }
 }

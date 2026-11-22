@@ -91,13 +91,23 @@ struct PardnerApp: App {
         // Room for the three columns at their first-launch widths and a thread open.
         .defaultSize(width: 1280, height: 800)
         .commands {
-            // The Devices sheet over the main window, once this Mac is paired.
+            // The Devices sheet and the new channel's sheet over the main window, once this Mac is paired and while no sheet is up.
             CommandGroup(after: .newItem) {
+                let pairing = delegate.pairing
+                let paired = pairing.screen == .paired
+                Button("New Channel…") {
+                    // The menu item is off while a sheet is up; the rule is read again at the act, as a key can arrive before the menu redraws.
+                    guard Menus.canMakeChannel(paired: pairing.screen == .paired, devices: pairing.devices, channels: pairing.channels) else { return }
+                    pairing.channels.openNew()
+                    delegate.showWindow?()
+                }
+                .keyboardShortcut("n", modifiers: .command).disabled(!Menus.canMakeChannel(paired: paired, devices: pairing.devices, channels: pairing.channels))
                 Button("Devices…") {
-                    delegate.pairing.devices.open()
+                    guard Menus.canOpenDevices(paired: pairing.screen == .paired, devices: pairing.devices, channels: pairing.channels) else { return }
+                    pairing.devices.open()
                     delegate.showWindow?() // the window may be closed: the sheet opens over the window the Dock would show
                 }
-                    .keyboardShortcut("d", modifiers: [.command, .shift]).disabled(delegate.pairing.screen != .paired)
+                .keyboardShortcut("d", modifiers: [.command, .shift]).disabled(!Menus.canOpenDevices(paired: paired, devices: pairing.devices, channels: pairing.channels))
             }
             CommandGroup(after: .toolbar) {
                 Picker("Appearance", selection: $theme) {

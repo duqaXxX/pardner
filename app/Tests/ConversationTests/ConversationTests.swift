@@ -54,6 +54,19 @@ private struct World {
 }
 
 final class ConversationTests: XCTestCase {
+    func testAnAnswerCarriesTheTimeOfItsFirstPart() {
+        var w = World()
+        let prompt = w.deliver(kind: 2, from: w.alice, json: ["text": "fix the tests"], to: w.bot, time: 1_700_000_000_000)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: prompt, time: 1_700_000_001_000)
+        let answer = Data(repeating: 0xAA, count: 16)
+        let parts = MessageRef(device: w.bot, name: answer)
+        w.deliver(kind: 4, from: w.bot, json: ["thread": prompt.hex, "markdown": "Running "], re: parts, time: 1_700_000_002_000)
+        w.deliver(kind: 4, from: w.bot, json: ["thread": prompt.hex, "markdown": "the tests."], re: parts, time: 1_700_090_000_000)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": prompt.hex, "markdown": "Running the tests."], re: prompt, name: answer, time: 1_700_090_001_000)
+        guard case .answer(let group)? = w.c.threads[prompt.hex]?.items.last else { return XCTFail("no answer group") }
+        XCTAssertEqual(group.time, Date(timeIntervalSince1970: 1_700_000_002), "the first part's time, a day before the answer that lands")
+    }
+
     func testAPromptOpensASessionThatRunsThenIsAnswered() {
         var w = World()
         let prompt = w.deliver(kind: 2, from: w.alice, json: ["text": "fix the tests"], to: w.bot)

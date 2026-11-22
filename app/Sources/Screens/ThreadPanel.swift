@@ -14,14 +14,20 @@ struct ThreadPanel: View {
     var composer: ComposerModel?
     /// The card that has the keyboard, by its request's reference: only a click or Tab gives it, and a card that ends leaves it to no other.
     @FocusState private var focus: MessageRef?
+    /// Only makes the view draw again when the day, the time zone or the clock changes; the day words are computed from the moment of drawing.
+    @State private var redraw = 0
 
     var body: some View {
+        let _ = redraw // read, so that a change draws the day words again
         let queued = thread.queued
+        // The day word before the root and each later entry that opens a day, a bot's answer by the time of its first part.
+        let entries: [Date?] = [thread.root?.time] + thread.items.map { if case .message(let m) = $0 { m.time } else if case .answer(let a) = $0 { a.time } else { nil } }
+        let days = Naming.dayLabels(entries, now: Date(), calendar: .current)
         VStack(spacing: 0) {
             HStack(spacing: PardnerMetrics.gap) {
                 Text("Thread").font(PardnerFont.ui(size: 15, weight: .semibold))
                 if let bot = thread.bot {
-                    Text("\(Naming.sender(bot, in: model)) · \(thread.state.label)")
+                    Text([Naming.sender(bot, in: model), thread.state.pill].compactMap { $0 }.joined(separator: " · "))
                         .font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.muted)
                 }
                 Spacer()
@@ -34,11 +40,16 @@ struct ThreadPanel: View {
             Divider().overlay(PardnerColor.line)
             ScrollView {
                 VStack(alignment: .leading, spacing: PardnerMetrics.gap * 2) {
+                    if let day = days[0] { DaySeparator(label: day) }
                     if let root = thread.root { MessageRow(model: model, icons: icons, message: root, queued: queued.contains(root.ref)) }
-                    ForEach(Array(thread.items.enumerated()), id: \.offset) { _, item in
+                    ForEach(Array(thread.items.enumerated()), id: \.offset) { index, item in
                         switch item {
-                        case .message(let m): entry(m, queued: queued)
-                        case .answer(let a): AnswerRow(model: model, icons: icons, answer: a)
+                        case .message(let m):
+                            if let day = days[index + 1] { DaySeparator(label: day) }
+                            entry(m, queued: queued)
+                        case .answer(let a):
+                            if let day = days[index + 1] { DaySeparator(label: day) }
+                            AnswerRow(model: model, icons: icons, answer: a)
                         }
                     }
                     if let composer { PendingRows(model: composer) }
@@ -46,12 +57,20 @@ struct ThreadPanel: View {
                 .padding(PardnerMetrics.gap * 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            // One identity per thread: the anchor is read when the scroll view is made, so a thread opened after another would keep its offset.
+            .id(thread.key)
+            // The newest entry in view, and a short thread starting under its header.
+            .defaultScrollAnchor(.bottom)
+            .defaultScrollAnchor(.top, for: .alignment)
             if let composer {
                 Divider().overlay(PardnerColor.line)
                 ComposerView(model: composer)
             }
         }
         .background(PardnerColor.panel)
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in redraw += 1 }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in redraw += 1 }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemClockDidChange)) { _ in redraw += 1 }
     }
 
     @ViewBuilder
@@ -77,7 +96,7 @@ struct AnswerRow: View {
     var body: some View {
         let name = Naming.sender(answer.ref.device, in: model)
         HStack(alignment: .top, spacing: PardnerMetrics.gap * 1.5) {
-            Avatar(name: name, isBot: true, icon: icons[answer.ref.device])
+            Avatar(name: name, isBot: true, icon: icons[answer.ref.device], size: MessageRow.markSize)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: PardnerMetrics.gap) {
                     Text(name).font(PardnerFont.ui(size: 14, weight: .semibold))
@@ -88,6 +107,7 @@ struct AnswerRow: View {
                 Text(verbatim: answer.markdown).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
         }
+        .contextMenu { Button("Copy") { Clipboard.copy(answer.markdown) } }
     }
 }
 

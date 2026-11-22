@@ -32,8 +32,6 @@ public struct MainWindow: View {
     @State private var channel: Data?
     @State private var thread: String?
     @State private var tab: Tab = .conversation
-    /// This Mac's rename was asked from the Devices sheet: the name sheet opens once that sheet is gone, not in the same tick.
-    @State private var renameAfterDevices = false
 
     enum Tab: String, CaseIterable { case conversation = "Conversation", sessions = "Sessions" }
 
@@ -112,13 +110,12 @@ public struct MainWindow: View {
         .frame(minWidth: Self.leastWidth(threadOpen: threadOpen))
         .onChange(of: shown?.id) { thread = nil }
         .sheet(isPresented: Binding(get: { devices?.isOpen ?? false }, set: { if !$0 { devices?.close() } }), onDismiss: {
-            guard renameAfterDevices, let devices else { return }
-            renameAfterDevices = false
+            guard let devices, devices.takeRename() else { return }
             let this = devices.rows.first(where: \.isThisMac)
             channels?.openRename(.device, current: this.flatMap { model.names.devices[$0.id] ?? $0.label })
         }) {
             if let devices {
-                DevicesSheet(model: devices, renameThisMac: channels == nil ? nil : { renameAfterDevices = true; devices.close() })
+                DevicesSheet(model: devices, renameThisMac: channels == nil ? nil : { devices.closeForRename() })
             }
         }
         .background(Color.clear.sheet(isPresented: Binding(get: { channels?.sheet != nil }, set: { if !$0 { channels?.close() } })) {
@@ -149,27 +146,34 @@ struct Empty: View {
     }
 }
 
-/// A sender's mark: the bot's icon when its profile has one, else the name's initial on the sender's colour.
+/// A sender's mark: a person's a circle, a bot's a rounded square; the bot's icon when its profile has one, else the name's initial.
 struct Avatar: View {
+    enum Mark { case circle, roundedSquare }
+
     let name: String
     let isBot: Bool
     let icon: NSImage?
     var size: CGFloat = 32
 
+    /// The shape of a sender's mark by its kind.
+    static func shape(isBot: Bool) -> Mark { isBot ? .roundedSquare : .circle }
+
     var body: some View {
+        // A circle is a rounded square whose radius is half its side.
+        let radius = Self.shape(isBot: isBot) == .circle ? size / 2 : size * 0.28
         Group {
             if let icon {
                 Image(nsImage: icon).resizable().interpolation(.high)
             } else {
                 Text(Naming.initial(name))
                     .font(PardnerFont.display(size: size * 0.42, weight: .bold))
-                    .foregroundStyle(isBot ? PardnerColor.agentInk : PardnerColor.brandInk)
+                    .foregroundStyle(isBot ? PardnerColor.agentInk : PardnerColor.brandText)
                     .frame(width: size, height: size)
-                    .background(isBot ? PardnerColor.agent : PardnerColor.brand)
+                    .background(isBot ? PardnerColor.agent : PardnerColor.brandSoft)
             }
         }
         .frame(width: size, height: size)
-        .clipShape(Circle())
+        .clipShape(RoundedRectangle(cornerRadius: radius))
     }
 }
 
@@ -206,14 +210,8 @@ struct Sidebar: View {
                         .fixedSize(horizontal: false, vertical: true).padding(.horizontal, PardnerMetrics.gap).padding(.vertical, 4)
                 }
                 ForEach(MainWindow.ordered(model), id: \.self) { id in
-                    Button { choose(id) } label: {
-                        Text(Naming.channel(id, in: model))
-                            .font(PardnerFont.ui(size: 14, weight: selected == id ? .semibold : .regular))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, PardnerMetrics.gap).padding(.vertical, 6)
-                            .background(selected == id ? PardnerColor.raised : .clear, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
-                    }
-                    .buttonStyle(.plain).pointerStyle(.link)
+                    ChannelRow(name: Naming.bareChannel(id, in: model), chosen: selected == id, waiting: model.channels[id].flatMap(Self.waitingCount)) { choose(id) }
+                        .contextMenu { if let channels, let channel = model.channels[id] { ChannelActions(model: model, channels: channels, channel: channel) } }
                 }
             }
             Section("Bots") {
@@ -237,27 +235,39 @@ struct Sidebar: View {
                 }
             }
             Spacer()
-            if let channels {
-                Button { channels.openRename(.person, current: model.personName) } label: {
-                    HStack(spacing: PardnerMetrics.gap) {
-                        Avatar(name: model.personName ?? "You", isBot: false, icon: nil, size: 20)
-                        Text(model.personName ?? "Set your name").foregroundStyle(model.personName == nil ? PardnerColor.muted : PardnerColor.text).lineLimit(1)
-                        Spacer()
+            // The person's row and the Devices button, under a rule.
+            HStack(spacing: 4) {
+                if let channels {
+                    Button { channels.openRename(.person, current: model.personName) } label: {
+                        HStack(spacing: PardnerMetrics.gap) {
+                            Avatar(name: model.personName ?? "You", isBot: false, icon: nil, size: 28)
+                            Text(model.personName ?? "Set your name").font(PardnerFont.ui(size: 14, weight: model.personName == nil ? .regular : .semibold))
+                                .foregroundStyle(model.personName == nil ? PardnerColor.muted : PardnerColor.text).lineLimit(1)
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
                     }
-                    .padding(.horizontal, PardnerMetrics.gap)
+                    .buttonStyle(.plain).pointerStyle(channels.ready ? .link : nil).disabled(!channels.ready).help("Change your name").accessibilityLabel("Change your name")
+                } else {
+                    Spacer()
                 }
-                .buttonStyle(.plain).pointerStyle(channels.ready ? .link : nil).disabled(!channels.ready).help("Change your name").accessibilityLabel("Change your name")
-            }
-            if let openDevices {
-                Button(action: openDevices) {
-                    Label("Devices…", systemImage: "laptopcomputer.and.iphone").frame(maxWidth: .infinity, alignment: .leading)
+                if let openDevices {
+                    Button(action: openDevices) { Image(systemName: "laptopcomputer.and.iphone").foregroundStyle(PardnerColor.muted).frame(width: 30, height: 30).contentShape(Rectangle()) }
+                        .buttonStyle(.plain).pointerStyle(.link).help("Devices…").accessibilityLabel("Devices…")
                 }
-                .buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Open the devices")
             }
+            .padding(.top, PardnerMetrics.gap + 2)
+            .overlay(alignment: .top) { Rectangle().fill(PardnerColor.line).frame(height: 1) }
         }
         .padding(PardnerMetrics.gap * 1.5)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(PardnerColor.side)
+    }
+
+    /// The count a channel's row carries: its threads that wait for the person, nil while none does.
+    static func waitingCount(_ channel: Channel) -> Int? {
+        let count = channel.threads.values.filter { $0.state == .waiting }.count
+        return count > 0 ? count : nil
     }
 
     struct Section<Content: View>: View {
@@ -277,5 +287,35 @@ struct Sidebar: View {
                 content
             }
         }
+    }
+}
+
+/// A channel's row: `#` and the bare name, the chosen row on `raised` and semibold, a row under the pointer on `raised` at half strength,
+/// and the count of threads waiting for the person in a pill.
+struct ChannelRow: View {
+    let name: String
+    let chosen: Bool
+    let waiting: Int?
+    let choose: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: choose) {
+            HStack(spacing: PardnerMetrics.gap) {
+                Text("#").foregroundStyle(chosen ? PardnerColor.brandText : PardnerColor.muted).frame(width: 12)
+                Text(name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                if let waiting {
+                    Text("\(waiting)").font(PardnerFont.ui(size: 11, weight: .bold)).foregroundStyle(PardnerColor.badgeInk)
+                        .padding(.horizontal, 5).frame(minWidth: 18, minHeight: 18).background(PardnerColor.badge, in: Capsule())
+                        .accessibilityLabel("\(waiting) waiting for you")
+                }
+            }
+            .font(PardnerFont.ui(size: 14, weight: chosen ? .semibold : .regular))
+            .padding(.horizontal, PardnerMetrics.gap + 2).frame(height: 30)
+            .background(chosen ? PardnerColor.raised : hovered ? PardnerColor.raised.opacity(0.5) : .clear, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).pointerStyle(.link).onHover { hovered = $0 }
+        .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 }

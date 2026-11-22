@@ -1,4 +1,4 @@
-// The composer under a conversation (composer design 2): a field that grows to eight lines, a label and the bot list for a channel's, the line
+// The composer under a conversation (composer design 2): a field two lines high that grows to eight, a label and the bot list for a channel's, the line
 // under it for what it refused, and the rows of the messages on their way. The decisions are `ComposerModel`'s; this draws them and passes keys.
 import AppKit
 import Conversation
@@ -21,7 +21,8 @@ struct ComposerField: NSViewRepresentable {
         view.drawsBackground = false
         view.isRichText = false
         view.allowsUndo = true
-        view.font = NSFont.systemFont(ofSize: 14)
+        // Inter 14, as the messages above it.
+        view.font = PardnerFont.uiCT(size: 14, weight: .regular) as NSFont
         view.textContainerInset = .zero
         view.textContainer?.lineFragmentPadding = 0
         view.isVerticallyResizable = true
@@ -30,12 +31,15 @@ struct ComposerField: NSViewRepresentable {
         view.textContainer?.widthTracksTextView = true
         view.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         view.registerForDraggedTypes([.fileURL])
+        model.hasMarkedText = false
         scroll.documentView = view
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         return scroll
     }
+
+    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) { coordinator.parent.model.hasMarkedText = false }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let view = scroll.documentView as? NSTextView else { return }
@@ -48,6 +52,14 @@ struct ComposerField: NSViewRepresentable {
             view.undoManager?.removeAllActions()
         }
         view.textColor = NSColor(PardnerColor.text)
+        if model.focusRequested {
+            // After the update: the request is cleared in the model, which this pass must not change.
+            DispatchQueue.main.async {
+                view.window?.makeFirstResponder(view)
+                view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
+                model.focusTaken()
+            }
+        }
         DispatchQueue.main.async { context.coordinator.measure(view) }
     }
 
@@ -58,6 +70,7 @@ struct ComposerField: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let view = notification.object as? NSTextView else { return }
             parent.model.edited(view.string)
+            parent.model.hasMarkedText = view.hasMarkedText()
             measure(view)
         }
 
@@ -85,12 +98,12 @@ struct ComposerField: NSViewRepresentable {
             }
         }
 
-        /// The field's height: its lines up to eight, then the scroll view scrolls.
+        /// The field's height: two lines at rest, its lines up to eight, then the scroll view scrolls.
         func measure(_ view: NSTextView) {
             guard let layout = view.layoutManager, let container = view.textContainer else { return }
             layout.ensureLayout(for: container)
             let line = layout.defaultLineHeight(for: view.font ?? NSFont.systemFont(ofSize: 14))
-            let wanted = min(max(layout.usedRect(for: container).height, line), line * 8)
+            let wanted = min(max(layout.usedRect(for: container).height, line * 2), line * 8)
             if abs(parent.height - wanted) > 0.5 { parent.height = wanted }
         }
     }
@@ -104,6 +117,11 @@ final class ComposerTextView: NSTextView {
     static func holdsFile(_ board: NSPasteboard) -> Bool {
         board.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
             || (board.availableType(from: [.png, .tiff]) != nil && board.string(forType: .string) == nil)
+    }
+
+    override func resignFirstResponder() -> Bool {
+        coordinator?.parent.model.hasMarkedText = false
+        return super.resignFirstResponder()
     }
 
     override func paste(_ sender: Any?) {
@@ -129,7 +147,7 @@ final class ComposerTextView: NSTextView {
 
 struct ComposerView: View {
     let model: ComposerModel
-    @State private var height: CGFloat = 20
+    @State private var height: CGFloat = 34
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -139,22 +157,32 @@ struct ComposerView: View {
             if let line = model.disabledLine {
                 Text(line).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
             }
-            HStack(alignment: .top, spacing: PardnerMetrics.gap) {
-                if let label = model.label {
-                    Text("@" + model.name(of: label))
-                        .font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.agentText)
-                        .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(PardnerColor.agentSoft, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
-                }
-                ZStack(alignment: .topLeading) {
-                    if model.text.isEmpty {
-                        Text(model.thread == nil ? "Message the channel, or type @ to mention a bot" : "Reply in the thread")
-                            .foregroundStyle(PardnerColor.muted).allowsHitTesting(false)
+            VStack(spacing: 0) {
+                HStack(alignment: .top, spacing: PardnerMetrics.gap) {
+                    if let label = model.label {
+                        Text("@" + model.name(of: label))
+                            .font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.agentText)
+                            .padding(.horizontal, 6).padding(.vertical, 1)
+                            .background(PardnerColor.agentSoft, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
                     }
-                    ComposerField(model: model, height: $height).id("\(model.channel.base64EncodedString())/\(model.thread ?? "")").frame(height: height)
+                    ZStack(alignment: .topLeading) {
+                        if model.text.isEmpty {
+                            Text(model.thread == nil ? "Message the channel, or type @ to mention a bot" : "Reply in the thread")
+                                .foregroundStyle(PardnerColor.muted).allowsHitTesting(false)
+                        }
+                        ComposerField(model: model, height: $height).id("\(model.channel.base64EncodedString())/\(model.thread ?? "")").frame(height: height)
+                    }
                 }
+                .padding(PardnerMetrics.gap)
+                Rectangle().fill(PardnerColor.line).frame(height: 1)
+                // The hint goes first when the box is wide enough for it; the buttons stay. Files are refused (`pasteRefused`), so there is no attach button.
+                ViewThatFits(in: .horizontal) {
+                    buttons(hint: true)
+                    buttons(hint: false)
+                }
+                .padding(.horizontal, PardnerMetrics.gap).padding(.vertical, 6)
             }
-            .padding(PardnerMetrics.gap).opacity(model.availability == .ready ? 1 : 0.5)
+            .opacity(model.availability == .ready ? 1 : 0.5)
             .background(PardnerColor.surface, in: RoundedRectangle(cornerRadius: PardnerMetrics.containerRadius))
             .overlay(RoundedRectangle(cornerRadius: PardnerMetrics.containerRadius).stroke(PardnerColor.line))
             if let notice = model.notice {
@@ -162,6 +190,30 @@ struct ComposerView: View {
             }
         }
         .padding(PardnerMetrics.gap * 2)
+    }
+}
+
+extension ComposerView {
+    /// The row under the field: the mention button at the left, then at the right the hint when `hint` and the send button.
+    private func buttons(hint: Bool) -> some View {
+        HStack(spacing: PardnerMetrics.gap) {
+            // A thread's `@` is plain text, so only a channel's composer has the button.
+            if model.thread == nil {
+                Button { model.startMention() } label: { Image(systemName: "at").frame(width: 30, height: 30).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).foregroundStyle(PardnerColor.muted).pointerStyle(model.canMention ? .link : nil).disabled(!model.canMention)
+                    .help("Mention a bot").accessibilityLabel("Mention a bot")
+            }
+            Spacer(minLength: 0)
+            if hint {
+                Text("Return to send, Shift-Return for a new line").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted).lineLimit(1).fixedSize()
+            }
+            Button { model.submit() } label: {
+                Image(systemName: "arrow.up").font(.system(size: 13, weight: .semibold)).foregroundStyle(PardnerColor.brandInk)
+                    .frame(width: 38, height: 30).background(PardnerColor.brand, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
+                    .opacity(model.sendOff ? 0.4 : 1).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).pointerStyle(model.sendOff ? nil : .link).disabled(model.sendOff).help("Send").accessibilityLabel("Send")
+        }
     }
 }
 
@@ -192,18 +244,12 @@ struct PendingRows: View {
     var body: some View {
         ForEach(model.rows()) { row in
             HStack(alignment: .top, spacing: PardnerMetrics.gap * 1.5) {
-                Avatar(name: "You", isBot: false, icon: nil)
+                Avatar(name: "You", isBot: false, icon: nil, size: MessageRow.markSize)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: PardnerMetrics.gap) {
                         Text("You").font(PardnerFont.ui(size: 14, weight: .semibold))
-                        if let to = row.to {
-                            Text("@" + model.name(of: to))
-                                .font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.agentText)
-                                .padding(.horizontal, 6).padding(.vertical, 1)
-                                .background(PardnerColor.agentSoft, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
-                        }
                     }
-                    Text(verbatim: row.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    mentioned(row.to.map { "@" + model.name(of: $0) }, row.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     switch row.status {
                     case .sending: line("Sending\u{2026}", PardnerColor.muted)
                     case .sent: EmptyView()
