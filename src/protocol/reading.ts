@@ -70,6 +70,8 @@ export interface ChannelView {
   key: Bytes | undefined;
   /** `openAt` the current epoch. */
   open: boolean;
+  /** Whether it is of the space class (design 2.3): a person's space, or a spare of it. */
+  space: boolean;
 }
 
 interface Channel {
@@ -112,6 +114,7 @@ export class Reading {
   #chains: Bytes[] = [];
   #log: LoggedEntry[] = [];
   #channels = new Map<string, Channel>();
+  #space: string | undefined; // the key of the first placed channel of the space class
   // `id`: the seal's own, never its signature (crypto.md 4); `ok`: its maker and signature checked against the log (crypto.md 9)
   #seals: { seal: HistorySeal; sig: Bytes; id: Bytes; ok: boolean }[] = [];
   #seen = new Seen();
@@ -147,8 +150,16 @@ export class Reading {
     return this.#state === "rest";
   }
 
+  /** The conversation channels and the person's space, never a spare (personal space design 2.3): what a device writes into and keeps. */
   channels(): Bytes[] {
-    return [...this.#channels.values()].flatMap((c) => (c.members[0] ? [c.members[0].id] : []));
+    return [...this.#channels]
+      .filter(([key, c]) => c.members[0] && (!c.members[0].space || key === this.#space))
+      .map(([, c]) => (c.members[0] as LoggedMember).id);
+  }
+
+  /** The person's space: the first placed channel of the space class, or `undefined` while none is read (design 2.3). */
+  space(): Bytes | undefined {
+    return this.#space === undefined ? undefined : this.#channels.get(this.#space)?.members[0]?.id;
   }
 
   /** The folded channel, or `undefined` while no entry of it is read. */
@@ -161,6 +172,7 @@ export class Reading {
       epochs: c.epochs,
       key: last && c.keys.get(idKey(last.id)),
       open: openAt(last, c.members, this.#log.length),
+      space: c.members[0]?.space === true,
     };
   }
 
@@ -279,6 +291,7 @@ export class Reading {
     this.#chains = [];
     this.#log = [];
     this.#channels = new Map();
+    this.#space = undefined;
     this.#seen = new Seen();
   }
 
@@ -381,6 +394,7 @@ export class Reading {
       if (!v.ok || !bytesEqual(d.value.signerPerson, person)) return bad("a member entry");
       c.members.push(v.value);
       this.#channels.set(idKey(id), c);
+      if (v.value.space) this.#space ??= idKey(id);
     } else if (kind === 3) {
       const d = decodeEpochEntry(signed);
       const c = d.ok && this.#channels.get(idKey(d.value.channel));
@@ -400,7 +414,12 @@ export class Reading {
     const d = decodeMessage(signed);
     const c = d.ok && this.#channels.get(idKey(d.value.header.channel));
     if (!c) return [];
-    c.check ??= messageChecker(this.#r.platform, c.epochs, [this.#log]);
+    c.check ??= messageChecker(
+      this.#r.platform,
+      c.epochs,
+      [this.#log],
+      c.members[0]?.space === true,
+    );
     const v = c.check(signed, sig);
     const last = c.epochs.at(-1);
     if (!v.ok || !last || this.#seen.check(v.value.message.header) === "again") return [];

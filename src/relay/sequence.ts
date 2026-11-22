@@ -16,7 +16,12 @@ import {
   type LoggedEntry,
   type PublicKeys,
 } from "../protocol/device-log.ts";
-import { checkEpochEntry, decodeEpochEntry, type LoggedEpoch } from "../protocol/epochs.ts";
+import {
+  checkEpochEntry,
+  decodeEpochEntry,
+  type HistorySeal,
+  type LoggedEpoch,
+} from "../protocol/epochs.ts";
 import { deviceId, recoveryKeyId, signedId } from "../protocol/ids.ts";
 import {
   checkMemberEntry,
@@ -145,6 +150,8 @@ export class Sequence {
   #firstAt = new Map<string, number>();
   #builds = new Map<string, number[]>();
   #byPerson = new Map<string, Set<Channel>>();
+  /** Per person id: the first placed channel of the space class, which is the person's space (personal space design 2.3). */
+  #spaces = new Map<string, string>();
   /** Per person id: the position of each device-log entry, in the log's order (the recovery log reads them back). */
   #at = new Map<string, number[]>();
   #named = new Map<string, Reference[]>();
@@ -257,6 +264,24 @@ export class Sequence {
   /** Whether a held log ever named the recovery key; true for good, as a reset replaces a key and keeps it named. */
   namesRecovery(id: Bytes): boolean {
     return this.#recoveryNames.has(idKey(id));
+  }
+
+  /**
+   * S6 (personal space design 2.4): whether the relay may keep a history seal of its channel's epoch. A
+   * seal of a space epoch is kept only when its maker and its recipient are a device or recovery key
+   * that the space's own person's log names; any other channel's is not bounded by this.
+   */
+  keepsSeal(seal: HistorySeal): boolean {
+    const first = this.channels.get(idKey(seal.channel))?.members[0];
+    if (!first?.space) return true;
+    const owner = first.entry.signerPerson;
+    const log = this.devices.get(idKey(owner));
+    if (!log) return false;
+    const { named, recoveries } = this.#view(owner, log);
+    return (
+      named.has(idKey(seal.maker)) &&
+      (named.has(idKey(seal.recipient)) || recoveries.has(idKey(seal.recipient)))
+    );
   }
 
   /** Whether the channel placed the epoch; true for good, as epochs are append-only. */
@@ -387,6 +412,8 @@ export class Sequence {
     if (holds(held?.members ?? [], e.seq, id)) return this.#out(Code.accepted);
     if (!bytesEqual(e.signerDevice, conn.device) || !bytesEqual(e.signerPerson, conn.person))
       return this.#out(Code.refused);
+    // S2 (personal space design 2.4): a space's member log is entry 0 alone. Here and not in the check, which a start runs again.
+    if (held?.members[0]?.space) return this.#out(Code.refused);
     const verdict = checkMemberEntry(
       this.#platform,
       held?.members ?? [],
@@ -395,6 +422,9 @@ export class Sequence {
       this.devices.get(idKey(e.signerPerson)) ?? [],
     );
     if (!verdict.ok) return this.#out(verdict.rule === "position" ? Code.position : Code.refused);
+    // S1: a person's space is the first of its class that is placed; the next is answered like a position taken.
+    if (verdict.value.space && this.#spaces.has(idKey(e.signerPerson)))
+      return this.#out(Code.position);
     return this.#placed(KIND.member, signed, sig, { member: verdict.value });
   }
 
@@ -439,7 +469,7 @@ export class Sequence {
     const current = held.epochs.at(-1);
     if (!current || !bytesEqual(current.id, h.epoch)) return this.#out(Code.ended);
     if (held.closed) return this.#out(Code.closed);
-    if (!this.#checker(held.epochs, h.channel)(signed, sig).ok || held.slots.has(slotOf(h)))
+    if (!this.#checker(held, h.channel)(signed, sig).ok || held.slots.has(slotOf(h)))
       return this.#out(Code.refused);
     // SD 5.12, points 3 and 4: a blob that is not on disk and no longer wanted is gone for good, so
     // the outbox that holds the message drops it; one that is only not on disk yet is missing.
@@ -451,14 +481,19 @@ export class Sequence {
 
   /**
    * The package's check of a message, over the channel's current epoch, rebuilt when an epoch is
-   * placed (design 3.9). A device log that grows changes no verdict: the epoch's heads cut each log
-   * where it was (`messageChecker`'s contract).
+   * placed (design 3.9), in the class of its channel (S5). A device log that grows changes no verdict:
+   * the epoch's heads cut each log where it was (`messageChecker`'s contract).
    */
-  #checker(epochs: readonly LoggedEpoch[], channel: Bytes) {
+  #checker(held: Channel, channel: Bytes) {
     const key = idKey(channel);
     let check = this.#checkers.get(key);
     if (!check) {
-      check = messageChecker(this.#platform, epochs.slice(-1), [...this.devices.values()]);
+      check = messageChecker(
+        this.#platform,
+        held.epochs.slice(-1),
+        [...this.devices.values()],
+        held.members[0]?.space === true,
+      );
       this.#checkers.set(key, check);
     }
     return check;
@@ -542,6 +577,8 @@ export class Sequence {
       channel.members.push(parsed.member);
       if (parsed.member.changesMembers) channel.closed = true;
       this.channels.set(key, channel);
+      if (parsed.member.space && !this.#spaces.has(idKey(e.signerPerson)))
+        this.#spaces.set(idKey(e.signerPerson), key);
       this.#placeMembers(channel);
     } else if ("epoch" in parsed) {
       const key = idKey(parsed.epoch.entry.channel);

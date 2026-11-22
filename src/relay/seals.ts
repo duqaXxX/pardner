@@ -108,6 +108,7 @@ export class Seals {
     if (this.#keys.has(sealKey(verdict.value))) {
       return { code: Code.accepted, ticket: this.#rounds.written };
     }
+    if (!this.#seq.keepsSeal(verdict.value)) return refuse; // S6, at submit only: a held seal, which an older relay may have kept, is accepted above
     const ticket = this.#file.append({ signed, sig });
     this.#keep({ signed, sig }, verdict.value, ticket); // a copy: the frame's buffer is reused
     return { code: Code.accepted, ticket };

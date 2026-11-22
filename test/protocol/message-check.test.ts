@@ -163,8 +163,12 @@ function signedBy(sender: { id: Bytes; sign: string }, over: Partial<MessageHead
   assert.ok(signature.ok);
   return { bytes, signature: signature.value };
 }
-const verdict = (w: ReturnType<typeof world>, m: { bytes: Bytes; signature: Bytes }) => {
-  const v = messageChecker(platform, w.epochs, w.logs)(m.bytes, m.signature);
+const verdict = (
+  w: ReturnType<typeof world>,
+  m: { bytes: Bytes; signature: Bytes },
+  space = false,
+) => {
+  const v = messageChecker(platform, w.epochs, w.logs, space)(m.bytes, m.signature);
   return v.ok ? "ok" : v.rule;
 };
 
@@ -242,14 +246,14 @@ test("the id is the hash of the signed bytes: two signatures of one message give
   assert.ok(again.ok);
   assert.notDeepEqual(again.value, first.signature, "ECDSA signs differently each time");
   const id = (signature: Bytes) => {
-    const v = messageChecker(platform, w.epochs, w.logs)(first.bytes, signature);
+    const v = messageChecker(platform, w.epochs, w.logs, false)(first.bytes, signature);
     assert.ok(v.ok);
     return v.value.id;
   };
   assert.deepEqual(id(first.signature), id(again.value));
   assert.deepEqual(id(first.signature), platform.sha256(first.bytes));
   const second = signedBy(w.app, { counter: 2 });
-  const next = messageChecker(platform, w.epochs, w.logs)(second.bytes, second.signature);
+  const next = messageChecker(platform, w.epochs, w.logs, false)(second.bytes, second.signature);
   assert.ok(next.ok);
   assert.notDeepEqual(next.value.id, id(first.signature));
 });
@@ -310,7 +314,7 @@ test("R1-1: two logs that name one id with two kinds name no device, in either o
     [...w.logs, other.log],
     [other.log, ...w.logs],
   ]) {
-    const check = messageChecker(platform, w.epochs, logs);
+    const check = messageChecker(platform, w.epochs, logs, false);
     const [a, b] = [check(prompt.bytes, prompt.signature), check(answer.bytes, answer.signature)];
     assert.deepEqual([a.ok ? "ok" : a.rule, b.ok ? "ok" : b.rule], ["to", "sender"]);
   }
@@ -352,8 +356,9 @@ test("R1-3: the Sent-by column: an app sends prompts and replies, a bot the rest
   for (const [kind, over] of sent) {
     const app = kind === 2 || kind === 10;
     const [right, wrong] = app ? [w.app, w.bot] : [w.bot, w.app];
-    assert.equal(verdict(w, signedBy(right, { kind, ...over })), "ok", `kind ${kind}`);
-    assert.equal(verdict(w, signedBy(wrong, { kind, ...over })), "kind", `kind ${kind}`);
+    const space = kind === 13; // a profile is checked in the class of its channel
+    assert.equal(verdict(w, signedBy(right, { kind, ...over }), space), "ok", `kind ${kind}`);
+    assert.equal(verdict(w, signedBy(wrong, { kind, ...over }), space), "kind", `kind ${kind}`);
   }
   assert.equal(verdict(w, signedBy(w.app, { kind: 1 })), "ok");
   assert.equal(verdict(w, signedBy(w.bot, { kind: 1 })), "ok");
@@ -402,7 +407,7 @@ test("5.6 condition 2: a recovery key that was replaced is not a sender either [
   const bytes = sealMessage(platform, epochKey, { ...base, sender: oldId }, empty);
   const signed = platform.sign("msg.rec.s", bytes);
   assert.ok(signed.ok);
-  assert.equal(messageChecker(platform, epochs, [app.log])(bytes, signed.value).ok, false);
+  assert.equal(messageChecker(platform, epochs, [app.log], false)(bytes, signed.value).ok, false);
 });
 
 /** An epoch whose heads are the whole logs of `persons` and whose recipients are `ids`. */
@@ -427,10 +432,12 @@ test("A: an edit whose re names another device's message is refused", () => {
   const app = device("app");
   const bot = device("bot", { signing: pk(3), receiving: pk(4) });
   const forged = signedBy(bot, { kind: 11, re: { device: app.id, name: fill(9, 16) } });
-  const v = messageChecker(platform, epochOf([app, bot], [app.id, bot.id]), [app.log, bot.log])(
-    forged.bytes,
-    forged.signature,
-  );
+  const v = messageChecker(
+    platform,
+    epochOf([app, bot], [app.id, bot.id]),
+    [app.log, bot.log],
+    false,
+  )(forged.bytes, forged.signature);
   assert.equal(v.ok, false);
 });
 
@@ -438,11 +445,12 @@ test("B: an app sends an answer, a bot sends a prompt: the Sent-by column", () =
   const app = device("app");
   const bot = device("bot", { signing: pk(3), receiving: pk(4) });
   const bot2 = device("bot", { signing: pk(5), receiving: pk(6) });
-  const check = messageChecker(platform, epochOf([app, bot, bot2], [app.id, bot.id, bot2.id]), [
-    app.log,
-    bot.log,
-    bot2.log,
-  ]);
+  const check = messageChecker(
+    platform,
+    epochOf([app, bot, bot2], [app.id, bot.id, bot2.id]),
+    [app.log, bot.log, bot2.log],
+    false,
+  );
   const answer = signedBy(app, { kind: 5, re: { device: app.id, name: fill(9, 16) } });
   const prompt = signedBy(bot2, { kind: 2, to: bot.id });
   assert.deepEqual(
@@ -463,7 +471,7 @@ test("C: the verdict on `to` does not depend on the order of the logs when two n
     [a.log, bot.log, b.log],
     [b.log, a.log, bot.log],
   ].map((logs) => {
-    const v = messageChecker(platform, epochs, logs)(prompt.bytes, prompt.signature);
+    const v = messageChecker(platform, epochs, logs, false)(prompt.bytes, prompt.signature);
     return v.ok ? "ok" : v.rule;
   });
   assert.deepEqual(verdicts, ["ok", "ok"]);
@@ -522,11 +530,14 @@ test("C1-5: an empty log among the devices gives a verdict, not an exception", (
 test("CR-4: a checker is fixed for its life; a new one sees a log that has grown", () => {
   const w = world();
   const logs = [w.app.log, w.stranger.log];
-  const before = messageChecker(platform, w.epochs, logs);
+  const before = messageChecker(platform, w.epochs, logs, false);
   const message = signedBy(w.bot);
   logs.push(w.bot.log);
   assert.equal(before(message.bytes, message.signature).ok, false, "the old checker is unchanged");
-  assert.equal(messageChecker(platform, w.epochs, logs)(message.bytes, message.signature).ok, true);
+  assert.equal(
+    messageChecker(platform, w.epochs, logs, false)(message.bytes, message.signature).ok,
+    true,
+  );
 });
 
 test("CR-5: a bot's answer, start, cut, not-read or request never names the bot's own message", () => {
@@ -551,4 +562,37 @@ test("every `message-check` case of message.json passes", () => {
   const checks = vectors.cases.filter((c: { op: string }) => c.op === "message-check");
   assert.ok(checks.length >= 8);
   assert.deepEqual(runVectors(platform, { ...vectors, cases: checks }), []);
+});
+
+test("S5, PD 6.4: a profile is accepted in a space only, and every other kind in a conversation channel only", () => {
+  const w = world();
+  const re = { device: w.app.id, name: fill(9, 16) };
+  const own = { device: w.bot.id, name: fill(9, 16) };
+  const sent: [number, Partial<MessageHeader>][] = [
+    [1, {}],
+    [2, { to: w.bot.id }],
+    [3, { re }],
+    [4, { re: own }],
+    [5, { re }],
+    [6, { re }],
+    [7, { re }],
+    [8, {}],
+    [9, { re }],
+    [10, { to: w.bot.id, re: own }],
+    [11, { re: own }],
+    [12, {}],
+  ];
+  for (const [kind, over] of sent) {
+    const sender = kind === 2 || kind === 10 ? w.app : w.bot;
+    assert.equal(verdict(w, signedBy(sender, { kind, ...over }), false), "ok", `kind ${kind}`);
+    assert.equal(verdict(w, signedBy(sender, { kind, ...over }), true), "class", `kind ${kind}`);
+  }
+  assert.equal(verdict(w, signedBy(w.bot, { kind: 13 }), true), "ok");
+  assert.equal(verdict(w, signedBy(w.bot, { kind: 13 }), false), "class");
+});
+
+test("S5: the sender's kind is judged before the class, as the model orders them", () => {
+  const w = world();
+  assert.equal(verdict(w, signedBy(w.app, { kind: 13 }), false), "kind");
+  assert.equal(verdict(w, signedBy(w.app, { kind: 13 }), true), "kind");
 });

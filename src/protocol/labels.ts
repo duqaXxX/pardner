@@ -27,6 +27,7 @@ const TEXT = {
   file: "AES-GCM additional data of a blob",
   "cut-name": "hashed: the name of a bot's cut notice",
   "unread-name": "hashed: the name of a bot's not-read notice",
+  "personal-space": "hashed: the nonce of the entry 0 of a person's space",
 } as const;
 
 export type LabelName = keyof typeof TEXT;

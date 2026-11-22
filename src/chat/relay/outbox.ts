@@ -9,6 +9,7 @@ import { bytesEqual } from "../../protocol/bytes.ts";
 import { buildEpoch, type HistorySeal, tickEpoch } from "../../protocol/epochs.ts";
 import { deviceId, signedId } from "../../protocol/ids.ts";
 import { makeSeal, sealKey, seals, startOf } from "../../protocol/keeper.ts";
+import { encodeMemberEntry, spaceNonce } from "../../protocol/member-log.ts";
 import { KIND_PROFILE, messageChecker } from "../../protocol/messages.ts";
 import {
   build,
@@ -26,7 +27,8 @@ import { toHex } from "./hex.ts";
 import { type Pairing, SIGN } from "./pairing.ts";
 import type { Store } from "./store.ts";
 
-const MESSAGE = 4; // the item kinds of a `submit` frame
+const MEMBER = 2; // the item kinds of a `submit` frame
+const MESSAGE = 4;
 const EPOCH = 3;
 const BUILT = "relay: a message could not be built, nothing is sent until the next read";
 
@@ -36,7 +38,7 @@ export interface OutboxOptions {
   store: Store;
   reading: Reading;
   /** `Connection.submit`: the relay's result code, or `undefined` when none came. */
-  submit: (kind: 3 | 4, signed: Bytes, sig: Bytes) => Promise<number | undefined>;
+  submit: (kind: 2 | 3 | 4, signed: Bytes, sig: Bytes) => Promise<number | undefined>;
   /** `Connection.giveSeal`: the relay's result code, or `undefined` when none came. */
   giveSeal: (seal: HistorySeal, sig: Bytes) => Promise<number | undefined>;
   log: (line: string) => void;
@@ -60,6 +62,8 @@ export class Outbox {
   #unbuildable = new Set<string>(); // channels whose epoch build failed, logged once
   #unsealable = new Set<string>(); // `sealKey` of each seal whose make failed, logged once
   #sealing = false;
+  #said = new Set<string>(); // the refusals of a space epoch entry already logged, by channel and epoch count
+  #spaceAsked = false; // the person's space was asked for in this run, and the relay answered
   #again = false; // a rest came while seals were given
   #released = false;
   #dropped = new Set<string>(); // names that left the outbox without being read back: refused, too large or unwanted
@@ -94,7 +98,10 @@ export class Outbox {
   /** Told of each `Out` of the connection: a message of the bot's own read back, a new incarnation, a rest. */
   take(out: Out): void {
     if (out.do === "incarnation") {
-      if (out.changed) this.#dropStarts();
+      if (out.changed) {
+        this.#dropStarts();
+        this.#spaceAsked = false; // a relay gone back may lack the space it placed
+      }
     } else if (out.do === "message" && bytesEqual(out.message.header.sender, this.#self)) {
       const key = toHex(out.message.header.channel);
       const held = this.#o.store.saved.outboxes.get(key) ?? [];
@@ -104,6 +111,7 @@ export class Outbox {
     } else if (out.do === "rest") {
       this.#sent.clear(); // what the pass did not read back is sent again, as the same bytes
       this.#waiting.clear();
+      this.#spaceAtRest();
       this.pump();
       void this.#seal();
     }
@@ -171,6 +179,39 @@ export class Outbox {
   }
 
   /**
+   * At a rest (personal space design 3): a fault stored on the space is dropped, since only now is its
+   * id known (2.6), and a person with no space gets one. Entry 0 is a function of the person and this
+   * device, so asking again after a lost answer places the same bytes; a relay that answers 2 has
+   * another device's space, which the next read brings.
+   */
+  #spaceAtRest(): void {
+    const { reading, store, pairing, platform, submit, log } = this.#o;
+    // Every fault stored on a channel of the space class: the space's and a spare's, which is never stepped (2.6).
+    const stale = [...store.saved.faults].filter(
+      (k) => reading.channel(Uint8Array.from(Buffer.from(k, "hex")))?.space,
+    );
+    if (stale.length > 0)
+      void this.#save((s) => {
+        for (const k of stale) s.faults.delete(k);
+      });
+    if (reading.space() || this.#spaceAsked) return;
+    const signed = encodeMemberEntry({
+      seq: 0,
+      kind: "create",
+      nonce: spaceNonce(platform, pairing.person),
+      signerPerson: pairing.person,
+      signerDevice: this.#self,
+    });
+    const sig = platform.sign(SIGN, signed);
+    if (!sig.ok) return;
+    void submit(MEMBER, signed, sig.value).then((code) => {
+      if (code === undefined) return;
+      this.#spaceAsked = true;
+      if (code !== 0 && code !== 2) log(`relay: the person's space was answered with ${code}`);
+    });
+  }
+
+  /**
    * A profile not built yet holds what an earlier run would have written: built now, it would count
    * as this run's (bot-profile design 3.2, condition 3) and keep a changed name or a newly learned
    * account out of its epoch. Dropped at start, the writer decides again at rest from this run's
@@ -203,9 +244,9 @@ export class Outbox {
   }
 
   /** `item` replaced by `next` in its channel's outbox, or removed when `next` is `undefined`; rejects when the write fails. */
-  #put(key: string, item: OutboxItem, next?: OutboxItem): Promise<void> {
+  #put(key: string, item: OutboxItem, next?: OutboxItem, ofRun = true): Promise<void> {
     if (!next) this.#dropped.add(toHex(item.name));
-    if (!next && item.kind === KIND_PROFILE) this.profileDropped = true;
+    if (!next && item.kind === KIND_PROFILE && ofRun) this.profileDropped = true;
     return this.#o.store
       .change((s) =>
         s.outboxes.set(
@@ -298,19 +339,35 @@ export class Outbox {
         // A newer epoch already read: build in it at once, not at the next rest.
         return !bytesEqual(reading.channel(channel)?.epochs.at(-1)?.id ?? at.epoch, at.epoch);
       case 1: {
+        const verdict = messageChecker(
+          platform,
+          view.epochs,
+          [reading.devices],
+          view.space,
+        )(built.signed, built.signature);
+        // A profile a version before the space built for a conversation channel: dropped for its class, and no reason to write no more (review K2).
+        if (!verdict.ok && verdict.rule === "class") {
+          log("relay: a message was refused for its class, not delivered");
+          await this.#put(key, item, undefined, false); // a stale profile is no profile of this run that failed to land
+          return true;
+        }
         // A relay of an earlier version does not know the kind: not a fault (design 3.2, S2).
         if (item.kind === KIND_PROFILE) {
           log("relay: the relay refused the bot's profile");
           await this.#put(key, item);
           return true;
         }
-        const verdict = messageChecker(platform, view.epochs, [reading.devices])(
-          built.signed,
-          built.signature,
-        );
-        // Kind, `to` and `re` depend on the draft alone: a refusal by them is the bot's own, not the relay's.
+        // Kind, class, `to` and `re` depend on the draft and its channel alone: a refusal by them is the bot's own, not the relay's.
         if (!verdict.ok && ["kind", "to", "re"].includes(verdict.rule)) {
-          log("relay: a message was refused for its kind or its recipient, not delivered");
+          log(
+            "relay: a message was refused for its kind, its class or its recipient, not delivered",
+          );
+          await this.#put(key, item);
+          return true;
+        }
+        if (view.space) {
+          // The space is never a fault target (design 2.6): the item is dropped, the channel stays open.
+          log("relay: a message was refused in the person's space, not delivered");
           await this.#put(key, item);
           return true;
         }
@@ -350,6 +407,12 @@ export class Outbox {
     if (code === 0) {
       this.#waiting.set(key, view.epochs.length);
       log(`relay: an epoch was started (${why})`);
+    } else if (code === 1 && view.space) {
+      // Owed again at the next rest (2.6); said once for each epoch count.
+      const said = `${key} ${view.epochs.length}`;
+      if (!this.#said.has(said))
+        log("relay: an epoch entry was refused in the space, nothing is stopped");
+      this.#said.add(said);
     } else if (code === 1) await this.#fault(key, "an epoch entry");
     else if (code !== undefined && code !== 2)
       log(`relay: an epoch entry was answered with ${code}`); // 2: the heads moved, the push that follows is read
