@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { RelayProvider, splitParts } from "../../../src/chat/relay/provider.ts";
-import type { InboundMessage, ThreadChat } from "../../../src/chat/seam.ts";
+import type { ChannelBind, InboundMessage, ThreadChat } from "../../../src/chat/seam.ts";
 import { decodeMessage } from "../../../src/protocol/messages.ts";
 import { DARWIN } from "../../relay/process-support.ts";
 import { platform } from "../../relay/support.ts";
@@ -302,3 +303,77 @@ test(
     }
   },
 );
+
+const bindVectors = JSON.parse(
+  readFileSync(
+    new URL("../../protocol/content-vectors/bind-content.json", import.meta.url),
+    "utf8",
+  ),
+) as {
+  cases: Array<{
+    name: string;
+    content: { markdown: string; bind?: ChannelBind };
+    bind: ChannelBind | null;
+  }>;
+};
+
+test(
+  "a channel line writes the bind of a /bind answer in its first piece only, as the shared vectors read (#69)",
+  DARWIN,
+  async () => {
+    const r = await rig();
+    const b = botOn(r);
+    try {
+      b.connection.start();
+      await b.rested();
+      const { message } = await prompted(r, b, "/bind demo");
+      const channel = provider(r, b).channel(message.ref.channel);
+      const written = bindVectors.cases.filter((c) => c.bind !== null);
+      for (const { content } of written)
+        await channel.notice(content.markdown, undefined, content.bind);
+      // Two pieces: the folder rides the first.
+      const long = "a".repeat(65_537);
+      await channel.notice(long, undefined, { folder: "/srv/code/demo", state: "usable" });
+      await channel.notice("A line of no bind.");
+      await b.until(async () => (await kind(r, 1)).length === written.length + 3);
+      const lines = (await kind(r, 1)).map((m) => r.body(m as never));
+      assert.deepEqual(
+        lines.slice(0, written.length),
+        written.map((c) => c.content),
+      );
+      assert.deepEqual(lines[written.length], {
+        say: "notice",
+        markdown: "a".repeat(65_536),
+        bind: { folder: "/srv/code/demo", state: "usable" },
+      });
+      assert.deepEqual(lines[written.length + 1], { say: "notice", markdown: "a" });
+      assert.deepEqual(lines[written.length + 2], {
+        say: "notice",
+        markdown: "A line of no bind.",
+      });
+    } finally {
+      await b.stop();
+      await r.stop();
+    }
+  },
+);
+
+test("a channel notice is placed in the outbox at the call, first piece with its bind (#69)", async () => {
+  const placed: Array<{ content: string }> = [];
+  const outbox = {
+    queue: async (_channel: unknown, draft: { content: string }) => {
+      placed.push(draft);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return true;
+    },
+  };
+  const relay = new RelayProvider(new Uint8Array(32), outbox as never, {} as never, platform);
+  const bind = { folder: "/srv/code/demo", state: "usable" } as const;
+  const done = relay.channel("ab".repeat(32)).notice("a".repeat(65_537), undefined, bind);
+  // Nothing awaited yet: the core orders its replies by this.
+  assert.equal(placed.length, 1);
+  assert.deepEqual(JSON.parse(placed[0]?.content as string).bind, bind);
+  await done;
+  assert.equal(placed.length, 2);
+  assert.equal(JSON.parse(placed[1]?.content as string).bind, undefined);
+});

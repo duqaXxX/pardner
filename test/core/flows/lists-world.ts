@@ -97,9 +97,9 @@ class Faulty implements ChatProvider {
   channel(channel: string): ChannelChat {
     const inner = this.#inner.channel(channel);
     return {
-      notice: async (text) => {
+      notice: async (text, answers, bind) => {
         if (this.noticeFails) throw new Error("notice refused");
-        return inner.notice(text);
+        return inner.notice(text, answers, bind);
       },
       say: (markdown) => inner.say(markdown),
       ...(inner.offer === undefined

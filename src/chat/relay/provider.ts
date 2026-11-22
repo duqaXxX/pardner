@@ -10,6 +10,7 @@ import { refKey } from "../../protocol/device-reader.ts";
 import type { Bytes, Platform } from "../../protocol/platform.ts";
 import {
   type AgentAccount,
+  type ChannelBind,
   type ChannelChat,
   type ChatCapabilities,
   ChatError,
@@ -116,13 +117,21 @@ export class RelayProvider implements ChatProvider {
     markdown: string,
     thread?: string,
     answers?: MessageId,
+    bind?: ChannelBind,
   ) {
     // A line that answers a top-level prompt names it (`re`), which is how the app draws it under that prompt.
     const re = answers ? referenceOf(answers) : undefined;
     // A long text is several texts, each at most 64 KiB (3.8).
     const pieces = splitParts(markdown);
-    for (const piece of pieces.length ? pieces : [markdown]) {
-      const content = JSON.stringify({ ...(thread ? { thread } : {}), say, markdown: piece });
+    const parts = pieces.length ? pieces : [markdown];
+    for (const [index, piece] of parts.entries()) {
+      // The folder rides the first piece only: a reader takes it from the answer's start.
+      const content = JSON.stringify({
+        ...(thread ? { thread } : {}),
+        say,
+        markdown: piece,
+        ...(bind && index === 0 ? { bind } : {}),
+      });
       const queued = await this.#outbox.queue(fromHex(channel), { kind: 1, re, content });
       if (!queued) throw new ChatError("relay_not_queued", { failure: "failed" });
     }
@@ -261,8 +270,9 @@ export class RelayProvider implements ChatProvider {
     const text = (say: "notice" | "say" | "tell") => (markdown: string, answers?: MessageId) =>
       this.#text(channel, say, markdown, undefined, answers);
     return {
-      notice: async (markdown, answers) => {
-        await text("notice")(markdown, answers);
+      notice: async (markdown, answers, bind) => {
+        // Placed in the outbox before the first await, as `bind.ts` relies on.
+        await this.#text(channel, "notice", markdown, undefined, answers, bind);
         return null;
       },
       say: text("say"),
