@@ -143,8 +143,17 @@ extension PairingController {
     func devicesRead(_ effect: HostValue) async {
         guard let snap = DeviceSnapshot(effect) else { return await hostFaulted("the package gave a device list that does not read") }
         snapshot = snap
+        if stored?.stage == .paired, stored?.device == nil { recordDevice(snap) }
         if stored?.stage == .joining { await completeJoin(snap) }
         if stored?.stage == .paired { await settle() }
+    }
+
+    /// A paired store without its device id gets it at the first read that lists this device. Bookkeeping: a failed write changes no phase and the next read tries again.
+    private func recordDevice(_ snap: DeviceSnapshot) {
+        guard var state = stored, snap.devices.contains(where: { $0.id == snap.selfID && $0.active }) else { return }
+        state.device = snap.selfID
+        guard (try? pairing.write(state)) != nil else { return }
+        stored = state
     }
 
     /// The time this Mac first read each device's add, kept in the pairing store so no other device can forge it (design 3.9).
@@ -371,6 +380,8 @@ extension PairingController {
             return
         }
         state.stage = .paired
+        state.device = snap.selfID
+        mayHoldUnnamedEarlier = false
         state.proof = nil // the name stays for good: the link takes it as this device's name while none is pending or read, so a restart before it is written still sends it
         guard save(state) else { return }
         joiningScreen = nil
@@ -413,7 +424,8 @@ extension PairingController {
                 id: device.id, kind: device.kind, label: shownDeviceNames[device.id] ?? state.labels[device.id], shortForm: device.short, adder: adder,
                 position: device.position, active: device.active, isThisMac: device.id == snap.selfID,
                 seenAt: state.seen[device.id].map { Date(timeIntervalSince1970: $0) }, onlyHolderEpochs: device.onlyHolderEpochs,
-                addedWhileRemoving: removal.map { $0.devices.contains(device.id) && device.position >= $0.length && device.addedBy != snap.selfID } ?? false)
+                addedWhileRemoving: removal.map { $0.devices.contains(device.id) && device.position >= $0.length && device.addedBy != snap.selfID } ?? false,
+                isEarlierKeys: device.active && device.id == state.earlier)
         }
         list.pendingEntry = state.pending != nil
         list.pendingAddName = state.pending == nil ? nil : pendingAddDevice.flatMap { state.labels[$0] }

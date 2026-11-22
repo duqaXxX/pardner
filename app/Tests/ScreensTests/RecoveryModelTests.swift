@@ -158,6 +158,15 @@ final class RecoveryModelTests: XCTestCase {
         XCTAssertNil(model.givingUp)
     }
 
+    func testTheNoLineSaysWhichEarlierKeysStayActive() {
+        XCTAssertEqual(RecoveryScreenWords.noLine(.notActive), RecoveryScreenWords.devicesNoLine)
+        XCTAssertEqual(RecoveryScreenWords.noLine(.unnamed),
+                       RecoveryScreenWords.devicesNoLine + " Your earlier keys on this Mac may still be active; remove them in Devices if so.")
+        XCTAssertEqual(RecoveryScreenWords.noLine(.named("5e5e 5e5e 5e5e 5e5e")),
+                       RecoveryScreenWords.devicesNoLine + " Your earlier keys on this Mac (5e5e 5e5e 5e5e 5e5e) stay active until you remove them in Devices.")
+        XCTAssertEqual(RecoveryScreenWords.earlierKeysMark, "This Mac's earlier keys")
+    }
+
     func testEveryRefusalHasItsWordsAndNoneSaysSheet() {
         let all: [RecoveryRefusal] = [.unknownPerson, .notCurrent, .madeEarlier, .notTheStartKey, .yourNewKey, .notTyped, .noLongerCurrent, .personGone]
         for why in all {
@@ -246,6 +255,9 @@ final class RecoveryModelTests: XCTestCase {
     func testOnlyARefusalBeforeAResetOffersCancelAndTheStoredOnesSaySoPlainly() {
         XCTAssertEqual([RecoveryRefusal.unknownPerson, .notCurrent, .madeEarlier, .notTheStartKey, .yourNewKey, .notTyped, .noLongerCurrent, .personGone].filter(RecoveryScreenWords.canCancel),
                        [.unknownPerson, .notCurrent, .madeEarlier])
+        XCTAssertEqual([RecoveryRefusal.unknownPerson, .notCurrent, .madeEarlier, .notTheStartKey, .yourNewKey, .notTyped, .noLongerCurrent, .personGone].filter(RecoveryScreenWords.canQuit),
+                       [.noLongerCurrent, .personGone])
+        XCTAssertEqual(RecoveryScreenWords.quitRecovery, "Quit recovery and keep this Mac as it is")
         XCTAssertFalse(RecoveryScreenWords.canTypeAgain(.noLongerCurrent))
         XCTAssertFalse(RecoveryScreenWords.canTypeAgain(.personGone))
         XCTAssertEqual(RecoveryScreenWords.refusal(.personGone).title, "Your relay no longer knows this person")

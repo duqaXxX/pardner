@@ -92,6 +92,10 @@ final class PairingModelTests: XCTestCase {
         XCTAssertEqual(devices.pasted, "")
     }
 
+    func testTheSetupNameHintSaysTheNameIsTheSameOnEveryDevice() {
+        XCTAssertEqual(PairingModel.setupNameHint, "Your name, the same on all your devices.")
+    }
+
     func testTheMessageIsTheControllersText() {
         XCTAssertEqual(PairingModel(phase: .linkFaulted(PairingPhase.linkFaultAdvice)).message, PairingPhase.linkFaultAdvice)
         XCTAssertEqual(PairingModel(phase: .fault(.newerStore, PairingPhase.newerStoreAdvice)).message, PairingPhase.newerStoreAdvice)

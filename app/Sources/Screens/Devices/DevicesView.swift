@@ -95,6 +95,7 @@ struct DeviceInfo: View {
                     Text(DevicesModel.kindName(row.kind)).font(PardnerFont.ui(size: 14, weight: .semibold))
                 }
                 if row.isThisMac { Pill(text: "This Mac", ground: PardnerColor.brandSoft, ink: PardnerColor.brandText) }
+                if row.isEarlierKeys { Pill(text: RecoveryScreenWords.earlierKeysMark, ground: PardnerColor.agentSoft, ink: PardnerColor.agentText) }
                 if row.label != nil { Pill(text: DevicesModel.kindName(row.kind), ground: PardnerColor.raised, ink: PardnerColor.muted) }
                 if row.addedWhileRemoving { Pill(text: "added while you were removing", ground: PardnerColor.agentSoft, ink: PardnerColor.agentText) }
             }
