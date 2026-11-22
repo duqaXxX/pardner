@@ -48,9 +48,21 @@ struct ChannelView: View {
                         ForEach(channel.timeline, id: \.self) { position in
                             if let m = byPosition[position] {
                                 MessageRow(model: model, icons: icons, message: m, queued: queued.contains(m.ref))
-                                if let t = channel.threads[m.ref.hex], m.kind == 2 || !t.items.isEmpty {
-                                    Summary(model: model, thread: t, open: { thread = t.key })
+                                if let t = channel.threads[m.ref.hex] {
+                                    if t.isWord {
+                                        // A word or a refused prompt: a message with the bot's lines under it, no session.
+                                        Answered(model: model, icons: icons, thread: t, prompt: m)
+                                            .padding(.leading, 32 + PardnerMetrics.gap * 1.5)
+                                    } else if t.showsSummary(openedBy: m.kind) {
+                                        // No sign yet keeps the summary, which opens the thread: a first turn with no text can be reached.
+                                        VStack(alignment: .leading, spacing: PardnerMetrics.gap) {
+                                            if let note = t.unsettledNote(of: m.ref) {
+                                                Text(note).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                                            }
+                                            Summary(model: model, thread: t, open: { thread = t.key })
+                                        }
                                         .padding(.leading, 32 + PardnerMetrics.gap * 1.5)
+                                    }
                                 }
                             }
                         }
@@ -105,6 +117,35 @@ struct MessageRow: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if queued { Text("Queued").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted) }
             }
+        }
+    }
+}
+
+/// What stands under a prompt that opened no session: its state when it never ran or was cut, then the bot's lines and what its thread holds, in order.
+struct Answered: View {
+    let model: ReadingModel
+    let icons: [Data: NSImage]
+    let thread: MessageThread
+    let prompt: Message
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PardnerMetrics.gap) {
+            ForEach(Array(thread.items.enumerated()), id: \.offset) { _, item in
+                switch item {
+                case .message(let line): MessageRow(model: model, icons: icons, message: line)
+                case .answer(let answer): Text(verbatim: answer.markdown).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if let state { Text(state).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted) }
+        }
+    }
+
+    // A cut after a sign of a word is an interruption; a not-read, the only way to settle as never run, is a prompt the bot never ran.
+    private var state: String? {
+        switch thread.prompts[prompt.ref] {
+        case .cut: "Interrupted"
+        case .notRead: "Not run"
+        default: nil
         }
     }
 }

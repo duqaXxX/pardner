@@ -85,7 +85,8 @@ public struct MainWindow: View {
             if let c = shown {
                 ChannelView(model: model, icons: icons, channel: c, channels: channels, composers: composers, tab: $tab, thread: $thread)
                     .frame(minWidth: 420, maxWidth: .infinity)
-                if let key = thread, let t = c.threads[key] {
+                // A thread that settles as a word or as never run while its panel is open closes the panel: it has no composer to keep.
+                if let key = thread, let t = c.threads[key], !t.isWord {
                     Divider().overlay(PardnerColor.line)
                     ThreadPanel(model: model, icons: icons, thread: t, close: { thread = nil }, composer: composers?.composer(channel: c.id, thread: key))
                         .frame(width: 380)

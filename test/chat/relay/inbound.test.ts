@@ -425,3 +425,30 @@ test("a note needs an answered question and an answer names at least one questio
   await r.echo();
   assert.deepEqual([r.answers.length, r.inbound.waiting.size], [1, 0]);
 });
+
+test("a top-level prompt not handed on is answered as no session (#68)", async () => {
+  const r = rig();
+  r.inbound.start(undefined);
+  r.prompt({ text: "x" });
+  await r.feed();
+  await r.echo();
+  const [answer] = r.queued.filter((q) => q.draft.kind === 5);
+  assert.equal(JSON.parse(answer?.draft.content ?? "{}").session, false);
+});
+
+test("a prompt of a thread not handed on is answered with no flag (#68)", async () => {
+  const r = rig();
+  r.prompt({ text: "first" });
+  await r.feed();
+  await r.echo();
+  const first = r.messages[0] as InboundMessage;
+  first.handled?.(true);
+  await r.echo();
+  r.inbound.start(undefined);
+  r.prompt({ text: "y", thread: first.ref.thread });
+  await r.feed();
+  await r.echo();
+  const answer = JSON.parse(r.queued.findLast((q) => q.draft.kind === 5)?.draft.content ?? "{}");
+  assert.equal(answer.markdown, "The bot did not run this prompt.");
+  assert.equal("session" in answer, false);
+});

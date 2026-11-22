@@ -496,4 +496,164 @@ extension ConversationTests {
         w.deliver(kind: 5, from: w.bot, json: ["thread": "", "markdown": ""], re: s.reply, time: 1_800_000_000_000)
         XCTAssertGreaterThan(w.c.threads[s.thread]!.lastReply!, before!)
     }
+
+    // MARK: a prompt answered as a word, or a session (#68)
+
+    func testTheBotsLineThatAnswersAPromptSettlesItAsNoSessionAndSitsUnderIt() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "/bypass on"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        XCTAssertNil(w.c.threads[root.hex]?.settlement)
+        XCTAssertEqual(w.c.threads[root.hex]?.unsettledNote(of: root), "Started", "only the start")
+        let line = w.deliver(kind: 1, from: w.bot, json: ["say": "notice", "markdown": "Bypass applies inside a session."], re: root)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": root.hex, "markdown": "", "session": false], re: root)
+        XCTAssertEqual(w.c.threads[root.hex]?.settlement, .noSession)
+        XCTAssertEqual(w.c.timeline, [10], "the line is no message of the channel")
+        XCTAssertEqual(w.c.threads[root.hex]?.items.count, 1)
+        guard case .message(let under)? = w.c.threads[root.hex]?.items.first else { return XCTFail("no line under the prompt") }
+        XCTAssertEqual(under.ref, line)
+        XCTAssertTrue(w.c.sessions.isEmpty, "never in Sessions")
+        XCTAssertNil(w.c.threads[root.hex]?.unsettledNote(of: root))
+    }
+
+    func testAnAnswerThatSaysNoSessionSettlesAWordWithNoLine() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "/stop"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": root.hex, "markdown": "", "session": false], re: root)
+        XCTAssertEqual(w.c.threads[root.hex]?.settlement, .noSession)
+        XCTAssertEqual(w.c.threads[root.hex]?.items.count, 0)
+        XCTAssertEqual(w.c.threads[root.hex]?.prompts[root], .answered)
+        XCTAssertTrue(w.c.sessions.isEmpty)
+    }
+
+    func testAnAnswerWithoutTheFlagAndASetupRequestAndAPartSettleASession() {
+        var w = World()
+        let resumed = w.deliver(kind: 2, from: w.alice, json: ["text": "/resume old"], to: w.bot)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": resumed.hex, "markdown": ""], re: resumed)
+        let asked = w.deliver(kind: 2, from: w.alice, json: ["text": "go"], to: w.bot)
+        w.deliver(kind: 9, from: w.bot, json: ["thread": asked.hex, "title": "Setup", "request": ["type": "setup"]], re: asked)
+        let streamed = w.deliver(kind: 2, from: w.alice, json: ["text": "go on"], to: w.bot)
+        w.deliver(kind: 4, from: w.bot, json: ["thread": streamed.hex, "markdown": "Working"], re: MessageRef(device: w.bot, name: Data(repeating: 0xCC, count: 16)))
+        for key in [resumed, asked, streamed] { XCTAssertEqual(w.c.threads[key.hex]?.settlement, .session) }
+        XCTAssertEqual(w.c.sessions.count, 3)
+    }
+
+    func testABotsTextInThePromptsOwnThreadIsASessionSign() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "x"], to: w.bot)
+        w.deliver(kind: 1, from: w.bot, json: ["thread": root.hex, "say": "notice", "markdown": "Set: model default"])
+        XCTAssertEqual(w.c.threads[root.hex]?.settlement, .session)
+    }
+
+    func testTheFirstSignWinsInPositionOrderAndNeverChanges() {
+        var w = World()
+        // A setup request came first: a session, whatever the answer's flag says after a cancel.
+        let cancelled = w.deliver(kind: 2, from: w.alice, json: ["text": "go"], to: w.bot)
+        w.deliver(kind: 9, from: w.bot, json: ["thread": cancelled.hex, "title": "Setup", "request": ["type": "setup"]], re: cancelled)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": cancelled.hex, "markdown": "", "session": false], re: cancelled)
+        XCTAssertEqual(w.c.threads[cancelled.hex]?.settlement, .session)
+        // A line first: a word, whatever follows.
+        let word = w.deliver(kind: 2, from: w.alice, json: ["text": "/help"], to: w.bot)
+        w.deliver(kind: 1, from: w.bot, json: ["say": "say", "markdown": "The words"], re: word)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": word.hex, "markdown": ""], re: word)
+        XCTAssertEqual(w.c.threads[word.hex]?.settlement, .noSession)
+    }
+
+    func testACutSettlesNothingAndANotReadBeforeAnySignIsNotRun() {
+        var w = World()
+        let died = w.deliver(kind: 2, from: w.alice, json: ["text": "one"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: died)
+        w.deliver(kind: 6, from: w.bot, json: [:], re: died)
+        XCTAssertNil(w.c.threads[died.hex]?.settlement, "a run that died after it started is no prompt that never ran")
+        XCTAssertEqual(w.c.threads[died.hex]?.prompts[died], .cut)
+        XCTAssertEqual(w.c.threads[died.hex]?.unsettledNote(of: died), "Interrupted")
+        XCTAssertEqual(w.c.sessions.count, 1, "listed: a silent session that crashed is not hidden")
+        XCTAssertEqual(w.c.threads[died.hex]?.showsSummary(openedBy: 2), true, "its thread can be opened")
+        w.deliver(kind: 4, from: w.bot, json: ["thread": died.hex, "markdown": "late"], re: MessageRef(device: w.bot, name: Data(repeating: 0xBB, count: 16)))
+        XCTAssertEqual(w.c.threads[died.hex]?.settlement, .session, "a later sign decides")
+        let unread = w.deliver(kind: 2, from: w.alice, json: ["text": "two"], to: w.bot)
+        w.deliver(kind: 7, from: w.bot, json: [:], re: unread)
+        XCTAssertEqual(w.c.threads[unread.hex]?.settlement, .notRun)
+        XCTAssertEqual(w.c.threads[unread.hex]?.isWord, true)
+        let word = w.deliver(kind: 2, from: w.alice, json: ["text": "/status"], to: w.bot)
+        w.deliver(kind: 1, from: w.bot, json: ["say": "say", "markdown": "Status"], re: word)
+        w.deliver(kind: 6, from: w.bot, json: [:], re: word)
+        XCTAssertEqual(w.c.threads[word.hex]?.settlement, .noSession, "a cut after a sign: interrupted, not not run")
+        XCTAssertEqual(w.c.threads[word.hex]?.prompts[word], .cut)
+        XCTAssertEqual(w.c.threads[word.hex]?.showsSummary(openedBy: 2), false)
+        XCTAssertEqual(w.c.sessions.count, 1)
+    }
+
+    func testATellInAnUnsettledWordsThreadIsNoSessionSign() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "/resume abc"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        w.deliver(kind: 1, from: w.bot, json: ["thread": root.hex, "say": "tell", "markdown": "Nothing is running in this session."])
+        XCTAssertNil(w.c.threads[root.hex]?.settlement, "the bot's answer to a Stop typed in the thread is no sign")
+        w.deliver(kind: 1, from: w.bot, json: ["say": "notice", "markdown": "The word's line."], re: root)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": root.hex, "markdown": "", "session": false], re: root)
+        XCTAssertEqual(w.c.threads[root.hex]?.settlement, .noSession)
+        XCTAssertTrue(w.c.sessions.isEmpty)
+        // A tell, then an answer without the flag: still a session.
+        let run = w.deliver(kind: 2, from: w.alice, json: ["text": "fix it"], to: w.bot)
+        w.deliver(kind: 1, from: w.bot, json: ["thread": run.hex, "say": "tell", "markdown": "A refusal."])
+        w.deliver(kind: 5, from: w.bot, json: ["thread": run.hex, "markdown": "done"], re: run)
+        XCTAssertEqual(w.c.threads[run.hex]?.settlement, .session)
+    }
+
+    func testABotLineWithReAfterTheSessionSettledIsAnItemOfItsThread() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "fix it"], to: w.bot)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": root.hex, "markdown": "done"], re: root)
+        let line = w.deliver(kind: 1, from: w.bot, json: ["say": "notice", "markdown": "A late refusal."], re: root)
+        XCTAssertEqual(w.c.threads[root.hex]?.settlement, .session, "the first sign stands")
+        XCTAssertEqual(w.c.threads[root.hex]?.items.count, 2)
+        guard case .message(let item)? = w.c.threads[root.hex]?.items.last else { return XCTFail("no item") }
+        XCTAssertEqual(item.ref, line)
+        XCTAssertEqual(w.c.sessions.count, 1)
+        XCTAssertEqual(w.c.timeline, [10], "no line of the channel")
+    }
+
+    func testALineWithReFromAnotherBotOrAPersonStaysAChannelLineInPlace() {
+        var w = World()
+        let other = Data(repeating: 4, count: 32)
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "hi"], to: w.bot)
+        w.deliver(kind: 1, from: other, json: ["say": "notice", "markdown": "another bot"], re: root)
+        w.deliver(kind: 1, from: w.alice, json: ["markdown": "a person"], re: root)
+        XCTAssertNil(w.c.threads[root.hex]?.settlement)
+        XCTAssertEqual(w.c.threads[root.hex]?.items.count, 0)
+        XCTAssertEqual(w.c.timeline.count, 3, "each is a line of the channel")
+    }
+
+    func testALongLineInSeveralTextsDrawsEachInOrderUnderThePrompt() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "/help"], to: w.bot)
+        let first = w.deliver(kind: 1, from: w.bot, json: ["say": "say", "markdown": "one"], re: root)
+        let second = w.deliver(kind: 1, from: w.bot, json: ["say": "say", "markdown": "two"], re: root)
+        let refs = w.c.threads[root.hex]?.items.compactMap { item -> MessageRef? in if case .message(let m) = item { m.ref } else { nil } }
+        XCTAssertEqual(refs, [first, second])
+    }
+
+    func testAnOlderBotThatWritesNoFlagAndNoReKeepsTheOldReading() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "/bind demo"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        w.deliver(kind: 1, from: w.bot, json: ["say": "notice", "markdown": "Bound"]) // no `re`: a line of the channel
+        w.deliver(kind: 5, from: w.bot, json: ["thread": root.hex, "markdown": ""], re: root)
+        XCTAssertEqual(w.c.threads[root.hex]?.settlement, .session)
+        XCTAssertEqual(w.c.sessions.count, 1)
+    }
+
+    func testTheLineAndTheAnswerSettleTheSameWhateverTheBatchOrder() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "/help"], to: w.bot)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": root.hex, "markdown": "", "session": false], re: root)
+        w.deliver(kind: 1, from: w.alice, json: ["markdown": "later"], at: 13)
+        // The line arrives at a place already passed: the channel is read again in position order, the line before the answer.
+        w.deliver(kind: 1, from: w.bot, json: ["say": "say", "markdown": "late"], re: root, again: true, at: 12)
+        XCTAssertEqual(w.c.threads[root.hex]?.settlement, .noSession)
+        XCTAssertEqual(w.c.threads[root.hex]?.items.count, 1)
+        XCTAssertEqual(w.c.timeline, [10, 13])
+    }
 }

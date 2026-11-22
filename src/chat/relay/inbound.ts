@@ -296,7 +296,14 @@ export class Inbound {
     const target = this.#target;
     if (!target || typeof body?.text !== "string") {
       this.#o.log("relay: a prompt was not handed on");
-      void this.#finish(run, channel, thread ?? id, "The bot did not run this prompt.");
+      void this.#finish(
+        run,
+        channel,
+        thread ?? id,
+        "The bot did not run this prompt.",
+        undefined,
+        !!thread,
+      );
       return;
     }
     const text = body.text;
@@ -312,26 +319,32 @@ export class Inbound {
       content: async () => text,
       // The core is done with the prompt: its replies are written, and the answer closes it. Not once
       // stopped: a prompt the core never finished stays unanswered, and is read as cut after a restart.
-      handled: () => {
+      handled: (session) => {
         if (!this.#target) return;
         const reply = this.#replies.get(refKey(run.ref));
         this.#replies.delete(refKey(run.ref));
-        void this.#finish(run, channel, thread ?? id, reply?.text ?? "", reply?.name);
+        void this.#finish(run, channel, thread ?? id, reply?.text ?? "", reply?.name, session);
       },
     };
+    // The core calls `handled` itself after any throw of its own, and says then whether it opened a
+    // session: the relay answers on its own only a prompt the core never took (above).
     target.message(message).catch(() => {
       this.#o.log("relay: the core did not take a prompt");
-      void this.#finish(run, channel, thread ?? id, "The bot did not run this prompt.");
     });
   }
 
-  /** The answer of a message the bot handed on (kind 5, `re` it): once queued, the message is done. */
+  /**
+   * The answer of a message the bot handed on (kind 5, `re` it): once queued, the message is done.
+   * `session`: false writes `"session": false`, for a top-level prompt whose thread holds no session
+   * (a word, a refusal, a prompt the bot did not run), which the app draws as a message.
+   */
   async #finish(
     run: Prompt,
     channel: Bytes,
     thread: string,
     markdown: string,
     name?: Bytes,
+    session = true,
   ): Promise<void> {
     // One answer per prompt (3.8): the first of the core's done, a refusal and a failure wins.
     const key = refKey(run.ref);
@@ -341,7 +354,12 @@ export class Inbound {
     const queued = await this.#o.outbox
       .queue(
         channel,
-        { kind: 5, re: run.ref, name, content: JSON.stringify({ thread, markdown }) },
+        {
+          kind: 5,
+          re: run.ref,
+          name,
+          content: JSON.stringify({ thread, markdown, ...(session ? {} : { session: false }) }),
+        },
         (saved) => {
           this.#reader.answered(run.ref);
           saved.decided = new Map(this.#reader.decided);

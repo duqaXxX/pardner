@@ -209,6 +209,8 @@ export function botOn(
     clock?: Clock;
     /** What the fake core answers to an answer: false for a request it no longer waits on. */
     taken?: boolean;
+    /** The fake core's `message` rejects after it took the prompt, as a `Cancelled` of a stop does. */
+    rejects?: boolean;
     /** The configured name and icon of a bot that writes its profile; absent, it writes none. */
     profile?: Omit<Profile, "account">;
     /** The folder of another bot of alice's (`addBot`); the rig's own by default. */
@@ -272,7 +274,10 @@ export function botOn(
   const messages: InboundMessage[] = [];
   const answers: [string, OwnerAnswer][] = [];
   const target = {
-    message: async (m: InboundMessage) => void messages.push(m),
+    message: async (m: InboundMessage) => {
+      messages.push(m);
+      if (over.rejects) throw new Error("cancelled");
+    },
     answer: async (_ref: unknown, id: string, a: OwnerAnswer) =>
       !!answers.push([id, a]) && (over.taken ?? true),
   };

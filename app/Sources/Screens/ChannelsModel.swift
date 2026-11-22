@@ -133,9 +133,9 @@ public final class ChannelsModel {
         self.bot = bot
     }
 
-    /// The bot a channel's `/bind` goes to: the `to` of its latest `/bind` prompt (the creation's), else the bot of its newest session.
+    /// The bot a channel's `/bind` goes to: the `to` of its latest `/bind` prompt (the creation's), else the `to` of its newest prompt (a word has no session, and still names its bot).
     static func bot(of channel: Channel) -> Data? {
-        channel.messages.last { $0.kind == 2 && $0.shown.hasPrefix("/bind ") }?.to ?? channel.sessions.first?.bot
+        channel.messages.last { $0.kind == 2 && $0.shown.hasPrefix("/bind ") }?.to ?? channel.messages.last { $0.kind == 2 }?.to
     }
 
     private func open(_ next: Sheet) {

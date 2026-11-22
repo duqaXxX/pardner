@@ -379,7 +379,8 @@ test("a session gone at continue time reacts error not a raised hand", LIMIT, as
     await world.settle();
     await unsent(world);
     assert.equal(standing(world.chat, ref), "error");
-    assert.ok(world.shown(ref).includes(named(texts.SESSION_GONE, PLAIN_NAMES)));
+    // The thread's entry is gone: no session holds it, so the failure is a channel line naming the prompt.
+    assert.ok(world.chat.texts(ref.channel).includes(named(texts.SESSION_GONE, PLAIN_NAMES)));
   } finally {
     // `closedFlag` was set directly above, bypassing the real teardown: finished properly here
     // even when an assertion fails, or the world's own `closeAll` waits for ever on this object.

@@ -67,6 +67,13 @@ public enum Item: Sendable, Equatable {
     }
 }
 
+/// What the first sign of the prompt's bot says the opening prompt was: the bot's setup, parts or answer say a session; a line of its
+/// own (`re` the prompt) or an answer that says no session, a word; a not-read before any other sign, a prompt that never ran. A cut is
+/// no sign: it means a run that died after it started, and a later sign still decides.
+public enum Settlement: Sendable, Equatable {
+    case session, noSession, notRun
+}
+
 /// A thread: opened by a message of the channel, a session when that message is a prompt to a bot.
 public struct MessageThread: Sendable, Equatable {
     /// The hex of the opening message's reference, as every body of the thread names it.
@@ -78,6 +85,25 @@ public struct MessageThread: Sendable, Equatable {
     public internal(set) var items: [Item] = []
     public internal(set) var prompts: [MessageRef: PromptStatus] = [:]
     public internal(set) var requests: [MessageRef: RequestStatus] = [:]
+    /// The opening prompt's, set by the first sign of its bot in position order and never changed; nil while there is none.
+    public internal(set) var settlement: Settlement?
+    /// The prompt was settled as a word or as never run: a message with the bot's lines under it, no session.
+    public var isWord: Bool { settlement == .noSession || settlement == .notRun }
+    /// Whether the Sessions tab lists it: a prompt to a bot that was not settled as a word or as never run. A prompt with no sign yet
+    /// is listed, so that a first turn with no text can still be opened.
+    public var isSession: Bool { bot != nil && !isWord }
+    /// Whether a summary that opens the thread stands under its opening message of kind `kind`: any prompt to a bot that is no word,
+    /// even before its first sign.
+    public func showsSummary(openedBy kind: Int) -> Bool { !isWord && (kind == 2 || !items.isEmpty) }
+    /// What stands over the summary of a prompt with no sign of its bot yet: that the bot started it, or that a run cut it.
+    public func unsettledNote(of prompt: MessageRef) -> String? {
+        guard settlement == nil else { return nil }
+        switch prompts[prompt] {
+        case .running: return "Started"
+        case .cut: return "Interrupted"
+        default: return nil
+        }
+    }
     /// The body of the owner's reply each request ended on: the one sent while it waits, then the one the bot took.
     public var answers: [MessageRef: String] { replied.mapValues(\.json) }
     // By request: the owner's reply that stands for it, and whether the bot took it. A refusal of that reply, or the bot saying the
@@ -129,7 +155,7 @@ public struct Channel: Sendable, Equatable {
 
     /// The sessions, by their last reply, newest first (first-screens decision 8); the key breaks a tie.
     public var sessions: [MessageThread] {
-        threads.values.filter { $0.bot != nil }.sorted {
+        threads.values.filter(\.isSession).sorted {
             let a = $0.lastReply ?? $0.root?.time ?? .distantPast, b = $1.lastReply ?? $1.root?.time ?? .distantPast
             return a != b ? a > b : $0.key < $1.key
         }
@@ -141,6 +167,12 @@ public struct Channel: Sendable, Equatable {
         messages.append(m)
         if let re = m.re, let reply = replies[re], let key = threadOf[re], [3, 5, 6, 7].contains(m.kind) {
             threads[key]?.take(verdict: m, of: re, reply: reply)
+            return
+        }
+        // The bot's own line that answers a top-level prompt (`re` it): under that prompt, never a message of the channel.
+        if case .text = m.body, m.thread == nil, let re = m.re, let key = threadOf[re], threads[key]?.answers(line: m) == true {
+            threadOf[m.ref] = key
+            threads[key]?.take(line: m)
             return
         }
         let key: String?
@@ -173,6 +205,17 @@ extension MessageThread {
     // other bots of a channel act on nothing here); a reply only from a device whose prompt the bot started.
     mutating func take(_ m: Message) {
         let fromBot = bot != nil && m.sender == bot
+        // The first sign decides what the opening prompt was (a prompt's start is no sign).
+        if fromBot, settlement == nil {
+            switch m.body {
+            case .request, .part: settlement = .session
+            // A `tell` is the bot answering a Stop or a reply typed in the thread: it can precede a word's own line.
+            case .text(_, let say) where m.thread != nil && say != "tell": settlement = .session
+            case .answer where m.re == root?.ref: settlement = m.noSession ? .noSession : .session
+            case .notRead where m.re == root?.ref: settlement = .notRun
+            default: break
+            }
+        }
         switch m.body {
         case .prompt:
             prompts[m.ref] = .sent
@@ -220,6 +263,18 @@ extension MessageThread {
             return
         }
         if fromBot { lastReply = max(lastReply ?? .distantPast, m.time) }
+    }
+
+    /// Whether `m`, a text with no thread, is the line of the session's bot that answers the opening prompt.
+    func answers(line m: Message) -> Bool {
+        bot != nil && m.sender == bot && m.re != nil && m.re == root?.ref
+    }
+
+    /// The bot's line that answers the opening prompt: an item under it, and the first sign unless one came before.
+    mutating func take(line m: Message) {
+        if settlement == nil { settlement = .noSession }
+        items.append(.message(m))
+        lastReply = max(lastReply ?? .distantPast, m.time)
     }
 
     /// What the bot says to the reply `reply`, from the bot it was `to` alone: its empty kind 5 means the answer was handed on, whatever the request's

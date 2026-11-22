@@ -681,12 +681,19 @@ class MemoryChannel implements ChannelChat {
     this.#channel = channel;
   }
 
-  async notice(text: string): Promise<MessageId | null> {
+  async notice(text: string, answers?: MessageId): Promise<MessageId | null> {
+    this.#answered("notice", text, answers);
     return this.#room.write(this.#channel, null, DAEMON, text, "notice").id;
   }
 
-  async say(markdown: string): Promise<void> {
+  async say(markdown: string, answers?: MessageId): Promise<void> {
+    this.#answered("say", markdown, answers);
     this.#room.write(this.#channel, null, DAEMON, markdown, "reference");
+  }
+
+  /** The channel lines that answer a prompt of the owner's are recorded with it, as `calls("answers")`. */
+  #answered(how: string, text: string, answers?: MessageId): void {
+    if (answers !== undefined) this.#room.record(null, "answers", [how, text, answers]);
   }
 
   async open(markdown: string, lead?: { lead: string; words: string }): Promise<ThreadRef> {

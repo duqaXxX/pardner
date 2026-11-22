@@ -162,7 +162,7 @@ export interface SaysOptions {
   /** The message carries files or was spoken: the daemon never reads it as a word. */
   readonly literal?: boolean;
   /** Called by the core once it is done with the message (`InboundMessage.handled`). */
-  readonly handled?: () => void;
+  readonly handled?: (session: boolean) => void;
 }
 
 /** The people of the room. */

@@ -62,6 +62,8 @@ public struct Message: Sendable, Equatable {
     public let thread: String?
     public let body: Body
     public let files: [FileInfo]
+    /// A kind 5 that says its prompt's thread holds no session (`"session": false`): the prompt was answered as a word, or refused.
+    public let noSession: Bool
 
     public var ref: MessageRef { MessageRef(device: sender, name: name) }
 
@@ -84,6 +86,7 @@ public struct Message: Sendable, Equatable {
         }
         let fields = view["text"]?.stringValue.flatMap(Self.object)
         thread = fields?["thread"] as? String
+        noSession = kind == 5 && fields?["session"] as? Bool == false
         body = fields.map { Self.body(kind: Int(kind), $0, text: view["text"]?.stringValue ?? "") } ?? .unreadable
     }
 

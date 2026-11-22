@@ -12,7 +12,7 @@
  */
 
 import type { CommandInfo, PromptContent } from "../../agent/seam.ts";
-import type { InboundMessage, ShellRequest, ThreadRef } from "../../chat/seam.ts";
+import type { InboundMessage, MessageId, ShellRequest, ThreadRef } from "../../chat/seam.ts";
 import { strip } from "../../text.ts";
 import {
   COMMAND_PREFIX,
@@ -105,10 +105,23 @@ export function messages(
    * Tells `Not sent.` under a prompt its ticket says the owner stopped, before it holds anything
    * a drop must put back. False, with nothing awaited, while the ticket stands.
    */
-  async function dropped(ticket: Ticket): Promise<boolean> {
+  async function dropped(ticket: Ticket, answers?: MessageId): Promise<boolean> {
     if (!ticket.signal.aborted) return false;
-    if (!talk.stopped) await talk.tell(ticket.ref, texts.NOT_SENT);
+    if (talk.stopped) return true;
+    if (answers === undefined) await talk.tell(ticket.ref, texts.NOT_SENT);
+    else await talk.inChannel(ticket.ref.channel, texts.NOT_SENT, answers);
     return true;
+  }
+
+  /**
+   * The top-level prompt a refusal answers through a channel line, which the app draws under it:
+   * `message` itself while no session holds its thread, else undefined, and the refusal is a line of
+   * that session's thread. Asked where the refusal is written, since the same one is written on
+   * both sides of `sessions.open`.
+   */
+  function answering(message: InboundMessage): MessageId | undefined {
+    const { channel, thread } = message.ref;
+    return message.topLevel && !sessions.holds(channel, thread) ? message.id : undefined;
   }
 
   /**
@@ -509,13 +522,26 @@ export function messages(
   }
 
   /**
-   * Where a word's failure is told: in the channel for a word that acts top-level, under the
-   * owner's message for one typed inside a session's thread.
+   * Where a word's failure is told, asked when it is written: into the thread while a session holds
+   * it (a word typed there, or one that opened the session before it failed), else a channel line,
+   * which names the prompt when the word is a top-level one.
    */
-  function wordReport(ref: ThreadRef, session: ThreadSession | null): Report {
+  function wordReport(ref: ThreadRef, message: InboundMessage): Report {
     return async (told) => {
-      if (session === null) await talk.inChannel(ref.channel, told);
-      else await talk.tell(ref, told);
+      if (sessions.holds(ref.channel, ref.thread)) await talk.tell(ref, told);
+      else await talk.inChannel(ref.channel, told, answering(message));
+    };
+  }
+
+  /**
+   * Where a top-level prompt's failure is told: a channel line under it while no session holds
+   * its thread, else the turn's own push in the thread (`Talk.replyOnFailure`'s default).
+   */
+  function failureReport(message: InboundMessage): Report {
+    return async (told) => {
+      const answers = answering(message);
+      if (answers === undefined) await talk.tell(message.ref, told, { stays: true });
+      else await talk.inChannel(message.ref.channel, told, answers);
     };
   }
 
@@ -533,10 +559,11 @@ export function messages(
     opened: ThreadSession | null,
     ticket: Ticket,
     id: string,
+    answers: MessageId | undefined,
   ): Promise<void> {
     // Outside a session's thread it is answered in the channel, as the words of one session are.
     if (opened === null) {
-      await talk.inChannel(ref.channel, texts.SHELL_OUTSIDE_SESSION);
+      await talk.inChannel(ref.channel, texts.SHELL_OUTSIDE_SESSION, answers);
       return;
     }
     if (!deps.shellCommands) {
@@ -591,10 +618,14 @@ export function messages(
 
   /** Tells the provider the core is done with `message`: when its turn ends, or now when no turn took it. */
   function handled(message: InboundMessage): void {
+    // Decided when the core is done: whether the prompt's thread holds a session then, which a
+    // top-level prompt answered as a word or refused before any session opened does not.
+    const session = () =>
+      !message.topLevel || sessions.holds(message.ref.channel, message.ref.thread);
     const ticket = ticketOf.get(message) ?? null;
     const turn = ticket === null ? undefined : turns.get(ticket);
-    if (turn === undefined) message.handled?.();
-    else void turn.done.wait().then(() => message.handled?.());
+    if (turn === undefined) message.handled?.(session());
+    else void turn.done.wait().then(() => message.handled?.(session()));
   }
 
   /** Whether a message of the owner's, read as `command`, is sent to the agent as it stands. */
@@ -664,12 +695,15 @@ export function messages(
     const { ref, topLevel } = message;
     const { channel, thread } = ref;
     const { session, command, written, outside } = read;
+    // One state for a word's lines and its failure: a word that opens the session fails under the
+    // same prompt it answered.
+    const answers = answering(message);
     if (command !== null && command.kind === "shell") {
       const typed = command;
       await talk.replyOnFailure(
         ref,
-        () => shell(ref, typed, session, owned(ticket), message.id),
-        wordReport(ref, session),
+        () => shell(ref, typed, session, owned(ticket), message.id, answers),
+        wordReport(ref, message),
       );
       return;
     }
@@ -677,8 +711,15 @@ export function messages(
       const typed = command;
       await talk.replyOnFailure(
         ref,
-        () => word(ref, message.id, typed, { session, outside, aborted, ticket }),
-        wordReport(ref, session),
+        () =>
+          word(ref, message.id, typed, {
+            session,
+            outside,
+            aborted,
+            ticket,
+            answers,
+          }),
+        wordReport(ref, message),
       );
       return;
     }
@@ -697,7 +738,7 @@ export function messages(
         // Answered where a word is: under the owner's message in a session's thread, for the
         // owner alone, and as a post in the channel anywhere else. No session starts.
         if (session !== null) await talk.tell(ref, answer);
-        else await talk.inChannel(channel, answer);
+        else await talk.inChannel(channel, answer, answering(message));
         return;
       }
     }
@@ -725,15 +766,15 @@ export function messages(
     // Before the thread's entry is written: an install under way starts no process, and a message
     // that would only start one changes nothing.
     if (state.channel(channel) !== null && (await sessions.refusesStarts())) {
-      if (await dropped(owned(ticket))) return;
-      await talk.refuseRestarting(ref);
+      if (await dropped(owned(ticket), answering(message))) return;
+      await talk.refuseRestarting(ref, answering(message));
       return;
     }
     // A stop during that wait, with the answer a start allows: no entry is written for it.
-    if (await dropped(owned(ticket))) return;
+    if (await dropped(owned(ticket), answering(message))) return;
     const opened = sessions.open(channel, thread);
     if (opened === null) {
-      await talk.unbound(channel);
+      await talk.unbound(channel, answering(message));
       return;
     }
     await submitToSession(
@@ -751,7 +792,12 @@ export function messages(
     // `handled` follows the failure's reply, so that it lands in the thread before the prompt is closed.
     message: async (message) => {
       try {
-        await talk.replyOnFailure(message.ref, () => route(message));
+        await talk.replyOnFailure(
+          message.ref,
+          () => route(message),
+          // A top-level prompt no session holds answers through the channel, as a word does.
+          message.topLevel ? failureReport(message) : undefined,
+        );
       } finally {
         handled(message);
       }

@@ -250,6 +250,26 @@ final class ChannelsModelTests: XCTestCase {
         XCTAssertNil(ChannelsModel.bot(of: none))
     }
 
+    func testBindFallsBackToTheNewestPromptsBotWhateverItWasSettledAs() {
+        let (alice, mini, studio) = (Self.id(1), Self.id(2), Self.id(3))
+        var m = ReadingModel()
+        let channel = Self.id(0x3F)
+        func put(_ position: Int, kind: Int, sender: Data, text: String, to: Data?, re: Data? = nil) {
+            m.take(view: .object([
+                "do": .string("message"), "position": .number(Double(position)), "channel": .bytes(channel), "sender": .bytes(sender),
+                "name": .bytes(Data(repeating: UInt8(position), count: 16)), "epoch": .bytes(Data(repeating: 9, count: 32)),
+                "time": .number(1_763_600_000_000.0 + Double(position) * 60_000), "kind": .number(Double(kind)), "to": to.map { .bytes($0) } ?? .null,
+                "blobs": .array([]), "files": .array([]),
+                "re": re.map { .object(["device": .bytes(alice), "name": .bytes($0)]) } ?? .null, "text": .string(text), "again": .bool(false),
+            ]))
+        }
+        put(1, kind: 2, sender: alice, text: #"{"text":"first"}"#, to: mini)
+        put(2, kind: 2, sender: alice, text: #"{"text":"/stop"}"#, to: studio)
+        // The newest prompt is answered as a word: no session of its own, and no session of studio's to read the bot from.
+        put(3, kind: 5, sender: studio, text: "{\"thread\":\"\(MessageRef(device: alice, name: Data(repeating: 2, count: 16)).hex)\",\"markdown\":\"\",\"session\":false}", to: nil, re: Data(repeating: 2, count: 16))
+        put(4, kind: 5, sender: mini, text: "{\"thread\":\"\(MessageRef(device: alice, name: Data(repeating: 1, count: 16)).hex)\",\"markdown\":\"done\"}", to: nil, re: Data(repeating: 1, count: 16)) // the session replies last
+        XCTAssertEqual(ChannelsModel.bot(of: m.channels[channel]!), studio)
+    }
     func testOpeningBindSelectsThatBotNotTheFirst() {
         let model = ChannelsModel(devices: devices(bots: [(3, true), (2, true)]))
         model.openBind(channel: Self.id(9), bot: Self.id(3))
