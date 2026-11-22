@@ -10,8 +10,15 @@ public struct RecoveryProgress: Sendable, Equatable {
     public struct Epoch: Sendable, Equatable {
         public let channel: Data
         public let epoch: Data
+        /// Its place in its channel's epoch log, so consecutive epochs make one range.
+        public let place: Int
+        public let unopened: Unopened
+        /// Of the person's space or a spare: waited on like any epoch, and left out of the list of conversations.
+        public let space: Bool
 
-        public init(channel: Data, epoch: Data) { (self.channel, self.epoch) = (channel, epoch) }
+        public init(channel: Data, epoch: Data, place: Int = 0, unopened: Unopened = Unopened(count: 0), space: Bool = false) {
+            (self.channel, self.epoch, self.place, self.unopened, self.space) = (channel, epoch, place, unopened, space)
+        }
     }
 
     /// An earlier recovery key the person has not typed, and the epochs that stay unreadable on this device without it.
@@ -53,9 +60,10 @@ public enum RecoveryWords {
     public static let typeIt = "Type the key"
     public static let keepTheStartKey = "Keep the recovery key you typed to start: it is still your current recovery key."
 
-    /// `list` names the epochs by channel and dates, as the screen writes them.
-    public static func unreadable(_ list: String) -> String {
-        "These conversations stay unreadable on this device: \(list). This may be a recovery key Pardner told you could be destroyed."
+    /// `lines` name the conversations by channel and dates, as the screen writes them; none when the key only opens the person's space and its spares.
+    public static func unreadable(_ lines: [String]) -> String {
+        let tail = "This may be a recovery key Pardner told you could be destroyed."
+        return lines.isEmpty ? "No conversation stays unreadable on this device. \(tail)" : "These conversations stay unreadable on this device: \(lines.joined(separator: "; ")). \(tail)"
     }
 }
 
@@ -66,7 +74,11 @@ extension PairingController {
         let recorded = Set(reading.recoveries)
         var missing: [Data: [RecoveryProgress.Epoch]] = [:]
         var order: [Data] = []
-        for epoch in reading.epochs where !epoch.open {
+        var places: [Data: Int] = [:]
+        for epoch in reading.epochs {
+            let place = places[epoch.channel, default: 0]
+            places[epoch.channel] = place + 1
+            guard !epoch.open else { continue }
             let sealed = Set(epoch.sealedTo).intersection(recorded)
             guard sealed.isDisjoint(with: held) else { continue }
             let without = sealed.subtracting(held) // the current key too, while it is not held: it opens the epoch as well, and on the keep path it is the key typed to start
@@ -74,7 +86,7 @@ extension PairingController {
             var seen = Set<Data>()
             for key in epoch.sealedTo where without.subtracting(gaveUp).contains(key) && seen.insert(key).inserted {
                 if missing[key] == nil { order.append(key) }
-                missing[key, default: []].append(.init(channel: epoch.channel, epoch: epoch.epoch))
+                missing[key, default: []].append(.init(channel: epoch.channel, epoch: epoch.epoch, place: place, unopened: epoch.unopened ?? Unopened(count: 0), space: epoch.space))
             }
         }
         let open = reading.epochs.filter(\.open)

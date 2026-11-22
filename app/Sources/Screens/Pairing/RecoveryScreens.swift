@@ -120,16 +120,14 @@ struct Opening: View {
         }
     }
 
-    /// The conversations that stay unreadable without the key, by name. The link gives no dates, so none are shown.
-    private func conversations(_ missing: RecoveryProgress.Missing) -> String {
-        Array(Set(missing.epochs.map(\.channel))).map(Naming.channel).sorted().joined(separator: ", ")
-    }
+    /// The conversations that stay unreadable without the key, by name and the dates of their messages.
+    private func conversations(_ missing: RecoveryProgress.Missing) -> [String] { RecoveryScreenWords.conversations(missing.epochs) }
 
     @ViewBuilder private func row(_ missing: RecoveryProgress.Missing) -> some View {
         let id = Naming.short(missing.key)
         VStack(alignment: .leading, spacing: PardnerMetrics.gap) {
             Text(RecoveryScreenWords.missing(id, isCurrent: missing.isCurrent)).fixedSize(horizontal: false, vertical: true)
-            if !missing.epochs.isEmpty { Text(conversations(missing)).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted) }
+            if !conversations(missing).isEmpty { Text(conversations(missing).joined(separator: "\n")).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted) }
             if model.givingUp == missing.key {
                 VStack(alignment: .leading, spacing: PardnerMetrics.gap) {
                     Text(RecoveryWords.unreadable(conversations(missing))).foregroundStyle(PardnerColor.agentText)

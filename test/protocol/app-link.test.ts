@@ -1553,6 +1553,85 @@ test("a recovery key held after the read opens the epochs it was sealed in, and 
   );
 });
 
+const DAY = 86_400_000;
+const FLOOR = Date.UTC(2026, 10, 14);
+
+/** A recovering app that holds none of the scene's keys, with a message at each of `times` in one epoch it cannot open. */
+function unopened(times: number[]) {
+  const s = scene();
+  const epoch = s.epoch();
+  times.forEach((time, i) => {
+    s.wire.put(
+      4,
+      message(s.alice.first, s.channel, epoch, {
+        kind: 1,
+        time,
+        counter: i + 1,
+        name: fill(20 + i, 16),
+      }),
+    );
+  });
+  const r = rig(s, {}, keyed());
+  r.connect();
+  return { s, r, epoch };
+}
+
+test("epoch dates: an epoch not open tells how many messages it holds unopened and the smallest and largest signed time, whatever the order (issue 95)", () => {
+  const t = Date.now() - 5 * DAY;
+  const { r } = unopened([t + 3000, t, t + 1000]);
+  assert.deepEqual(r.link.epochs()[0]?.unopened, { count: 3, first: t, last: t + 3000 });
+});
+
+test("epoch dates: a time a day ahead of the clock or before 2026-11-14 is counted and left out of the range, and none left gives no dates", () => {
+  const ok = Date.now() - DAY;
+  const wild = [Date.now() + DAY + 60_000, FLOOR - 1];
+  assert.deepEqual(unopened([...wild, ok]).r.link.epochs()[0]?.unopened, {
+    count: 3,
+    first: ok,
+    last: ok,
+  });
+  assert.deepEqual(unopened(wild).r.link.epochs()[0]?.unopened, { count: 2 });
+});
+
+test("epoch dates: an epoch of the person's space tells so, and one of a conversation does not (review D3)", () => {
+  const s = scene({ space: true });
+  s.epoch();
+  const talk = addChannel(s, fill(9, 16));
+  talk.epoch();
+  const r = rig(s, {}, keyed());
+  r.connect();
+  const by = (c: Bytes) => r.link.epochs().find((e) => bytesEqual(e.channel, c));
+  assert.equal(by(s.channel)?.space, true);
+  assert.equal(by(talk.id)?.space, false);
+});
+
+test("epoch dates: an epoch not open with no message has a count of 0 and no dates", () => {
+  assert.deepEqual(unopened([]).r.link.epochs()[0]?.unopened, { count: 0 });
+});
+
+test("epoch dates: an epoch whose key arrives is open and carries no unopened; an open epoch never does", () => {
+  const { s, r } = unopened([Date.now() - DAY]);
+  assert.ok(r.link.epochs()[0]?.unopened);
+  const held = r.link.holdRecovery(
+    { id: s.alice.recovery.recoveryId, receiving: receivingOf(s.alice.recovery) },
+    2,
+  );
+  assert.ok(held.ok);
+  const e = r.link.epochs()[0];
+  assert.equal(e?.open, true);
+  assert.equal(e && "unopened" in e, false);
+});
+
+test("epoch dates: after an incarnation change the dates are those of the new pass, not the sum of both", () => {
+  const t = Date.now() - 2 * DAY;
+  const { s, r } = unopened([t]);
+  assert.deepEqual(r.link.epochs()[0]?.unopened, { count: 1, first: t, last: t });
+  r.drop(1);
+  s.wire.incarnation = fill(8, 16);
+  r.connect(60_000);
+  assert.deepEqual(r.link.epochs()[0]?.unopened, { count: 1, first: t, last: t });
+});
+
 test("the recovery keys this person's log named come in order from the link and on the recovery-log effect, apart from the keys other seals name (recovery design 2.6)", () => {
   const s = scene();
   const epoch = s.epoch();

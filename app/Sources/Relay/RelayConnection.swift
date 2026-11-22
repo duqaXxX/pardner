@@ -137,6 +137,29 @@ public enum BuildOutcome: Sendable, Equatable {
     case refused(String)
 }
 
+/// The messages an epoch holds that this device cannot open, and the smallest and largest of their plausible signed times, as the link counts them. For display only: no rule reads them (epoch dates design 5).
+public struct Unopened: Sendable, Equatable {
+    public var count: Int
+    public var first: Date?
+    public var last: Date?
+
+    public init(count: Int, first: Date? = nil, last: Date? = nil) { (self.count, self.first, self.last) = (count, first, last) }
+
+    /// The link's `unopened` value; nil for any other shape: a count of 0 or more, and with messages `first` and `last` both or neither, finite, in order and
+    /// between the floor (2026-11-14, before which no header had a time) and a day ahead; none at a count of 0.
+    init?(_ value: HostValue) {
+        guard let count = value["count"]?.numberValue, count >= 0, count == count.rounded(), count < 1e15 else { return nil }
+        let plausible = 1_794_614_400_000.0...(Date().timeIntervalSince1970 * 1000 + 86_400_000)
+        switch (value["first"], value["last"]) {
+        case (nil, nil): self.init(count: Int(count))
+        case (let first?, let last?):
+            guard count > 0, let first = first.numberValue, let last = last.numberValue, plausible.contains(first), plausible.contains(last), first <= last else { return nil }
+            self.init(count: Int(count), first: Date(timeIntervalSince1970: first / 1000), last: Date(timeIntervalSince1970: last / 1000))
+        default: return nil
+        }
+    }
+}
+
 /// What "done" needs of the link (recovery design 2.6): each epoch read with whether its key is held and who its seals are to, every recovery key the log named, and the current one.
 public struct RecoveryReading: Sendable, Equatable {
     public struct Epoch: Sendable, Equatable {
@@ -144,16 +167,24 @@ public struct RecoveryReading: Sendable, Equatable {
         public var epoch: Data
         public var open: Bool
         public var sealedTo: [Data]
+        /// What the epoch holds unopened: present exactly when it is not open.
+        public var unopened: Unopened?
+        /// Whether the channel is the person's space or a spare of it: no conversation of the list.
+        public var space: Bool
 
-        public init(channel: Data, epoch: Data, open: Bool, sealedTo: [Data]) { (self.channel, self.epoch, self.open, self.sealedTo) = (channel, epoch, open, sealedTo) }
+        public init(channel: Data, epoch: Data, open: Bool, sealedTo: [Data], unopened: Unopened? = nil, space: Bool = false) {
+            (self.channel, self.epoch, self.open, self.sealedTo, self.unopened, self.space) = (channel, epoch, open, sealedTo, unopened, space)
+        }
 
         /// The link's `epochs` entry; nil for any other shape, since a reading that drops an epoch could declare done over it.
         init?(_ value: HostValue) {
             guard let channel = value["channel"]?.bytesValue, channel.count == 32, let epoch = value["epoch"]?.bytesValue, epoch.count == 32,
-                  case .bool(let open)? = value["open"], let list = value["sealedTo"]?.arrayValue else { return nil }
+                  case .bool(let open)? = value["open"], case .bool(let space)? = value["space"], let list = value["sealedTo"]?.arrayValue else { return nil }
             let sealed = list.compactMap(\.bytesValue)
             guard sealed.count == list.count, sealed.allSatisfy({ $0.count == 32 }) else { return nil }
-            self.init(channel: channel, epoch: epoch, open: open, sealedTo: sealed)
+            let unopened = value["unopened"].map(Unopened.init)
+            guard open ? unopened == nil : unopened != nil, unopened != .some(nil) else { return nil }
+            self.init(channel: channel, epoch: epoch, open: open, sealedTo: sealed, unopened: unopened ?? nil, space: space)
         }
     }
 

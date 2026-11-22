@@ -215,7 +215,10 @@ public final class PairingModel {
         if let key = givingUp {
             if case .recovering(.opening(let progress)) = next, progress.waiting.contains(where: { $0.key == key && !$0.isCurrent }) {} else { givingUp = nil }
         }
-        if case .recovering = next, next != phase { problem = nil }
+        // The opening step is one step while it asks for the same keys and only what it lists changes (a count or a date at a rest): its problem and note stay.
+        var sameStep = false
+        if case .recovering(.opening(let now)) = next, case .recovering(.opening(let before)) = phase { sameStep = Set(now.waiting.map(\.key)) == Set(before.waiting.map(\.key)) }
+        if case .recovering = next, next != phase, !sameStep { problem = nil }
         if case .showingSheet(let request) = next {
             if sheet?.source !== request {
                 sheet?.close()
@@ -229,7 +232,7 @@ public final class PairingModel {
         if next != phase {
             // A note belongs to the phase it was made in; a return to the first screen starts at its first page (design 3.10), except
             // from a setup that ended unpaired (a declined sheet, a failure): it stays on the form, where its message is drawn.
-            cancelNote = nil
+            if !sameStep { cancelNote = nil }
             if case .unpaired = next, !phase.isUnpaired, !phase.isSettingUp, !phase.isRecovering { (showForm, showJoin, showRecover) = (false, false, false) }
             if case .paired = next {} else { devices.reset() } // the Devices sheet and its half-made acts do not outlive the pairing
             // A failed write ends the connection with `fault(.failed)` and Retry brings the pairing back: the new-channel sheet and its folder wait for

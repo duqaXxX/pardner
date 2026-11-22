@@ -84,6 +84,32 @@ public final class RecoveryEntryModel {
 
 /// The words of the recovery screens (recovery design 2.2 to 2.7), in the design's own texts where it gives them.
 public enum RecoveryScreenWords {
+    /// The conversations that stay unreadable, one line per run of consecutive epochs of a channel (epoch dates design 2, 6): the day of the first and of
+    /// the last message, in the system's abbreviated date; "dates unknown" when messages were read but no time was plausible; "no messages" when none was.
+    public static func conversations(_ epochs: [RecoveryProgress.Epoch], locale: Locale = .current, timeZone: TimeZone = .current) -> [String] {
+        var order: [Data] = []
+        var byChannel: [Data: [RecoveryProgress.Epoch]] = [:]
+        for epoch in epochs where !epoch.space {
+            if byChannel[epoch.channel] == nil { order.append(epoch.channel) }
+            byChannel[epoch.channel, default: []].append(epoch)
+        }
+        let style = Date.FormatStyle(date: .abbreviated, time: .omitted, locale: locale, timeZone: timeZone)
+        return order.flatMap { channel -> [String] in
+            var runs: [[RecoveryProgress.Epoch]] = []
+            for epoch in (byChannel[channel] ?? []).sorted(by: { $0.place < $1.place }) {
+                if let last = runs.last?.last, last.place + 1 == epoch.place { runs[runs.count - 1].append(epoch) } else { runs.append([epoch]) }
+            }
+            return runs.map { run in
+                let name = Naming.channel(channel)
+                guard run.contains(where: { $0.unopened.count > 0 }) else { return "\(name), no messages" }
+                let firsts = run.compactMap(\.unopened.first), lasts = run.compactMap(\.unopened.last)
+                guard let first = firsts.min(), let last = lasts.max() else { return "\(name), dates unknown" }
+                let (from, to) = (first.formatted(style), last.formatted(style))
+                return from == to ? "\(name), on \(from)" : "\(name), from \(from) to \(to)"
+            }
+        }
+    }
+
     public static let choice = "Recover with your recovery key"
     public static let choiceLine = "For when every device of yours is lost. You need your recovery key: its public part and the secret you wrote down."
     public static let formHint = "Paste what Copy gave when you wrote your recovery key down, or type the three values."
