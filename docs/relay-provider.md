@@ -50,6 +50,12 @@ closed by the relay, no key held for the current one, 30 days old by the clock t
 out of counters (`rollover`, reported by the build). The bot builds the entry, submits it and reads the answer
 back; an epoch another device started first is refused at its position, and the bot then answers in that one.
 
+The person's space is a channel of its own (its entry 0 carries a nonce derived from the person). At a rest that
+finds none, the bot creates it: entry 0 is a function of the person and this device, so asking again places the
+same bytes, and a relay that answers 2 has another device's space. A refusal in the space is never a channel fault:
+a message is dropped, an epoch entry is owed again at the next rest, and a fault stored on the space is dropped at
+the first rest that names it.
+
 The bot also gives history seals. For each epoch, the current one included, whose key it holds, and each active device of its
 owner and the owner's current recovery key, it makes one seal when no seal counts: an epoch entry's seal or a
 history seal counts only while the device that made it is not removed. So a device added after an epoch gets
@@ -71,14 +77,14 @@ name is the host's up to its first dot, then `-<instance>` (`ChatContext.instanc
 what a profile refuses and cut to 32 code points, or `bot` when nothing is left or it holds a brand.
 
 `ProfileWriter` (`profile.ts`) takes every `Out` after the outbox and the inbound. It reads the
-profiles of the sequence (kind 13) with the package's `Profiles`, and at each rest decides, channel
-by channel, whether to write one in the current epoch: only while it holds that epoch's key, when
+profiles of the sequence (kind 13) with the package's `Profiles`, taken from the person's space alone
+(`reading.space()`), and at each rest decides whether to write one in the space's current epoch: only while it holds that epoch's key, when
 its newest profile there is absent or differs from what it would write, when that epoch holds none
 of this run's (one more once the run learns the account, for a profile written before), when none
 waits in the outbox, and when no profile of this run left the outbox without landing (`Outbox.profileDropped`). The
 account arrives through `ChatProvider.agentAccount`, which the core calls when a session connects;
 until then a missing account is no difference, and the one written is that of the bot's newest
-profile. The account goes only into a channel whose members are the owner alone. Nothing is stored.
+profile. The account goes into every profile, since the space is the owner's alone. Nothing is stored.
 
 At start the outbox drops a profile it holds that is not built yet: built now it would count as this
 run's and keep a changed name or a newly learned account out of its epoch, so the writer decides

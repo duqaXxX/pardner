@@ -26,9 +26,12 @@ import { deviceId, recoveryKeyId, relayKeyId, signedId } from "./ids.ts";
 import { EXPORTER_LABEL, type LabelName, labelBytes, labelText } from "./labels.ts";
 import {
   checkMemberEntry,
+  decodeMemberEntry,
   encodeMemberEntry,
+  isSpaceEntry,
   type LoggedMember,
   type MemberEntry,
+  spaceNonce,
 } from "./member-log.ts";
 import {
   cutName,
@@ -173,6 +176,8 @@ interface Case {
   inputs?: EntryJson | MemberJson | EpochJson | HeaderJson | BodyJson;
   /** `message.json`: the epoch a `message-check` runs under. */
   at?: AtJson;
+  /** `message-check`: whether the channel is a person's space; a case that leaves it out is a conversation channel. */
+  space?: boolean;
   rule?: string;
   /** `epoch-entry.json`: the persons whose device logs the check reads, and the seals to open. */
   persons?: string[];
@@ -764,7 +769,7 @@ function messageCase(p: Platform, file: VectorFile, c: Case): string {
         },
       } as unknown as LoggedEpoch;
       const logs = (c.persons ?? []).map((name) => deviceLogOf(p, file, name));
-      const v = messageChecker(p, [epoch], logs)(bytes, fromHex(c.signature));
+      const v = messageChecker(p, [epoch], logs, c.space === true)(bytes, fromHex(c.signature));
       if (v.ok) return toHex(v.value.id);
       return v.rule === "decode" ? "error:decode" : `error:check:${v.rule}`;
     }
@@ -949,6 +954,12 @@ function outcome(
           (c.items ?? []).map((i) => signedId(p, fromHex(i))),
         ),
       );
+    case "space-nonce":
+      return toHex(spaceNonce(p, fromHex(c.input)));
+    case "space-class": {
+      const e = decodeMemberEntry(fromHex(c.bytes));
+      return e.ok && isSpaceEntry(p, e.value) ? "space" : "conversation";
+    }
     case "label":
       return labelText(c.name as LabelName) === c.text
         ? toHex(labelBytes(c.name as LabelName))
@@ -1069,6 +1080,7 @@ const STRUCTURES = [
   "frames",
   "chain",
   "profile",
+  "space",
 ];
 
 /**

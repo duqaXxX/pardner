@@ -14,7 +14,12 @@ import {
 } from "../../src/protocol/epochs.ts";
 import type { Frame } from "../../src/protocol/frames.ts";
 import { relayKeyId, signedId } from "../../src/protocol/ids.ts";
-import { checkMemberEntry, type LoggedMember } from "../../src/protocol/member-log.ts";
+import {
+  checkMemberEntry,
+  encodeMemberEntry,
+  type LoggedMember,
+  spaceNonce,
+} from "../../src/protocol/member-log.ts";
 import type { Bytes } from "../../src/protocol/platform.ts";
 import { encodeHead, runningHash } from "../../src/protocol/proofs.ts";
 import type { Out, Reading, Who } from "../../src/protocol/reading.ts";
@@ -29,6 +34,7 @@ import {
   message,
   type Person,
   person,
+  signedBy,
 } from "../relay/world.ts";
 
 export type Signed = { signed: Bytes; sig: Bytes };
@@ -89,8 +95,8 @@ export class Wire {
 export const play = (r: Reading, frames: Frame[]): Out[] => frames.flatMap((f) => r.take(f));
 export const kinds = (outs: Out[]) => outs.map((o) => o.do);
 
-/** alice (an app) and a bot, the entries that pair them, a channel and the first epoch, on a wire. */
-export function scene() {
+/** alice (an app) and a bot, the entries that pair them, a channel (her space with `space`) and the first epoch, on a wire. */
+export function scene(options: { space?: boolean } = {}) {
   const alice = person();
   const bot = keyed("bot");
   const wire = new Wire();
@@ -110,7 +116,10 @@ export function scene() {
     return wire.put(1, e);
   };
   entry(alice.add(log, bot));
-  const create = memberEntry(alice, [], { kind: "create", nonce: fill(3, 16) });
+  const create = memberEntry(alice, [], {
+    kind: "create",
+    nonce: options.space ? spaceNonce(platform, alice.id) : fill(3, 16),
+  });
   const channel = signedId(platform, create.signed);
   const m = checkMemberEntry(platform, [], create.signed, create.sig, log);
   assert.ok(m.ok);
@@ -180,3 +189,38 @@ export function historySeal(epoch: LoggedEpoch, maker: Keyed, to: Keyed, key: By
 
 export type { Person };
 export { bytesEqual };
+
+/** A channel of alice's put on `s`'s wire: the space's own nonce or another, by the first device or the bot. */
+export function addChannel(s: Scene, nonce: Uint8Array, by: "first" | "bot" = "first") {
+  const create =
+    by === "first"
+      ? memberEntry(s.alice, [], { kind: "create", nonce })
+      : signedBy(
+          s.bot,
+          encodeMemberEntry({
+            seq: 0,
+            kind: "create",
+            nonce,
+            signerPerson: s.alice.id,
+            signerDevice: s.bot.id,
+          }),
+        );
+  const id = signedId(platform, create.signed);
+  const m = checkMemberEntry(platform, [], create.signed, create.sig, s.log);
+  assert.ok(m.ok);
+  const members: LoggedMember[] = [m.value];
+  const epochs: LoggedEpoch[] = [];
+  s.wire.put(2, create);
+  const epoch = () => {
+    const seq = {
+      channels: new Map([[idKey(id), { members, epochs }]]),
+      devices: new Map([[idKey(s.alice.id), s.log]]),
+    } as unknown as Sequence;
+    const e = epochEntry(seq, id, { person: s.alice, device: s.alice.first }, [s.alice]);
+    const logged = { entry: e.entry, id: signedId(platform, e.signed) };
+    epochs.push(logged);
+    s.wire.put(3, e);
+    return { id: logged.id, key: e.key };
+  };
+  return { id, epoch };
+}

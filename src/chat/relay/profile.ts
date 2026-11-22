@@ -1,13 +1,12 @@
 /**
  * The bot's profile (bot-profile design 3.2 and 4): its name, its icon and the agent's account,
- * written into each channel it reads, in the channel's current epoch, when what it would write
- * differs from its newest profile there. Nothing is stored: what to write follows from the
+ * written into its person's space alone (personal space design 4.2), in the space's current epoch,
+ * when what it would write differs from its newest profile there. Nothing is stored: what to write follows from the
  * sequence, the configuration and the run, so a restart or a store gone back writes one again at
  * worst.
  */
 import { bytesEqual } from "../../protocol/bytes.ts";
 import { activeDevices, idKey } from "../../protocol/device-log.ts";
-import { membersOf } from "../../protocol/member-log.ts";
 import { KIND_PROFILE, openMessage } from "../../protocol/messages.ts";
 import type { Run } from "../../protocol/outbox.ts";
 import type { Bytes, Platform } from "../../protocol/platform.ts";
@@ -20,8 +19,6 @@ import type { Store } from "./store.ts";
 export interface ProfileOptions {
   platform: Platform;
   self: Bytes;
-  /** The owner: the account goes only into a channel whose members are the owner alone (3.5). */
-  person: Bytes;
   run: Run;
   reading: Reading;
   outbox: Outbox;
@@ -72,6 +69,9 @@ export class ProfileWriter {
     } else if (out.do === "message" && out.message.header.kind === KIND_PROFILE) {
       const { message, place, position } = out;
       const h = message.header;
+      // Only the space's own: a spare is of the same class and is accepted as a message, so the filter is here (design 2.3).
+      const space = this.#o.reading.space();
+      if (!space || !bytesEqual(h.channel, space)) return;
       // The key `place` gives is its current epoch's: a profile of another epoch is not opened.
       if (!place.key || !bytesEqual(place.epoch, h.epoch)) return;
       const body = openMessage(this.#o.platform, place.key, message);
@@ -98,14 +98,15 @@ export class ProfileWriter {
 
   #decideAll(): void {
     if (!this.#o.reading.sendable) return;
-    for (const channel of this.#o.reading.channels()) void this.#decide(channel);
+    const space = this.#o.reading.space();
+    if (space) void this.#decide(space);
   }
 
-  /** What the bot would write into a channel, with the account when its owner is its one member (3.5, 4.3). */
-  #wanted(alone: boolean): Profile {
+  /** What the bot would write into the space, with the account (3.5, 4.3). */
+  #wanted(): Profile {
     const account =
       this.#account === undefined ? this.#profiles.of(this.#o.self)?.account : this.#account;
-    const p = { ...this.#o.configured, ...(alone && account ? { account } : {}) };
+    const p = { ...this.#o.configured, ...(account ? { account } : {}) };
     try {
       encodeProfile(p);
       return p;
@@ -123,8 +124,7 @@ export class ProfileWriter {
     if (outbox.profileDropped || this.#unqueued) return;
     const queued = this.#o.store.saved.outboxes.get(key) ?? [];
     if (queued.some((i) => i.kind === KIND_PROFILE)) return;
-    const members = membersOf(view.members);
-    const want = this.#wanted(members.size === 1 && members.has(idKey(this.#o.person)));
+    const want = this.#wanted();
     const mine = (this.#own.get(key) ?? []).filter((o) => o.epoch === idKey(epoch.id));
     const newest = mine.reduce<Own | undefined>(
       (a, o) => (!a || o.position > a.position ? o : a),

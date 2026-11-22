@@ -509,6 +509,8 @@ export class AppLink {
       ...(this.#waiting.get(at) ?? []),
       { message: out.message, position: out.position },
     ]);
+    // The space and a spare are no conversation: no view of theirs reaches the screen (personal space design 2.3).
+    if (this.#link.reading.channel(h.channel)?.space) return [];
     return [{ do: "deliver", out: this.#message(out.message, out.position, undefined, false) }];
   }
 
@@ -548,11 +550,14 @@ export class AppLink {
     if (again && !body.ok) return [];
     const view = this.#message(message, position, body.ok ? body.value : undefined, again);
     const h = message.header;
-    if (body.ok && h.kind === KIND_PROFILE) {
+    const r = this.#link.reading;
+    // A profile comes from the person's space alone: a spare is of the same class and is read as a message (design 2.3).
+    const home = r.space();
+    if (body.ok && h.kind === KIND_PROFILE && home && bytesEqual(h.channel, home)) {
       this.#profiles.take(position, h, body.value.content);
       this.#touched.set(idKey(h.sender), h.sender);
     }
-    return [{ do: "deliver", out: view }];
+    return r.channel(h.channel)?.space ? [] : [{ do: "deliver", out: view }];
   }
 
   /**
@@ -807,9 +812,15 @@ export class AppLink {
         this.#platform,
         epoch ? (r.channel(channel)?.epochs ?? []) : [],
         [r.devices],
+        r.channel(channel)?.space === true,
       )(signed, signature);
-      // Kind, `to` and `re` depend on the draft alone: a refusal by them is the app's own, not the relay's (SD 4, I3).
-      if (!verdict.ok && ["kind", "to", "re"].includes(verdict.rule)) this.#drop(channel, held);
+      // Kind, class, `to` and `re` depend on the draft and its channel alone: a refusal by them is the app's own, not the relay's (SD 4, I3).
+      // In the space any refusal drops the item and never stops the channel (design 2.6).
+      if (
+        r.channel(channel)?.space ||
+        (!verdict.ok && ["kind", "class", "to", "re"].includes(verdict.rule))
+      )
+        this.#drop(channel, held);
       else {
         this.#boxes.fault(channel);
         this.#dirty = true;

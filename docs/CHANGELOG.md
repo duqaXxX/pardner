@@ -188,6 +188,18 @@ All notable changes to this project are documented here. The format follows
   in Light or Dark (View > Appearance). The radii and the base gap are tokens beside the colours. Until a device is
   paired the window says so; once it is, the window draws what the link delivers, in the link's order, and an erase
   of the pairing empties it. `swift run screens-snapshot <dir>` renders it over a synthetic conversation.
+- A person's space in the protocol and the relay: a channel whose entry 0 carries a nonce derived from the person (the label
+  `blind-relay/1 personal-space`), so its members are that person's own devices and its epochs are sealed to them and the
+  recovery key alone. A device reads the first such channel placed as the person's space (`reading.space()`) and leaves a
+  later one (a spare, which only an older relay places) out of `reading.channels()`. The relay answers a second space of one
+  person with result 2, refuses any member entry after entry 0 of a space, and keeps a history seal of a space epoch only
+  between devices and recovery keys of that person's log; none of these is applied when the relay starts. A profile (kind 13)
+  is accepted in a space only, and every other kind in a conversation channel only (`messageChecker` takes the channel's
+  class; refusal rule `class`). The vectors for the nonce, the class and the check are in `space.json`.
+- The bot writes its profile into its person's space alone, in every profile the account included, and makes the space at a rest
+  that finds none. A refusal in the space (a message, an epoch entry) stops no channel, and a fault stored on it is dropped at
+  the first rest that names it. A bot of an earlier version still writes into every channel, and an updated relay refuses
+  those profiles (the bot logs `relay: the relay refused the bot's profile`).
 
 ### Changed
 

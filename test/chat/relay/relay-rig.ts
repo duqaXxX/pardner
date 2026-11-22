@@ -9,7 +9,11 @@ import type { ChatInbound, InboundMessage, OwnerAnswer } from "../../../src/chat
 import { checkDeviceEntry, idKey, type LoggedEntry } from "../../../src/protocol/device-log.ts";
 import type { LoggedEpoch } from "../../../src/protocol/epochs.ts";
 import { deviceId, signedId } from "../../../src/protocol/ids.ts";
-import { checkMemberEntry, type LoggedMember } from "../../../src/protocol/member-log.ts";
+import {
+  checkMemberEntry,
+  type LoggedMember,
+  spaceNonce,
+} from "../../../src/protocol/member-log.ts";
 import {
   decodeMessage,
   type MessageHeader,
@@ -37,12 +41,17 @@ import { RelayProcess } from "../../support/scripted-device/relay-process.ts";
 import { tempDirSync } from "../../support/temp.ts";
 
 export const hex = (b: Bytes) => Buffer.from(b).toString("hex");
-export type Submit = (kind: 3 | 4, signed: Bytes, sig: Bytes) => Promise<number | undefined>;
+export type Submit = (kind: 2 | 3 | 4, signed: Bytes, sig: Bytes) => Promise<number | undefined>;
 
 export let counter = 0;
 export let sent = 0;
-/** A relay, alice with the bot added and a channel with its first epoch sealed to both. */
-export async function rig() {
+/**
+ * A relay, alice with the bot added and a channel with its first epoch sealed to both. With
+ * `space`, that channel is alice's space (personal space design 2.1) and `talk` is a conversation
+ * channel beside it, which `send` writes into: a space holds no text. A rig has a space unless
+ * it is `bare`, as a person set up before the space has none.
+ */
+export async function rig(options: { space?: boolean; bare?: boolean } = {}) {
   const tag = `in${++counter}`;
   const relay = new RelayProcess();
   const target = await relay.open();
@@ -82,11 +91,14 @@ export async function rig() {
   };
   await device({ kind: "add", device: bot.value.device, proof: bot.value.proof });
   /** A channel of alice's with its first epoch, sealed to alice and the bot. */
-  const open = async (nonce: number) => {
+  const open = async (nonce: number | Bytes) => {
     const members: LoggedMember[] = [];
     const epochs: LoggedEpoch[] = [];
     const keys: Bytes[] = [];
-    const create = memberEntry(alice, [], { kind: "create", nonce: fill(nonce, 16) });
+    const create = memberEntry(alice, [], {
+      kind: "create",
+      nonce: typeof nonce === "number" ? fill(nonce, 16) : nonce,
+    });
     await put(2, create);
     const channel = signedId(platform, create.signed);
     const m = checkMemberEntry(platform, [], create.signed, create.sig, log);
@@ -137,16 +149,21 @@ export async function rig() {
     };
     return { channel, epoch, send };
   };
-  const first = await open(3);
+  // A person's space exists from setup: a bot that found none would make one at its first rest.
+  const home = options.bare ? undefined : await open(spaceNonce(platform, alice.id));
+  const first = options.space ? (home as Awaited<ReturnType<typeof open>>) : await open(3);
+  const talk = options.space ? await open(3) : first;
   return {
     relay,
     dir,
     channel: first.channel,
+    /** The conversation channel of a rig with a space: the rig's own channel without one. */
+    talk,
     /** Another channel of alice's, its first epoch sealed to alice and the bot. */
     open,
     alice,
     botId: deviceId(platform, bot.value.device.signing, bot.value.device.receiving),
-    send: first.send,
+    send: talk.send,
     epoch: first.epoch,
     /** The relay's incarnation, as a device proving itself is told it. */
     async incarnation(): Promise<Bytes> {
@@ -263,7 +280,6 @@ export function botOn(
     new ProfileWriter({
       platform: held,
       self,
-      person: pairing.person,
       run,
       reading: connection.reading,
       outbox,

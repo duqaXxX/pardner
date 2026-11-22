@@ -58,6 +58,7 @@ export type MessageRule =
   | "signature"
   | "counter"
   | "kind"
+  | "class"
   | "to"
   | "re";
 export type MessageVerdict =
@@ -70,6 +71,8 @@ export const KIND_START = 3;
 export const KIND_BUILD = 12;
 /** The kind of a bot's profile (6.4, 6.8): it names its sender alone, so it has no `to` and no `re`. */
 export const KIND_PROFILE = 13;
+/** The kinds of a person's space, which no conversation channel holds; every other kind is the conversation channels' (personal space design 4, S5). Kinds 15 and 16 are the names', not in the table yet. */
+const SPACE_KINDS: readonly number[] = [KIND_PROFILE, 15, 16];
 // By kind, 1 to 13: how 6.4's table treats `to` and `re` (0 none, 1 required, 2 either), and who sends it.
 const KINDS = [
   [0, 2, undefined],
@@ -299,13 +302,17 @@ function viewOf(
  * sender's kind is the one 6.4 gives the message's kind; `to` is a bot among the recipients; and
  * `re` names the sender's own message for an edit or a part, the message of `to` for a reply, and
  * another sender's for a start, an answer, a cut, a not-read notice or a request; a text may answer
- * any message, its sender's own included. An id two logs name with two kinds is no device. Holding the
- * epoch's key (condition 1) is `openMessage`'s; a counter seen before (condition 4) is the reader's.
+ * any message, its sender's own included. An id two logs name with two kinds is no device. A message
+ * belongs to the class of its channel: `space` is whether the channel is a person's space, where a
+ * profile (and a name) goes and no other kind, while a conversation channel takes the rest (design 4,
+ * S5). Holding the epoch's key (condition 1) is `openMessage`'s; a counter seen before (condition 4)
+ * is the reader's.
  */
 export function messageChecker(
   platform: Platform,
   epochs: readonly LoggedEpoch[],
   devices: readonly (readonly LoggedEntry[])[],
+  space: boolean,
 ): (signed: Bytes, signature: Bytes) => MessageVerdict {
   const held = new Map(
     epochs.map((e) => [
@@ -335,6 +342,7 @@ export function messageChecker(
     if (h.counter > MAX_COUNTER) return refused("counter");
     const by = (KINDS[h.kind - 1] as readonly [number, number, string | undefined])[2];
     if (by && sender.kind !== by) return refused("kind");
+    if (SPACE_KINDS.includes(h.kind) !== space) return refused("class");
     if (h.to && device(h.to)?.kind !== "bot") return refused("to");
     const own = h.kind === 10 ? h.to : h.kind === 4 || h.kind === 11 ? h.sender : undefined;
     const self = h.re && h.kind !== 1 && bytesEqual(h.re.device, h.sender);

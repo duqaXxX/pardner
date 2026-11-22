@@ -25,7 +25,7 @@ import {
   RECEIVE,
   SIGN,
 } from "../../src/protocol/index.ts";
-import { decodeMemberEntry } from "../../src/protocol/member-log.ts";
+import { decodeMemberEntry, spaceNonce } from "../../src/protocol/member-log.ts";
 import { decodeMessage, KIND_PROFILE, sealMessage } from "../../src/protocol/messages.ts";
 import { Run } from "../../src/protocol/outbox.ts";
 import { shortForm } from "../../src/protocol/pairing-string.ts";
@@ -34,7 +34,14 @@ import { encodeProfile } from "../../src/protocol/profile.ts";
 import { platform } from "../relay/support.ts";
 import { epochEntry, fill, type Keyed, keyed, message, signedBy } from "../relay/world.ts";
 import { makeProof } from "./proof.ts";
-import { historySeal, prompt, receivingOf, type Scene, scene } from "./reading-world.ts";
+import {
+  addChannel,
+  historySeal,
+  prompt,
+  receivingOf,
+  type Scene,
+  scene,
+} from "./reading-world.ts";
 
 const BINDING = fill(9);
 
@@ -277,7 +284,7 @@ test("a message whose key arrives later by a history seal is delivered unopened,
 });
 
 test("a bot's profile is told once when it changes", () => {
-  const s = scene();
+  const s = scene({ space: true });
   const epoch = s.epoch();
   const profile = (name: string, n: number) =>
     signedBy(
@@ -300,7 +307,9 @@ test("a bot's profile is told once when it changes", () => {
       ),
     );
   s.wire.put(4, profile("mini", 1));
-  s.wire.put(4, message(s.alice.first, s.channel, epoch, { kind: 1, name: fill(33, 16) }));
+  const talk = addChannel(s, fill(9, 16));
+  const talkEpoch = talk.epoch();
+  s.wire.put(4, message(s.alice.first, talk.id, talkEpoch, { kind: 1, name: fill(33, 16) }));
   const r = rig(s);
   const told = r.connect().filter((e) => e.do === "profile");
   assert.equal(told.length, 1);
@@ -312,8 +321,55 @@ test("a bot's profile is told once when it changes", () => {
   assert.equal(next[0]?.do === "profile" && next[0].profile?.name, "mini-dev");
 });
 
+/** A profile of `bot` in `channel`, sealed in `epoch`. */
+function profileIn(
+  s: Scene,
+  channel: Bytes,
+  epoch: { id: Bytes; key: Bytes },
+  name: string,
+  n: number,
+) {
+  return signedBy(
+    s.bot,
+    sealMessage(
+      platform,
+      epoch.key,
+      {
+        channel,
+        counter: n,
+        epoch: epoch.id,
+        sender: s.bot.id,
+        run: fill(4, 16),
+        incarnation: s.wire.incarnation,
+        time: 1_700_000_000_000,
+        kind: KIND_PROFILE,
+        name: fill(60 + n, 16),
+      },
+      { files: [], content: encodeProfile({ name }) },
+    ),
+  );
+}
+
+test("personal space 2.3, review K1: the space and a spare are no conversation: no message view of theirs reaches the screen, and the profile still does", () => {
+  const s = scene({ space: true });
+  const home = s.epoch();
+  s.wire.put(4, profileIn(s, s.channel, home, "mini", 1));
+  const spare = addChannel(s, spaceNonce(platform, s.alice.id), "bot");
+  s.wire.put(4, profileIn(s, spare.id, spare.epoch(), "rogue", 2));
+  const talk = addChannel(s, fill(9, 16));
+  s.wire.put(4, message(s.alice.first, talk.id, talk.epoch(), { kind: 1, name: fill(33, 16) }));
+  const fx = rig(s).connect();
+  assert.deepEqual(
+    messages(fx).map((m) => Buffer.from(m.channel).toString("hex")),
+    [Buffer.from(talk.id).toString("hex")],
+    "only the conversation channel's message",
+  );
+  const told = fx.flatMap((e) => (e.do === "profile" && e.profile ? [e.profile.name] : []));
+  assert.deepEqual(told, ["mini"], "review K5: the space's profile, not the spare's");
+});
+
 test("a relay recreated reads the profiles again, and tells nothing when the shown one is the same", () => {
-  const s = scene();
+  const s = scene({ space: true });
   const epoch = s.epoch();
   s.wire.put(
     4,

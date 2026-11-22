@@ -11,10 +11,19 @@ import { type Clock, Connection } from "../../../src/chat/relay/connection.ts";
 import { Outbox } from "../../../src/chat/relay/outbox.ts";
 import { botPlatform, loadPairing, pair } from "../../../src/chat/relay/pairing.ts";
 import { identityOf, Store } from "../../../src/chat/relay/store.ts";
+import { bytesEqual } from "../../../src/protocol/bytes.ts";
 import { checkDeviceEntry, idKey, type LoggedEntry } from "../../../src/protocol/device-log.ts";
-import type { HistorySeal, LoggedEpoch } from "../../../src/protocol/epochs.ts";
+import {
+  decodeEpochEntry,
+  type HistorySeal,
+  type LoggedEpoch,
+} from "../../../src/protocol/epochs.ts";
 import { deviceId, signedId } from "../../../src/protocol/ids.ts";
-import { checkMemberEntry, type LoggedMember } from "../../../src/protocol/member-log.ts";
+import {
+  checkMemberEntry,
+  type LoggedMember,
+  spaceNonce,
+} from "../../../src/protocol/member-log.ts";
 import { decodeMessage } from "../../../src/protocol/messages.ts";
 import { Run } from "../../../src/protocol/outbox.ts";
 import { decodePairingString } from "../../../src/protocol/pairing-string.ts";
@@ -29,7 +38,7 @@ import { RelayProcess } from "../../support/scripted-device/relay-process.ts";
 import { tempDirSync } from "../../support/temp.ts";
 
 const hex = (b: Bytes) => Buffer.from(b).toString("hex");
-type Submit = (kind: 3 | 4, signed: Bytes, sig: Bytes) => Promise<number | undefined>;
+type Submit = (kind: 2 | 3 | 4, signed: Bytes, sig: Bytes) => Promise<number | undefined>;
 type GiveSeal = (seal: HistorySeal, sig: Bytes) => Promise<number | undefined>;
 const text = { kind: 1, content: "{}" };
 
@@ -92,6 +101,23 @@ async function rig() {
     epochs.push({ entry: e.entry, id: signedId(platform, e.signed) });
   };
   await epoch();
+  // The person's space exists from setup (personal space design 3): a bot that found none would make one.
+  const home = memberEntry(alice, [], { kind: "create", nonce: spaceNonce(platform, alice.id) });
+  await put(2, home);
+  const space = checkMemberEntry(platform, [], home.signed, home.sig, log);
+  assert.ok(space.ok);
+  const homeEpoch = epochEntry(
+    {
+      channels: new Map([
+        [idKey(signedId(platform, home.signed)), { members: [space.value], epochs: [] }],
+      ]),
+      devices: new Map([[idKey(alice.id), log]]),
+    } as unknown as Sequence,
+    signedId(platform, home.signed),
+    { person: alice, device: alice.first },
+    [alice],
+  );
+  await put(3, homeEpoch);
   return {
     relay,
     dir,
@@ -113,8 +139,16 @@ async function rig() {
       assert.equal(pass.type, "pass");
       const items = (pass as { items: { kind: number; signed: Bytes }[] }).items;
       return {
-        seals: (pass as unknown as { seals: { seal: HistorySeal }[] }).seals.map((s) => s.seal),
-        epochs: items.filter((i) => i.kind === 3).map((i) => signedId(platform, i.signed)),
+        seals: (pass as unknown as { seals: { seal: HistorySeal }[] }).seals
+          .map((s) => s.seal)
+          .filter((seal) => bytesEqual(seal.channel, channel)), // the space has seals of its own
+        // The conversation channel's: the space beside it has epochs of its own.
+        epochs: items
+          .filter((i) => {
+            const d = decodeEpochEntry(i.signed);
+            return i.kind === 3 && d.ok && bytesEqual(d.value.channel, channel);
+          })
+          .map((i) => signedId(platform, i.signed)),
         messages: items
           .filter((i) => i.kind === 4)
           .map((i) => {
@@ -291,7 +325,10 @@ test(
       assert.deepEqual(seal?.recipient, more.id);
       assert.deepEqual(seal?.maker, b.self);
       // The relay's list, which every pass brings up to date, holds the seal: the bot gives no more.
-      await b.until(() => b.connection.reading.seals.length === 1);
+      await b.until(
+        () =>
+          b.connection.reading.seals.filter((x) => bytesEqual(x.channel, r.channel)).length === 1,
+      );
       const gave = given.length;
       await b.outbox.queue(r.channel, text); // another rest
       await b.until(() => b.queued().length === 0);
@@ -366,7 +403,8 @@ test(
     const b = botOn(r, {
       // The app's epoch reaches the relay before the bot's own start is sent: the bot's is refused at its position.
       submit: (real) => async (kind, signed, sig) => {
-        if (kind === 3 && !gate) gate = r.epoch();
+        const entry = kind === 3 ? decodeEpochEntry(signed) : undefined;
+        if (entry?.ok && bytesEqual(entry.value.channel, r.channel) && !gate) gate = r.epoch();
         await gate;
         return real(kind, signed, sig);
       },
@@ -385,7 +423,8 @@ test(
         held.epochs[1],
         "built in the epoch the app started",
       );
-      assert.ok(!b.lines.some((l) => l.startsWith("relay: an epoch was started")));
+      // The one epoch the bot starts is the space's: the app started the conversation channel's.
+      assert.equal(b.lines.filter((l) => l.startsWith("relay: an epoch was started")).length, 1);
     } finally {
       await b.stop();
       await r.stop();
@@ -480,7 +519,7 @@ test(
       assert.equal((await r.held()).messages.length, 1);
       assert.ok(
         b.lines.includes(
-          "relay: a message was refused for its kind or its recipient, not delivered",
+          "relay: a message was refused for its kind, its class or its recipient, not delivered",
         ),
       );
       assert.equal(b.store.saved.faults.size, 0);

@@ -27,12 +27,14 @@ type MemberBody =
  * An entry the log holds: its id is SHA-256 of its signed bytes; entry 0's id is the channel id.
  * `changesMembers` is whether it makes or removes a member (security design 4, "set-changing"):
  * an accept, or a remove of a member; a remove of an invited person withdraws the invitation and
- * changes no set. The check computes it from the state it used.
+ * changes no set. The check computes it from the state it used. `space` is whether it is the entry
+ * 0 of a person's space (personal space design 2.3): the class of a channel, read from that entry alone.
  */
 export interface LoggedMember {
   entry: MemberEntry;
   id: Bytes;
   changesMembers: boolean;
+  space: boolean;
 }
 
 /** Why an entry may not follow a log: `decode` is the structure, the rest are security design 4's rules. */
@@ -100,6 +102,14 @@ export function decodeMemberEntry(bytes: Bytes): Result<MemberEntry> {
   });
 }
 
+/** The nonce of the entry 0 of `person`'s space: the first 16 bytes of SHA-256 of its label and the person (personal space design 2.1). */
+export const spaceNonce = (platform: Platform, person: Bytes): Bytes =>
+  platform.sha256(new Writer().label("personal-space").b32(person).bytes()).slice(0, 16);
+
+/** Whether `e` is the entry 0 of a space: a create whose nonce is the space nonce of its own signer's person (design 2.3). */
+export const isSpaceEntry = (platform: Platform, e: MemberEntry): boolean =>
+  e.kind === "create" && bytesEqual(e.nonce, spaceNonce(platform, e.signerPerson));
+
 /** Who belongs to a channel with which role, and who is invited and has not accepted. */
 interface State {
   members: Map<string, MemberRole>;
@@ -125,9 +135,15 @@ function stateOf(log: readonly LoggedMember[]): State {
   return s;
 }
 
-/** The persons who are members after a log, by `idKey` of their ids. */
+/**
+ * The persons who are members after a log, by `idKey` of their ids. In a space no entry after entry
+ * 0 changes who is a member, so its person alone is: an entry an older relay placed there is folded
+ * and changes nothing (personal space design 2.5).
+ */
 export const membersOf = (log: readonly LoggedMember[]): Set<string> =>
-  new Set(stateOf(log).members.keys());
+  log[0]?.space
+    ? new Set([idKey(log[0].entry.signerPerson)])
+    : new Set(stateOf(log).members.keys());
 
 /**
  * Whether `signed` with `signature` may follow `log` (security design 4): the structure, then the
@@ -163,7 +179,12 @@ export function checkMemberEntry(
   if (e.seq !== log.length) return fail("position");
   const logged = (changesMembers: boolean): MemberVerdict => ({
     ok: true,
-    value: { entry: e, id: signedId(platform, signed), changesMembers },
+    value: {
+      entry: e,
+      id: signedId(platform, signed),
+      changesMembers,
+      space: isSpaceEntry(platform, e),
+    },
   });
   if (e.kind === "create") return logged(false);
   const last = log.at(-1) as LoggedMember;

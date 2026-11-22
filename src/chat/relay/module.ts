@@ -331,7 +331,6 @@ export function relayChat(): ChatEntry {
         const profile = new ProfileWriter({
           platform,
           self,
-          person: pairing.person,
           run,
           reading: connection.reading,
           outbox,

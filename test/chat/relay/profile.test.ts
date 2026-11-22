@@ -26,7 +26,7 @@ test(
   "a bot writes its profile at its first rest, again once it learns its account, and no more; a restart with the same configuration writes none",
   DARWIN,
   async () => {
-    const r = await rig();
+    const r = await rig({ space: true });
     let b = botOn(r, { profile: { name: "mini" } });
     try {
       b.connection.start();
@@ -80,7 +80,7 @@ test(
   "a new epoch gets the bot's profile; a relay that refuses a profile is no fault and gets no second one in the run",
   DARWIN,
   async () => {
-    const r = await rig();
+    const r = await rig({ space: true });
     let refuse = false;
     const b = botOn(r, {
       profile: { name: "mini" },
@@ -105,7 +105,7 @@ test(
       assert.equal(b.outbox.profileDropped, true);
       assert.deepEqual(b.queued(), []);
       assert.equal(b.store.saved.faults.size, 0, "the channel goes on");
-      await b.outbox.queue(r.channel, { kind: 8, content: "{}" });
+      await b.outbox.queue(r.talk.channel, { kind: 8, content: "{}" });
       await b.until(async () => (await r.held()).messages.some((m) => m.kind === 8));
       await waiting();
       assert.equal(
@@ -125,7 +125,7 @@ test(
   "a profile still in the outbox at a restart is the one sent: the next run writes no second",
   DARWIN,
   async () => {
-    const r = await rig();
+    const r = await rig({ space: true });
     const unanswered = botOn(r, {
       profile: { name: "mini" },
       submit: (real) => async (k, s, g) => {
@@ -156,7 +156,7 @@ test(
   "two processes with one bot key and two names write one profile each, and one of them says so",
   DARWIN,
   async () => {
-    const r = await rig();
+    const r = await rig({ space: true });
     const a = botOn(r, { profile: { name: "mini" } });
     const b = botOn(r, { profile: { name: "mini-copy" } });
     try {
@@ -185,7 +185,7 @@ test(
   "a bot that reads another bot of its owner's under its own name says so once, and still writes its own",
   DARWIN,
   async () => {
-    const r = await rig();
+    const r = await rig({ space: true });
     const second = await r.addBot();
     await r.epoch(); // sealed to both bots
     const other = botOn(r, { dir: second.dir, profile: { name: "mini" } });
@@ -212,7 +212,7 @@ test(
   "a store whose write fails is logged, never a rejection: the profile it kept in memory lands once",
   DARWIN,
   async () => {
-    const r = await rig();
+    const r = await rig({ space: true });
     const b = botOn(r, { profile: { name: "mini" } });
     try {
       b.connection.start();
@@ -245,7 +245,7 @@ test(
   "a profile queued but not built at a restart is dropped: the next run writes its own configuration",
   DARWIN,
   async () => {
-    const r = await rig();
+    const r = await rig({ space: true });
     const stuck = botOn(r, {
       profile: { name: "mini" },
       // A state message the relay never answers holds the profile behind it, not built.
@@ -256,7 +256,7 @@ test(
     });
     let b = stuck;
     try {
-      await stuck.outbox.queue(r.channel, { kind: 8, content: "{}" });
+      await stuck.outbox.queue(r.channel, { kind: 8, content: "{}" }); // never reaches the relay: the wrapper holds it
       stuck.connection.start();
       await stuck.until(() => stuck.queued().some((i) => i.kind === KIND_PROFILE && !i.built));
       await stuck.stop();
@@ -282,7 +282,7 @@ test(
   "the relay module wires the writer: a provider built from the entry writes its profile, and its account",
   DARWIN,
   async () => {
-    const r = await rig();
+    const r = await rig({ space: true });
     const context = {
       variables: {
         RELAY_ADDRESS: `127.0.0.1:${r.port}`,
