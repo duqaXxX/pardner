@@ -6,21 +6,36 @@ import Foundation
 import XCTest
 
 final class OutboxCallTests: XCTestCase {
-    private func connection(link: String) async throws -> (RelayConnection, LinkStore, URL) {
+    private var hostUsed: ProtocolHost?
+    private func connection(link: String, ownName: String? = nil) async throws -> (RelayConnection, LinkStore, URL) {
         let store = SoftwareKeyStore()
         _ = try store.make("device.sign", .sign)
         _ = try store.make("device.receive", .receive)
         let script = try XCTUnwrap(ProcessInfo.processInfo.environment["PARDNER_JOINED_SCRIPT"], "run test/protocol/jsc.test.ts")
         let host = try await ProtocolHost(scriptPath: script, store: store)
+        hostUsed = host
         try await host.perform { state in
-            _ = state.context!.evaluateScript("protocol.appLink = function () { return { exporterLabel: function () { return 'label'; }, start: function () { return []; }, stop: function () { return []; }, \(link) }; };")
+            _ = state.context!.evaluateScript("protocol.appLink = function (platform, o) { protocol.sawOwnName = String(o.ownName); return { exporterLabel: function () { return 'label'; }, start: function () { return []; }, stop: function () { return []; }, \(link) }; };")
         }
         let endpoint = RelayEndpoint(host: "127.0.0.1", port: 1, pin: Data(repeating: 4, count: 65))
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("pardner-store-\(UUID().uuidString)")
         addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
         let linkStore = try LinkStore(folder: folder, identity: LinkIdentity(
             signing: try store.publicKey("device.sign"), receiving: try store.publicKey("device.receive"), relay: endpoint.pin))
+        // The public init is the one `PairingController` calls: a name it is given must reach the link's options.
+        if let ownName { return (try RelayConnection(host: host, store: store, person: Data(repeating: 1, count: 32), endpoint: endpoint, linkStore: linkStore, ownName: ownName), linkStore, folder) }
         return (try RelayConnection(host: host, store: store, person: Data(repeating: 1, count: 32), endpoint: endpoint, linkStore: linkStore, constants: [:]), linkStore, folder)
+    }
+
+    func testTheNameTheControllerGivesReachesTheLinksOptions() async throws {
+        let (connection, _, _) = try await connection(link: "createChannel: function () { return { channel: new Uint8Array(32), effects: [] }; }", ownName: "Mac one")
+        connection.start()
+        var seen = ""
+        for _ in 0..<40 where seen.isEmpty {
+            seen = try await XCTUnwrap(hostUsed).perform { state in state.context!.evaluateScript("String(protocol.sawOwnName === undefined ? '' : protocol.sawOwnName)")!.toString() ?? "" }
+            if seen.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
+        }
+        XCTAssertEqual(seen, "Mac one")
     }
 
     func testAnEffectThePlatformDoesNotKnowAfterTheAnswerIsThatCallsErrorAndTheConnectionFaults() async throws {
@@ -38,6 +53,16 @@ final class OutboxCallTests: XCTestCase {
         // Answered once: a second answer of the same continuation traps this process, which is the failure.
         let told = await faulted.value
         XCTAssertTrue(told, "the host's fault ends the connection as elsewhere")
+        await connection.stop()
+    }
+
+    func testASetNameCallReachesTheLinkWithItsKindTargetTextAndSetupFlag() async throws {
+        let (connection, _, _) = try await connection(link: "setName: function (kind, target, text, now, options) { protocol.sawName = [kind, target, text, options.setup].join('|'); return { name: new Uint8Array(16), effects: [] }; }")
+        connection.start()
+        let outcome = try await connection.setName(kind: 15, target: nil, text: "Ada", setup: true)
+        XCTAssertEqual(outcome, .queued(name: Data(count: 16)))
+        let seen = try await XCTUnwrap(hostUsed).perform { state in state.context!.evaluateScript("protocol.sawName")!.toString() ?? "" }
+        XCTAssertEqual(seen, "15||Ada|true")
         await connection.stop()
     }
 

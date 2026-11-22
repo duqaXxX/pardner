@@ -2011,3 +2011,311 @@ test("review P7: a send() write that fails before the first rest's head leaves t
   );
   assert.deepEqual(fxOf(rest, "channel-fault-dropped"), [], "no drop is told after a failed write");
 });
+
+// The names design, step N2 (sections 2.2, 4 and 4.4): the pending names of the app and when it writes them, as the model's rules say.
+const storedNames = (r: Rig) => r.outWrites.at(-1)?.names ?? [];
+const kindsOf = (fx: AppEffect[]) =>
+  only(fx, "submit").map((f) => {
+    const m = decodeMessage(f.signed);
+    assert.ok(m.ok, "a message");
+    return m.value.header.kind;
+  });
+const rename = (
+  r: Rig,
+  kind: 14 | 15 | 16,
+  target: Bytes | undefined,
+  text: string,
+  now = 10,
+  setup = false,
+) => {
+  const set = r.link.setName(kind, target, text, now, { setup });
+  assert.ok(typeof set === "object", `a name is set, not ${set}`);
+  return r.settle(set.effects, now);
+};
+const spaceRig = (over: Partial<AppLinkOptions> = {}) => {
+  const s = scene({ space: true });
+  s.epoch();
+  return { s, r: rig(s, over, s.alice.first) };
+};
+
+test("names 4.2, 4.4: a person's name is pending in the store, written into the space under its message name, and cleared when it is read back", () => {
+  const { s, r } = spaceRig();
+  r.connect();
+  const fx = rename(r, 15, undefined, "Alice", 10, true);
+  assert.deepEqual(
+    storedNames(r).map((n) => n.kind),
+    [15],
+    "kept in the store in one write",
+  );
+  const mine = storedNames(r)[0] as NonNullable<AppOutbox["names"]>[number];
+  const sent = drive(s, r, fx, 11);
+  const built = only(sent, "submit")
+    .map((f) => decodeMessage(f.signed))
+    .find((m) => m.ok && m.value.header.kind === 15);
+  assert.ok(built?.ok, "submitted");
+  assert.deepEqual(built.value.header.channel, s.channel, "into the space");
+  assert.deepEqual(built.value.header.name, mine.name, "under the pending entry's message name");
+  assert.deepEqual(storedNames(r), [], "read back: no longer pending");
+  assert.deepEqual(namesOf(sent).at(-1), [15, idKey(s.alice.id), "Alice"]);
+});
+
+test("names 4.4: a restart before the send keeps the name and sends it under the same message name", () => {
+  const { s, r } = spaceRig();
+  r.connect();
+  r.hold(true);
+  const set = r.link.setName(15, undefined, "Alice", 10);
+  assert.ok(typeof set === "object");
+  const w = r.settle(set.effects, 10).at(-1);
+  assert.ok(w?.do === "write");
+  const stored = w.outbox;
+  const t = rig(s, { outbox: stored }, s.alice.first);
+  const sent = only(drive(s, t, t.connect(), 5), "submit").map((f) => decodeMessage(f.signed));
+  const own = sent.find((m) => m.ok && m.value.header.kind === 15);
+  assert.ok(own?.ok);
+  assert.deepEqual(own.value.header.name, (stored.names ?? [])[0]?.name);
+});
+
+test("names 4.4, R3-1: a name renamed back to an earlier one is cleared by its message name alone: the earlier message of that name clears nothing", () => {
+  const { s, r } = spaceRig();
+  r.connect();
+  drive(s, r, rename(r, 15, undefined, "Alpha"), 11);
+  drive(s, r, rename(r, 15, undefined, "Beta", 30), 31);
+  rename(r, 15, undefined, "Alpha", 50); // back to the first name, under a new message name
+  const stored = storedNames(r);
+  assert.equal(stored.length, 1);
+  const t = rig(s, { outbox: r.outWrites.at(-1) as AppOutbox }, s.alice.first); // a restart: every start reads from position 0
+  const fx = drive(s, t, t.connect(), 60);
+  assert.deepEqual(
+    namesOf(fx).at(-1),
+    [15, idKey(s.alice.id), "Alpha"],
+    "it shows after the restart",
+  );
+  assert.deepEqual(storedNames(t), []);
+});
+
+test("names 2.2, D-N3 A: a refused name stays pending, no other goes out on that connection and the queued ones are held in place; a new connection sends it again", () => {
+  const { s, r } = spaceRig();
+  r.connect();
+  r.hold(true);
+  const a = r.link.setName(15, undefined, "Alice", 10);
+  const b = r.link.setName(16, undefined, "Mac one", 10);
+  assert.ok(typeof a === "object" && typeof b === "object");
+  r.hold(false);
+  const fx = r.settle([...a.effects, ...b.effects], 10).concat(r.answer(true, 10));
+  const first = only(fx, "submit");
+  assert.deepEqual(kindsOf(fx), [15], "one name in flight");
+  const after = r.give(results(fx, 1), 12);
+  assert.deepEqual(fxOf(after, "channel-fault"), [], "no fault");
+  assert.deepEqual(kindsOf(after), [], "the other name is not sent while the refusal holds");
+  assert.equal(first.length, 1);
+  assert.deepEqual(
+    storedNames(r)
+      .map((n) => n.kind)
+      .sort(),
+    [15, 16],
+    "both still pending",
+  );
+  r.drop(13);
+  const again = drive(s, r, r.connect(2000), 20);
+  assert.deepEqual(
+    [...new Set(kindsOf(again))].sort(),
+    [15, 16],
+    "the next connection sends both again",
+  );
+});
+
+test("names 4.2: a setup name is dropped once the sequence holds a kind 15 of the person under another message name, and a rename is not", () => {
+  const s = scene({ space: true });
+  const home = s.epoch();
+  s.wire.put(4, nameIn(s, s.channel, home, 15, encodeName(15, "Set since"), 2));
+  const r = rig(s, {}, s.alice.first);
+  rename(r, 15, undefined, "First setup", 0, true);
+  const fx = r.connect();
+  assert.deepEqual(
+    kindsOf(fx).filter((k) => k === 15),
+    [],
+    "never sent",
+  );
+  assert.deepEqual(storedNames(r), [], "dropped from the store");
+  assert.deepEqual(namesOf(fx).at(-1), [15, idKey(s.alice.id), "Set since"]);
+  rename(r, 15, undefined, "A rename", 20);
+  assert.equal(storedNames(r).length, 1, "a rename has no such condition");
+});
+
+test("names 4.2: the person's and the device's names wait for the space's first epoch, then go", () => {
+  const s = scene({ space: true });
+  const r = rig(s, {}, s.alice.first);
+  r.connect();
+  const fx = rename(r, 15, undefined, "Alice");
+  assert.deepEqual(kindsOf(fx), []);
+  assert.deepEqual(
+    itemsOf(r.outWrites.at(-1), s.channel),
+    [],
+    "nothing queued while the space has no epoch",
+  );
+  s.epoch();
+  r.drop(11);
+  assert.deepEqual(kindsOf(r.connect(2000)), [15]);
+});
+
+test("names 4.1: a channel's rename is pending, kept in the store, and written in its own channel; a space or an unknown channel is refused", () => {
+  const s = scene();
+  s.epoch();
+  const r = rig(s, {}, s.alice.first);
+  r.connect();
+  assert.equal(r.link.setName(14, fill(1, 32), "docs", 5), "not-member");
+  assert.equal(r.link.setName(14, s.channel, "Not Allowed", 5), "bad-input");
+  const fx = rename(r, 14, s.channel, "docs");
+  assert.deepEqual(
+    storedNames(r).map((n) => n.kind),
+    [14],
+  );
+  const sent = drive(s, r, fx, 11);
+  assert.deepEqual(namesOf(sent).at(-1), [14, idKey(s.channel), "docs"]);
+  assert.deepEqual(storedNames(r), []);
+});
+
+test("names 4.3: an app with no kind 16 of its own takes the name it knows for itself, once", () => {
+  const { s, r } = spaceRig({ ownName: "Mac one" });
+  const fx = drive(s, r, r.connect(), 5);
+  assert.deepEqual(namesOf(fx).at(-1), [16, idKey(s.alice.first.id), "Mac one"]);
+  r.drop(50);
+  const again = r.connect(3000);
+  assert.deepEqual(kindsOf(again), [], "not written again");
+  assert.deepEqual(storedNames(r), []);
+});
+
+test("names 4.3: an app that holds a kind 16 of its own in the sequence takes no name, and a name that does not read is none", () => {
+  const s = scene({ space: true });
+  const home = s.epoch();
+  s.wire.put(4, nameIn(s, s.channel, home, 16, encodeName(16, "Mine"), 3));
+  assert.deepEqual(kindsOf(rig(s, { ownName: "Mac one" }, s.alice.first).connect()), []);
+  const t = spaceRig({ ownName: "bad\u0000name" });
+  assert.deepEqual(kindsOf(t.r.connect()), []);
+});
+
+test("names 4.3, review T2: the name typed at a join is kept pending in the store at the first rest, so a restart before the space's epoch opens writes it, not the computer's name", () => {
+  const s = scene({ space: true });
+  const r = rig(s, { ownName: "Typed label" }, s.alice.first);
+  r.connect();
+  const stored = r.outWrites.at(-1);
+  assert.deepEqual(
+    (stored?.names ?? []).map((n) => [n.kind, n.content]),
+    [[16, encodeName(16, "Typed label")]],
+    "pending in the store before any epoch is open",
+  );
+  s.epoch();
+  const t = rig(s, { outbox: stored as AppOutbox, ownName: "Computer" }, s.alice.first); // after the join the typed name is gone: the Mac's is the fallback
+  const sent = drive(s, t, t.connect(), 5);
+  assert.deepEqual(namesOf(sent).at(-1), [16, idKey(s.alice.first.id), "Typed label"]);
+});
+
+test("names 4.1, review T5: a second rename before the first went out replaces it, and only the second is sent", () => {
+  const { s, r } = spaceRig();
+  r.connect();
+  r.hold(true);
+  const a = r.link.setName(15, undefined, "First", 10);
+  assert.ok(typeof a === "object");
+  r.settle(a.effects, 10);
+  r.answer(true, 11); // the first is queued, not built, its write held
+  const b = r.link.setName(15, undefined, "Second", 12);
+  assert.ok(typeof b === "object");
+  r.hold(false);
+  const fx = drive(s, r, [...r.settle(b.effects, 12), ...r.answer(true, 13)], 14);
+  assert.deepEqual(kindsOf(fx), [15], "one name message goes out");
+  assert.deepEqual(namesOf(fx).at(-1), [15, idKey(s.alice.id), "Second"]);
+});
+
+// Names, step N2 unit 3: the person's name typed at the first device's setup, and a channel's name given at its creation.
+test("names 4.2: the first device writes the name typed at setup as the person's name, and its own device name is the Mac's", () => {
+  const { s, r } = spaceRig({ typedName: "Ada Lovelace", ownName: "Mac one" });
+  const fx = drive(s, r, r.connect(), 5);
+  assert.deepEqual(
+    namesOf(fx)
+      .filter(([k]) => k === 15)
+      .at(-1),
+    [15, idKey(s.alice.id), "Ada Lovelace"],
+  );
+  assert.deepEqual(
+    namesOf(fx)
+      .filter(([k]) => k === 16)
+      .at(-1),
+    [16, idKey(s.alice.first.id), "Mac one"],
+  );
+});
+
+test("names 4.2: the setup name yields to a kind 15 of the person already in the sequence", () => {
+  const s = scene({ space: true });
+  const home = s.epoch();
+  s.wire.put(4, nameIn(s, s.channel, home, 15, encodeName(15, "Set elsewhere"), 2));
+  const r = rig(s, { typedName: "Ada", ownName: "Mac one" }, s.alice.first);
+  const fx = r.connect();
+  assert.deepEqual(
+    kindsOf(fx).filter((k) => k === 15),
+    [],
+    "never sent",
+  );
+  assert.deepEqual(
+    namesOf(fx)
+      .filter(([k]) => k === 15)
+      .at(-1),
+    [15, idKey(s.alice.id), "Set elsewhere"],
+  );
+});
+
+test("names 4.3: a device that is not the first keeps the typed name as its device name and names no person", () => {
+  const s = scene({ space: true });
+  s.epoch();
+  const r = rig(s, { typedName: "Studio label", ownName: "Computer" }); // the scene's bot stands in as a later device
+  r.connect();
+  assert.deepEqual(
+    storedNames(r).map((n) => [n.kind, n.content]),
+    [[16, encodeName(16, "Studio label")]],
+  );
+});
+
+test("names 4.1: a channel's name given at its creation is pending in the same write as entry 0 and the bind, and shows once the channel is read", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  assert.equal(
+    r.link.createChannel({ bot: s.bot.id, folder: "/work", name: "Not Allowed" }, 5),
+    "bad-input",
+  );
+  r.hold(true);
+  const made = r.link.createChannel({ bot: s.bot.id, folder: "/work", name: "docs" }, 10);
+  assert.ok(typeof made === "object");
+  const [w] = outboxes(r.settle(made.effects, 10));
+  assert.ok(w?.pending, "entry 0 is in the write");
+  assert.deepEqual(
+    w.names?.map((n) => [n.kind, n.content]),
+    [[14, encodeName(14, "docs")]],
+    "and the name, in the one write",
+  );
+  assert.deepEqual(w.names?.[0]?.channel, made.channel);
+  r.hold(false);
+  const fx = drive(s, r, r.answer(true, 11), 12);
+  assert.ok(namesOf(fx).some(([k, t, n]) => k === 14 && t === idKey(made.channel) && n === "docs"));
+});
+
+test("names 4.1, review V1: a refused creation leaves no pending name for the channel that never was", () => {
+  const s = scene();
+  s.epoch();
+  const r = appRig(s);
+  r.connect();
+  const made = r.link.createChannel({ bot: s.bot.id, folder: "/work/docs", name: "docs" }, 10);
+  assert.ok(typeof made === "object", `made: ${String(made)}`);
+  const fx = r.settle(made.effects, 10);
+  assert.equal(r.outWrites.at(-1)?.names?.length, 1, "the name is kept with entry 0");
+  const refused = r.give(results(fx, 1), 12);
+  assert.deepEqual(
+    fxOf(refused, "channel-refused").map((e) => e.code),
+    [1],
+  );
+  assert.deepEqual(
+    (r.outWrites.at(-1)?.names ?? []).map((n) => n.kind),
+    [],
+    "gone with the channel",
+  );
+});

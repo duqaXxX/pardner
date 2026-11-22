@@ -7,8 +7,10 @@ public struct ChannelSheet: View {
     @Bindable var model: ChannelsModel
     /// The bots' names from the reading model's profiles.
     let names: [Data: String]
+    /// The names the person's channels show, for the warning that two share one.
+    let channelNames: [Data: String]
 
-    public init(model: ChannelsModel, names: [Data: String]) { (self.model, self.names) = (model, names) }
+    public init(model: ChannelsModel, names: [Data: String], channelNames: [Data: String] = [:]) { (self.model, self.names, self.channelNames) = (model, names, channelNames) }
 
     private var isBind: Bool { if case .bind = model.sheet { true } else { false } }
 
@@ -21,6 +23,13 @@ public struct ChannelSheet: View {
                     .font(PardnerFont.mono(size: 12, weight: .regular)).accessibilityLabel("Folder")
             }
             .onChange(of: model.folder) { model.edited() }
+            if !isBind {
+                Field(title: "Channel name", hint: "Lowercase letters, digits, - and _. It follows the folder until you type one; leave it empty for none.", error: nil) {
+                    TextField("", text: $model.nameText).accessibilityLabel("Channel name")
+                }
+                .onChange(of: model.nameText) { model.channelNameEdited() }
+                NameLines(note: model.nameNote, warning: model.duplicateWarning(channels: channelNames))
+            }
             if model.showsBotPicker(names: names) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Bot").font(PardnerFont.ui(size: 13, weight: .semibold))

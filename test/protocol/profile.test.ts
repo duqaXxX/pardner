@@ -31,3 +31,17 @@ test("the vectors of profile.json pass, and a changed expectation is named", () 
     changed.cases[shown].name,
   ]);
 });
+
+// Names, review V2: the person's name is checked as kind 15 is read, in characters, not as a pairing string's bytes.
+test("checkPersonName: 64 code points, whatever their bytes; no @, no hidden character, no space at either end", async () => {
+  const { checkPersonName } = await import("../../src/protocol/profile.ts");
+  const platform = createNodePlatform();
+  assert.ok(
+    checkPersonName(platform, "中".repeat(30)),
+    "30 CJK characters are 90 bytes and one name",
+  );
+  assert.ok(checkPersonName(platform, "a".repeat(64)));
+  assert.ok(!checkPersonName(platform, "a".repeat(65)));
+  for (const bad of ["", " Ada", "Ada ", "Ada@home", "Ada​", "\ud800"])
+    assert.ok(!checkPersonName(platform, bad), JSON.stringify(bad));
+});

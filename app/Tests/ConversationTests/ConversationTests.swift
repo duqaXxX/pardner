@@ -656,4 +656,20 @@ extension ConversationTests {
         XCTAssertEqual(w.c.threads[root.hex]?.items.count, 1)
         XCTAssertEqual(w.c.timeline, [10, 13])
     }
+
+    /// The `names` effect of the link (names design 3): a name for a channel, the person or a device, `null` when none shows now.
+    func testTheNamesTheLinkTellsAreKeptByTheIdTheyName() {
+        var model = ReadingModel()
+        let (channel, person, device) = (Data(repeating: 1, count: 32), Data(repeating: 2, count: 32), Data(repeating: 3, count: 32))
+        func effect(_ kind: Double, _ target: Data, _ name: HostValue) -> HostValue { .object(["kind": .number(kind), "target": .bytes(target), "name": name]) }
+        model.take(names: .object(["do": .string("names"), "names": .array([
+            effect(14, channel, .string("docs")), effect(15, person, .string("Ada")), effect(16, device, .string("Mac one")),
+        ])]))
+        XCTAssertEqual(model.names.channels[channel], "docs")
+        XCTAssertEqual(model.names.persons[person], "Ada")
+        XCTAssertEqual(model.names.devices[device], "Mac one")
+        model.take(names: .object(["do": .string("names"), "names": .array([effect(14, channel, .null)])]))
+        XCTAssertNil(model.names.channels[channel], "a name that no longer shows is dropped")
+        XCTAssertEqual(model.names.persons[person], "Ada", "the others stay")
+    }
 }

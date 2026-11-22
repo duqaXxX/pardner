@@ -303,6 +303,20 @@ final class PairingModelTests: XCTestCase {
         XCTAssertEqual(model.joinName, "", "the placeholder shows")
     }
 
+    /// The first device's form asks the person's name, filled with the Mac user's full name (names design 4.2).
+    func testTheFirstDeviceFormOpensWithTheUsersFullNameAndKeepsWhatWasTyped() {
+        let model = PairingModel(phase: .unpaired(nil))
+        XCTAssertEqual(model.setupName, "", "nothing is read at launch")
+        model.fullName = { "  Ada Lovelace " }
+        model.openFirst()
+        XCTAssertTrue(model.showForm)
+        XCTAssertEqual(model.setupName, "Ada Lovelace")
+        model.setupName = "Ada"
+        model.back()
+        model.openFirst()
+        XCTAssertEqual(model.setupName, "Ada", "a name the person typed stays")
+    }
+
     func testTheSetupOfAJoinIsToldApartFromTheSetupOfAFirstDevice() {
         XCTAssertTrue(PairingModel(phase: .settingUp, join: true).isJoinSetUp)
         XCTAssertFalse(PairingModel(phase: .settingUp, form: true).isJoinSetUp)

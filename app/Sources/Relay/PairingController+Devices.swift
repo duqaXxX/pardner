@@ -371,7 +371,7 @@ extension PairingController {
             return
         }
         state.stage = .paired
-        (state.proof, state.name) = (nil, nil)
+        state.proof = nil // the name stays for good: the link takes it as this device's name while none is pending or read, so a restart before it is written still sends it
         guard save(state) else { return }
         joiningScreen = nil
         phase = .paired
@@ -392,7 +392,7 @@ extension PairingController {
     }
 
     private func subject(_ id: Data, _ snap: DeviceSnapshot?) -> DeviceSubject {
-        if let name = stored?.labels[id] { return .label(name) }
+        if let name = shownDeviceNames[id] ?? stored?.labels[id] { return .label(name) }
         guard let device = snap?.devices.first(where: { $0.id == id }) else { return .unknown }
         return .shortForm(device.kind, device.short)
     }
@@ -410,7 +410,7 @@ extension PairingController {
             default: adder = .removedDevice
             }
             return DeviceRow(
-                id: device.id, kind: device.kind, label: state.labels[device.id], shortForm: device.short, adder: adder,
+                id: device.id, kind: device.kind, label: shownDeviceNames[device.id] ?? state.labels[device.id], shortForm: device.short, adder: adder,
                 position: device.position, active: device.active, isThisMac: device.id == snap.selfID,
                 seenAt: state.seen[device.id].map { Date(timeIntervalSince1970: $0) }, onlyHolderEpochs: device.onlyHolderEpochs,
                 addedWhileRemoving: removal.map { $0.devices.contains(device.id) && device.position >= $0.length && device.addedBy != snap.selfID } ?? false)

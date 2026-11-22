@@ -335,8 +335,30 @@ public struct BotProfile: Sendable, Equatable {
     }
 }
 
+/// The names the link shows (names design 3), by the id each names: a channel's, the person's and a device's. A bot is named by its profile.
+public struct ShownNames: Sendable, Equatable {
+    public private(set) var channels: [Data: String] = [:]
+    public private(set) var persons: [Data: String] = [:]
+    public private(set) var devices: [Data: String] = [:]
+
+    /// One `names` effect: each entry gives the name now shown for its target, or `null` when none shows.
+    mutating func take(_ effect: HostValue) {
+        for entry in effect["names"]?.arrayValue ?? [] {
+            guard let kind = entry["kind"]?.numberValue, let target = entry["target"]?.bytesValue else { continue }
+            let name = entry["name"]?.stringValue
+            switch Int(kind) {
+            case 14: channels[target] = name
+            case 15: persons[target] = name
+            case 16: devices[target] = name
+            default: break
+            }
+        }
+    }
+}
+
 /// The channels and the bots' profiles, as the link delivered them.
 public struct ReadingModel: Sendable, Equatable {
+    public private(set) var names = ShownNames()
     public private(set) var channels: [Data: Channel] = [:]
     public private(set) var profiles: [Data: BotProfile] = [:]
     // The person's own app devices, as the Devices list names them.
@@ -384,6 +406,15 @@ public struct ReadingModel: Sendable, Equatable {
             channels[id] = c
         }
     }
+
+    /// One `names` effect of the link.
+    public mutating func take(names effect: HostValue) { names.take(effect) }
+
+    /// The person's own name, when one shows (a Mac has one person).
+    public var personName: String? { names.persons.values.first }
+
+    /// Whether `device` is one of the person's own apps, as the Devices list names them.
+    public func isOwn(_ device: Data) -> Bool { ownDevices.contains(device) }
 
     /// One `profile` effect of the link: the profile shown for a bot, or none.
     public mutating func take(profile: HostValue) {

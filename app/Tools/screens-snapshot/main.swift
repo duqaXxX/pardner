@@ -201,7 +201,7 @@ MainActor.assumeIsolated {
                 return m
             }),
             ("recover-refused-new-key", { PairingModel(phase: .recovering(.refused(.yourNewKey))) }),
-            ("form", { PairingModel(phase: .unpaired(nil), form: true) }),
+            ("form", { let m = PairingModel(phase: .unpaired(nil), form: true); m.setupName = "Ada Lovelace"; return m }),
             ("form-errors", {
                 let m = PairingModel(phase: .unpaired(nil), form: true, refused: .relayKey)
                 m.address = "relay.example.net:7443"
@@ -280,6 +280,37 @@ MainActor.assumeIsolated {
                 ("channel-sheet-bind", ChannelsModel(devices: DevicesModel(state: busy), sheet: .bind(channel: channelSample.channel), folder: "projects/docs")),
             ]
             for (name, model) in sheetStates { try render(appearance, ChannelSheet(model: model, names: botNames), size: nil, to: "\(name)-\(theme).png") }
+            // The name sheets (names design 4.1 to 4.3), and the window with the names the link shows.
+            let nameSheets: [(String, ChannelsModel.NameTarget, String, String?)] = [
+                ("name-sheet-person", .person, "Ada Lovelace", nil),
+                ("name-sheet-channel", .channel(channelSample.channel), "docs", nil),
+                ("name-sheet-channel-refused", .channel(channelSample.channel), "Docs & Notes", "Use only lowercase letters, digits, - and _, up to 80 characters."),
+                ("name-sheet-device", .device, "Mac mini", nil),
+            ]
+            for (name, target, text, problem) in nameSheets {
+                let model = ChannelsModel(devices: DevicesModel(state: busy), sheet: .rename(target), problem: problem)
+                model.nameText = text
+                try render(appearance, NameSheet(model: model), size: nil, to: "\(name)-\(theme).png")
+            }
+            // The channel's name at its creation, with what the field left out and the warning that another channel has the name.
+            let sameName = ChannelsModel(devices: DevicesModel(state: busy), sheet: .create, folder: "projects/docs")
+            sameName.nameText = "docs"
+            let leftOut = ChannelsModel(devices: DevicesModel(state: busy), sheet: .create, folder: "projects/docs")
+            leftOut.nameText = "docs"
+            leftOut.nameText = "docs!"
+            leftOut.channelNameEdited()
+            for (name, model) in [("channel-sheet-name-duplicate", sameName), ("channel-sheet-name-left-out", leftOut)] {
+                try render(appearance, ChannelSheet(model: model, names: botNames, channelNames: [Data(repeating: 0x33, count: 32): "docs"]), size: nil, to: "\(name)-\(theme).png")
+            }
+            var shown = channelSample.model
+            let (me, thisMac) = (Data(repeating: 0x11, count: 32), Data(repeating: 0x12, count: 32))
+            shown.take(names: .object(["do": .string("names"), "names": .array([
+                .object(["kind": .number(14), "target": .bytes(channelSample.channel), "name": .string("docs")]),
+                .object(["kind": .number(15), "target": .bytes(me), "name": .string("Ada Lovelace")]),
+                .object(["kind": .number(16), "target": .bytes(thisMac), "name": .string("Mac mini")]),
+            ])]))
+            try render(appearance, MainWindow(model: shown, devices: DevicesModel(), channels: ChannelsModel(state: ChannelsState(), devices: DevicesModel(state: busy)),
+                                              channel: channelSample.channel), size: NSSize(width: 1280, height: 800), to: "window-names-\(theme).png")
             var creating = ChannelsState()
             creating.creating = PendingChannel(channel: Data(repeating: 0x77, count: 32), bot: Data(repeating: 0x2b, count: 32), folder: "projects/docs")
             var refused = ChannelsState()

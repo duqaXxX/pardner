@@ -13,7 +13,7 @@ import {
   type MessageHeader,
 } from "./messages.ts";
 import { hidden, hiddenInName } from "./name-rule.ts";
-import type { Bytes } from "./platform.ts";
+import type { Bytes, Platform } from "./platform.ts";
 import { fail, ok, type Result } from "./result.ts";
 
 /** What a bot says of itself: its name, the agent's account where its members may read it, its icon. */
@@ -245,6 +245,11 @@ export function readName(kind: number, content: string): Result<string> {
   return record(json) && nameFits(kind, json.name) ? ok(json.name) : fail("bad-input");
 }
 
+/** Whether `name` may be a person's: the rule kind 15 is read under (the app checks the name typed at setup with it; the platform is unused). */
+export function checkPersonName(_platform: Platform, name: string): boolean {
+  return nameFits(KIND_PERSON_NAME, name);
+}
+
 /** The content of a name message of `kind`; a name `readName` would refuse throws. */
 export function encodeName(kind: number, name: string): string {
   if (!nameFits(kind, name)) throw new RangeError("a name readName refuses");
@@ -259,6 +264,7 @@ interface Copy {
   kind: number;
   channel: Bytes;
   sender: Bytes;
+  name: Bytes;
   /** The place of the first copy seen, from its header, whether or not the body opened. */
   first: number;
   /** The place of the first copy opened, and its name when it reads and carries no file. */
@@ -290,6 +296,7 @@ export class Names {
         kind: h.kind,
         channel: h.channel,
         sender: h.sender,
+        name: h.name,
         first: position,
       });
   }
@@ -328,5 +335,32 @@ export class Names {
       (c) =>
         c.kind === KIND_DEVICE_NAME && bytesEqual(c.channel, space) && bytesEqual(c.sender, device),
     );
+  }
+
+  /** Whether the sequence holds a kind 15 in `space` whose message name is not `name`: the person named themselves since (names design 4.2). */
+  personNamedOtherwise(space: Bytes, name: Bytes): boolean {
+    for (const c of this.#copies.values())
+      if (c.kind === KIND_PERSON_NAME && bytesEqual(c.channel, space) && !bytesEqual(c.name, name))
+        return true;
+    return false;
+  }
+
+  /** Whether the sequence holds any kind 15 in `space`: the person is named (names design 4.2). */
+  hasPerson(space: Bytes): boolean {
+    for (const c of this.#copies.values())
+      if (c.kind === KIND_PERSON_NAME && bytesEqual(c.channel, space)) return true;
+    return false;
+  }
+
+  /** Whether the sequence holds a kind 16 in `space` sent by `device`, opened or not (names design 4.3). */
+  hasDevice(space: Bytes, device: Bytes): boolean {
+    for (const c of this.#copies.values())
+      if (
+        c.kind === KIND_DEVICE_NAME &&
+        bytesEqual(c.channel, space) &&
+        bytesEqual(c.sender, device)
+      )
+        return true;
+    return false;
   }
 }

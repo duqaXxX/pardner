@@ -37,6 +37,7 @@ public final class ConversationModel {
         switch event {
         case .delivered(let view): reading.take(view: view)
         case .profile(let profile): reading.take(profile: profile)
+        case .names(let names): reading.take(names: names)
         case .reset:
             reading = ReadingModel()
             reading.setOwnDevices(own)

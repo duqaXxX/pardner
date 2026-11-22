@@ -4,9 +4,27 @@
  */
 import { bytesEqual, isBytes } from "./bytes.ts";
 import { idKey } from "./device-log.ts";
-import { decodeMessage, fits, type Reference } from "./messages.ts";
+import {
+  decodeMessage,
+  fits,
+  KIND_CHANNEL_NAME,
+  KIND_DEVICE_NAME,
+  KIND_PERSON_NAME,
+  type Reference,
+} from "./messages.ts";
 import type { OutboxItem } from "./outbox.ts";
 import type { Bytes } from "./platform.ts";
+import { readName } from "./profile.ts";
+
+/** A name the person set that this device has not read back (names design 4.4): its message name is chosen when it is set, and only a read-back of a message under it clears it. A channel's carries its `channel`; the person's and the device's go into the space. */
+export interface PendingName {
+  kind: number;
+  channel?: Bytes | undefined;
+  name: Bytes;
+  content: string;
+  /** The first app's name asked at setup, dropped once the person has named themselves since (4.2). */
+  setup: boolean;
+}
 
 /** The app outbox as the store keeps it: entry 0 of the channel being created, entry 0 of the person's space while it is made (a slot of its own, so it never blocks a new channel), each channel's items with their built bytes, and the faulted channels. */
 export interface AppOutbox {
@@ -14,6 +32,7 @@ export interface AppOutbox {
   space?: { signed: Bytes; sig: Bytes } | null;
   channels: { channel: Bytes; items: OutboxItem[] }[];
   faults: Bytes[];
+  names?: PendingName[];
 }
 
 /** An item as a screen draws it: `waiting` for the relay, `sent` (the relay holds it, not read back yet), or `refused` (not delivered, gone from the outbox). */
@@ -73,10 +92,34 @@ function clean(raw: unknown): OutboxItem | undefined {
   return ok ? item : undefined;
 }
 
+/** The pending name a stored value holds, or `undefined` when it is not one. */
+function cleanName(raw: unknown): PendingName | undefined {
+  if (!object(raw)) return undefined;
+  const { kind, channel, name, content, setup } = raw;
+  const named = kind === KIND_CHANNEL_NAME;
+  const ok =
+    (named || kind === KIND_PERSON_NAME || kind === KIND_DEVICE_NAME) &&
+    sized(name, 16) &&
+    typeof content === "string" &&
+    readName(kind as number, content).ok &&
+    (named ? sized(channel, 32) : channel == null) &&
+    typeof setup === "boolean";
+  return ok
+    ? {
+        kind: kind as number,
+        channel: (channel ?? undefined) as Bytes | undefined,
+        name: name as Bytes,
+        content,
+        setup,
+      }
+    : undefined;
+}
+
 /** The app outbox in memory: what the store held, cleaned at load, and what `AppLink` changes. */
 export class Boxes {
   pending: AppOutbox["pending"];
   space: AppOutbox["pending"];
+  names: PendingName[] = [];
   #items = new Map<string, { channel: Bytes; items: readonly OutboxItem[] }>();
   #faults = new Map<string, Bytes>();
 
@@ -97,6 +140,7 @@ export class Boxes {
           c.channel as Bytes,
           list(c.items).flatMap((i) => clean(i) ?? []),
         );
+    this.names = list(stored?.names).flatMap((n) => cleanName(n) ?? []);
     for (const f of list(stored?.faults))
       if (sized(f, 32)) this.#faults.set(idKey(f as Bytes), f as Bytes);
   }
@@ -133,6 +177,7 @@ export class Boxes {
       ...(this.space && { space: this.space }),
       channels: [...this.#items.values()].map((c) => ({ channel: c.channel, items: [...c.items] })),
       faults: [...this.#faults.values()],
+      ...(this.names.length && { names: [...this.names] }),
     };
   }
 }

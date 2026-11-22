@@ -18,6 +18,8 @@ public final class PairingModel {
     public var address = ""
     public var relayKey = ""
     public var enrolmentSecret = ""
+    /// The person's name, asked at a first device's setup (names design 4.2).
+    public var setupName = ""
     /// The join form: the three values the approving device gives, and this Mac's name.
     public var joinAddress = ""
     public var joinKey = ""
@@ -73,6 +75,15 @@ public final class PairingModel {
 
     /// This Mac's name as System Settings shows it. Read when the join form opens: the lookup can wait on the network, so it is not made at launch.
     @ObservationIgnored var computerName: () -> String = { Host.current().localizedName ?? "" }
+
+    /// The Mac user's full name, read when the first device's form opens.
+    @ObservationIgnored var fullName: () -> String = { NSFullUserName() }
+
+    /// The first screen's This is my first device: the form opens with the user's full name, unless the person has typed one.
+    public func openFirst() {
+        showForm = true
+        if setupName.isEmpty { setupName = Self.fitName(fullName()) }
+    }
 
     /// A device name is 1 to 64 bytes with no space at either end: cut to 64 bytes, then trimmed; nothing left is an empty field with its placeholder.
     static func fitName(_ raw: String) -> String {
@@ -249,11 +260,11 @@ public final class PairingModel {
     public func setUp() {
         guard let controller, !working else { return }
         (working, refused, problem) = (true, nil, nil)
-        let (address, key, secret) = (address, relayKey, enrolmentSecret)
+        let (address, key, secret, name) = (address, relayKey, enrolmentSecret, setupName.trimmingCharacters(in: .whitespacesAndNewlines))
         Task {
             var failure: Error?
             do {
-                try await controller.setUp(address: address, relayKey: key, enrolmentSecret: secret)
+                try await controller.setUp(address: address, relayKey: key, enrolmentSecret: secret, name: name.isEmpty ? nil : name)
             } catch {
                 failure = error
             }

@@ -8,10 +8,25 @@ import Relay
 
 @MainActor @Observable
 public final class ChannelsModel {
-    /// What the open sheet is for: a new channel, or a new `/bind` prompt in a channel.
+    /// What a name is for (names design 4.1 to 4.3): a channel, the person, or this Mac.
+    public enum NameTarget: Equatable {
+        case channel(Data)
+        case person
+        case device
+    }
+
+    /// What the open sheet is for: a new channel, a new `/bind` prompt in a channel, or a name.
     public enum Sheet: Equatable {
         case create
         case bind(channel: Data)
+        case rename(NameTarget)
+    }
+
+    /// What Save would ask of the controller: the kind of name (14 a channel's, 15 the person's, 16 this device's), its channel and the text.
+    struct NameRequest: Equatable {
+        let kind: Int
+        let target: Data?
+        let text: String
     }
 
     /// An active bot as the picker lists it.
@@ -27,13 +42,22 @@ public final class ChannelsModel {
 
     /// What Create or Bind would ask of the controller.
     enum Request: Equatable {
-        case create(bot: Data, folder: String)
+        case create(bot: Data, folder: String, name: String? = nil)
         case bind(channel: Data, draft: OutboxDraft)
     }
 
     public private(set) var state = ChannelsState()
     public private(set) var sheet: Sheet?
     public var folder = ""
+    /// What the name sheet's field holds.
+    public var nameText = ""
+    /// The name the sheet opened with.
+    private var nameShown: String?
+    /// What the channel-name field left out or cut, until the next good edit.
+    public private(set) var nameNote: String?
+    // What the model last wrote into the field itself (the folder's suggestion, a normalised text), and whether the person typed a name of their own.
+    private var written = ""
+    private var nameTouched = false
     /// The bot the person picked; the first one stands in while it is nil or no longer active.
     public var bot: Data?
     public private(set) var problem: String?
@@ -151,10 +175,39 @@ public final class ChannelsModel {
         clearFields()
     }
 
-    private func clearFields() { (folder, bot, problem, working) = ("", nil, nil, false) }
+    private func clearFields() { (folder, nameText, nameNote, written, nameTouched, bot, problem, working) = ("", "", nil, "", false, nil, nil, false) }
 
-    /// Typing takes back what the last act answered.
-    public func edited() { problem = nil }
+    /// Typing takes back what the last act answered; a new channel's name follows the folder until the person types one.
+    public func edited() {
+        problem = nil
+        guard sheet == .create, !nameTouched else { return }
+        written = ChannelNameRule.suggestion(forFolder: folder)
+        nameText = written
+        nameNote = nil // a line about an earlier name is no line about this one
+    }
+
+    /// The channel-name field changed: the text becomes what the rule makes of it, and the line says what was left out. A change the model made
+    /// itself is no new typing, so it keeps the line.
+    public func channelNameEdited() {
+        problem = nil
+        let result = ChannelNameRule.normalise(nameText)
+        let theirs = nameText != written // typed or pasted by the person, whether or not the rule then rewrites it
+        if theirs { nameTouched = true }
+        if result.text != nameText {
+            nameText = result.text
+            nameNote = result.note
+            written = result.text
+        } else if theirs {
+            nameNote = nil
+        }
+    }
+
+    /// The line for a name another of the person's channels already has (the relay cannot tell: names are encrypted); nil for none.
+    public func duplicateWarning(channels: [Data: String]) -> String? {
+        let own: Data? = if case .rename(.channel(let channel))? = sheet { channel } else { nil }
+        guard !nameText.isEmpty, channels.contains(where: { $0.key != own && $0.value == nameText }) else { return nil }
+        return "Another of your channels is already called \(nameText)."
+    }
 
     /// The person picked a bot: the last error was about the choice before.
     public func pick(_ choice: Data?) {
@@ -162,13 +215,72 @@ public final class ChannelsModel {
         problem = nil
     }
 
+    // MARK: names
+
+    /// Opens the name sheet for `target`, filled with the name now shown; nothing opens before the log is read.
+    public func openRename(_ target: NameTarget, current: String?) {
+        guard ready else { return }
+        if case .channel(let channel) = target, !canRename(channel) { return }
+        open(.rename(target))
+        nameText = current ?? ""
+        nameShown = current
+    }
+
+    /// A faulted channel takes no name: the link would never write it.
+    public func canRename(_ channel: Data) -> Bool { ready && !state.faulted.contains(channel) }
+
+    /// The ends are trimmed: a name has no space at either end.
+    func nameRequest() -> NameRequest? {
+        guard case .rename(let target)? = sheet else { return nil }
+        let text = nameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        switch target {
+        case .channel(let channel): return NameRequest(kind: 14, target: channel, text: text)
+        case .person: return NameRequest(kind: 15, target: nil, text: text)
+        case .device: return NameRequest(kind: 16, target: nil, text: text)
+        }
+    }
+
+    /// Save is offered with a name that differs from the one shown, and no act in flight.
+    public var canSaveName: Bool { ready && !working && nameRequest().map { $0.text != nameShown } ?? false }
+
+    /// Asks the controller to set the name the sheet holds; the answer lands in `finishName`.
+    public func saveName() {
+        guard let controller, canSaveName, let request = nameRequest() else { return }
+        (working, problem) = (true, nil)
+        let asked = ticket
+        Task {
+            do { finishName(try await controller.setName(kind: request.kind, target: request.target, text: request.text), for: asked) } catch { finishFailure(error, for: asked) }
+        }
+    }
+
+    func finishName(_ outcome: SendOutcome, for asked: Int? = nil) {
+        guard asked ?? ticket == ticket, case .rename(let target)? = sheet else { return }
+        working = false
+        switch outcome {
+        case .queued: close()
+        case .notSaved: problem = "Pardner could not save the name. Try again."
+        case .ended: problem = Self.notConnected
+        case .refused(let reason):
+            problem = switch (reason, target) {
+            case ("bad-input", .channel): "Use only lowercase letters, digits, - and _, up to 80 characters."
+            case ("bad-input", .person): "Use up to 64 characters, with no hidden characters and no @."
+            case ("bad-input", .device): "Use up to 64 characters, with no hidden characters."
+            case ("not-ready", _): Self.notReady
+            case ("not-member", _): "This Mac is not a member of this channel."
+            default: "Pardner could not set the name. Try again in a moment."
+            }
+        }
+    }
+
     // MARK: the acts
 
     func request(names: [Data: String]) -> Request? {
         guard let sheet, !trimmedFolder.isEmpty, let bot = resolvedBot(names: names) else { return nil }
         switch sheet {
-        case .create: return .create(bot: bot, folder: trimmedFolder)
+        case .create: return .create(bot: bot, folder: trimmedFolder, name: nameText.isEmpty ? nil : nameText)
         case .bind(let channel): return .bind(channel: channel, draft: Self.bindDraft(bot: bot, folder: trimmedFolder))
+        case .rename: return nil
         }
     }
 
@@ -185,8 +297,8 @@ public final class ChannelsModel {
         let asked = ticket
         Task {
             switch request {
-            case .create(let bot, let folder):
-                do { finishCreate(try await controller.createChannel(bot: bot, folder: folder), for: asked) } catch { finishFailure(error, for: asked) }
+            case .create(let bot, let folder, let name):
+                do { finishCreate(try await controller.createChannel(bot: bot, folder: folder, name: name), for: asked) } catch { finishFailure(error, for: asked) }
             case .bind(let channel, let draft):
                 do { finishSend(try await controller.send(channel: channel, draft: draft), for: asked) } catch { finishFailure(error, for: asked) }
             }

@@ -144,7 +144,7 @@ struct FirstScreen: View {
             if note == .staleRecoveryKey { stale(RecoveryScreenWords.staleKey) }
             Choice(title: "This is my first device", prominent: true,
                    line: "For a relay just made with pardner relay init. This Mac becomes your first device and makes your recovery key. You need the relay's address, key and enrolment secret.") {
-                model.showForm = true
+                model.openFirst()
             }
             Choice(title: "I already use Pardner on another device", prominent: false,
                    line: "Your other device approves this Mac. You need the three values its Devices screen shows under Add a device.") {
@@ -195,6 +195,10 @@ struct RelayForm: View {
                   error: model.refused == .enrolmentSecret ? "The enrolment secret must be 64 hexadecimal characters." : nil) {
                 SecureField("", text: $model.enrolmentSecret).accessibilityLabel("Enrolment secret")
             }
+            Field(title: "Your name", hint: "Your other devices show it. Change it if you like, or leave it empty.",
+                  error: model.refused == .name ? "Use up to 64 characters, with no hidden characters and no @." : nil) {
+                TextField("Your name", text: $model.setupName).accessibilityLabel("Your name")
+            }
             if let problem = model.problem {
                 Text(problem).foregroundStyle(PardnerColor.delText).font(PardnerFont.ui(size: 13, weight: .regular))
             }
@@ -208,6 +212,7 @@ struct RelayForm: View {
         }
         .onChange(of: model.address) { model.edited() }
         .onChange(of: model.relayKey) { model.edited() }
+        .onChange(of: model.setupName) { model.edited() }
         // Not when the model itself empties the field after the controller has had the secret: that would take back the error it just set.
         .onChange(of: model.enrolmentSecret) { if !model.enrolmentSecret.isEmpty { model.edited() } }
     }

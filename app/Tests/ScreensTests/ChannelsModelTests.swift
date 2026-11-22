@@ -277,4 +277,150 @@ final class ChannelsModelTests: XCTestCase {
         XCTAssertEqual(model.request(names: names), .bind(channel: Self.id(9), draft: ChannelsModel.bindDraft(bot: Self.id(3), folder: "/w")),
                        "mini sorts first, and the channel's bot is studio")
     }
+
+    // MARK: names (names design 4.1 to 4.3)
+
+    func testARenameOpensFilledWithTheNameShownAndAsksForTheKindOfItsTarget() throws {
+        let channel = Self.id(9)
+        let model = ChannelsModel(devices: devices())
+        model.openRename(.channel(channel), current: "docs")
+        XCTAssertEqual(model.sheet, .rename(.channel(channel)))
+        XCTAssertEqual(model.nameText, "docs")
+        XCTAssertTrue(try XCTUnwrap(model.nameRequest()) == .init(kind: 14, target: channel, text: "docs"))
+        model.openRename(.person, current: nil)
+        model.nameText = "  Ada Lovelace \n"
+        XCTAssertTrue(try XCTUnwrap(model.nameRequest()) == .init(kind: 15, target: nil, text: "Ada Lovelace"), "the ends are trimmed: a name has no space at either end")
+        model.openRename(.device, current: "Mac one")
+        XCTAssertTrue(try XCTUnwrap(model.nameRequest()) == .init(kind: 16, target: nil, text: "Mac one"))
+        model.nameText = "  "
+        XCTAssertNil(model.nameRequest(), "an empty name is not saved")
+    }
+
+    func testNothingOpensBeforeTheLogIsRead() {
+        let model = ChannelsModel(devices: devices(read: false))
+        model.openRename(.person, current: nil)
+        XCTAssertNil(model.sheet)
+    }
+
+    func testRenameOutcomesSaySomethingPlainPerTarget() {
+        let model = ChannelsModel(devices: devices())
+        model.openRename(.channel(Self.id(9)), current: "docs")
+        model.finishName(.refused("bad-input"))
+        XCTAssertEqual(model.problem, "Use only lowercase letters, digits, - and _, up to 80 characters.")
+        model.finishName(.notSaved)
+        XCTAssertEqual(model.problem, "Pardner could not save the name. Try again.")
+        model.openRename(.person, current: nil)
+        model.finishName(.refused("bad-input"))
+        XCTAssertEqual(model.problem, "Use up to 64 characters, with no hidden characters and no @.")
+        model.openRename(.device, current: nil)
+        model.finishName(.refused("bad-input"))
+        XCTAssertEqual(model.problem, "Use up to 64 characters, with no hidden characters.")
+        model.finishName(.queued(name: Data(repeating: 1, count: 16)))
+        XCTAssertNil(model.sheet, "a name set closes the sheet")
+    }
+
+    func testAFaultedChannelCannotBeRenamed() {
+        let channel = Self.id(9)
+        var state = ChannelsState()
+        state.faulted = [channel]
+        let model = ChannelsModel(state: state, devices: devices())
+        XCTAssertFalse(model.canRename(channel))
+        model.openRename(.channel(channel), current: "docs")
+        XCTAssertNil(model.sheet, "the name would never be written")
+        XCTAssertTrue(ChannelsModel(devices: devices()).canRename(channel))
+    }
+
+    func testSavingTheNameAlreadyShownIsNotOffered() {
+        let model = ChannelsModel(devices: devices())
+        model.openRename(.person, current: "Ada")
+        XCTAssertFalse(model.canSaveName, "nothing would change")
+        model.nameText = "Ada Lovelace"
+        XCTAssertTrue(model.canSaveName)
+        model.nameText = " Ada "
+        XCTAssertFalse(model.canSaveName, "the ends are trimmed before the comparison")
+    }
+
+    func testAnUnexpectedRefusalIsAPlainSentenceWithNoCode() {
+        let model = ChannelsModel(devices: devices())
+        model.openRename(.person, current: nil)
+        model.finishName(.refused("something-new"))
+        XCTAssertEqual(model.problem, "Pardner could not set the name. Try again in a moment.")
+    }
+
+    // MARK: the channel name's typing rule (decided 2026-11-22)
+
+    func testTheChannelNameRuleChangesWhatIsTypedAsDecided() {
+        let note = "Only a to z, 0 to 9, - and _ are allowed in a channel name."
+        let rows: [(String, String, String?)] = [
+            ("Docs", "docs", nil), // uppercase to lowercase
+            ("my docs", "my-docs", nil), // a space to one -
+            ("my   docs", "my-docs", nil), // a run of spaces to one -
+            ("Caf\u{E9} \u{C0}la", "cafe-ala", nil), // an accented letter to its base letter
+            ("a_b-c9", "a_b-c9", nil), // what is allowed stays
+            ("docs & notes", "docs-notes", note), // any other character is not inserted, with the line saying what is allowed
+            ("docs!", "docs", note),
+            ("\u{4E2D}\u{6587}", "", note),
+        ]
+        for (typed, shown, line) in rows {
+            let result = ChannelNameRule.normalise(typed)
+            XCTAssertEqual(result.text, shown, typed)
+            XCTAssertEqual(result.note, line, typed)
+        }
+        let long = ChannelNameRule.normalise(String(repeating: "a", count: 95))
+        XCTAssertEqual(long.text.count, 80, "a paste is cut at 80")
+        XCTAssertEqual(long.note, "A channel name has at most 80 characters: the rest was cut.")
+    }
+
+    func testTypingAnIllegalCharacterKeepsTheLineUntilTheNextGoodEdit() {
+        let model = ChannelsModel(devices: devices())
+        model.openRename(.channel(Self.id(9)), current: nil)
+        model.nameText = "docs!"
+        model.channelNameEdited()
+        XCTAssertEqual(model.nameText, "docs")
+        XCTAssertEqual(model.nameNote, "Only a to z, 0 to 9, - and _ are allowed in a channel name.")
+        model.channelNameEdited() // the change of the field to "docs" is told again: nothing new was typed
+        XCTAssertNotNil(model.nameNote)
+        model.nameText = "docs2"
+        model.channelNameEdited()
+        XCTAssertNil(model.nameNote, "a good edit takes the line back")
+    }
+
+    func testTwoChannelsWithOneNameAreWarnedAbout() {
+        let (mine, other) = (Self.id(9), Self.id(8))
+        let model = ChannelsModel(devices: devices())
+        model.openRename(.channel(mine), current: "docs")
+        XCTAssertNil(model.duplicateWarning(channels: [mine: "docs", other: "web"]), "its own name is no duplicate")
+        model.nameText = "web"
+        XCTAssertEqual(model.duplicateWarning(channels: [mine: "docs", other: "web"]), "Another of your channels is already called web.")
+        model.nameText = ""
+        XCTAssertNil(model.duplicateWarning(channels: [other: "web"]))
+    }
+
+    func testTheNewChannelNameFollowsTheFolderUntilTheyTypeOne() {
+        let model = ChannelsModel(devices: devices())
+        model.openNew()
+        model.folder = "/work/My App"
+        model.edited()
+        XCTAssertEqual(model.nameText, "my-app", "the folder's last component, as the rule makes it")
+        model.nameText = "web"
+        model.channelNameEdited()
+        model.folder = "/work/other"
+        model.edited()
+        XCTAssertEqual(model.nameText, "web", "a name the person typed stays")
+        XCTAssertEqual(model.request(names: names), .create(bot: Self.id(2), folder: "/work/other", name: "web"))
+    }
+
+    func testAPastedNameTheRuleRewroteIsStillTheirsAndTheFolderLeavesItAlone() {
+        let model = ChannelsModel(devices: devices())
+        model.openNew()
+        model.folder = "/work/app"
+        model.edited()
+        model.nameText = "Web"
+        model.channelNameEdited() // pasted: the rule makes it "web"
+        XCTAssertEqual(model.nameText, "web")
+        model.channelNameEdited() // the field's own change comes back
+        model.folder = "/work/other"
+        model.edited()
+        XCTAssertEqual(model.nameText, "web", "the person typed a name: the folder no longer replaces it")
+    }
 }

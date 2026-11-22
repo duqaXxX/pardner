@@ -245,6 +245,11 @@ extension LinkStoreTests {
             "space": .object(["signed": bytes(8, 70), "sig": bytes(8, 64)]),
             "channels": .array([.object(["channel": id(5), "items": .array([full, plain])])]),
             "faults": .array([id(6)]),
+            // Names the person set that are not read back (names design 4.4): a channel's with its channel, and the person's setup name.
+            "names": .array([
+                .object(["kind": .number(14), "channel": id(5), "name": bytes(11, 16), "content": .string("{\"name\":\"docs\"}"), "setup": .bool(false)]),
+                .object(["kind": .number(15), "name": bytes(12, 16), "content": .string("{\"name\":\"Ada\"}"), "setup": .bool(true)]),
+            ]),
         ])
     }
 
@@ -260,6 +265,20 @@ extension LinkStoreTests {
         try store!.writeOutbox(outbox())
         store = nil
         XCTAssertEqual(try LinkStore(folder: place, identity: identity).loadOutbox(), outbox())
+    }
+
+    func testAnUnreadableNamesFieldDropsTheNamesAlone() throws {
+        let place = folder()
+        var store: LinkStore? = try LinkStore(folder: place, identity: identity)
+        try store!.writeOutbox(outbox())
+        store = nil
+        var file = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: outboxFile(place))) as? [String: Any])
+        file["names"] = "not a list"
+        try JSONSerialization.data(withJSONObject: file).write(to: outboxFile(place))
+        let loaded = try XCTUnwrap(try LinkStore(folder: place, identity: identity).loadOutbox(), "the rest of the outbox is kept")
+        XCTAssertNil(loaded["names"])
+        XCTAssertNotNil(loaded["pending"]?["signed"])
+        XCTAssertNotNil(loaded["channels"])
     }
 
     func testAnOutboxWrittenBeforeTheSpaceHadASlotIsStillRead() throws {

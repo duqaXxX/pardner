@@ -15,8 +15,10 @@ enum Clipboard {
 
 public struct DevicesSheet: View {
     @Bindable var model: DevicesModel
+    /// Renames this Mac (names design 4.3); nil where the window has no pairing.
+    let renameThisMac: (() -> Void)?
 
-    public init(model: DevicesModel) { self.model = model }
+    public init(model: DevicesModel, renameThisMac: (() -> Void)? = nil) { (self.model, self.renameThisMac) = (model, renameThisMac) }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -25,7 +27,7 @@ public struct DevicesSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: PardnerMetrics.gap * 2) {
                     switch model.page {
-                    case .list: DeviceList(model: model)
+                    case .list: DeviceList(model: model, rename: renameThisMac)
                     case .add: AddDevice(model: model)
                     case .remove: RemoveDevices(model: model)
                     }
@@ -153,6 +155,7 @@ struct Note: View {
 
 struct DeviceList: View {
     let model: DevicesModel
+    var rename: (() -> Void)?
 
     var body: some View {
         if let notice = model.state.notice {
@@ -184,6 +187,9 @@ struct DeviceList: View {
                     Button("Remove") { model.askRemoval(clicked: row.id) }
                         .buttonStyle(PardnerButton(prominent: false)).disabled(!model.canRemove(row))
                         .accessibilityLabel("Remove \(DevicesModel.title(row))")
+                } else if let rename {
+                    Button("Rename…") { rename() }
+                        .buttonStyle(PardnerButton(prominent: false)).disabled(!model.ready).accessibilityLabel("Rename this Mac")
                 }
             }
             .padding(PardnerMetrics.gap * 1.5).card()

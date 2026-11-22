@@ -101,7 +101,7 @@ final class PairingStoreTests: XCTestCase {
         try fault("")
         try fault("[]")
         try fault("{\"version\":1")
-        try fault(good.replacingOccurrences(of: "\"version\":1", with: "\"version\":3"))
+        try fault(good.replacingOccurrences(of: "\"version\":1", with: "\"version\":4"))
         try fault(good.replacingOccurrences(of: "\"stage\":\"paired\"", with: "\"stage\":\"done\""))
         try fault("{\"extra\":1," + good.dropFirst())
         try fault(good.replacingOccurrences(of: "\"port\":8443", with: "\"port\":70000"))
@@ -252,11 +252,48 @@ final class PairingStoreTests: XCTestCase {
         XCTAssertThrowsError(try PairingStore.decode(Data(recovering.replacingOccurrences(of: "\"version\":2", with: "\"version\":1").utf8))) { error in
             XCTAssertEqual((error as? PairingFault)?.isNewerVersion, false, "a recovery in a version 1 file is malformed, not newer")
         }
-        XCTAssertThrowsError(try PairingStore.decode(Data(recovering.replacingOccurrences(of: "\"version\":2", with: "\"version\":3").utf8))) { error in
+        XCTAssertThrowsError(try PairingStore.decode(Data(recovering.replacingOccurrences(of: "\"version\":2", with: "\"version\":4").utf8))) { error in
             XCTAssertEqual((error as? PairingFault)?.isNewerVersion, true)
         }
         let plain = String(decoding: try PairingStore.encode(states()[5]), as: UTF8.self)
         XCTAssertEqual(try PairingStore.decode(Data(plain.replacingOccurrences(of: "\"version\":1", with: "\"version\":2").utf8)), states()[5], "version 2 reads a plain state too")
+    }
+
+    /// A paired Mac that keeps the name typed at its join is version 3, so a build that does not know the field calls the file newer and erases nothing (design 4.1; names design 4.3).
+    func testAPairedFileThatHoldsANameIsVersionThree() throws {
+        var named = PairingState(stage: .paired, relay: relay, person: person)
+        named.name = "Mac mini"
+        let text = String(decoding: try PairingStore.encode(named), as: UTF8.self)
+        XCTAssertTrue(text.contains("\"version\":3"))
+        XCTAssertEqual(try PairingStore.decode(Data(text.utf8)), named, "every version is read")
+        for old in ["1", "2"] {
+            XCTAssertThrowsError(try PairingStore.decode(Data(text.replacingOccurrences(of: "\"version\":3", with: "\"version\":\(old)").utf8))) { error in
+                XCTAssertEqual((error as? PairingFault)?.isNewerVersion, false, "a name at paired in version \(old) is malformed, not newer")
+            }
+        }
+        XCTAssertThrowsError(try PairingStore.decode(Data(text.replacingOccurrences(of: "\"version\":3", with: "\"version\":4").utf8))) { error in
+            XCTAssertEqual((error as? PairingFault)?.isNewerVersion, true)
+        }
+        let plain = String(decoding: try PairingStore.encode(PairingState(stage: .paired, relay: relay, person: person)), as: UTF8.self)
+        XCTAssertTrue(plain.contains("\"version\":1"), "a paired file without a name stays version 1")
+        XCTAssertEqual(try PairingStore.decode(Data(plain.replacingOccurrences(of: "\"version\":1", with: "\"version\":3").utf8)).name, nil, "version 3 reads a plain state too")
+    }
+
+    /// The name typed at setup is kept through the setup stages in a version 3 file, as the join's is once paired.
+    func testTheSetupStagesMayHoldTheTypedNameInAVersionThreeFile() throws {
+        for stage in [PairingStage.keysMade(.enrol), .enrolling] {
+            var state = states().first { $0.stage == stage }!
+            state.name = "Ada Lovelace"
+            let text = String(decoding: try PairingStore.encode(state), as: UTF8.self)
+            XCTAssertTrue(text.contains("\"version\":3"), "\(stage)")
+            XCTAssertEqual(try PairingStore.decode(Data(text.utf8)), state)
+            XCTAssertThrowsError(try PairingStore.decode(Data(text.replacingOccurrences(of: "\"version\":3", with: "\"version\":1").utf8))) { error in
+                XCTAssertEqual((error as? PairingFault)?.isNewerVersion, false, "a name at \(stage) in version 1 is malformed")
+            }
+        }
+        var join = states().first { $0.stage == .keysMade(.join) }!
+        join.name = "Mac"
+        XCTAssertThrowsError(try PairingStore.decode(try PairingStore.encode(join)), "a join's keys-made holds no name")
     }
 
     func testEnrollingNamesTheGenesisIdAsThePerson() throws {

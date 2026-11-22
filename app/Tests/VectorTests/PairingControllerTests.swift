@@ -56,9 +56,14 @@ final class FakeLink: RelayLinking, @unchecked Sendable { // one test thread at 
         onSubmit?()
         return submitOutcomes.isEmpty ? submitOutcome : submitOutcomes.removeFirst()
     }
-    func createChannel(bot: Data, folder: String) async throws -> CreateOutcome {
+    func createChannel(bot: Data, folder: String, name: String?) async throws -> CreateOutcome {
         creations.append((bot, folder))
         return createOutcome
+    }
+    var named: [(kind: Int, target: Data?, text: String, setup: Bool)] = []
+    func setName(kind: Int, target: Data?, text: String, setup: Bool) async throws -> SendOutcome {
+        named.append((kind, target, text, setup))
+        return sendOutcome
     }
     func send(channel: Data, draft: OutboxDraft) async throws -> SendOutcome {
         sends.append((channel, draft))
@@ -101,6 +106,7 @@ private final class Seen: @unchecked Sendable {
 private final class Harness: @unchecked Sendable {
     var links: [FakeLink] = []
     var enrolments: [Enrolment?] = []
+    var typedNames: [String?] = []
     var hostsMade = 0
     var putBackStored = false // the mark a put-back leaves in the link store: every later link delivers it at its start
     var link: FakeLink { links.last! }
@@ -146,10 +152,11 @@ final class PairingControllerTests: XCTestCase {
                 await latch?.wait()
                 return try await ProtocolHost(scriptPath: script, store: keys, person: person)
             },
-            connect: { _, _, _, _, _, enrolment, _ in
+            connect: { _, _, _, _, _, enrolment, _, typed in
                 let link = FakeLink(putBack: harness.putBackStored)
                 harness.links.append(link)
                 harness.enrolments.append(enrolment)
+                harness.typedNames.append(typed)
                 return link
             })
         return Rig(controller: controller, keys: store, pairing: pairing, pairingFolder: pairingFolder, linkFolder: linkFolder, harness: harness)
@@ -162,10 +169,11 @@ final class PairingControllerTests: XCTestCase {
         let controller = PairingController(
             keys: rig.keys, pairing: rig.pairing, linkFolder: rig.linkFolder,
             makeHost: { keys, person in try await ProtocolHost(scriptPath: script, store: keys, person: person) },
-            connect: { _, _, _, _, _, enrolment, _ in
+            connect: { _, _, _, _, _, enrolment, _, typed in
                 let link = FakeLink(putBack: harness.putBackStored)
                 harness.links.append(link)
                 harness.enrolments.append(enrolment)
+                harness.typedNames.append(typed)
                 return link
             })
         return (controller, harness)
@@ -201,9 +209,9 @@ final class PairingControllerTests: XCTestCase {
     }
 
     /// The setup of the standard form, on a task of its own: the sheet's answer comes from the test.
-    private func begin(_ rig: Rig) -> Task<Void, Error> {
+    private func begin(_ rig: Rig, name: String? = nil) -> Task<Void, Error> {
         let (controller, key, secret) = (rig.controller, hex(relayKey), secretHex)
-        return Task { try await controller.setUp(address: "relay.example:8443", relayKey: key, enrolmentSecret: secret) }
+        return Task { try await controller.setUp(address: "relay.example:8443", relayKey: key, enrolmentSecret: secret, name: name) }
     }
 
     private func relayText() -> String { "relay.example:8443" }
@@ -265,7 +273,7 @@ final class PairingControllerTests: XCTestCase {
 
     /// Design 4.1: a file written by a newer app is the newer app's: nothing is erased and no action is offered but updating.
     func testANewerVersionStoreErasesNothingAndRefusesPairAgain() async throws {
-        let rig = try rig(keys: true, rawStore: #"{"version": 3}"#)
+        let rig = try rig(keys: true, rawStore: #"{"version": 4}"#)
         await rig.controller.launch()
         let phase = await rig.controller.phase
         guard case .fault(.newerStore, let advice) = phase else { return XCTFail("\(phase)") }
@@ -369,7 +377,7 @@ final class PairingControllerTests: XCTestCase {
         ]
         for (address, key, secret, error) in cases {
             do {
-                try await rig.controller.setUp(address: address, relayKey: key, enrolmentSecret: secret)
+                try await rig.controller.setUp(address: address, relayKey: key, enrolmentSecret: secret, name: nil)
                 XCTFail("\(address) was taken")
             } catch let thrown as PairingInputError { XCTAssertEqual(thrown, error, address) }
             XCTAssertNil(try rig.pairing.load(), "nothing was written")
@@ -397,6 +405,42 @@ final class PairingControllerTests: XCTestCase {
         XCTAssertNil(try rig.pairing.load())
         XCTAssertTrue(rig.harness.links.isEmpty, "nothing was sent")
         XCTAssertNil(request.withSecret { $0.count }, "the secret is out of reach once answered")
+    }
+
+    /// The name typed at setup (names design 4.2) is kept in the pairing file from `keys-made` on and given to the link as the person's name.
+    func testTheNameTypedAtSetupIsKeptThroughTheStagesAndGivenToTheLink() async throws {
+        let rig = try rig()
+        await rig.controller.launch()
+        let setUp = begin(rig, name: "Ada Lovelace")
+        let found = await sheet(rig.controller); let request = try XCTUnwrap(found)
+        XCTAssertEqual(try rig.pairing.load()?.name, "Ada Lovelace", "at keys-made, while the sheet shows")
+        request.answer(true)
+        try await setUp.value
+        XCTAssertEqual(try rig.pairing.load()?.name, "Ada Lovelace", "at enrolling")
+        XCTAssertEqual(rig.harness.typedNames.last, "Ada Lovelace")
+    }
+
+    /// The person's name is checked as kind 15 is read: 64 characters, not the pairing string's 64 bytes.
+    func testAThirtyCharacterNameInAnotherScriptIsTakenAtSetup() async throws {
+        let rig = try rig()
+        await rig.controller.launch()
+        let setUp = begin(rig, name: String(repeating: "\u{4E2D}", count: 30))
+        let found = await sheet(rig.controller); let request = try XCTUnwrap(found)
+        XCTAssertEqual(try rig.pairing.load()?.name, String(repeating: "\u{4E2D}", count: 30))
+        request.answer(false)
+        _ = try? await setUp.value
+    }
+
+    func testANameThatDoesNotFitIsRefusedBeforeAnythingIsWritten() async throws {
+        let rig = try rig()
+        await rig.controller.launch()
+        for bad in ["", " Ada", "Ada\u{200B}", "Ada@home"] {
+            do {
+                try await rig.controller.setUp(address: relayText(), relayKey: hex(relayKey), enrolmentSecret: secretHex, name: bad)
+                XCTFail("\(bad) was taken")
+            } catch let thrown as PairingInputError { XCTAssertEqual(thrown, .name, bad) }
+            XCTAssertNil(try rig.pairing.load(), "nothing was written")
+        }
     }
 
     func testAConfirmationWritesEnrollingWithEntryZeroThenConnectsWithTheSecret() async throws {
