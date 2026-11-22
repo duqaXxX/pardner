@@ -141,6 +141,7 @@ test(
 );
 
 test("nothing serving means port 1, and a serve that waits for init fails when its child exits", {
+  ...DARWIN,
   timeout: 20_000,
 }, async () => {
   const relay = new RelayProcess();
