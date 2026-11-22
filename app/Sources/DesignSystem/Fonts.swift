@@ -77,6 +77,11 @@ public enum PardnerFont {
         Font(ctFont(file: "JetBrainsMono[wght].ttf", size: size, weight: weight.rawValue))
     }
 
+    /// Inter as a `CTFont`, for an AppKit view that draws text by itself (the composer's field).
+    public static func uiCT(size: CGFloat, weight: InterWeight) -> CTFont {
+        ctFont(file: "InterVariable.ttf", size: size, weight: weight.rawValue)
+    }
+
     /// JetBrains Mono as a `CTFont`, for drawing glyphs by hand (the recovery key is never given to a `Text`).
     public static func monoCT(size: CGFloat, weight: MonoWeight) -> CTFont {
         ctFont(file: "JetBrainsMono[wght].ttf", size: size, weight: weight.rawValue)

@@ -13,7 +13,10 @@ enum Naming {
     }
 
     /// A channel in the sidebar and the header: its name when one shows, else its short id.
-    static func channel(_ id: Data, in model: ReadingModel) -> String { "#" + (model.names.channels[id] ?? short(id)) }
+    static func channel(_ id: Data, in model: ReadingModel) -> String { "#" + bareChannel(id, in: model) }
+
+    /// A channel's name without its `#`, for the sidebar row that draws the `#` in a colour of its own.
+    static func bareChannel(_ id: Data, in model: ReadingModel) -> String { model.names.channels[id] ?? short(id) }
 
     /// A channel by its short id alone, where no names are read.
     static func channel(_ id: Data) -> String { "#" + short(id) }
@@ -23,6 +26,37 @@ enum Naming {
 
     /// A short time of day, as the boards show beside a sender.
     static func time(_ date: Date) -> String { date.formatted(date: .omitted, time: .shortened) }
+
+    /// The date and the time of a message, for the tooltip of its time.
+    static func dateTime(_ date: Date) -> String { date.formatted(date: .abbreviated, time: .shortened) }
+
+    /// A day's word for a separator: Today, Yesterday, else the date. `now` and `calendar` are given so that a test fixes them.
+    static func day(_ date: Date, now: Date, calendar: Calendar) -> String {
+        if calendar.isDate(date, inSameDayAs: now) { return "Today" }
+        if let before = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: before) { return "Yesterday" }
+        return date.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted, locale: calendar.locale ?? .current, calendar: calendar, timeZone: calendar.timeZone))
+    }
+
+    /// The separator before each entry: the day's word for the first entry and at each change of calendar day, else nil. An entry with no
+    /// time (one whose time is not known) has no separator and leaves the day as it was.
+    static func dayLabels(_ times: [Date?], now: Date, calendar: Calendar) -> [String?] {
+        var current: Date?
+        return times.map { time in
+            guard let time else { return nil }
+            defer { current = time }
+            if let current, calendar.isDate(time, inSameDayAs: current) { return nil }
+            return day(time, now: now, calendar: calendar)
+        }
+    }
+
+    /// The count of a thread's replies, as its summary words it.
+    static func replies(_ count: Int) -> String { count == 1 ? "1 reply" : "\(count) replies" }
+
+    /// The `@name` a prompt opens its text with: only a prompt of the owner's that reads and names its bot.
+    static func mention(of message: Message, in model: ReadingModel) -> String? {
+        guard message.kind == 2, message.body != .unreadable, let to = message.to else { return nil }
+        return "@" + sender(to, in: model)
+    }
 }
 
 extension Message {
@@ -52,6 +86,9 @@ extension MessageThread {
         let messages = items.compactMap { item -> Date? in if case .message(let m) = item { m.time } else { nil } }.max()
         return [messages, lastReply].compactMap { $0 }.max()
     }
+
+    /// `Last reply HH:mm` for the summary, nil while nothing was answered.
+    var lastReplyWords: String? { lastTime.map { "Last reply \(Naming.time($0))" } }
 }
 
 extension SessionState {
@@ -63,4 +100,7 @@ extension SessionState {
         case .waiting: "Waiting for you"
         }
     }
+
+    /// The state word a summary and the panel's header show: only a session that runs or waits writes one.
+    var pill: String? { self == .idle ? nil : label }
 }

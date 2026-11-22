@@ -40,8 +40,8 @@ public enum Samples {
         profile(mini, "mini", "alice@example.com")
         profile(studio, "studio", "bob@example.com")
 
-        let hello = put(1, bob, ["markdown": "Morning. I moved the release to Friday, the docs are not ready."], minutes: 0)
-        put(1, alice, ["markdown": "Fine by me. I'll ask mini to look at the failing test.", "thread": hello.hex], minutes: 2)
+        let hello = put(1, bob, ["markdown": "Morning. I moved the release to Friday, the docs are not ready."], minutes: -1440) // the day before, so that the window draws two days
+        put(1, alice, ["markdown": "Fine by me. I'll ask mini to look at the failing test.", "thread": hello.hex], minutes: -1438)
 
         let fix = put(2, alice, ["text": "The relay test fails on a restart. Find why and fix it."], to: mini, minutes: 5)
         put(3, mini, [:], re: fix, minutes: 5.1)
