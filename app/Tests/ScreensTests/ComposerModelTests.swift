@@ -506,6 +506,66 @@ final class ComposerModelTests: XCTestCase {
         XCTAssertEqual(c.text, "second")
     }
 
+    /// #107: a failed send gives the text back; selecting it all and typing `@` (one edit) opens the bot list as in an empty field.
+    func testAnAtTypedOverATextAFailureGaveBackOpensTheBotList() async {
+        outcome = .notSaved
+        let c = composer()
+        await send(c, "hello")
+        XCTAssertEqual(c.text, "hello", "the failure gives the text back")
+        type(c, "@")
+        XCTAssertTrue(c.picking, "an @ over the restored text opens the list")
+        XCTAssertTrue(c.pickHighlighted())
+        XCTAssertNotNil(c.label, "the pick becomes the label, so the message reaches the bot")
+    }
+
+    /// A text that started with `@` comes back with its list closed, as before: the `@` that was closed is still there.
+    func testATextThatStartedWithAnAtComesBackWithItsListClosed() async {
+        outcome = .notSaved
+        let c = composer()
+        await send(c, "@nobody here")
+        XCTAssertEqual(c.text, "@nobody here")
+        XCTAssertFalse(c.picking)
+        type(c, "@")
+        XCTAssertTrue(c.picking, "the whole text replaced by an @: the closed @ went, so the list opens")
+    }
+
+    /// After Escape the list stays closed while the person types on, and opens again once the field is a lone `@` once more.
+    func testAFieldBackToALoneAtAfterEscapeOpensTheList() {
+        let c = composer()
+        type(c, "@")
+        c.closePicker()
+        press(c, "x")
+        XCTAssertFalse(c.picking, "typing on after Escape keeps it closed")
+        type(c, "@")
+        XCTAssertTrue(c.picking)
+    }
+
+    /// #112: the empty field names the channel and how to reach a bot; in a session's thread, the bot a reply goes to; in a people's thread, the thread.
+    func testThePlaceholderNamesTheChannelOrTheBotAReplyGoesTo() {
+        let r = reading()
+        XCTAssertEqual(composer(reading: r.0).placeholder, "Message \(Naming.channel(channel, in: r.0)), or type @ to hand a task to a bot")
+        let session = composer(thread: r.mine, reading: r.0)
+        XCTAssertEqual(session.placeholder, "Reply to \(session.name(of: mini))", "the bot named as the bot list names it")
+        XCTAssertEqual(composer(thread: r.people, reading: r.0).placeholder, "Reply in the thread")
+        let named = composer(reading: r.0)
+        named.startMention()
+        XCTAssertTrue(named.pickHighlighted())
+        XCTAssertEqual(named.placeholder, "Message \(Naming.channel(channel, in: r.0))", "no @ hint once a bot is named")
+    }
+
+    /// #112: the emoji button asks for the field's keyboard and the palette; the field clears both once it has honoured them.
+    func testTheEmojiButtonAsksForTheFieldAndThePalette() {
+        let c = composer()
+        c.startEmoji()
+        XCTAssertTrue(c.focusRequested)
+        XCTAssertTrue(c.paletteRequested)
+        c.focusTaken()
+        XCTAssertFalse(c.focusRequested)
+        XCTAssertFalse(c.paletteRequested)
+        c.startMention()
+        XCTAssertFalse(c.paletteRequested, "the mention button opens no palette")
+    }
+
     func testABindOfASheetIsARowButAnItemWithReIsNotDrawn() {
         let c = composer()
         let bind = OutboxItemRow(name: Data(repeating: 0xB1, count: 16), kind: 2, to: mini, re: nil, content: #"{"text":"/bind /work"}"#, state: .waiting)
