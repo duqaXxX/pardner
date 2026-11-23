@@ -34,11 +34,13 @@ enum SidebarDrag {
         case header(String, below: Bool)
         case row(Data, below: Bool)
         case channels
+        /// An empty section's `No channels` row.
+        case empty(String)
 
         var isBelow: Bool {
             switch self {
             case .header(_, let below), .row(_, let below): below
-            case .channels: false
+            case .channels, .empty: false
             }
         }
     }
@@ -48,6 +50,9 @@ enum SidebarDrag {
         case header(String)
         case row(Data)
         case channels
+        /// An empty section's `No channels` row: a channel dropped on it goes into the section; a section is refused, as its line would
+        /// show inside the section.
+        case empty(String)
 
         /// Whether the zone's two halves mean different places: a row's always (a channel goes before it or before the row below), a header's
         /// only for a dragged section; a channel dropped on a header goes last, and "Channels" is one place.
@@ -55,7 +60,7 @@ enum SidebarDrag {
             switch self {
             case .row: true
             case .header: item.isSection
-            case .channels: false
+            case .channels, .empty: false
             }
         }
 
@@ -66,6 +71,7 @@ enum SidebarDrag {
             case .header(let id): return .header(id, below: below)
             case .row(let id): return .row(id, below: below)
             case .channels: return .channels
+            case .empty(let id): return .empty(id)
             }
         }
     }
@@ -84,7 +90,7 @@ enum SidebarDrag {
             switch place {
             case .channels: before = nil
             case .header(let header, let below): before = below ? next(after: header, in: ids) : header
-            case .row: return nil
+            case .row, .empty: return nil
             }
             return changes(ids, id, before: before) ? .moveSection(section: id, before: before) : nil
         case .channel(let channel):
@@ -92,7 +98,7 @@ enum SidebarDrag {
             let target: SectionsModel.Group?, before: Data?
             switch place {
             case .channels: (target, before) = (nil, nil)
-            case .header(let header, _):
+            case .header(let header, _), .empty(let header):
                 guard let group = tree.sections.first(where: { $0.id == header }) else { return nil }
                 (target, before) = (group, nil)
             case .row(let row, let below):

@@ -19,7 +19,48 @@ public struct LiveMainWindow: View {
         (self.conversation, self.devices, self.settings, self.channels, self.sections, self.composers) = (conversation, devices, settings, channels, sections, composers)
     }
 
-    public var body: some View { MainWindow(model: conversation.reading, devices: devices, settings: settings, channels: channels, sections: sections, composers: composers) }
+    @State private var covered = !StartCover.done
+
+    public var body: some View {
+        ZStack {
+            MainWindow(model: conversation.reading, devices: devices, settings: settings, channels: channels, sections: sections, composers: composers)
+                .accessibilityHidden(covered)
+            if covered { StartCover().transition(.opacity) }
+        }
+        .animation(.easeOut(duration: 0.2), value: covered)
+        // The sections count as read once told, current or waiting for a key that may never come (`behind`): the tree shown is then the
+        // one the sidebar keeps.
+        .onChange(of: channels.ready && (sections.current || sections.behind), initial: true) { if $1 { uncover() } }
+        .task {
+            try? await Task.sleep(for: StartCover.limit)
+            uncover()
+        }
+    }
+
+    private func uncover() {
+        StartCover.done = true
+        covered = false
+    }
+}
+
+/// The logo over the whole window while the app first reads the relay, so the sidebar never jumps as the device list and the sections
+/// arrive. It goes once both are read, or after `limit` whatever is still missing, and never comes back in the process's life: a reopened
+/// window or a reconnection keeps the window as it is.
+struct StartCover: View {
+    static let limit: Duration = .seconds(30)
+    /// Set when the cover went, for every window built after it.
+    static var done = false
+
+    var body: some View {
+        VStack(spacing: PardnerMetrics.gap * 2) {
+            Logo(size: 72)
+            ProgressView().controlSize(.small)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(PardnerColor.bg)
+        .ignoresSafeArea()
+        .accessibilityElement(children: .ignore).accessibilityLabel("Loading")
+    }
 }
 
 /// The window's content for a reading model; `channel` and `thread` start the selection.
@@ -242,7 +283,7 @@ struct Sidebar: View {
                 Logo(size: 32)
                 Text("Pardner").font(PardnerFont.display(size: 18, weight: .bold))
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 4).padding(.bottom, PardnerMetrics.gap)
             if let sections {
                 if let line = SectionsMenu.line(current: sections.current, behind: sections.behind, notApplied: sections.notApplied) {
                     Text(line).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
@@ -264,18 +305,24 @@ struct Sidebar: View {
                         if !sections.isFolded(group.id) {
                             ForEach(group.channels, id: \.self) { sectionRow($0, in: sections) }
                             if group.channels.isEmpty {
+                                // The empty section's row takes a drop as its header does: a channel dropped on it goes into the section.
                                 Text("No channels").font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(PardnerColor.muted)
-                                    .padding(.horizontal, PardnerMetrics.gap + 2).frame(height: 30)
+                                    .padding(.horizontal, PardnerMetrics.gap + 2).frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+                                    .contentShape(Rectangle())
+                                    .modifier(zone(sections, "empty-\(group.id)", .empty(group.id)))
                             }
                         }
                     }
                 }
             }
-            Section("Channels", menu: sections.map { sections in
-                AnyView(Button("New Section…") { edit = .new(channel: nil) }.disabled(!sections.current))
-            }, trailing: channels.map { channels in
-                AnyView(Button { channels.openNew() } label: { Image(systemName: "plus").font(.system(size: 12, weight: .semibold)).frame(width: 22, height: 22) }
-                    .buttonStyle(.plain).pointerStyle(channels.ready ? .link : nil).disabled(!channels.ready).help("New channel").accessibilityLabel("New channel"))
+            Section("Channels", trailing: channels.map { channels in
+                AnyView(Menu {
+                    Button("New Channel…") { channels.openNew() }.disabled(!channels.ready)
+                    if let sections { Button("New Section…") { edit = .new(channel: nil) }.disabled(!sections.current) }
+                } label: { Image(systemName: "plus").font(.system(size: 12, weight: .semibold)).frame(width: 22, height: 22) }
+                    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                    .disabled(!channels.ready && !(sections?.current ?? false)).pointerStyle(channels.ready || sections?.current == true ? .link : nil)
+                    .help("New channel or section").accessibilityLabel("New channel or section"))
             }) {
                 if let row = channels?.creatingRow(known: Set(model.channels.keys)) {
                     Text(row)
@@ -330,26 +377,20 @@ struct Sidebar: View {
 
     struct Section<Content: View>: View {
         let title: String
-        /// The entries of the header's menu, in its context menu and its `…` button under the pointer; nil has neither.
-        let menu: AnyView?
         let trailing: AnyView?
         @ViewBuilder let content: Content
-        @State private var hovered = false
-        init(_ title: String, menu: AnyView? = nil, trailing: AnyView? = nil, @ViewBuilder content: () -> Content) {
-            (self.title, self.menu, self.trailing, self.content) = (title, menu, trailing, content())
+        init(_ title: String, trailing: AnyView? = nil, @ViewBuilder content: () -> Content) {
+            (self.title, self.trailing, self.content) = (title, trailing, content())
         }
         var body: some View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text(title.uppercased()).font(PardnerFont.ui(size: 11, weight: .semibold))
                     Spacer()
-                    if let menu { EllipsisMenu(label: "\(title) actions") { menu }.opacity(hovered ? 1 : 0).allowsHitTesting(hovered) }
                     trailing
                 }
                 .foregroundStyle(PardnerColor.muted)
                 .padding(.horizontal, PardnerMetrics.gap).padding(.bottom, 4)
-                .onHover { hovered = $0 }
-                .contextMenu { if let menu { menu } }
                 content
             }
         }
@@ -368,8 +409,9 @@ struct ChannelRow: View {
     var body: some View {
         Button(action: choose) {
             HStack(spacing: PardnerMetrics.gap) {
-                Text("#").foregroundStyle(chosen ? PardnerColor.brandText : PardnerColor.muted).frame(width: 12)
-                Text(name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                // `#` against the name, as the name reads elsewhere ("#notes").
+                Text("\(Text("#").foregroundStyle(chosen ? PardnerColor.brandText : PardnerColor.muted))\(Text(verbatim: name))")
+                    .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                 if let waiting {
                     WaitingBadge(count: waiting)
                 }

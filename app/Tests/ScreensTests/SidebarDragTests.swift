@@ -88,6 +88,20 @@ final class SidebarDragTests: XCTestCase {
         XCTAssertEqual(SidebarDrag.Zone.channels.place(.channel(a), y: 25, height: 30), .channels)
     }
 
+    /// An empty section's `No channels` row takes a channel into the section, on either half, and refuses a section, whose line would
+    /// show inside the section.
+    func testAnEmptySectionsRowTakesAChannelAndRefusesASection() {
+        let empty = SectionsModel.Tree(sections: [.init(id: "s1", name: "One", channels: [a]), .init(id: "s3", name: "Empty", channels: [])], rest: [d])
+        let zone = SidebarDrag.Zone.empty("s3")
+        XCTAssertFalse(zone.halves(.section("s1")))
+        XCTAssertEqual(zone.place(.channel(d), y: 25, height: 30), .empty("s3"))
+        XCTAssertEqual(SidebarDrag.act(dragging: .channel(d), onto: zone.place(.channel(d), y: 5, height: 30), in: empty, current: true),
+                       .moveChannel(channel: d, section: "s3", before: nil))
+        XCTAssertEqual(SidebarDrag.act(dragging: .channel(a), onto: .empty("s3"), in: empty, current: true), .moveChannel(channel: a, section: "s3", before: nil))
+        XCTAssertNil(SidebarDrag.act(dragging: .section("s1"), onto: zone.place(.section("s1"), y: 5, height: 30), in: empty, current: true))
+        XCTAssertNil(SidebarDrag.act(dragging: .channel(d), onto: .empty("s3"), in: empty, current: false))
+    }
+
     func testTheItemSurvivesItsProvider() throws {
         for item in [SidebarDrag.Item.channel(a), .section("s1")] { XCTAssertEqual(try SidebarDrag.Item(data: item.data), item) }
         XCTAssertThrowsError(try SidebarDrag.Item(data: Data("x".utf8)))
