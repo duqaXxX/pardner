@@ -64,6 +64,8 @@ public final class PairingModel {
     /// What the main window draws, over the same controller: it is emptied by an erase, not by a phase, since a new connection after a
     /// fault reads the sequence again from its start and replaces what it drew.
     public let conversation: ConversationModel
+    /// The sidebar's sections: the shown tree, the acts, the folds, over the same conversation and channel acts.
+    public let sections: SectionsModel
     /// The composers of the main window, beside the channel acts: they learn each outbox from the same state.
     public let composers: Composers
 
@@ -73,6 +75,7 @@ public final class PairingModel {
         devices.onState = { [weak conversation] in conversation?.setOwnDevices(Set($0.rows.filter { $0.kind == .app && $0.active }.map(\.id))) }
         let composers = Composers(conversation: conversation, devices: devices) { channel, draft in try await controller.send(channel: channel, draft: draft) }
         channels.composers = composers
+        sections = SectionsModel(conversation: conversation, channels: channels) { try await controller.arrange($0) }
         (self.controller, storesOpen, self.devices, self.settings, self.channels, self.conversation, self.composers) = (controller, true, devices, SettingsModel(devices: devices), channels, conversation, composers)
     }
 
@@ -112,6 +115,7 @@ public final class PairingModel {
         let channels = ChannelsModel(devices: devices)
         let composers = Composers(conversation: conversation, devices: devices) { _, _ in .ended }
         channels.composers = composers
+        sections = SectionsModel(conversation: conversation, channels: channels) { _ in .ended }
         (controller, self.phase, showForm, showJoin, self.refused, cancelNote, self.storesOpen, self.devices, self.settings, self.channels, self.conversation, self.composers) =
             (nil, phase, form, join, refused, note, storesOpen, devices, SettingsModel(devices: devices), channels, conversation, composers)
         if case .recovering(.typeKey(let request)) = phase { entry = RecoveryEntryModel(request: request) } // a fixed phase has no controller to apply it
