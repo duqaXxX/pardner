@@ -66,6 +66,10 @@ public final class ChannelsModel {
     public private(set) var working = false
     /// Which opening of the sheet an answer belongs to: a late answer never touches a sheet opened since.
     private(set) var ticket = 0
+    /// The section the sheet was opened from (New Channel… in a section's menu); `onCreated` hands it on with the new channel's id.
+    private var createSection: String?
+    /// A channel was made from a section: its id and that section (sidebar sections design 7).
+    @ObservationIgnored var onCreated: ((Data, String) -> Void)?
     /// Change Folder… was asked from the panel: the panel closes and the bind sheet opens once it is gone, not in the same tick.
     private var bindPending: (channel: Data, bot: Data?)?
 
@@ -149,10 +153,11 @@ public final class ChannelsModel {
 
     // MARK: the sheet
 
-    /// Opens the sheet for a new channel with empty fields; nothing opens before the log is read.
-    public func openNew() {
+    /// Opens the sheet for a new channel with empty fields, from a section's menu when `section` is given; nothing opens before the log is read.
+    public func openNew(in section: String? = nil) {
         guard ready else { return }
         open(.create)
+        createSection = section
     }
 
     /// Opens the sheet for a new `/bind` prompt in `channel`, with `bot` (the channel's own, see `bot(of:)`) picked; nothing opens for a faulted channel.
@@ -201,7 +206,10 @@ public final class ChannelsModel {
     /// A sheet of this model is up, or the bind sheet waits for the panel to go.
     public var holdsSheet: Bool { sheet != nil || bindPending != nil }
 
-    private func clearFields() { (folder, nameText, nameNote, written, nameTouched, bot, problem, working) = ("", "", nil, "", false, nil, nil, false) }
+    private func clearFields() {
+        (folder, nameText, nameNote, written, nameTouched, bot, problem, working) = ("", "", nil, "", false, nil, nil, false)
+        createSection = nil
+    }
 
     /// Typing takes back what the last act answered; a new channel's name follows the folder until the person types one.
     public func edited() {
@@ -291,7 +299,7 @@ public final class ChannelsModel {
             problem = switch (reason, target) {
             case ("bad-input", .channel): "Use only lowercase letters, digits, - and _, up to 80 characters."
             case ("bad-input", .person): "Use up to 64 characters, with no hidden characters and no @."
-            case ("bad-input", .device): "Use up to 64 characters, with no hidden characters."
+            case ("bad-input", .device): Self.deviceNameRule
             case ("not-ready", _): Self.notReady
             case ("not-member", _): "This Mac is not a member of this channel."
             default: "Pardner could not set the name. Try again in a moment."
@@ -341,7 +349,10 @@ public final class ChannelsModel {
         guard asked ?? ticket == ticket, sheet != nil else { return }
         working = false
         switch outcome {
-        case .created: close()
+        case .created(let channel):
+            let section = createSection
+            close()
+            if let section { onCreated?(channel, section) }
         case .notSaved: problem = "Pardner could not save the new channel. Try again."
         case .ended: problem = Self.notConnected
         case .refused(let reason):
@@ -372,6 +383,8 @@ public final class ChannelsModel {
         }
     }
 
+    /// What a device's name must be; a section's name is under the same rule.
+    static let deviceNameRule = "Use up to 64 characters, with no hidden characters."
     private static let notReady = "Pardner is still reading your devices. Try again in a moment."
     private static let notConnected = "Pardner is not connected. Try again in a moment."
 }

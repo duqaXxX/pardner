@@ -65,6 +65,11 @@ final class FakeLink: RelayLinking, @unchecked Sendable { // one test thread at 
         named.append((kind, target, text, setup))
         return sendOutcome
     }
+    var arranged: [SectionAct] = []
+    func arrange(_ act: SectionAct) async throws -> SendOutcome {
+        arranged.append(act)
+        return sendOutcome
+    }
     func send(channel: Data, draft: OutboxDraft) async throws -> SendOutcome {
         sends.append((channel, draft))
         return sendOutcome
@@ -1223,6 +1228,34 @@ final class PairingControllerTests: XCTestCase {
         rig.harness.link.emit(.delivered(rest))
         let got = await readings(rig.controller, 4)
         XCTAssertEqual(got, [.reset, .delivered(message), .profile(profile), .delivered(rest)], "a reach and the devices are not the reading model's")
+        await rig.controller.shutdown()
+    }
+
+    func testAnArrangementReachesTheReadingsAfterTheResetOfItsConnection() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        await rig.controller.launch()
+        let first = HostValue.object(["do": .string("arrangement"), "sections": .null, "current": .bool(false), "behind": .bool(false), "notApplied": .bool(false)])
+        let second = HostValue.object(["do": .string("arrangement"), "sections": .array([]), "current": .bool(true), "behind": .bool(false), "notApplied": .bool(false)])
+        rig.harness.link.emit(.arrangement(first))
+        rig.harness.link.emit(.faulted("the host faulted"))
+        _ = await wait(rig.controller, "no fault") { if case .fault(.failed, _) = $0 { return true } else { return false } }
+        let retried = await rig.controller.retry()
+        XCTAssertTrue(retried)
+        rig.harness.link.emit(.arrangement(second))
+        let got = await readings(rig.controller, 4)
+        XCTAssertEqual(got, [.reset, .arrangement(first), .reset, .arrangement(second)], "each connection's arrangement follows its own reset")
+        await rig.controller.shutdown()
+    }
+
+    func testAnActOnTheControllerGoesToTheLinkAndEndsWithNoConnection() async throws {
+        let rig = try rig(keys: true, state: stored(.paired))
+        let none = try await rig.controller.arrange(.removeSection(section: "ab"))
+        XCTAssertEqual(none, .ended, "no connection runs before launch")
+        await rig.controller.launch()
+        let act = SectionAct.moveChannel(channel: Data(repeating: 1, count: 32), section: nil, before: nil)
+        let outcome = try await rig.controller.arrange(act)
+        XCTAssertEqual(outcome, rig.harness.link.sendOutcome)
+        XCTAssertEqual(rig.harness.link.arranged, [act])
         await rig.controller.shutdown()
     }
 

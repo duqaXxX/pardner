@@ -71,6 +71,9 @@ public enum RelayEvent: Sendable {
     case profile(HostValue)
     /// The names the link shows changed: its `names` effect, with `names`, each `kind`, `target` and `name` (null when none shows; names design 3).
     case names(HostValue)
+    /// The sections the link shows changed: its `arrangement` effect, with `sections` (null before any is shown; each `id`, `name` and `channels`
+    /// in hex), `current`, `behind` and `notApplied` (sidebar sections design 4).
+    case arrangement(HostValue)
     /// The device log the link reads changed: the link's `devices` effect, with `person`, `length`, `last`, `devices` and `self` (device pairing design 4.2).
     case devices(HostValue)
     /// The relay first served a link given an `Enrolment`: entry 0 was placed, and the owner stops passing the secret (device pairing design 3.5).
@@ -210,6 +213,7 @@ enum Event: Sendable {
     case createChannel(bot: Data, folder: String, name: String?, CheckedContinuation<CreateOutcome, Error>)
     case send(channel: Data, draft: OutboxDraft, CheckedContinuation<SendOutcome, Error>)
     case setName(kind: Int, target: Data?, text: String, setup: Bool, CheckedContinuation<SendOutcome, Error>)
+    case arrange(SectionAct, CheckedContinuation<SendOutcome, Error>)
     case stop
 }
 
@@ -455,6 +459,14 @@ public final class RelayConnection: @unchecked Sendable {
         }
     }
 
+    /// Makes an act on the sections (sidebar sections design 3): one pending entry of the app outbox, written at rest. `queued` carries its message name;
+    /// `refused` carries `not-ready` (the device has not read everything), `bad-input` or `too-many`.
+    public func arrange(_ act: SectionAct) async throws -> SendOutcome {
+        try await withCheckedThrowingContinuation { continuation in
+            if case .terminated = feed.yield(.arrange(act, continuation)) { continuation.resume(returning: .ended) }
+        }
+    }
+
     /// Ends the connection and the dialing; returns when the task has ended. Before `start()` it ends the connection for good.
     public func stop() async {
         let task = lifecycle.withLock { state -> Task<Void, Never>? in
@@ -571,6 +583,13 @@ public final class RelayConnection: @unchecked Sendable {
                 throw error
             }
             continuation.resume(returning: outcome)
+        case .arrange(let act, let continuation):
+            let outcome: SendOutcome
+            do { outcome = try await arranged(act) } catch {
+                continuation.resume(throwing: error)
+                throw error
+            }
+            continuation.resume(returning: outcome)
         case .networkUp: try await perform(try await call("networkUp"))
         case .timer(let at):
             guard armed == at else { return } // a timer that is no longer the armed one does nothing
@@ -642,6 +661,13 @@ public final class RelayConnection: @unchecked Sendable {
         return try await saved(effects) ? .queued(name: name) : .notSaved
     }
 
+    private func arranged(_ act: SectionAct) async throws -> SendOutcome {
+        let answer = try await call("arrange", [act.hostValue])
+        guard let (made, effects) = try answered(answer) else { return .refused(answer.stringValue ?? "") }
+        guard let name = made["name"]?.bytesValue else { throw HostError.faulted("an arrangement answered with no message name") }
+        return try await saved(effects) ? .queued(name: name) : .notSaved
+    }
+
     private func built(_ act: DeviceAct) async throws -> BuildOutcome {
         func pairing(_ device: HostValue, _ proof: Data) -> HostValue { .object(["device": device, "proof": .bytes(proof)]) }
         let answer: HostValue
@@ -689,7 +715,7 @@ public final class RelayConnection: @unchecked Sendable {
                 out.yield(.delivered(view))
             case "profile": out.yield(.profile(fx))
             case "names": out.yield(.names(fx))
-            case "arrangement": break // the sections' screens come in a later unit; until then the effect tells nothing the app uses
+            case "arrangement": out.yield(.arrangement(fx))
             case "devices": out.yield(.devices(fx))
             case "outbox": out.yield(.outbox(fx))
             case "creating": out.yield(.creating(fx))
@@ -836,6 +862,7 @@ public final class RelayConnection: @unchecked Sendable {
             case .createChannel(_, _, _, let continuation): continuation.resume(returning: .ended)
             case .send(_, _, let continuation): continuation.resume(returning: .ended)
             case .setName(_, _, _, _, let continuation): continuation.resume(returning: .ended)
+            case .arrange(_, let continuation): continuation.resume(returning: .ended)
             default: break
             }
         }

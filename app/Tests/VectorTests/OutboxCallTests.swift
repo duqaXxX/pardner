@@ -66,6 +66,100 @@ final class OutboxCallTests: XCTestCase {
         await connection.stop()
     }
 
+    /// One entry per act: the object the link reads is `ArrangeAct` (src/protocol/arrangement-act.ts), ids in lowercase hex, a Swift nil as null.
+    func testEachActReachesTheLinkAsTheArrangeActItIs() async throws {
+        let (connection, _, _) = try await connection(link: "arrange: function (act, now) { protocol.sawActs = (protocol.sawActs || []).concat([JSON.stringify(act)]); return { name: new Uint8Array(16), effects: [] }; }")
+        connection.start()
+        let channel = Data([0x0a, 0xff, 0x00, 0x1b])
+        let acts: [(SectionAct, String)] = [
+            (.newSection(name: "Work"), #"{"type":"section-new","name":"Work"}"#),
+            (.newSection(name: "Work", channel: channel), #"{"type":"section-new","name":"Work","channel":"0aff001b"}"#),
+            (.renameSection(section: "ab12", name: "Home"), #"{"type":"section-rename","section":"ab12","name":"Home"}"#),
+            (.moveSection(section: "ab12", before: nil), #"{"type":"section-move","section":"ab12","before":null}"#),
+            (.moveSection(section: "ab12", before: "cd34"), #"{"type":"section-move","section":"ab12","before":"cd34"}"#),
+            (.removeSection(section: "ab12"), #"{"type":"section-remove","section":"ab12"}"#),
+            (.moveChannel(channel: channel, section: nil, before: nil), #"{"type":"channel-move","channel":"0aff001b","section":null,"before":null}"#),
+            (.moveChannel(channel: channel, section: "ab12", before: Data([1, 2])), #"{"type":"channel-move","channel":"0aff001b","section":"ab12","before":"0102"}"#),
+        ]
+        for (act, _) in acts {
+            let outcome = try await connection.arrange(act)
+            XCTAssertEqual(outcome, .queued(name: Data(count: 16)))
+        }
+        let seen = try await XCTUnwrap(hostUsed).perform { state in state.context!.evaluateScript("JSON.stringify(protocol.sawActs)")!.toString() ?? "" }
+        let sent = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(seen.utf8)) as? [String])
+        // Compared as parsed objects: the key order of a JSON text is the engine's.
+        func parsed(_ text: String) throws -> NSDictionary { try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? NSDictionary) }
+        XCTAssertEqual(try sent.map(parsed), try acts.map { try parsed($0.1) })
+        await connection.stop()
+    }
+
+    func testEachRefusalOfAnArrangeIsItsOutcome() async throws {
+        let (connection, _, _) = try await connection(link: "arrange: function (act) { var n = protocol.n = (protocol.n || 0) + 1; return ['not-ready', 'bad-input', 'too-many'][n - 1]; }")
+        connection.start()
+        for reason in ["not-ready", "bad-input", "too-many"] {
+            let outcome = try await connection.arrange(.removeSection(section: "ab12"))
+            XCTAssertEqual(outcome, .refused(reason))
+        }
+        await connection.stop()
+    }
+
+    func testAnArrangeWhoseFirstWriteFailsIsNotSavedAndAFaultAfterItsAnswerIsItsError() async throws {
+        let write = "{ do: 'write', outbox: { pending: { signed: new Uint8Array(70), sig: new Uint8Array(64) }, channels: [], faults: [] } }"
+        let (connection, store, _) = try await connection(link: """
+            arrange: function () { protocol.n = (protocol.n || 0) + 1; return { name: new Uint8Array(16), effects: protocol.n === 1 ? [\(write)] : [{ do: 'nope' }] }; },
+            written: function () { return []; }
+            """)
+        store.beforeOutboxWrite = { throw StoreError(description: "the disk is full") }
+        connection.start()
+        let outcome = try await connection.arrange(.removeSection(section: "ab12"))
+        XCTAssertEqual(outcome, .notSaved)
+        do {
+            let second = try await connection.arrange(.removeSection(section: "ab12"))
+            XCTFail("a fault after the answer must be the call's error, not \(second)")
+        } catch {}
+        await connection.stop()
+    }
+
+    func testTheArrangementEffectBecomesTheEvent() async throws {
+        let shown = "{ do: 'arrangement', sections: [{ id: 'ab12', name: 'Work', channels: ['0a0b'] }], current: true, behind: false, notApplied: false }"
+        let (connection, _, _) = try await connection(link: "arrange: function () { return { name: new Uint8Array(16), effects: [\(shown)] }; }")
+        let events = connection.events
+        let got = Task { () -> HostValue? in
+            for await event in events { if case .arrangement(let fx) = event { return fx } }
+            return nil
+        }
+        connection.start()
+        _ = try await connection.arrange(.newSection(name: "Work"))
+        // Bounded: a missing event ends the wait with nil, not with a test that never returns.
+        let bound = Task { try? await Task.sleep(for: .seconds(10)); got.cancel() }
+        let seen = await got.value
+        bound.cancel()
+        let fx = try XCTUnwrap(seen)
+        XCTAssertEqual(fx["sections"]?.arrayValue?.first?["id"]?.stringValue, "ab12")
+        XCTAssertEqual(fx["sections"]?.arrayValue?.first?["channels"]?.arrayValue?.first?.stringValue, "0a0b")
+        XCTAssertEqual(fx["current"], .bool(true))
+        await connection.stop()
+    }
+
+    func testAnArrangeAfterTheConnectionEndedIsEnded() async throws {
+        let (connection, _, _) = try await connection(link: "arrange: function () { return { name: new Uint8Array(16), effects: [] }; }")
+        connection.start()
+        await connection.stop()
+        let outcome = try await connection.arrange(.newSection(name: "Work"))
+        XCTAssertEqual(outcome, .ended, "the feed has ended")
+    }
+
+    /// An arrange asked before the connection ever started and stopped for good is answered by the end's drain or by the ended feed, whichever
+    /// the ask meets: both answer `ended`.
+    func testAnArrangeQueuedBehindTheEndIsEnded() async throws {
+        let (connection, _, _) = try await connection(link: "arrange: function () { return { name: new Uint8Array(16), effects: [] }; }")
+        let asked = Task { try await connection.arrange(.removeSection(section: "ab12")) }
+        await Task.yield()
+        await connection.stop()
+        let outcome = try await asked.value
+        XCTAssertEqual(outcome, .ended)
+    }
+
     func testTheSameForSend() async throws {
         let (connection, _, _) = try await connection(link: "send: function () { return { name: new Uint8Array(16), effects: [{ do: 'nope' }] }; }")
         connection.start()

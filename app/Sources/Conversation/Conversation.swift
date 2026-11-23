@@ -372,9 +372,48 @@ public struct ShownNames: Sendable, Equatable {
     }
 }
 
+/// The sections the link shows (sidebar sections design 4, 4.1), as its `arrangement` effect tells them.
+public struct ShownArrangement: Sendable, Equatable {
+    /// One section: its id (lowercase hex, as the acts name it), its name and its channels in the content's order, held or not.
+    public struct Section: Sendable, Equatable {
+        public let id: String
+        public let name: String
+        public let channels: [Data]
+    }
+
+    /// Nil when no arrangement shows (before any is told, or none is held).
+    public private(set) var sections: [Section]?
+    /// Every kind 17 of the space is read and applied: the section acts are offered only then.
+    public private(set) var current = false
+    /// The device waits for a copy of a kind 17 that is still to come.
+    public private(set) var behind = false
+    /// The device's own pending tree took no part when read back (design 3.2).
+    public private(set) var notApplied = false
+
+    mutating func take(_ effect: HostValue) {
+        sections = effect["sections"]?.arrayValue?.compactMap { entry in
+            guard let id = entry["id"]?.stringValue, let name = entry["name"]?.stringValue else { return nil }
+            return Section(id: id, name: name, channels: (entry["channels"]?.arrayValue ?? []).compactMap { $0.stringValue.flatMap(Self.bytes(hex:)) })
+        }
+        (current, behind, notApplied) = (effect["current"] == .bool(true), effect["behind"] == .bool(true), effect["notApplied"] == .bool(true))
+    }
+
+    private static func bytes(hex: String) -> Data? {
+        guard hex.count.isMultiple(of: 2) else { return nil }
+        var out = Data(), rest = hex[...]
+        while !rest.isEmpty {
+            guard let byte = UInt8(rest.prefix(2), radix: 16) else { return nil }
+            out.append(byte)
+            rest = rest.dropFirst(2)
+        }
+        return out
+    }
+}
+
 /// The channels and the bots' profiles, as the link delivered them.
 public struct ReadingModel: Sendable, Equatable {
     public private(set) var names = ShownNames()
+    public private(set) var arrangement = ShownArrangement()
     public private(set) var channels: [Data: Channel] = [:]
     public private(set) var profiles: [Data: BotProfile] = [:]
     // The person's own app devices, as the Devices list names them.
@@ -425,6 +464,9 @@ public struct ReadingModel: Sendable, Equatable {
 
     /// One `names` effect of the link.
     public mutating func take(names effect: HostValue) { names.take(effect) }
+
+    /// One `arrangement` effect of the link.
+    public mutating func take(arrangement effect: HostValue) { arrangement.take(effect) }
 
     /// The person's own name, when one shows (a Mac has one person).
     public var personName: String? { names.persons.values.first }

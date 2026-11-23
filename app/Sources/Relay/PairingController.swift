@@ -16,6 +16,8 @@ public enum ReadingEvent: Sendable, Equatable {
     case profile(HostValue)
     /// The names the link shows, as `RelayEvent.names` carries them.
     case names(HostValue)
+    /// The sections the link shows, as `RelayEvent.arrangement` carries them.
+    case arrangement(HostValue)
     /// The model starts again empty: a new connection reads the sequence from its start, or the pairing's keys and stores were erased.
     case reset
 }
@@ -31,6 +33,7 @@ public protocol RelayLinking: AnyObject, Sendable {
     func createChannel(bot: Data, folder: String, name: String?) async throws -> CreateOutcome
     func send(channel: Data, draft: OutboxDraft) async throws -> SendOutcome
     func setName(kind: Int, target: Data?, text: String, setup: Bool) async throws -> SendOutcome
+    func arrange(_ act: SectionAct) async throws -> SendOutcome
     func holdRecovery(id: Data, receiving: String) async -> Bool
     func recoveryReading() async -> RecoveryReading?
 }
@@ -466,6 +469,12 @@ public actor PairingController {
         return try await link.setName(kind: kind, target: target, text: text, setup: setup)
     }
 
+    /// Makes an act on the sections through the running connection (sidebar sections design 3).
+    public func arrange(_ act: SectionAct) async throws -> SendOutcome {
+        guard let link else { return .ended }
+        return try await link.arrange(act)
+    }
+
     /// The screen took these refused items of `channel` (`ChannelsState.undelivered`): they are not kept any longer.
     public func acknowledgeUndelivered(channel: Data, names: Set<Data>) {
         guard let kept = channels.undelivered[channel] else { return }
@@ -498,6 +507,7 @@ public actor PairingController {
         case .names(let names):
             readingOut.yield(.names(names))
             deviceNamesTold(names)
+        case .arrangement(let sections): readingOut.yield(.arrangement(sections))
         default: break
         }
         // The channel state is set before any suspension below too: a stop that runs in one moves `connectionID` first.
@@ -545,7 +555,7 @@ public actor PairingController {
             await stopConnection()
             phase = .fault(.failed, PairingPhase.storeFailedAdvice)
         case .faulted(let message): await hostFaulted(message)
-        case .profile, .names, .outbox, .creating, .channelRefused, .channelFault, .channelFaultDropped: break
+        case .profile, .names, .arrangement, .outbox, .creating, .channelRefused, .channelFault, .channelFaultDropped: break
         }
     }
 
