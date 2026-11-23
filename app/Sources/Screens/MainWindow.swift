@@ -12,13 +12,14 @@ public struct LiveMainWindow: View {
     let devices: DevicesModel
     let settings: SettingsModel
     let channels: ChannelsModel
+    let sections: SectionsModel
     let composers: Composers
 
-    public init(conversation: ConversationModel, devices: DevicesModel, settings: SettingsModel, channels: ChannelsModel, composers: Composers) {
-        (self.conversation, self.devices, self.settings, self.channels, self.composers) = (conversation, devices, settings, channels, composers)
+    public init(conversation: ConversationModel, devices: DevicesModel, settings: SettingsModel, channels: ChannelsModel, sections: SectionsModel, composers: Composers) {
+        (self.conversation, self.devices, self.settings, self.channels, self.sections, self.composers) = (conversation, devices, settings, channels, sections, composers)
     }
 
-    public var body: some View { MainWindow(model: conversation.reading, devices: devices, settings: settings, channels: channels, composers: composers) }
+    public var body: some View { MainWindow(model: conversation.reading, devices: devices, settings: settings, channels: channels, sections: sections, composers: composers) }
 }
 
 /// The window's content for a reading model; `channel` and `thread` start the selection.
@@ -30,6 +31,8 @@ public struct MainWindow: View {
     let settings: SettingsModel?
     /// The channel acts' model; nil in the samples, which have no pairing.
     let channels: ChannelsModel?
+    /// The sidebar's sections; nil in the samples, which have no pairing.
+    let sections: SectionsModel?
     /// The composers; nil in the samples.
     let composers: Composers?
     @State private var channel: Data?
@@ -39,11 +42,12 @@ public struct MainWindow: View {
     enum Tab: String, CaseIterable { case conversation = "Conversation", sessions = "Sessions" }
 
     /// The window over `model`, with a channel and a thread open when given.
-    public init(model: ReadingModel, devices: DevicesModel? = nil, settings: SettingsModel? = nil, channels: ChannelsModel? = nil, composers: Composers? = nil, channel: Data? = nil, thread: String? = nil) {
+    public init(model: ReadingModel, devices: DevicesModel? = nil, settings: SettingsModel? = nil, channels: ChannelsModel? = nil, sections: SectionsModel? = nil, composers: Composers? = nil, channel: Data? = nil, thread: String? = nil) {
         self.model = model
         self.devices = devices
         self.settings = settings
         self.channels = channels
+        self.sections = sections
         self.composers = composers
         _channel = State(initialValue: channel)
         _thread = State(initialValue: thread)
@@ -97,7 +101,7 @@ public struct MainWindow: View {
         PaneSplit(
             threadOpen: threadOpen,
             sidebar: pane(Sidebar(model: model, selected: shown?.id, choose: { channel = $0 }, openSettings: settings.map { settings in { settings.open(.general) } },
-                                  channels: channels), background: PardnerColor.side),
+                                  channels: channels, sections: sections), background: PardnerColor.side),
             conversation: pane(Group {
                 if let c = shown {
                     ChannelView(model: model, icons: icons, channel: c, channels: channels, composers: composers, tab: $tab, thread: $thread)
@@ -202,6 +206,35 @@ struct Sidebar: View {
     var openSettings: (() -> Void)?
     /// The channel acts; nil where the window has no pairing.
     var channels: ChannelsModel?
+    /// The sections; nil where the window has no pairing, which draws today's list under "Channels".
+    var sections: SectionsModel?
+    @State private var edit: SectionEdit?
+    @State private var hover = SidebarDrag.Hover()
+
+    /// The tree drawn: the model's, or every channel under "Channels" while there is no model.
+    private var tree: SectionsModel.Tree { sections?.tree ?? SectionsModel.Tree(sections: [], rest: MainWindow.ordered(model)) }
+
+    /// Draggable only where the window has sections: without them there is nowhere to drop.
+    @ViewBuilder private func draggable(_ view: some View, _ item: SidebarDrag.Item) -> some View {
+        if sections != nil { view.onDrag { hover.dragging = item; return item.provider } } else { view }
+    }
+
+    private func row(_ id: Data) -> some View {
+        draggable(ChannelRow(name: Naming.bareChannel(id, in: model), chosen: selected == id, waiting: model.channels[id].flatMap(Self.waitingCount)) { choose(id) }
+            .contextMenu {
+                if let channels, let channel = model.channels[id] { ChannelActions(model: model, channels: channels, channel: channel) }
+                if let sections { Divider(); ChannelSectionActions(sections: sections, channel: id) { edit = .new(channel: id) } }
+            }, .channel(id))
+    }
+
+    private func zone(_ sections: SectionsModel, _ id: String, _ zone: SidebarDrag.Zone) -> DropZone {
+        DropZone(sections: sections, hover: hover, id: id, zone: zone)
+    }
+
+    /// A channel's row in a section: a drop zone of its own, whose halves say before it or before the row below.
+    private func sectionRow(_ id: Data, in sections: SectionsModel) -> some View {
+        row(id).modifier(zone(sections, "row-\(id.base64EncodedString())", .row(id)))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: PardnerMetrics.gap * 1.5) {
@@ -210,7 +243,37 @@ struct Sidebar: View {
                 Text("Pardner").font(PardnerFont.display(size: 18, weight: .bold))
             }
             .padding(.horizontal, 4)
-            Section("Channels", trailing: channels.map { channels in
+            if let sections {
+                if let line = SectionsMenu.line(current: sections.current, behind: sections.behind, notApplied: sections.notApplied) {
+                    Text(line).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, PardnerMetrics.gap)
+                }
+                if edit == nil, let problem = sections.problem {
+                    Text(problem).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.delText)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, PardnerMetrics.gap)
+                }
+                if case .new? = edit, let edit { SectionNameField(sections: sections, edit: edit) { self.edit = nil } }
+                ForEach(tree.sections) { group in
+                    VStack(alignment: .leading, spacing: 2) {
+                        if case .rename(let id)? = edit, id == group.id {
+                            SectionNameField(sections: sections, edit: .rename(section: id), current: group.name) { edit = nil }
+                        } else {
+                            draggable(SectionHeader(sections: sections, channels: channels, group: group, waiting: SectionsMenu.waiting(group, in: model)) { edit = .rename(section: group.id) }
+                                .modifier(zone(sections, "header-\(group.id)", .header(group.id))), .section(group.id))
+                        }
+                        if !sections.isFolded(group.id) {
+                            ForEach(group.channels, id: \.self) { sectionRow($0, in: sections) }
+                            if group.channels.isEmpty {
+                                Text("No channels").font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                                    .padding(.horizontal, PardnerMetrics.gap + 2).frame(height: 30)
+                            }
+                        }
+                    }
+                }
+            }
+            Section("Channels", menu: sections.map { sections in
+                AnyView(Button("New Section…") { edit = .new(channel: nil) }.disabled(!sections.current))
+            }, trailing: channels.map { channels in
                 AnyView(Button { channels.openNew() } label: { Image(systemName: "plus").font(.system(size: 12, weight: .semibold)).frame(width: 22, height: 22) }
                     .buttonStyle(.plain).pointerStyle(channels.ready ? .link : nil).disabled(!channels.ready).help("New channel").accessibilityLabel("New channel"))
             }) {
@@ -224,11 +287,10 @@ struct Sidebar: View {
                     Text(line).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.delText)
                         .fixedSize(horizontal: false, vertical: true).padding(.horizontal, PardnerMetrics.gap).padding(.vertical, 4)
                 }
-                ForEach(MainWindow.ordered(model), id: \.self) { id in
-                    ChannelRow(name: Naming.bareChannel(id, in: model), chosen: selected == id, waiting: model.channels[id].flatMap(Self.waitingCount)) { choose(id) }
-                        .contextMenu { if let channels, let channel = model.channels[id] { ChannelActions(model: model, channels: channels, channel: channel) } }
-                }
+                ForEach(tree.rest, id: \.self) { row($0) }
             }
+            // The whole group is the zone: a drop on its header or its rows takes a channel out of its section.
+            .zoned(sections.map { zone($0, "channels", .channels) })
             Spacer()
             // The person's row and the Settings button, under a rule.
             HStack(spacing: 4) {
@@ -256,6 +318,7 @@ struct Sidebar: View {
         }
         .padding(PardnerMetrics.gap * 1.5)
         .frame(maxHeight: .infinity, alignment: .top)
+        .onChange(of: tree) { edit = SectionsMenu.kept(edit, in: tree) }
         .background(PardnerColor.side)
     }
 
@@ -267,18 +330,26 @@ struct Sidebar: View {
 
     struct Section<Content: View>: View {
         let title: String
+        /// The entries of the header's menu, in its context menu and its `…` button under the pointer; nil has neither.
+        let menu: AnyView?
         let trailing: AnyView?
         @ViewBuilder let content: Content
-        init(_ title: String, trailing: AnyView? = nil, @ViewBuilder content: () -> Content) { (self.title, self.trailing, self.content) = (title, trailing, content()) }
+        @State private var hovered = false
+        init(_ title: String, menu: AnyView? = nil, trailing: AnyView? = nil, @ViewBuilder content: () -> Content) {
+            (self.title, self.menu, self.trailing, self.content) = (title, menu, trailing, content())
+        }
         var body: some View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text(title.uppercased()).font(PardnerFont.ui(size: 11, weight: .semibold))
                     Spacer()
+                    if let menu { EllipsisMenu(label: "\(title) actions") { menu }.opacity(hovered ? 1 : 0).allowsHitTesting(hovered) }
                     trailing
                 }
                 .foregroundStyle(PardnerColor.muted)
                 .padding(.horizontal, PardnerMetrics.gap).padding(.bottom, 4)
+                .onHover { hovered = $0 }
+                .contextMenu { if let menu { menu } }
                 content
             }
         }
@@ -300,9 +371,7 @@ struct ChannelRow: View {
                 Text("#").foregroundStyle(chosen ? PardnerColor.brandText : PardnerColor.muted).frame(width: 12)
                 Text(name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                 if let waiting {
-                    Text("\(waiting)").font(PardnerFont.ui(size: 11, weight: .bold)).foregroundStyle(PardnerColor.badgeInk)
-                        .padding(.horizontal, 5).frame(minWidth: 18, minHeight: 18).background(PardnerColor.badge, in: Capsule())
-                        .accessibilityLabel("\(waiting) waiting for you")
+                    WaitingBadge(count: waiting)
                 }
             }
             .font(PardnerFont.ui(size: 14, weight: chosen ? .semibold : .regular))

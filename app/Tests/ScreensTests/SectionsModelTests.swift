@@ -213,6 +213,23 @@ final class SectionsModelTests: XCTestCase {
 
     // MARK: the outcomes
 
+    func testOnlyAQueuedAnswerCountsAsMade() {
+        let r = rig()
+        let named = SectionAct.newSection(name: "x")
+        r.model.finish(.queued(name: Data([1])), for: named)
+        XCTAssertTrue(r.model.queued)
+        r.model.finish(.refused("not-ready"), for: named)
+        XCTAssertFalse(r.model.queued, "a name field keeps its text on not-ready")
+    }
+
+    func testAProblemCanBeCleared() {
+        let r = rig()
+        r.model.finish(.ended, for: .newSection(name: "x"))
+        XCTAssertNotNil(r.model.problem)
+        r.model.clearProblem()
+        XCTAssertNil(r.model.problem)
+    }
+
     func testOutcomesBecomeSentencesOrNothing() {
         let r = rig()
         let named = SectionAct.newSection(name: "x"), moved = SectionAct.moveSection(section: "a", before: nil)
