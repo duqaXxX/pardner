@@ -3,6 +3,7 @@ import Conversation
 import Foundation
 import ProtocolHost
 @testable import Screens
+import SwiftUI
 import XCTest
 
 final class ChannelHeaderTests: XCTestCase {
@@ -23,5 +24,20 @@ final class ChannelHeaderTests: XCTestCase {
         let channel = try XCTUnwrap(model.channels[Samples.channel])
         XCTAssertTrue(channel.sessions.isEmpty)
         XCTAssertNil(ChannelView.sessionsCount(channel))
+    }
+
+    /// The bot's chip is as wide as a short name and stops at the cap for a long one, which it cuts rather than lets run past its border.
+    @MainActor
+    func testTheBotChipHugsAShortNameAndCapsALongOne() throws {
+        func width(_ name: String) throws -> CGFloat {
+            let renderer = ImageRenderer(content: BotChip(name: name, icon: nil))
+            return try XCTUnwrap(renderer.nsImage).size.width
+        }
+        let chrome: CGFloat = 5 + 20 + 6 + 10
+        let short = try width("mini")
+        XCTAssertLessThan(short, chrome + 60, "a short name is not set in an empty frame")
+        let long = try width("Build and release automation bot on the Mac mini in the office")
+        XCTAssertLessThanOrEqual(long, chrome + BotChip.nameMost + 1, "a long name stops at the cap")
+        XCTAssertGreaterThan(long, chrome + BotChip.nameMost - 10, "a long name takes the whole cap")
     }
 }

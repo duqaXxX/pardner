@@ -173,7 +173,7 @@ struct ComposerView: View {
                         ComposerField(model: model, height: $height).id("\(model.channel.base64EncodedString())/\(model.thread ?? "")").frame(height: height)
                     }
                 }
-                .padding(PardnerMetrics.gap)
+                .padding(.vertical, model.thread == nil ? 12 : 10).padding(.horizontal, model.thread == nil ? 14 : 12)
                 Rectangle().fill(PardnerColor.line).frame(height: 1)
                 // The hint goes first when the box is wide enough for it; the buttons stay. Files are refused (`pasteRefused`), so there is no attach button.
                 ViewThatFits(in: .horizontal) {
@@ -189,7 +189,9 @@ struct ComposerView: View {
                 Text(notice).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.delText).fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(PardnerMetrics.gap * 2)
+        // A card standing on its own under the messages, with no rule above it: wider margins in the conversation than in the thread panel.
+        // The top keeps a scrolled message off the card's border.
+        .padding(.horizontal, model.thread == nil ? 24 : 16).padding(.top, 8).padding(.bottom, 20)
     }
 }
 
@@ -240,16 +242,19 @@ struct BotList: View {
 /// The messages on their way, in place at the end of the conversation or the thread.
 struct PendingRows: View {
     let model: ComposerModel
+    var mark = MessageRow.Mark.conversation
 
     var body: some View {
         ForEach(model.rows()) { row in
-            HStack(alignment: .top, spacing: PardnerMetrics.gap * 1.5) {
-                Avatar(name: "You", isBot: false, icon: nil, size: MessageRow.markSize)
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .top, spacing: mark.gap) {
+                Avatar(name: "You", isBot: false, icon: nil, size: mark.size)
+                VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: PardnerMetrics.gap) {
                         Text("You").font(PardnerFont.ui(size: 14, weight: .semibold))
                     }
-                    mentioned(row.to.map { "@" + model.name(of: $0) }, row.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    .designLines()
+                    mentioned(row.to.map { "@" + model.name(of: $0) }, row.text).designLines().textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                     switch row.status {
                     case .sending: line("Sending\u{2026}", PardnerColor.muted)
                     case .sent: EmptyView()

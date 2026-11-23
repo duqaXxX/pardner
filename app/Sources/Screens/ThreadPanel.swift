@@ -25,23 +25,37 @@ struct ThreadPanel: View {
         let days = Naming.dayLabels(entries, now: Date(), calendar: .current)
         VStack(spacing: 0) {
             HStack(spacing: PardnerMetrics.gap) {
-                Text("Thread").font(PardnerFont.ui(size: 15, weight: .semibold))
-                if let bot = thread.bot {
-                    Text([Naming.sender(bot, in: model), thread.state.pill].compactMap { $0 }.joined(separator: " · "))
-                        .font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.muted)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Thread").font(PardnerFont.ui(size: 15, weight: .semibold))
+                    if let bot = thread.bot {
+                        Text([Naming.sender(bot, in: model), thread.state.pill].compactMap { $0 }.joined(separator: " · "))
+                            .font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted).lineLimit(1)
+                    }
                 }
                 Spacer()
                 if let composer { SessionControls(composer: composer, state: thread.state) }
-                Button(action: close) { Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)) }
+                Button(action: close) { Image(systemName: "xmark").font(.system(size: 13, weight: .semibold)).frame(width: 30, height: 30).contentShape(Rectangle()) }
                     .buttonStyle(.plain).pointerStyle(.link).foregroundStyle(PardnerColor.muted)
                     .accessibilityLabel("Close the thread")
             }
-            .padding(.horizontal, PardnerMetrics.gap * 2).frame(height: 52)
+            .padding(.leading, 16).padding(.trailing, 12).padding(.vertical, 10).frame(minHeight: 58)
+            .movesWindow()
             Divider().overlay(PardnerColor.line)
             ScrollView {
                 VStack(alignment: .leading, spacing: PardnerMetrics.gap * 2) {
                     if let day = days[0] { DaySeparator(label: day) }
-                    if let root = thread.root { MessageRow(model: model, icons: icons, message: root, queued: queued.contains(root.ref)) }
+                    if let root = thread.root {
+                        MessageRow(model: model, icons: icons, message: root, queued: queued.contains(root.ref), mark: .thread)
+                        // The count of replies between the opening message and the replies, as the conversation's summary says it; none while
+                        // nothing has answered.
+                        if thread.replies > 0 {
+                            HStack(spacing: 10) {
+                                Text(Naming.replies(thread.replies)).font(PardnerFont.ui(size: 12, weight: .semibold)).foregroundStyle(PardnerColor.muted)
+                                Rectangle().fill(PardnerColor.line).frame(height: 1)
+                            }
+                            .accessibilityElement(children: .ignore).accessibilityLabel(Naming.replies(thread.replies))
+                        }
+                    }
                     ForEach(Array(thread.items.enumerated()), id: \.offset) { index, item in
                         switch item {
                         case .message(let m):
@@ -52,7 +66,7 @@ struct ThreadPanel: View {
                             AnswerRow(model: model, icons: icons, answer: a)
                         }
                     }
-                    if let composer { PendingRows(model: composer) }
+                    if let composer { PendingRows(model: composer, mark: .thread) }
                 }
                 .padding(PardnerMetrics.gap * 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -63,7 +77,6 @@ struct ThreadPanel: View {
             .defaultScrollAnchor(.bottom)
             .defaultScrollAnchor(.top, for: .alignment)
             if let composer {
-                Divider().overlay(PardnerColor.line)
                 ComposerView(model: composer)
             }
         }
@@ -82,7 +95,7 @@ struct ThreadPanel: View {
                 RequestRow(title: title, status: thread.requests[m.ref] ?? .open)
             }
         } else {
-            MessageRow(model: model, icons: icons, message: m, queued: queued.contains(m.ref))
+            MessageRow(model: model, icons: icons, message: m, queued: queued.contains(m.ref), mark: .thread)
         }
     }
 }
@@ -95,16 +108,22 @@ struct AnswerRow: View {
 
     var body: some View {
         let name = Naming.sender(answer.ref.device, in: model)
-        HStack(alignment: .top, spacing: PardnerMetrics.gap * 1.5) {
-            Avatar(name: name, isBot: true, icon: icons[answer.ref.device], size: MessageRow.markSize)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: PardnerMetrics.gap) {
+        let mark = MessageRow.Mark.thread
+        HStack(alignment: .top, spacing: mark.gap) {
+            Avatar(name: name, isBot: true, icon: icons[answer.ref.device], size: mark.size)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: PardnerMetrics.gap) {
                     Text(name).font(PardnerFont.ui(size: 14, weight: .semibold))
+                    BotBadge()
+                    Text(Naming.time(answer.time)).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                        .help(Naming.dateTime(answer.time))
                     if !answer.done {
                         Text("Writing…").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
                     }
                 }
-                Text(verbatim: answer.markdown).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                .designLines()
+                // Spans are read once the answer has landed; while parts come it is drawn as written (#73, section 7).
+                Text(answer.done ? CodeSpans.styled(answer.markdown) : AttributedString(answer.markdown)).designLines().textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
         }
         .contextMenu { Button("Copy") { Clipboard.copy(answer.markdown) } }
@@ -126,7 +145,7 @@ struct SessionControls: View {
                 Divider()
                 Button("Plan mode on") { composer.command("/plan on") }
                 Button("Plan mode off") { composer.command("/plan off") }
-            } label: { Image(systemName: "ellipsis").frame(width: 22, height: 22) }
+            } label: { Image(systemName: "ellipsis").frame(width: 30, height: 30) }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).pointerStyle(composer.canCommand ? .link : nil).fixedSize().disabled(!composer.canCommand).accessibilityLabel("Session mode")
         }
     }
