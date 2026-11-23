@@ -31,6 +31,8 @@ public final class SectionsModel {
     public private(set) var folded: Set<String>
     public private(set) var problem: String?
     public private(set) var working = false
+    /// Whether the last act was queued: a name field closes on it and stays open, with its text, on any other answer.
+    public private(set) var queued = false
 
     private let conversation: ConversationModel
     private let arrange: Arranger
@@ -89,6 +91,9 @@ public final class SectionsModel {
         run(.moveSection(section: section, before: before(ids, section, direction)))
     }
 
+    /// A drop's act, already computed from the shown order (`SidebarDrag.act`); refused like any other act while not current.
+    func drop(_ act: SectionAct) { run(act) }
+
     /// Into `section` as its last channel, or out to "Channels" with nil.
     public func move(channel: Data, into section: String?) { run(.moveChannel(channel: channel, section: section, before: nil)) }
 
@@ -99,16 +104,19 @@ public final class SectionsModel {
 
     private func run(_ act: SectionAct) {
         guard current, !working else { return }
-        (working, problem) = (true, nil)
+        (working, queued, problem) = (true, false, nil)
         Task {
             do { finish(try await arrange(act), for: act) } catch { finishFailure(error) }
         }
     }
 
+    /// Drops the line of the last refusal, as a name field opening does.
+    public func clearProblem() { problem = nil }
+
     func finish(_ outcome: SendOutcome, for act: SectionAct) {
-        working = false
+        (working, queued) = (false, false)
         switch outcome {
-        case .queued: break
+        case .queued: queued = true
         case .notSaved: problem = "Pardner could not save the change. Try again."
         case .ended: problem = "Pardner is not connected. Try again in a moment."
         case .refused(let reason):

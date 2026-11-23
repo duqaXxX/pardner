@@ -155,6 +155,46 @@ MainActor.assumeIsolated {
             }
             exit(0)
         }
+        if ProcessInfo.processInfo.environment["SNAPSHOT_ONLY"] == "sections" {
+            // The sidebar's sections (sidebar sections design 7): grouped, then each line that says why the commands are off.
+            final class NoDefaults: UserDefaults {
+                init() { super.init(suiteName: nil)! }
+                override func set(_ value: Any?, forKey key: String) {}
+                override func stringArray(forKey key: String) -> [String]? { nil }
+            }
+            func hex(_ byte: UInt8) -> String { String(repeating: String(format: "%02x", byte), count: 32) }
+            let base = Samples.model()
+            var reading = base.model
+            let named: [(UInt8, String)] = [(0x61, "api"), (0x62, "web"), (0x63, "ops")]
+            for (position, item) in named.enumerated() {
+                reading.take(view: .object([
+                    "do": .string("message"), "position": .number(Double(900 + position)), "channel": .bytes(Data(repeating: item.0, count: 32)), "sender": .bytes(Data(repeating: 0x71, count: 32)),
+                    "name": .bytes(Data(repeating: UInt8(position + 1), count: 16)), "epoch": .bytes(Data(repeating: 9, count: 32)), "time": .number(1_763_600_000_000),
+                    "kind": .number(1), "to": .null, "blobs": .array([]), "files": .array([]), "re": .null, "again": .bool(false), "text": .string(#"{"markdown":"Hi."}"#),
+                ]))
+            }
+            reading.take(names: .object(["do": .string("names"), "names": .array(named.map { .object(["kind": .number(14), "target": .bytes(Data(repeating: $0.0, count: 32)), "name": .string($0.1)]) }
+                + [.object(["kind": .number(14), "target": .bytes(base.channel), "name": .string("docs")])])]))
+            let layout: HostValue = .array([
+                .object(["id": .string(hex(0xA1)), "name": .string("Work"), "channels": .array([.string(hex(0x61)), .string(hex(0x62))])]),
+                .object(["id": .string(hex(0xA2)), "name": .string("Writing"), "channels": .array([.string(hex(base.channel[0]))])]),
+                .object(["id": .string(hex(0xA3)), "name": .string("Ideas"), "channels": .array([])]),
+            ])
+            for (appearance, theme) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
+                for (name, current, behind, notApplied, fold) in [("grouped", true, false, false, false), ("folded", true, false, false, true), ("reading", false, false, false, false),
+                                                                 ("behind", false, true, false, false), ("not-applied", true, false, true, false)] {
+                    var shown = reading
+                    shown.take(arrangement: .object(["sections": layout, "current": .bool(current), "behind": .bool(behind), "notApplied": .bool(notApplied)]))
+                    let devices = DevicesModel()
+                    let channels = ChannelsModel(devices: devices)
+                    let sections = SectionsModel(conversation: ConversationModel(reading: shown), channels: channels, defaults: NoDefaults()) { _ in .ended }
+                    if fold { sections.toggleFold(hex(0xA2)) }
+                    try render(appearance, MainWindow(model: shown, devices: devices, channels: channels, sections: sections, channel: base.channel),
+                               size: NSSize(width: 1280, height: 800), to: "sections-\(name)-\(theme).png")
+                }
+            }
+            exit(0)
+        }
         let themes: [(NSAppearance.Name, String)] = [(.aqua, "light"), (.darkAqua, "dark")]
         let page = NSSize(width: 1050, height: 640)
         let screens: [(String, () -> PairingModel)] = [
