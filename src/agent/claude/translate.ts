@@ -78,6 +78,8 @@ interface Memory {
   readonly runs: Map<string, string>;
   /** The subagents started in the background: their notification says their words. */
   readonly agents: Set<string>;
+  /** The calls whose start was emitted and whose end was not: the ones a request may name. */
+  readonly called: Set<string>;
   /**
    * The id of the wakeup Claude Code started last and has not ended (a scheduled task's run), null
    * when the last command it started was no wakeup: a result while it runs is the agent's when it
@@ -776,6 +778,7 @@ export class Translator {
     compacting: false,
     runs: new Map(),
     agents: new Set(),
+    called: new Set(),
     woken: null,
   };
 
@@ -793,6 +796,16 @@ export class Translator {
       commandLifecycle(this.#memory, record);
     }
     const handler = handlerOf(kindOf(record));
-    return handler !== null && isRecord(record) ? handler(this.#memory, record) : [];
+    const events = handler !== null && isRecord(record) ? handler(this.#memory, record) : [];
+    for (const event of events) {
+      if (event.type === "call_started") this.#memory.called.add(event.callId);
+      else if (event.type === "call_ended") this.#memory.called.delete(event.callId);
+    }
+    return events;
+  }
+
+  /** Whether a `call_started` of `callId` has been emitted and its `call_ended` has not. */
+  started(callId: string): boolean {
+    return this.#memory.called.has(callId);
   }
 }

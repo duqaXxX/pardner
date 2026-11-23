@@ -222,6 +222,7 @@ class MemoryReply implements Reply, Placed {
     if (last?.kind === "text") last.text += markdown;
     else this.#segments.push({ kind: "text", text: markdown });
     this.#write();
+    await this.#room.lag();
   }
 
   async task(update: TaskUpdate): Promise<void> {
@@ -230,6 +231,7 @@ class MemoryReply implements Reply, Placed {
     if (held?.kind === "task") held.update = update;
     else this.#segments.push({ kind: "task", update });
     this.#write();
+    await this.#room.lag();
   }
 
   /** A `signal` only releases the caller: the turn's end goes on once the call is let through. */

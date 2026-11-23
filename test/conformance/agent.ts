@@ -148,7 +148,7 @@ class Recorder {
   readonly finished: Promise<void>;
   #ended = false;
   #cursor = 0;
-  #wake: (() => void) | null = null;
+  #wake: (() => void)[] = [];
 
   constructor(session: AgentSession) {
     this.finished = this.#read(session.events);
@@ -165,8 +165,21 @@ class Recorder {
 
   #signal(): void {
     const wake = this.#wake;
-    this.#wake = null;
-    wake?.();
+    this.#wake = [];
+    for (const one of wake) one();
+  }
+
+  /** Resolves once the reader has taken the `call_started` of `callId`; false when the events end first. */
+  async tookStart(callId: string): Promise<boolean> {
+    for (;;) {
+      if (this.seen.some((event) => event.type === "call_started" && event.callId === callId)) {
+        return true;
+      }
+      if (this.#ended) return false;
+      await new Promise<void>((resolve) => {
+        this.#wake.push(resolve);
+      });
+    }
   }
 
   /** The events from the cursor through the first that `matches`; the cursor moves past it. */
@@ -180,7 +193,7 @@ class Recorder {
       }
       if (this.#ended) assert.fail(`the events ended before ${what}`);
       await new Promise<void>((resolve) => {
-        this.#wake = resolve;
+        this.#wake.push(resolve);
       });
     }
   }
@@ -706,6 +719,37 @@ export function agentConformance(name: string, harness: AgentHarness): void {
         assert.deepEqual(told?.input, played.input);
         assertWellFormed(turn);
         assertDeclared(turn, caps);
+      },
+    );
+
+    check(
+      "a request names a call only once the reader has that call's start",
+      LIMIT,
+      async (world, t) => {
+        // The contract of `RequestHandler`: the core waits for the named call's `call_started`
+        // before it shows the request, so a back end that names a call it never starts would hold
+        // the turn for good. The handler answers a named request only after its reader has the
+        // start, and gives a request whose call never comes up after a deadline.
+        world.callTool("allow", "Ran it.");
+        let reader: Recorder | null = null;
+        const unstarted: string[] = [];
+        const requests = new Requests({
+          permission: async (request) => {
+            if (request.callId === null || reader === null) return { allow: true };
+            const came = await Promise.race([
+              reader.tookStart(request.callId),
+              new Promise<false>((resolve) => setTimeout(() => resolve(false), 2000).unref()),
+            ]);
+            if (!came) unstarted.push(request.callId);
+            return { allow: true };
+          },
+        });
+        const opened = await open(t, world, requests);
+        reader = opened.events;
+        await opened.session.send(prompt());
+        await opened.events.turn();
+        assert.equal(requests.permissions.length, 1, "the owner is asked once");
+        assert.deepEqual(unstarted, [], "a request named a call whose start never came");
       },
     );
 

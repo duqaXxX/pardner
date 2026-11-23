@@ -143,6 +143,8 @@ export interface WorldOptions {
    * the chat posts lists in a thread and folds a message into its title.
    */
   readonly rewind?: boolean;
+  /** The chat's reply writes lag by this many turns of the event loop (`MemoryChatOptions.writeDelay`). */
+  readonly writeDelay?: number;
   /** More lines of the `.env`, after the selection and the allowed root. */
   readonly env?: readonly string[];
 }
@@ -229,6 +231,7 @@ export class World {
       }),
     });
     this.chat = memoryChat({
+      ...(options.writeDelay === undefined ? {} : { writeDelay: options.writeDelay }),
       ...(options.identities === undefined ? {} : { identities: options.identities }),
       ...(options.diff !== undefined && { lists: true, files: true }),
       ...(options.rewind === true && { lists: true, folds: true }),

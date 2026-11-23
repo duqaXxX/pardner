@@ -19,6 +19,7 @@ import {
   type FakeAgentSession,
   hookRun,
   type Item,
+  recordOf,
   type Script,
   sdkMessages,
   splitTurns,
@@ -98,6 +99,47 @@ test("a prompt of plain text is replayed before its turns first words and a comm
   assert.deepEqual(session.queries, ["list the files", "/usage"]);
 });
 
+// The scripted Claude stand-in names a call in a request as the Claude back end does (seam
+// contract of `RequestHandler`): only a call a record named, whose start is on the events.
+
+test("a request for a call no record named is a request for no call", async () => {
+  const seen = asked();
+  const session = await started({}, seen.handler);
+  session.inject([canUseToolCall("Bash", { command: "ls" }), END_OF_STREAM]);
+  await read(session, Number.POSITIVE_INFINITY);
+  assert.deepEqual(
+    seen.requests.map((request) => [request.type, request.callId]),
+    [["permission", null]],
+  );
+});
+
+test("a request for a call a record named carries its id, after the call's start", async () => {
+  const [turn] = splitTurns(sdkMessages("tools")) as [Item[]];
+  const first = turn.findIndex((item) => {
+    const content = (recordOf(item)?.message as JsonObject | undefined)?.content;
+    return (
+      Array.isArray(content) && content.some((block) => (block as JsonObject).type === "tool_use")
+    );
+  });
+  const message = recordOf(turn[first])?.message as JsonObject;
+  const callId = (
+    (message.content as JsonObject[]).find((block) => block.type === "tool_use") as JsonObject
+  ).id as string;
+  const seen = asked();
+  const session = await started({}, seen.handler);
+  session.inject([
+    ...turn.slice(0, first + 1),
+    canUseToolCall("Bash", { command: "ls" }, callId),
+    END_OF_STREAM,
+  ]);
+  const events = await read(session, Number.POSITIVE_INFINITY);
+  assert.deepEqual(
+    seen.requests.map((request) => request.callId),
+    [callId],
+  );
+  assert.ok(events.some((event) => event.type === "call_started" && event.callId === callId));
+});
+
 test("a request waits for the cores answer before the stream goes on", async () => {
   const seen = asked();
   const session = await started({}, seen.handler);
@@ -112,8 +154,9 @@ test("a request waits for the cores answer before the stream goes on", async () 
   assert.deepEqual(
     seen.requests.map((request) => [request.type, request.callId, request.toolName]),
     [
-      ["permission", "toolu_fake_1", "Bash"],
-      ["question", "toolu_fake_2", "AskUserQuestion"],
+      // No record named either call, so neither request names one.
+      ["permission", null, "Bash"],
+      ["question", null, "AskUserQuestion"],
     ],
   );
   assert.deepEqual(session.permissionResults, [

@@ -39,8 +39,8 @@ test("the owner approves a permission, the tool runs and the request's message i
     [
       ["message", "remove x", false, false],
       ["notice", "Model: default · Effort: full · Bypass: off", false, false],
+      ["reply", "Removing.\n[pending] Shell: rm x", false, true],
       ["request", "Shell: rm x", true, false],
-      ["reply", "Removing.\n[in_progress] Shell: rm x", false, true],
     ],
   );
 

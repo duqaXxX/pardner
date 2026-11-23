@@ -352,7 +352,7 @@ module that breaks it fails only in use.
 | The default model | The entry of `AgentInfo.models` with `ModelInfo.isDefault` stands for the model the agent picks when none is chosen. The setup draws it as the default choice (`setup.DEFAULT`) and sends nothing to `setModel` for it; the names of the core skip it (`models.modelName`, `models.settingName`) | `the default entry is the one the list marks, whatever its value` |
 | `setPermissionMode` | A mode the agent refuses rejects. The core then changes nothing of its own: the bypass it stores is written only after the call resolves | `a permission mode the back end names is taken, another is refused` |
 | `session_started` | Emitted only once a start that resumes that id would succeed: the core stores the id when the event arrives, and the setup's Start may resume it before any prompt | `an id that session_started names can be resumed at once` |
-| A request | `RequestHandler.permission` and `RequestHandler.question` each resolve once. The agent passes a signal and aborts it when it no longer waits: the core takes the request back from the owner and resolves it as refused | `a request the agent gives up aborts the signal it passed, and the turn goes on to its end` |
+| A request | `RequestHandler.permission` and `RequestHandler.question` each resolve once. The agent passes a signal and aborts it when it no longer waits: the core takes the request back from the owner and resolves it as refused. A request names a call (`callId`) only once that call's `call_started` is on `events` and while its `call_ended` is not; a back end that cannot say so passes `callId` null, and the core shows the request at once and marks no line | `a request the agent gives up aborts the signal it passed, and the turn goes on to its end`, `a request names a call only once the reader has that call's start` |
 | A start that fails | `ResumeRefused`, the one error class of the seam, when the session a start names cannot be resumed: the turn fails and the thread keeps its entry, so the next start tries again. Any other rejection is shown to the owner by its name and the next message tries again. Neither leaves a process running | `a resume the agent refuses rejects with ResumeRefused and leaves no process` |
 
 Members that serve a capability are optional on the type and present exactly when the module
@@ -939,6 +939,17 @@ request could not be shown. The request shows the tool's whole input, since Appr
 Code the whole input: it runs over as many code blocks as it needs, and past one message it keeps
 the start and the end with a line saying how many characters are not shown
 (a provider's cut).
+
+A request names its call (`callId`) only once that call's `call_started` is on the session's events
+(the contract of `RequestHandler`). The back end waits for the records the SDK delivered before it
+asked (`ClaudeSession`'s `canUseTool` runs in line with them) and passes `callId` null for a call the
+translator never started (`Translator.started`); the core then shows the request at once and marks
+nothing. For a named call, `ThreadSession.askOwner` waits until `read` has dispatched the call's
+start, then asks the reply's renderer to mark the line waiting (`TurnRenderer.hold`: a drawn line
+that runs turns `pending` with no `startedAt`; a call that asks before its line is drawn is drawn
+`pending`, through `asked`), posts the request below the line, and on an allow marks the line running
+again (`TurnRenderer.release`, with `startedAt` set then) before the decision returns to the agent.
+A call the renderer holds, or one inside a subagent, has no line to mark.
 
 A clarifying question (Claude Code's `AskUserQuestion` tool, 1 to 4 questions)
 arrives the same way and is posted as one line naming the questions, with a way to answer and a way to skip.
