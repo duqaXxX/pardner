@@ -31,7 +31,7 @@ struct ChannelPanel: Equatable {
     }
 }
 
-/// The panel's sheet for the channel `id`; a channel the reading no longer holds shows as not known yet, with Done.
+/// The panel's form for the channel `id`; a channel the reading no longer holds shows as not known yet.
 public struct ChannelPanelView: View {
     let model: ReadingModel
     let channels: ChannelsModel
@@ -55,11 +55,9 @@ public struct ChannelPanelView: View {
                 Text("Not known yet.").foregroundStyle(PardnerColor.muted)
             }
             HStack {
-                Button("Change Folder…") { channels.closeForBind(bot: panel?.bot ?? channel.flatMap(ChannelsModel.bot(of:))) }
+                Button("Change Folder…") { channels.changeFolder(bot: panel?.bot ?? channel.flatMap(ChannelsModel.bot(of:))) }
                     .buttonStyle(PardnerButton(prominent: false)).disabled(!channels.canBind(id))
                 Spacer()
-                Button("Done") { channels.close() }
-                    .keyboardShortcut(.cancelAction).buttonStyle(PardnerButton(prominent: true)).accessibilityLabel("Close the channel settings")
             }
         }
         .padding(PardnerMetrics.gap * 2.5)

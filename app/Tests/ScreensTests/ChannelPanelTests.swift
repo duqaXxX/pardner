@@ -70,49 +70,56 @@ final class ChannelPanelTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(ChannelPanel(channel: refused)).folder, "/srv/code/a", "the folder that stays")
     }
 
-    func testThePanelIsASheetUnderTheOneSheetRule() {
-        let devices = devices(), channels = ChannelsModel(devices: devices), settings = SettingsModel(devices: devices)
+    func testChangeFolderMovesThePanelToTheBindFormInOneStepInTheSameWindow() {
+        let channels = ChannelsModel(devices: devices())
+        var shown = 0
+        channels.present = { shown += 1 }
         channels.openSettings(channel: channelId)
-        XCTAssertEqual(channels.sheet, .settings(channel: channelId))
-        XCTAssertTrue(Menus.sheetIsUp(settings: settings, channels: channels))
-        XCTAssertFalse(Menus.canOpenSettings(paired: true, settings: settings, channels: channels))
-        XCTAssertFalse(Menus.canMakeChannel(paired: true, settings: settings, channels: channels))
-        channels.close()
-        XCTAssertFalse(Menus.sheetIsUp(settings: settings, channels: channels))
-    }
-
-    func testChangeFolderClosesThePanelFirstAndOpensTheBindSheetOnceItIsGone() {
-        let devices = devices(), channels = ChannelsModel(devices: devices), settings = SettingsModel(devices: devices)
-        channels.openSettings(channel: channelId)
-        channels.closeForBind(bot: bot)
-        XCTAssertNil(channels.sheet, "no sheet opens over a sheet")
-        XCTAssertTrue(Menus.sheetIsUp(settings: settings, channels: channels), "the bind sheet waits for the panel to go")
-        channels.close() // SwiftUI's dismissal calls it before onDismiss
-        XCTAssertTrue(Menus.sheetIsUp(settings: settings, channels: channels), "still waiting")
-        channels.takeBind()
+        XCTAssertEqual(shown, 1)
+        channels.folder = "/typed"
+        channels.changeFolder(bot: bot)
         XCTAssertEqual(channels.sheet, .bind(channel: channelId))
         XCTAssertEqual(channels.bot, bot)
-        channels.takeBind()
-        XCTAssertEqual(channels.sheet, .bind(channel: channelId), "taken once")
-        channels.close()
-        XCTAssertFalse(Menus.sheetIsUp(settings: settings, channels: channels))
+        XCTAssertEqual(channels.folder, "", "the fields of the panel are cleared, as for any new form")
+        XCTAssertEqual(shown, 1, "the window is the one already open")
     }
 
-    func testResetDropsAWaitingBind() {
+    func testALateCloseEndsNothingNewerAndChangeFolderIsTheSameShowing() {
         let channels = ChannelsModel(devices: devices())
+        channels.present = {}
         channels.openSettings(channel: channelId)
-        channels.closeForBind(bot: bot)
-        channels.reset()
-        channels.takeBind()
+        let first = channels.epoch
+        channels.changeFolder(bot: bot)
+        XCTAssertEqual(channels.epoch, first)
+        channels.close()
+        channels.openNew()
+        channels.close(ifEpoch: first)
+        XCTAssertEqual(channels.sheet, .create)
+        channels.close(ifEpoch: channels.epoch)
         XCTAssertNil(channels.sheet)
     }
 
-    func testChangeFolderIsRefusedForAFaultedChannel() {
+    func testChangeFolderOpensNothingFromAnotherFormAndNothingForAFaultedChannel() {
+        let channels = ChannelsModel(devices: devices())
+        channels.present = {}
+        channels.openNew()
+        channels.changeFolder(bot: bot)
+        XCTAssertEqual(channels.sheet, .create)
         var state = ChannelsState()
         state.faulted = [channelId]
-        let channels = ChannelsModel(state: state, devices: devices())
+        let faulted = ChannelsModel(state: state, devices: devices())
+        faulted.present = {}
+        faulted.openSettings(channel: channelId)
+        faulted.changeFolder(bot: bot)
+        XCTAssertEqual(faulted.sheet, .settings(channel: channelId), "the panel stays")
+    }
+
+    func testResetEndsTheBindForm() {
+        let channels = ChannelsModel(devices: devices())
+        channels.present = {}
         channels.openSettings(channel: channelId)
-        channels.closeForBind(bot: bot)
-        XCTAssertEqual(channels.sheet, .settings(channel: channelId), "the panel stays")
+        channels.changeFolder(bot: bot)
+        channels.reset()
+        XCTAssertNil(channels.sheet)
     }
 }

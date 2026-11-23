@@ -1,4 +1,4 @@
-// The sheet that sets a name (names design 4.1 to 4.3): a channel's, the person's or this Mac's. One field, the answer of the last try, Save and Cancel.
+// The sheet that sets a name (names design 4.1 and 4.3): a channel's or this Mac's. One field, the answer of the last try and Save; the window's own controls close it.
 import DesignSystem
 import SwiftUI
 
@@ -14,7 +14,6 @@ public struct NameSheet: View {
     private var title: String {
         switch target {
         case .channel?: "Channel name"
-        case .person?: "Your name"
         case .device?, nil: "This Mac's name"
         }
     }
@@ -22,7 +21,6 @@ public struct NameSheet: View {
     private var hint: String {
         switch target {
         case .channel?: "Lowercase letters, digits, - and _. A space becomes a -."
-        case .person?: "The name your other devices show for you."
         case .device?, nil: "The name your other devices show for this Mac."
         }
     }
@@ -40,8 +38,6 @@ public struct NameSheet: View {
             }
             HStack {
                 Spacer()
-                Button("Cancel") { model.close() }
-                    .keyboardShortcut(.cancelAction).buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Cancel")
                 Button("Save") { model.saveName() }
                     .buttonStyle(PardnerButton(prominent: true)).disabled(!model.canSaveName)
                     .keyboardShortcut(.defaultAction).accessibilityLabel("Save the name")

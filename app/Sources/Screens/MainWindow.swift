@@ -141,7 +141,7 @@ public struct MainWindow: View {
         // The panes are hosted apart, so each one carries the window's font, colour and background itself.
         PaneSplit(
             threadOpen: threadOpen,
-            sidebar: pane(Sidebar(model: model, selected: shown?.id, choose: { channel = $0 }, openSettings: settings.map { settings in { settings.open(.general) } },
+            sidebar: pane(Sidebar(model: model, selected: shown?.id, choose: { channel = $0 }, openSettings: settings.map { settings in { settings.open($0) } },
                                   channels: channels, sections: sections), background: PardnerColor.side),
             conversation: pane(Group {
                 if let c = shown {
@@ -160,22 +160,6 @@ public struct MainWindow: View {
         // The window's top edge is the window's own, under the hidden title bar; each pane's host keeps its 32 point inset for the traffic lights.
         .ignoresSafeArea(.container, edges: .top)
         .onChange(of: shown?.id) { thread = nil }
-        .sheet(isPresented: Binding(get: { settings?.pane != nil }, set: { if !$0 { settings?.close() } }), onDismiss: {
-            guard let settings, settings.takeRename() else { return }
-            let this = settings.devices.rows.first(where: \.isThisMac)
-            channels?.openRename(.device, current: this.flatMap { model.names.devices[$0.id] ?? $0.label })
-        }) {
-            if let settings {
-                SettingsPanel(model: settings, bots: bots, icons: icons, renameThisMac: channels == nil ? nil : { settings.closeForRename() })
-            }
-        }
-        .background(Color.clear.sheet(isPresented: Binding(get: { channels?.sheet != nil }, set: { if !$0 { channels?.close() } }), onDismiss: { channels?.takeBind() }) {
-            if let channels {
-                if case .rename? = channels.sheet { NameSheet(model: channels, channelNames: model.names.channels) } else if case .settings(let id)? = channels.sheet {
-                    ChannelPanelView(model: model, channels: channels, id: id)
-                } else { ChannelSheet(model: channels, names: model.profiles.mapValues(\.name), channelNames: model.names.channels) }
-            }
-        })
         .background(PardnerColor.bg)
     }
 
@@ -188,7 +172,7 @@ public struct MainWindow: View {
     /// field take Escape first; a request card's `onKeyPress` runs before the chain and returns `.handled` when it takes the key. Each pane
     /// carries it because the panes are hosted apart.
     private func closeThreadOnEscape() {
-        guard Menus.escapeClosesThread(threadOpen: openThread != nil, settings: settings, channels: channels) else { return }
+        guard openThread != nil else { return }
         thread = nil
     }
 }
@@ -243,8 +227,8 @@ struct Sidebar: View {
     let model: ReadingModel
     let selected: Data?
     let choose: (Data) -> Void
-    /// Opens the Settings panel; nil where the window has no pairing.
-    var openSettings: (() -> Void)?
+    /// Opens the Settings window on a pane; nil where the window has no pairing.
+    var openSettings: ((SettingsModel.Pane) -> Void)?
     /// The channel acts; nil where the window has no pairing.
     var channels: ChannelsModel?
     /// The sections; nil where the window has no pairing, which draws today's list under "Channels".
@@ -341,8 +325,8 @@ struct Sidebar: View {
             Spacer()
             // The person's row and the Settings button, under a rule.
             HStack(spacing: 4) {
-                if let channels {
-                    Button { channels.openRename(.person, current: model.personName) } label: {
+                if channels != nil {
+                    Button { openSettings?(.profile) } label: {
                         HStack(spacing: PardnerMetrics.gap) {
                             Avatar(name: model.personName ?? "You", isBot: false, icon: nil, size: 28)
                             Text(model.personName ?? "Set your name").font(PardnerFont.ui(size: 14, weight: model.personName == nil ? .regular : .semibold))
@@ -351,12 +335,12 @@ struct Sidebar: View {
                         }
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain).pointerStyle(channels.ready ? .link : nil).disabled(!channels.ready).help("Change your name").accessibilityLabel("Change your name")
+                    .buttonStyle(.plain).pointerStyle(openSettings == nil ? nil : .link).disabled(openSettings == nil).help("Profile…").accessibilityLabel("Profile…")
                 } else {
                     Spacer()
                 }
                 if let openSettings {
-                    Button(action: openSettings) { Image(systemName: "gearshape").foregroundStyle(PardnerColor.muted).frame(width: 30, height: 30).contentShape(Rectangle()) }
+                    Button { openSettings(.general) } label: { Image(systemName: "gearshape").foregroundStyle(PardnerColor.muted).frame(width: 30, height: 30).contentShape(Rectangle()) }
                         .buttonStyle(.plain).pointerStyle(.link).help("Settings…").accessibilityLabel("Settings…")
                 }
             }

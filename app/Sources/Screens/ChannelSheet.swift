@@ -1,4 +1,4 @@
-// The sheet that makes a channel (New channel) or binds one to a folder (Bind to a folder…): a folder, the bot when the person has more
+// The form that makes a channel (New channel) or binds one to a folder (Bind to a folder…): a folder, the bot when the person has more
 // than one, and the answer of the last try (new channel design 5). Colours, radii and the gap are the design system's tokens.
 import DesignSystem
 import SwiftUI
@@ -44,8 +44,6 @@ public struct ChannelSheet: View {
             }
             HStack {
                 Spacer()
-                Button("Cancel") { model.close() }
-                    .keyboardShortcut(.cancelAction).buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Cancel")
                 Button(isBind ? "Bind" : "Create") { model.submit(names: names) }
                     .buttonStyle(PardnerButton(prominent: true)).disabled(!model.canSubmit(names: names))
                     .keyboardShortcut(.defaultAction).accessibilityLabel(isBind ? "Bind the channel to the folder" : "Create the channel")

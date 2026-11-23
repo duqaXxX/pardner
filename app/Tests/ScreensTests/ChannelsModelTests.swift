@@ -101,6 +101,7 @@ final class ChannelsModelTests: XCTestCase {
         let model = ChannelsModel(devices: devices(), sheet: .create, folder: "/w")
         let asked = model.ticket
         model.close()
+        model.present = {}
         model.openNew()
         model.finishCreate(.notSaved, for: asked)
         XCTAssertNil(model.problem)
@@ -178,8 +179,10 @@ final class ChannelsModelTests: XCTestCase {
         var state = ChannelsState()
         state.faulted = [Self.id(9)]
         let model = ChannelsModel(state: state, devices: devices())
+        model.present = {}
         model.openBind(channel: Self.id(9))
         XCTAssertNil(model.sheet)
+        model.present = {}
         model.openBind(channel: Self.id(8))
         XCTAssertEqual(model.sheet, .bind(channel: Self.id(8)))
     }
@@ -272,6 +275,7 @@ final class ChannelsModelTests: XCTestCase {
     }
     func testOpeningBindSelectsThatBotNotTheFirst() {
         let model = ChannelsModel(devices: devices(bots: [(3, true), (2, true)]))
+        model.present = {}
         model.openBind(channel: Self.id(9), bot: Self.id(3))
         model.folder = "/w"
         XCTAssertEqual(model.request(names: names), .bind(channel: Self.id(9), draft: ChannelsModel.bindDraft(bot: Self.id(3), folder: "/w")),
@@ -283,35 +287,38 @@ final class ChannelsModelTests: XCTestCase {
     func testARenameOpensFilledWithTheNameShownAndAsksForTheKindOfItsTarget() throws {
         let channel = Self.id(9)
         let model = ChannelsModel(devices: devices())
+        model.present = {}
         model.openRename(.channel(channel), current: "docs")
         XCTAssertEqual(model.sheet, .rename(.channel(channel)))
         XCTAssertEqual(model.nameText, "docs")
         XCTAssertTrue(try XCTUnwrap(model.nameRequest()) == .init(kind: 14, target: channel, text: "docs"))
-        model.openRename(.person, current: nil)
-        model.nameText = "  Ada Lovelace \n"
-        XCTAssertTrue(try XCTUnwrap(model.nameRequest()) == .init(kind: 15, target: nil, text: "Ada Lovelace"), "the ends are trimmed: a name has no space at either end")
+        model.close() // a second request while a form is open is dropped
+        model.present = {}
         model.openRename(.device, current: "Mac one")
         XCTAssertTrue(try XCTUnwrap(model.nameRequest()) == .init(kind: 16, target: nil, text: "Mac one"))
+        model.nameText = "  Mac two \n"
+        XCTAssertTrue(try XCTUnwrap(model.nameRequest()) == .init(kind: 16, target: nil, text: "Mac two"), "the ends are trimmed: a name has no space at either end")
         model.nameText = "  "
         XCTAssertNil(model.nameRequest(), "an empty name is not saved")
     }
 
     func testNothingOpensBeforeTheLogIsRead() {
         let model = ChannelsModel(devices: devices(read: false))
-        model.openRename(.person, current: nil)
+        model.present = {}
+        model.openRename(.device, current: nil)
         XCTAssertNil(model.sheet)
     }
 
     func testRenameOutcomesSaySomethingPlainPerTarget() {
         let model = ChannelsModel(devices: devices())
+        model.present = {}
         model.openRename(.channel(Self.id(9)), current: "docs")
         model.finishName(.refused("bad-input"))
         XCTAssertEqual(model.problem, "Use only lowercase letters, digits, - and _, up to 80 characters.")
         model.finishName(.notSaved)
         XCTAssertEqual(model.problem, "Pardner could not save the name. Try again.")
-        model.openRename(.person, current: nil)
-        model.finishName(.refused("bad-input"))
-        XCTAssertEqual(model.problem, "Use up to 64 characters, with no hidden characters and no @.")
+        model.close() // a second request while a form is open is dropped
+        model.present = {}
         model.openRename(.device, current: nil)
         model.finishName(.refused("bad-input"))
         XCTAssertEqual(model.problem, "Use up to 64 characters, with no hidden characters.")
@@ -325,6 +332,7 @@ final class ChannelsModelTests: XCTestCase {
         state.faulted = [channel]
         let model = ChannelsModel(state: state, devices: devices())
         XCTAssertFalse(model.canRename(channel))
+        model.present = {}
         model.openRename(.channel(channel), current: "docs")
         XCTAssertNil(model.sheet, "the name would never be written")
         XCTAssertTrue(ChannelsModel(devices: devices()).canRename(channel))
@@ -332,17 +340,20 @@ final class ChannelsModelTests: XCTestCase {
 
     func testSavingTheNameAlreadyShownIsNotOffered() {
         let model = ChannelsModel(devices: devices())
-        model.openRename(.person, current: "Ada")
+        model.present = {}
+        model.openRename(.device, current: "Mac one")
         XCTAssertFalse(model.canSaveName, "nothing would change")
-        model.nameText = "Ada Lovelace"
+        model.nameText = "Mac two"
         XCTAssertTrue(model.canSaveName)
-        model.nameText = " Ada "
+        model.nameText = " Mac one "
         XCTAssertFalse(model.canSaveName, "the ends are trimmed before the comparison")
     }
 
     func testAnUnexpectedRefusalIsAPlainSentenceWithNoCode() {
         let model = ChannelsModel(devices: devices())
-        model.openRename(.person, current: nil)
+        model.close() // a second request while a form is open is dropped
+        model.present = {}
+        model.openRename(.device, current: nil)
         model.finishName(.refused("something-new"))
         XCTAssertEqual(model.problem, "Pardner could not set the name. Try again in a moment.")
     }
@@ -373,6 +384,7 @@ final class ChannelsModelTests: XCTestCase {
 
     func testTypingAnIllegalCharacterKeepsTheLineUntilTheNextGoodEdit() {
         let model = ChannelsModel(devices: devices())
+        model.present = {}
         model.openRename(.channel(Self.id(9)), current: nil)
         model.nameText = "docs!"
         model.channelNameEdited()
@@ -388,6 +400,7 @@ final class ChannelsModelTests: XCTestCase {
     func testTwoChannelsWithOneNameAreWarnedAbout() {
         let (mine, other) = (Self.id(9), Self.id(8))
         let model = ChannelsModel(devices: devices())
+        model.present = {}
         model.openRename(.channel(mine), current: "docs")
         XCTAssertNil(model.duplicateWarning(channels: [mine: "docs", other: "web"]), "its own name is no duplicate")
         model.nameText = "web"
@@ -398,6 +411,7 @@ final class ChannelsModelTests: XCTestCase {
 
     func testTheNewChannelNameFollowsTheFolderUntilTheyTypeOne() {
         let model = ChannelsModel(devices: devices())
+        model.present = {}
         model.openNew()
         model.folder = "/work/My App"
         model.edited()
@@ -412,6 +426,7 @@ final class ChannelsModelTests: XCTestCase {
 
     func testAPastedNameTheRuleRewroteIsStillTheirsAndTheFolderLeavesItAlone() {
         let model = ChannelsModel(devices: devices())
+        model.present = {}
         model.openNew()
         model.folder = "/work/app"
         model.edited()
@@ -422,5 +437,53 @@ final class ChannelsModelTests: XCTestCase {
         model.folder = "/work/other"
         model.edited()
         XCTAssertEqual(model.nameText, "web", "the person typed a name: the folder no longer replaces it")
+    }
+
+    func testASecondRequestWithAFormOpenChangesNothingAndBringsTheFormForward() {
+        let model = ChannelsModel(devices: devices(bots: [(3, true), (2, true)]))
+        var shown = 0
+        model.present = { shown += 1 }
+        model.openNew(in: "first")
+        model.folder = "/typed"
+        model.pick(Self.id(3))
+        XCTAssertEqual(shown, 1)
+        model.openBind(channel: Self.id(9), bot: Self.id(2))
+        model.openRename(.channel(Self.id(9)), current: "docs")
+        model.openSettings(channel: Self.id(9))
+        model.openNew(in: "second")
+        XCTAssertEqual(shown, 5, "each request brings the open form forward")
+        XCTAssertEqual(model.sheet, .create)
+        XCTAssertEqual(model.folder, "/typed")
+        XCTAssertEqual(model.nameText, "")
+        XCTAssertEqual(model.bot, Self.id(3))
+        model.close()
+        model.present = { shown += 1 }
+        model.openNew()
+        XCTAssertEqual(model.sheet, .create, "once closed, a request opens again")
+    }
+
+    func testAnOpenerChangesNothingWhilePresentIsNil() {
+        let model = ChannelsModel(devices: devices())
+        model.openNew()
+        model.openBind(channel: Self.id(9))
+        model.openRename(.device, current: "Mac one")
+        model.openSettings(channel: Self.id(9))
+        XCTAssertNil(model.sheet)
+        XCTAssertEqual(model.nameText, "")
+    }
+
+    func testResetLeavesNoFormAndEveryOpenerCallsPresent() {
+        let model = ChannelsModel(devices: devices())
+        var shown = 0
+        model.present = { shown += 1 }
+        model.openNew()
+        model.reset()
+        XCTAssertNil(model.sheet)
+        model.openBind(channel: Self.id(9))
+        model.close()
+        model.openRename(.device, current: nil)
+        model.close()
+        model.openSettings(channel: Self.id(9))
+        XCTAssertEqual(shown, 4)
     }
 }

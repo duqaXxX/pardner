@@ -1,5 +1,5 @@
-// The Settings panel (settings design 2): one sheet over the main window, 600 by 640 points as the Devices sheet it replaced was, with a row of
-// pane buttons at the top and the chosen pane under it. Colours, radii and the gap are the design system's tokens.
+// The Settings window (settings design 2, app windows design 3.1): 760 by 560 points, the panes listed at the left on `side` and the chosen pane
+// at the right with its title, a line under it and its own action. Colours, radii and the gap are the design system's tokens.
 import DesignSystem
 import SwiftUI
 
@@ -10,67 +10,97 @@ public struct SettingsPanel: View {
     /// The Bots pane's bots, from `MainWindow.listedBots`, and their icons decoded once for the window.
     let bots: [DevicesModel.ListedBot]
     let icons: [Data: NSImage]
+    /// The person's name as the device read it, for the Profile pane.
+    let personName: String?
 
-    public init(model: SettingsModel, bots: [DevicesModel.ListedBot] = [], icons: [Data: NSImage] = [:], renameThisMac: (() -> Void)? = nil) {
-        (self.model, self.bots, self.icons, self.renameThisMac) = (model, bots, icons, renameThisMac)
+    public init(model: SettingsModel, bots: [DevicesModel.ListedBot] = [], icons: [Data: NSImage] = [:], personName: String? = nil, renameThisMac: (() -> Void)? = nil) {
+        (self.model, self.bots, self.icons, self.personName, self.renameThisMac) = (model, bots, icons, personName, renameThisMac)
     }
 
-    /// What each pane's `Done` does: closes the panel, and Devices with it. The view and its test both take it from here.
-    static func done(_ model: SettingsModel) -> () -> Void { { model.close() } }
-
     public var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 4) {
-                ForEach(SettingsModel.Pane.allCases) { pane in
-                    Button(pane.rawValue) { model.open(pane) }
-                        .buttonStyle(.plain).pointerStyle(.link)
-                        .font(PardnerFont.ui(size: 14, weight: model.pane == pane ? .semibold : .regular))
-                        .padding(.horizontal, PardnerMetrics.gap + 2).frame(height: 30)
-                        .background(model.pane == pane ? PardnerColor.raised : .clear, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
-                        .accessibilityAddTraits(model.pane == pane ? .isSelected : [])
-                }
-                Spacer()
-            }
-            .padding(.horizontal, PardnerMetrics.gap * 1.5).frame(height: 44).background(PardnerColor.side)
+        HStack(spacing: 0) {
+            side
             Divider().overlay(PardnerColor.line)
-            switch model.pane {
-            case .general?: GeneralPane(close: Self.done(model))
-            case .devices?: DevicesPane(model: model.devices, done: Self.done(model), renameThisMac: renameThisMac)
-            case .bots?: BotsPane(bots: bots, icons: icons, listRead: model.devices.ready, close: Self.done(model))
-            case nil: EmptyView()
+            Group {
+                switch model.pane {
+                case .general?: GeneralPane()
+                case .profile?: ProfilePane(model: model.profile, live: personName, ready: model.devices.ready)
+                case .devices?: DevicesPane(model: model.devices, renameThisMac: renameThisMac)
+                case .bots?: BotsPane(bots: bots, icons: icons, listRead: model.devices.ready)
+                case nil: EmptyView()
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 600, height: 640)
+        .frame(width: 760, height: 560)
         .background(PardnerColor.bg)
         .foregroundStyle(PardnerColor.text)
         .font(PardnerFont.ui(size: 14, weight: .regular))
     }
+
+    /// The panes at the left, on `side` (the mock's 210 point column); the top clears the traffic lights over it.
+    private var side: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Settings").font(PardnerFont.display(size: 17, weight: .bold)).accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, PardnerMetrics.gap * 1.5).padding(.bottom, PardnerMetrics.gap)
+            ForEach(SettingsModel.Pane.allCases) { pane in
+                Button { model.open(pane) } label: {
+                    HStack(spacing: PardnerMetrics.gap) {
+                        symbol(pane).frame(width: 18, height: 18)
+                        Text(pane.rawValue)
+                        Spacer()
+                    }
+                    .padding(.horizontal, PardnerMetrics.gap * 1.5).frame(height: 32).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).pointerStyle(.link)
+                .font(PardnerFont.ui(size: 14, weight: model.pane == pane ? .semibold : .regular))
+                .foregroundStyle(model.pane == pane ? PardnerColor.brandText : PardnerColor.text)
+                .background(model.pane == pane ? PardnerColor.brandSoft : .clear, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
+                .accessibilityAddTraits(model.pane == pane ? .isSelected : [])
+            }
+            Spacer()
+        }
+        .padding(.horizontal, PardnerMetrics.gap).padding(.top, 40)
+        .frame(width: 210).frame(maxHeight: .infinity, alignment: .top).background(PardnerColor.side)
+    }
+
+    /// A pane's mark: a symbol, and for Bots the mark a bot has in the conversation.
+    @ViewBuilder private func symbol(_ pane: SettingsModel.Pane) -> some View {
+        switch pane {
+        case .general: Image(systemName: "gearshape")
+        case .profile: Image(systemName: "person.crop.circle")
+        case .devices: Image(systemName: "laptopcomputer")
+        case .bots: Avatar(name: "Bots", isBot: true, icon: nil, size: 16)
+        }
+    }
 }
 
-/// A pane's header: its title and `Done`, the cancel action, which closes the panel.
-struct PaneHeader: View {
+/// A pane's header: its title, a line under it, and the pane's own action at the right; the window's own controls close the window.
+struct PaneHeader<Action: View>: View {
     let title: String
-    let done: () -> Void
+    var subtitle: String?
+    @ViewBuilder let action: Action
 
     var body: some View {
-        HStack {
-            Text(title).font(PardnerFont.display(size: 20, weight: .bold)).accessibilityAddTraits(.isHeader)
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(PardnerFont.display(size: 20, weight: .bold)).accessibilityAddTraits(.isHeader)
+                if let subtitle { Text(subtitle).font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.muted) }
+            }
             Spacer()
-            Button("Done", action: done).keyboardShortcut(.cancelAction).buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Close the settings")
+            action
         }
-        .padding(.horizontal, PardnerMetrics.gap * 2.5).frame(height: 56)
+        .padding(.horizontal, PardnerMetrics.gap * 2.5).padding(.top, PardnerMetrics.gap * 2.5).padding(.bottom, PardnerMetrics.gap * 1.5)
     }
 }
 
 /// General: Appearance, the setting the View menu's picker writes too.
 struct GeneralPane: View {
-    let close: () -> Void
     @AppStorage(Theme.storageKey) private var theme = Theme.fallback.rawValue
 
     var body: some View {
         VStack(spacing: 0) {
-            PaneHeader(title: "General", done: close)
-            Divider().overlay(PardnerColor.line)
+            PaneHeader(title: "General", subtitle: "How Pardner looks.") {}
             HStack {
                 Text("Appearance")
                 Spacer()
@@ -85,18 +115,47 @@ struct GeneralPane: View {
     }
 }
 
+/// Profile: the person's name, the same on every device of theirs; the picture comes with issue #96. Save is the pane's action, the default one.
+struct ProfilePane: View {
+    @Bindable var model: ProfileModel
+    let live: String?
+    let ready: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PaneHeader(title: "Profile", subtitle: "How you appear on every device of yours.") {
+                Button("Save") { model.save(live: live, ready: ready) }
+                    .buttonStyle(PardnerButton(prominent: true)).disabled(!model.canSave(live: live, ready: ready))
+                    .keyboardShortcut(.defaultAction).accessibilityLabel("Save your name")
+            }
+            VStack(alignment: .leading, spacing: PardnerMetrics.gap) {
+                Field(title: "Name", hint: "The name your other devices show for you.", error: nil) {
+                    TextField("", text: Binding(get: { model.text(live: live) }, set: { model.edited = $0 }), prompt: Text("Set your name"))
+                        .accessibilityLabel("Your name")
+                }
+                if !ready {
+                    Text("Reading your devices…").font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                }
+                if let problem = model.problem {
+                    Text(problem).font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.delText).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, PardnerMetrics.gap * 2.5).padding(.top, PardnerMetrics.gap)
+            Spacer()
+        }
+    }
+}
+
 /// Bots: each active bot of the person by its mark, its name and its account, or its label and `Not seen yet` until a channel carries its profile.
 struct BotsPane: View {
     let bots: [DevicesModel.ListedBot]
     let icons: [Data: NSImage]
     /// The device list is read: before that the bots are not known, and an empty list says nothing about them.
     let listRead: Bool
-    let close: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            PaneHeader(title: "Bots", done: close)
-            Divider().overlay(PardnerColor.line)
+            PaneHeader(title: "Bots", subtitle: "The bots that hold your keys.") {}
             ScrollView {
                 VStack(alignment: .leading, spacing: PardnerMetrics.gap * 1.5) {
                     if bots.isEmpty {
