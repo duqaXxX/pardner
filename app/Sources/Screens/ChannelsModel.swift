@@ -8,10 +8,9 @@ import Relay
 
 @MainActor @Observable
 public final class ChannelsModel {
-    /// What a name is for (names design 4.1 to 4.3): a channel, the person, or this Mac.
+    /// What a name is for (names design 4.1 and 4.3): a channel or this Mac. The person's name is the Settings window's Profile pane.
     public enum NameTarget: Equatable {
         case channel(Data)
-        case person
         case device
     }
 
@@ -24,7 +23,7 @@ public final class ChannelsModel {
         case settings(channel: Data)
     }
 
-    /// What Save would ask of the controller: the kind of name (14 a channel's, 15 the person's, 16 this device's), its channel and the text.
+    /// What Save would ask of the controller: the kind of name (14 a channel's, 16 this device's), its channel and the text.
     struct NameRequest: Equatable {
         let kind: Int
         let target: Data?
@@ -66,12 +65,15 @@ public final class ChannelsModel {
     public private(set) var working = false
     /// Which opening of the sheet an answer belongs to: a late answer never touches a sheet opened since.
     private(set) var ticket = 0
+    /// Which showing of the form window this is: it changes when a form opens over none, not when Change Folder… swaps the form in the open window.
+    private(set) var epoch = 0
     /// The section the sheet was opened from (New Channel… in a section's menu); `onCreated` hands it on with the new channel's id.
     private var createSection: String?
     /// A channel was made from a section: its id and that section (sidebar sections design 7).
     @ObservationIgnored var onCreated: ((Data, String) -> Void)?
-    /// Change Folder… was asked from the panel: the panel closes and the bind sheet opens once it is gone, not in the same tick.
-    private var bindPending: (channel: Data, bot: Data?)?
+    /// Shows the form window, set once from the main scene. Every public opener calls it after setting its state, on every request: an open
+    /// window comes to the front. While it is nil (the main scene has not appeared) an opener changes nothing.
+    @ObservationIgnored public var present: (() -> Void)?
 
     private let devices: DevicesModel
     private let controller: PairingController?
@@ -108,7 +110,6 @@ public final class ChannelsModel {
     /// The pairing ended: the sheet and its fields go.
     func reset() {
         sheet = nil
-        bindPending = nil
         clearFields()
     }
 
@@ -155,16 +156,26 @@ public final class ChannelsModel {
 
     /// Opens the sheet for a new channel with empty fields, from a section's menu when `section` is given; nothing opens before the log is read.
     public func openNew(in section: String? = nil) {
-        guard ready else { return }
+        guard admitsRequest(), ready else { return }
         open(.create)
         createSection = section
+        present?()
     }
 
     /// Opens the sheet for a new `/bind` prompt in `channel`, with `bot` (the channel's own, see `bot(of:)`) picked; nothing opens for a faulted channel.
     public func openBind(channel: Data, bot: Data? = nil) {
-        guard canBind(channel) else { return }
+        guard admitsRequest(), canBind(channel) else { return }
         open(.bind(channel: channel))
         self.bot = bot
+        present?()
+    }
+
+    /// The first line of each public opener, before any write: nothing opens while there is no window to show it, and a form already open
+    /// comes to the front unchanged (the new request is dropped).
+    private func admitsRequest() -> Bool {
+        guard let present else { return false }
+        guard sheet == nil else { present(); return false }
+        return true
     }
 
     /// The bot a channel's `/bind` goes to: the `to` of its latest `/bind` prompt (the creation's), else the `to` of its newest prompt (a word has no session, and still names its bot).
@@ -173,6 +184,7 @@ public final class ChannelsModel {
     }
 
     private func open(_ next: Sheet) {
+        if sheet == nil { epoch += 1 }
         ticket += 1
         clearFields()
         sheet = next
@@ -185,26 +197,24 @@ public final class ChannelsModel {
         clearFields()
     }
 
+    /// The window closed: ends the form it showed, and not a newer one opened since.
+    func close(ifEpoch shown: Int) {
+        if shown == epoch { close() }
+    }
+
     /// Opens the channel's panel.
-    public func openSettings(channel: Data) { open(.settings(channel: channel)) }
+    public func openSettings(channel: Data) {
+        guard admitsRequest() else { return }
+        open(.settings(channel: channel))
+        present?()
+    }
 
-    /// Change Folder… in the panel: the panel closes, and `takeBind` opens the bind sheet; nothing happens for a faulted channel.
-    public func closeForBind(bot: Data?) {
+    /// Change Folder… in the panel: the form's own step from `settings` to `bind`, in the same window; nothing happens for a faulted channel.
+    public func changeFolder(bot: Data?) {
         guard case .settings(let channel)? = sheet, canBind(channel) else { return }
-        close()
-        bindPending = (channel, bot)
+        open(.bind(channel: channel))
+        self.bot = bot
     }
-
-    /// The panel's dismissal asks whether a bind waits: the bind sheet opens now, once.
-    public func takeBind() {
-        guard let pending = bindPending else { return }
-        bindPending = nil
-        openBind(channel: pending.channel, bot: pending.bot)
-    }
-
-    /// `close()` leaves a waiting bind: SwiftUI's dismissal calls it before `onDismiss` asks `takeBind`. `reset()` and `takeBind` clear it.
-    /// A sheet of this model is up, or the bind sheet waits for the panel to go.
-    public var holdsSheet: Bool { sheet != nil || bindPending != nil }
 
     private func clearFields() {
         (folder, nameText, nameNote, written, nameTouched, bot, problem, working) = ("", "", nil, "", false, nil, nil, false)
@@ -253,11 +263,12 @@ public final class ChannelsModel {
 
     /// Opens the name sheet for `target`, filled with the name now shown; nothing opens before the log is read.
     public func openRename(_ target: NameTarget, current: String?) {
-        guard ready else { return }
+        guard admitsRequest(), ready else { return }
         if case .channel(let channel) = target, !canRename(channel) { return }
         open(.rename(target))
         nameText = current ?? ""
         nameShown = current
+        present?()
     }
 
     /// A faulted channel takes no name: the link would never write it.
@@ -270,7 +281,6 @@ public final class ChannelsModel {
         guard !text.isEmpty else { return nil }
         switch target {
         case .channel(let channel): return NameRequest(kind: 14, target: channel, text: text)
-        case .person: return NameRequest(kind: 15, target: nil, text: text)
         case .device: return NameRequest(kind: 16, target: nil, text: text)
         }
     }
@@ -298,7 +308,6 @@ public final class ChannelsModel {
         case .refused(let reason):
             problem = switch (reason, target) {
             case ("bad-input", .channel): "Use only lowercase letters, digits, - and _, up to 80 characters."
-            case ("bad-input", .person): "Use up to 64 characters, with no hidden characters and no @."
             case ("bad-input", .device): Self.deviceNameRule
             case ("not-ready", _): Self.notReady
             case ("not-member", _): "This Mac is not a member of this channel."

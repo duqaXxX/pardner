@@ -11,22 +11,21 @@ import XCTest
 
 @MainActor
 final class SettingsModelTests: XCTestCase {
-    func testThePanelIsClosedUntilAPaneIsOpened() {
+    func testTheWindowIsClosedUntilAPaneIsOpened() {
         let settings = SettingsModel(devices: DevicesModel())
         XCTAssertNil(settings.pane)
-        XCTAssertFalse(settings.holdsSheet)
+        settings.present = {}
         settings.open(.general)
         XCTAssertEqual(settings.pane, .general)
-        XCTAssertTrue(settings.holdsSheet)
         settings.close()
         XCTAssertNil(settings.pane)
-        XCTAssertFalse(settings.holdsSheet)
     }
 
     func testAPhaseChangeClosesThePanelAndForgetsTheDevicesActs() {
         let devices = DevicesModel(state: DevicesState(), page: .add, pasted: "00")
         devices.isOpen = true
         let settings = SettingsModel(devices: devices)
+        settings.present = {}
         settings.open(.general)
         settings.reset()
         XCTAssertNil(settings.pane)
@@ -37,6 +36,7 @@ final class SettingsModelTests: XCTestCase {
     func testOpeningDevicesOpensItsModelAndAnotherPaneLeavesItOpen() {
         let devices = DevicesModel()
         let settings = SettingsModel(devices: devices)
+        settings.present = {}
         settings.open(.devices)
         XCTAssertEqual(settings.pane, .devices)
         XCTAssertTrue(devices.isOpen)
@@ -50,6 +50,7 @@ final class SettingsModelTests: XCTestCase {
     func testClosingThePanelClosesDevicesBackToItsList() {
         let devices = DevicesModel()
         let settings = SettingsModel(devices: devices)
+        settings.present = {}
         settings.open(.devices)
         devices.pasted = "0a1b"
         settings.close()
@@ -59,34 +60,63 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertEqual(devices.pasted, "")
     }
 
-    func testDoneClosesThePanelFromTheListAndBackLeavesItOpen() {
+    func testEscapeGoesBackOnADevicesPageAndClosesTheWindowElsewhere() {
         let devices = DevicesModel(state: DevicesState(), page: .add, pasted: "00")
         devices.isOpen = true
         let settings = SettingsModel(devices: devices)
+        settings.present = {}
         settings.open(.devices)
         XCTAssertEqual(devices.page, .add, "opening a pane that is already open keeps its page")
-        devices.back() // the Back button of the add and remove pages
+        settings.escape()
         XCTAssertEqual(devices.page, .list)
-        XCTAssertEqual(settings.pane, .devices, "Back never closes the panel")
-        SettingsPanel.done(settings)() // the closure the Done button of every pane is given
-        XCTAssertNil(settings.pane, "Done closes the panel, not just Devices")
+        XCTAssertEqual(settings.pane, .devices, "Escape on a page goes back and keeps the window")
+        settings.escape()
+        XCTAssertNil(settings.pane, "on the list it closes the window")
+        settings.open(.general)
+        settings.escape()
+        XCTAssertNil(settings.pane)
     }
 
-    func testARenameClosesThePanelAndHoldsTheRuleUntilTheNameSheetTakesIt() {
+    func testWithNoPresentDevicesStaysClosedToo() {
         let devices = DevicesModel()
         let settings = SettingsModel(devices: devices)
         settings.open(.devices)
-        settings.closeForRename()
         XCTAssertNil(settings.pane)
-        XCTAssertTrue(settings.holdsSheet, "a Command-Comma during the panel's dismissal cannot open it again")
-        XCTAssertTrue(settings.takeRename())
-        XCTAssertFalse(settings.holdsSheet)
-        XCTAssertFalse(settings.takeRename(), "once")
+        XCTAssertFalse(devices.isOpen)
+    }
+
+    func testALateCloseOfAnEarlierShowingEndsNothingNewer() {
+        let settings = SettingsModel(devices: DevicesModel())
+        settings.present = {}
+        settings.open(.general)
+        let first = settings.epoch
+        settings.open(.bots)
+        XCTAssertEqual(settings.epoch, first, "a pane change is the same showing")
+        settings.close()
+        settings.open(.general)
+        settings.close(ifEpoch: first)
+        XCTAssertEqual(settings.pane, .general, "the window of the first showing went late")
+        settings.close(ifEpoch: settings.epoch)
+        XCTAssertNil(settings.pane)
+    }
+
+    func testOpenCallsPresentOnEveryRequestAndNothingOpensWithoutIt() {
+        let settings = SettingsModel(devices: DevicesModel())
+        settings.open(.general)
+        XCTAssertNil(settings.pane, "no window to show it: no state")
+        var shown = 0
+        settings.present = { shown += 1 }
+        settings.open(.general)
+        settings.open(.general)
+        settings.open(.bots)
+        XCTAssertEqual(shown, 3, "an open window comes forward on each request")
+        XCTAssertEqual(settings.pane, .bots)
     }
 
     func testThePanelHasAPaneForEachSetting() {
-        XCTAssertEqual(SettingsModel.Pane.allCases.map(\.rawValue), ["General", "Devices", "Bots"])
+        XCTAssertEqual(SettingsModel.Pane.allCases.map(\.rawValue), ["General", "Profile", "Devices", "Bots"])
         let settings = SettingsModel(devices: DevicesModel())
+        settings.present = {}
         settings.open(.bots)
         XCTAssertEqual(settings.pane, .bots)
         XCTAssertFalse(settings.devices.isOpen, "only the Devices pane opens the Devices model")
@@ -119,6 +149,7 @@ final class SettingsModelTests: XCTestCase {
     func testEachPaneDrawsInBothThemes() throws {
         for pane in SettingsModel.Pane.allCases {
             let settings = SettingsModel(devices: DevicesModel(state: DevicesState()))
+            settings.present = {}
             settings.open(pane)
             let panel = SettingsPanel(model: settings)
             XCTAssertNotEqual(try picture(panel, .aqua), try picture(panel, .darkAqua), "\(pane.rawValue): the two themes draw differently")
@@ -132,6 +163,7 @@ final class SettingsModelTests: XCTestCase {
                                 onlyHolderEpochs: 0, addedWhileRemoving: false)]
         let devices = DevicesModel(state: state)
         let settings = SettingsModel(devices: devices)
+        settings.present = {}
         settings.open(.bots)
         let read = BotProfile(name: "mini", account: "a@example.com", plan: nil, icon: nil)
         let seen = try picture(SettingsPanel(model: settings, bots: devices.listedBots(profiles: [botId: read])))
@@ -141,11 +173,13 @@ final class SettingsModelTests: XCTestCase {
 
     func testTheBotsPaneSaysNothingAboutNoBotsUntilTheListIsRead() throws {
         let unread = SettingsModel(devices: DevicesModel(state: DevicesState()))
+        unread.present = {}
         unread.open(.bots)
         var state = DevicesState()
         state.rows = [DeviceRow(id: Data(repeating: 2, count: 32), kind: .app, label: nil, shortForm: "", adder: .none, position: 0, active: true, isThisMac: true, seenAt: nil,
                                 onlyHolderEpochs: 0, addedWhileRemoving: false)]
         let read = SettingsModel(devices: DevicesModel(state: state))
+        read.present = {}
         read.open(.bots)
         XCTAssertFalse(unread.devices.ready)
         XCTAssertTrue(read.devices.ready)

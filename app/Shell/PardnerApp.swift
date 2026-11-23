@@ -16,13 +16,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let pairing = PairingModel.live()
     /// Set by the scene's view (SwiftUI's `openWindow(id:)` is the documented way to show a `Window` again).
     var showWindow: (() -> Void)?
+    /// The main window, found from its view: a Dock click shows it when it is not visible, whatever other window is.
+    weak var mainWindow: NSWindow?
     private var replied = false
+
+    func showMainWindowIfHidden() { if !(mainWindow?.isVisible ?? false) { showWindow?() } }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
-    // A click on the Dock icon with no window on screen: the scene's own window is shown again.
+    // A click on the Dock icon while the main window is not on screen (Settings or a form may be): the scene's own window is shown again.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        if !hasVisibleWindows { showWindow?() }
+        showMainWindowIfHidden()
         return true
     }
 
@@ -77,7 +81,13 @@ struct PardnerApp: App {
             PairingRoot(model: delegate.pairing) { LiveMainWindow(conversation: delegate.pairing.conversation, devices: delegate.pairing.devices, settings: delegate.pairing.settings, channels: delegate.pairing.channels, sections: delegate.pairing.sections, composers: delegate.pairing.composers) }
                 .frame(minHeight: MainWindow.leastHeight)
                 .task { delegate.pairing.start() }
-                .onAppear { delegate.showWindow = { openWindow(id: "main") } }
+                .background(WindowReader { delegate.mainWindow = $0 })
+                .onAppear {
+                    delegate.showWindow = { openWindow(id: "main") }
+                    delegate.pairing.settings.present = { openWindow(id: WindowID.settings) }
+                    delegate.pairing.channels.present = { openWindow(id: WindowID.form) }
+                    delegate.pairing.onLeftPaired = { [weak delegate] in delegate?.showMainWindowIfHidden() }
+                }
                 .onChange(of: theme) { _, value in (Theme(rawValue: value) ?? Theme.fallback).apply() }
         }
         // Room for the three columns at their first-launch widths and a thread open.
@@ -85,32 +95,23 @@ struct PardnerApp: App {
         // No title bar: the sidebar runs the window's height (its own "Pardner" is the name on screen) and the traffic lights stay.
         .windowStyle(.hiddenTitleBar)
         .commands {
-            // The Settings panel (Devices is one of its panes) and the new channel's sheet over the main window, once this Mac is paired and while no sheet is up.
+            // The Settings window (Devices is one of its panes) and the form window, once this Mac is paired. An open window comes forward.
             CommandGroup(replacing: .appSettings) {
                 let pairing = delegate.pairing
-                Button("Settings…") {
-                    guard Menus.canOpenSettings(paired: pairing.screen == .paired, settings: pairing.settings, channels: pairing.channels) else { return }
-                    pairing.settings.open(.general)
-                    delegate.showWindow?() // the window may be closed: the panel opens over the window the Dock would show
-                }
-                .keyboardShortcut(",", modifiers: .command).disabled(!Menus.canOpenSettings(paired: pairing.screen == .paired, settings: pairing.settings, channels: pairing.channels))
+                Button("Settings…") { if pairing.screen == .paired { pairing.settings.open(.general) } }
+                    .keyboardShortcut(",", modifiers: .command).disabled(pairing.screen != .paired)
             }
             CommandGroup(after: .newItem) {
                 let pairing = delegate.pairing
                 let paired = pairing.screen == .paired
                 Button("New Channel…") {
-                    // The menu item is off while a sheet is up; the rule is read again at the act, as a key can arrive before the menu redraws.
-                    guard Menus.canMakeChannel(paired: pairing.screen == .paired, settings: pairing.settings, channels: pairing.channels) else { return }
+                    // The item is off until the channels are ready; the rule is read again at the act, as a key can arrive before the menu redraws.
+                    guard Menus.canMakeChannel(paired: pairing.screen == .paired, channels: pairing.channels) else { return }
                     pairing.channels.openNew()
-                    delegate.showWindow?()
                 }
-                .keyboardShortcut("n", modifiers: .command).disabled(!Menus.canMakeChannel(paired: paired, settings: pairing.settings, channels: pairing.channels))
-                Button("Devices…") {
-                    guard Menus.canOpenDevices(paired: pairing.screen == .paired, settings: pairing.settings, channels: pairing.channels) else { return }
-                    pairing.settings.open(.devices)
-                    delegate.showWindow?() // the window may be closed: the panel opens over the window the Dock would show
-                }
-                .keyboardShortcut("d", modifiers: [.command, .shift]).disabled(!Menus.canOpenDevices(paired: paired, settings: pairing.settings, channels: pairing.channels))
+                .keyboardShortcut("n", modifiers: .command).disabled(!Menus.canMakeChannel(paired: paired, channels: pairing.channels))
+                Button("Devices…") { if pairing.screen == .paired { pairing.settings.open(.devices) } }
+                    .keyboardShortcut("d", modifiers: [.command, .shift]).disabled(!paired)
             }
             CommandGroup(after: .toolbar) {
                 Picker("Appearance", selection: $theme) {
@@ -118,5 +119,34 @@ struct PardnerApp: App {
                 }
             }
         }
+        // Settings and the forms are windows of their own, closed by the window's controls (app windows design 3). The Window menu would list
+        // them and open them empty, so they carry no commands; nothing is restored at launch.
+        Window("Settings", id: WindowID.settings) {
+            LiveSettingsWindow(conversation: delegate.pairing.conversation, settings: delegate.pairing.settings, channels: delegate.pairing.channels)
+        }
+        .windowStyle(.hiddenTitleBar).windowResizability(.contentSize).restorationBehavior(.disabled).commandsRemoved()
+        Window("Form", id: WindowID.form) {
+            LiveFormWindow(conversation: delegate.pairing.conversation, channels: delegate.pairing.channels)
+        }
+        .windowStyle(.hiddenTitleBar).windowResizability(.contentSize).restorationBehavior(.disabled).commandsRemoved()
     }
+}
+
+/// Hands the window that holds the view to `found`.
+private struct WindowReader: NSViewRepresentable {
+    let found: (NSWindow) -> Void
+
+    /// Reports each window it lands in, so a main window made again after a close is found too.
+    final class Anchor: NSView {
+        var found: ((NSWindow) -> Void)?
+        override func viewDidMoveToWindow() { if let window { found?(window) } }
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = Anchor()
+        view.found = found
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {}
 }

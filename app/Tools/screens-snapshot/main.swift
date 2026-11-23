@@ -285,8 +285,9 @@ MainActor.assumeIsolated {
                 let devices = make()
                 devices.isOpen = true
                 let settings = SettingsModel(devices: devices)
+                settings.present = {}
                 settings.open(.devices)
-                try render(appearance, SettingsPanel(model: settings), size: NSSize(width: 600, height: 640), to: "\(name)-\(theme).png")
+                try render(appearance, SettingsPanel(model: settings), size: NSSize(width: 760, height: 560), to: "\(name)-\(theme).png")
             }
             let joinForm = PairingModel(phase: .unpaired(nil), join: true)
             (joinForm.joinAddress, joinForm.joinName) = ("relay.example.net:7443", "Studio Mac")
@@ -352,9 +353,8 @@ MainActor.assumeIsolated {
                 let channels = ChannelsModel(devices: DevicesModel(state: busy), sheet: .settings(channel: channelSample.channel))
                 try render(appearance, ChannelPanelView(model: reading, channels: channels, id: channelSample.channel), size: nil, to: "\(name)-\(theme).png")
             }
-            // The name sheets (names design 4.1 to 4.3), and the window with the names the link shows.
+            // The name sheets (names design 4.1 and 4.3), and the window with the names the link shows.
             let nameSheets: [(String, ChannelsModel.NameTarget, String, String?)] = [
-                ("name-sheet-person", .person, "Ada Lovelace", nil),
                 ("name-sheet-channel", .channel(channelSample.channel), "docs", nil),
                 ("name-sheet-channel-refused", .channel(channelSample.channel), "Docs & Notes", "Use only lowercase letters, digits, - and _, up to 80 characters."),
                 ("name-sheet-device", .device, "Mac mini", nil),
@@ -435,8 +435,12 @@ MainActor.assumeIsolated {
             try render(appearance, MainWindow(model: sample.model, devices: paired, settings: SettingsModel(devices: paired), channel: sample.channel, thread: sample.thread), size: NSSize(width: 1280, height: 800), to: "window-devices-\(theme).png")
             try render(appearance, MainWindow(model: sample.model, devices: paired, settings: SettingsModel(devices: paired), channel: sample.channel, thread: sample.thread), size: NSSize(width: 1900, height: 1050), to: "window-wide-\(theme).png")
             let settings = SettingsModel(devices: paired)
+            settings.present = {}
             settings.open(.general)
-            try render(appearance, SettingsPanel(model: settings), size: NSSize(width: 600, height: 640), to: "settings-general-\(theme).png")
+            try render(appearance, SettingsPanel(model: settings), size: NSSize(width: 760, height: 560), to: "settings-general-\(theme).png")
+            settings.open(.profile)
+            try render(appearance, SettingsPanel(model: settings, personName: "Ada Lovelace"), size: NSSize(width: 760, height: 560), to: "settings-profile-\(theme).png")
+            settings.present = {}
             settings.open(.bots)
             // The samples' two bots carry a profile; a third, with a label alone, has not been seen in a channel yet.
             let profiles = Samples.model().model.profiles
@@ -449,7 +453,7 @@ MainActor.assumeIsolated {
             }
             let listed = DevicesModel(state: threeBots).listedBots(profiles: profiles)
             let icons = profiles.compactMapValues { $0.icon.flatMap(NSImage.init(data:)) }
-            try render(appearance, SettingsPanel(model: settings, bots: listed, icons: icons), size: NSSize(width: 600, height: 640), to: "settings-bots-\(theme).png")
+            try render(appearance, SettingsPanel(model: settings, bots: listed, icons: icons), size: NSSize(width: 760, height: 560), to: "settings-bots-\(theme).png")
         }
         for (appearance, theme) in themes {
             let sample = Samples.model()

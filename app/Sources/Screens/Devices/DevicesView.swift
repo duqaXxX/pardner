@@ -15,15 +15,20 @@ enum Clipboard {
 
 struct DevicesPane: View {
     @Bindable var model: DevicesModel
-    /// `Done` on the list: closes the panel.
-    let done: () -> Void
     /// Renames this Mac (names design 4.3); nil where the window has no pairing.
     let renameThisMac: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider().overlay(PardnerColor.line)
+            // Escape goes back through the window's own action (`SettingsModel.escape`): a second shortcut here would never win.
+            PaneHeader(title: title, subtitle: model.page == .list ? "Every Mac and bot that holds your keys." : nil) {
+                if model.page == .list {
+                    Button("Add a device") { model.showAdd() }
+                        .buttonStyle(PardnerButton(prominent: true)).disabled(!model.canAdd).accessibilityLabel("Add a device")
+                } else {
+                    Button("Back") { model.back() }.buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Back to the devices")
+                }
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: PardnerMetrics.gap * 2) {
                     switch model.page {
@@ -32,24 +37,9 @@ struct DevicesPane: View {
                     case .remove: RemoveDevices(model: model)
                     }
                 }
-                .padding(PardnerMetrics.gap * 2.5).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, PardnerMetrics.gap * 2.5).padding(.bottom, PardnerMetrics.gap * 2.5).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-    }
-
-    private var header: some View {
-        HStack {
-            Text(title).font(PardnerFont.display(size: 20, weight: .bold)).accessibilityAddTraits(.isHeader)
-            Spacer()
-            if model.page == .list {
-                Button("Done", action: done)
-                    .keyboardShortcut(.cancelAction).buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Close the settings")
-            } else {
-                Button("Back") { model.back() }
-                    .keyboardShortcut(.cancelAction).buttonStyle(PardnerButton(prominent: false)).accessibilityLabel("Back to the devices")
-            }
-        }
-        .padding(.horizontal, PardnerMetrics.gap * 2.5).frame(height: 56)
     }
 
     private var title: String {
@@ -77,12 +67,33 @@ struct NameText: View {
     }
 }
 
-/// One device: its name or kind, "This Mac", its short form, who added it, its position and when this Mac first read the add.
+/// A device's mark at the left of its row: the bot's mark for a bot, a laptop in a round for an app.
+struct DeviceMark: View {
+    let row: DeviceRow
+
+    var body: some View {
+        if row.kind == .bot {
+            Avatar(name: row.label ?? DevicesModel.kindName(row.kind), isBot: true, icon: nil, size: 32)
+        } else {
+            Image(systemName: "laptopcomputer").foregroundStyle(PardnerColor.brandText)
+                .frame(width: 32, height: 32).background(PardnerColor.brandSoft, in: Circle())
+        }
+    }
+}
+
+/// One device: its mark, its name or kind, "This Mac", its short form, who added it, its position and when this Mac first read the add.
 struct DeviceInfo: View {
     let model: DevicesModel
     let row: DeviceRow
 
     var body: some View {
+        HStack(alignment: .top, spacing: PardnerMetrics.gap * 1.5) {
+            DeviceMark(row: row).accessibilityHidden(true)
+            texts
+        }
+    }
+
+    private var texts: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: PardnerMetrics.gap) {
                 if let label = row.label {
@@ -176,23 +187,35 @@ struct DeviceList: View {
             Text("This Mac read part of the log in one go, so some of the times below are one moment, not the moments the devices were added.")
                 .font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted).fixedSize(horizontal: false, vertical: true)
         }
-        ForEach(model.rows) { row in
-            HStack(alignment: .top) {
-                DeviceInfo(model: model, row: row)
-                Spacer(minLength: PardnerMetrics.gap)
-                if !row.isThisMac {
-                    Button("Remove") { model.askRemoval(clicked: row.id) }
-                        .buttonStyle(PardnerButton(prominent: false)).disabled(!model.canRemove(row))
-                        .accessibilityLabel("Remove \(DevicesModel.title(row))")
-                } else if let rename {
-                    Button("Rename…") { rename() }
-                        .buttonStyle(PardnerButton(prominent: false)).disabled(!model.ready).accessibilityLabel("Rename this Mac")
+        // One card, a thin line between its rows (the Settings mock).
+        VStack(spacing: 0) {
+            ForEach(Array(model.rows.enumerated()), id: \.element.id) { index, row in
+                if index > 0 { Divider().overlay(PardnerColor.line) }
+                HStack(alignment: .center) {
+                    DeviceInfo(model: model, row: row)
+                    Spacer(minLength: PardnerMetrics.gap)
+                    if !row.isThisMac {
+                        Button("Remove") { model.askRemoval(clicked: row.id) }
+                            .buttonStyle(PardnerButton(prominent: false)).disabled(!model.canRemove(row))
+                            .accessibilityLabel("Remove \(DevicesModel.title(row))")
+                    } else if let rename {
+                        Button("Rename…") { rename() }
+                            .buttonStyle(PardnerButton(prominent: false)).disabled(!model.ready).accessibilityLabel("Rename this Mac")
+                    }
                 }
+                .padding(PardnerMetrics.gap * 1.5)
             }
-            .padding(PardnerMetrics.gap * 1.5).card()
         }
-        Button("Add a device") { model.showAdd() }
-            .buttonStyle(PardnerButton(prominent: true)).disabled(!model.canAdd).accessibilityLabel("Add a device")
+        .card()
+        Text(Self.hint).font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.muted).fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Under the card: where a bot's pairing string comes from, the command in a chip.
+    static var hint: AttributedString {
+        var command = AttributedString("pardner setup")
+        command.font = PardnerFont.mono(size: 12, weight: .regular)
+        command.backgroundColor = PardnerColor.raised
+        return AttributedString("To add a bot, run ") + command + AttributedString(" on its machine and paste the pairing string it prints into Add a device.")
     }
 }
 

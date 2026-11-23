@@ -66,7 +66,7 @@ public final class DevicesModel {
     /// The pairing ended or the Mac is not paired: the sheet and the half-made acts go. The list stays, as the controller publishes a change only
     /// and a pairing that comes back with the same devices (a fault and Retry) publishes none; an erase publishes the empty list.
     func reset() {
-        (isOpen, page, handoff, renamePending) = (false, .list, nil, false)
+        (isOpen, page, handoff) = (false, .list, nil)
         clearForm()
         (chosen, offered, clicked, removalProblem) = ([], [], nil, nil)
     }
@@ -173,22 +173,6 @@ public final class DevicesModel {
     public func close() {
         isOpen = false
         back()
-    }
-
-    /// This Mac's rename was asked from the sheet: the name sheet opens once the sheet is gone, not in the same tick. Until `takeRename`, the
-    /// window counts as holding a sheet, so no command asks for another in between.
-    public private(set) var renamePending = false
-
-    /// Closes the sheet for this Mac's rename.
-    public func closeForRename() {
-        renamePending = true
-        close()
-    }
-
-    /// The sheet's dismissal asks whether a rename waits; true once, then the name sheet is the one to open.
-    public func takeRename() -> Bool {
-        defer { renamePending = false }
-        return renamePending
     }
 
     public func back() {

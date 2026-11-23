@@ -291,6 +291,7 @@ final class SectionsModelTests: XCTestCase {
     func testNewChannelInASectionOpensTheSheetWithItAndOnlyThenMovesIt() async {
         let r = rig()
         tell(r, [(0xA1, "Work", [])])
+        r.channels.present = {}
         r.channels.openNew(in: Self.hex(0xA1))
         r.channels.finishCreate(.created(channel: Self.id(3)))
         await quiet(r)
@@ -307,6 +308,7 @@ final class SectionsModelTests: XCTestCase {
     func testAChannelMadeWhileNotCurrentIsMovedOnceCurrent() async {
         let r = rig()
         tell(r, [(0xA1, "Work", [])], current: false)
+        r.channels.present = {}
         r.channels.openNew(in: Self.hex(0xA1))
         r.channels.finishCreate(.created(channel: Self.id(3)))
         hold(r, 3)
@@ -322,6 +324,7 @@ final class SectionsModelTests: XCTestCase {
             let r = rig()
             tell(r, [(0xA1, "Work", [])])
             r.calls.answer = answer
+            r.channels.present = {}
             r.channels.openNew(in: Self.hex(0xA1))
             r.channels.finishCreate(.created(channel: Self.id(3)))
             hold(r, 3)
@@ -344,6 +347,7 @@ final class SectionsModelTests: XCTestCase {
             let r = rig()
             tell(r, [(0xA1, "Work", [])])
             r.calls.answer = .refused(reason)
+            r.channels.present = {}
             r.channels.openNew(in: Self.hex(0xA1))
             r.channels.finishCreate(.created(channel: Self.id(3)))
             hold(r, 3)
@@ -359,6 +363,7 @@ final class SectionsModelTests: XCTestCase {
         let r = rig()
         tell(r, [(0xA1, "Work", [])])
         r.calls.holding = true
+        r.channels.present = {}
         r.channels.openNew(in: Self.hex(0xA1))
         r.channels.finishCreate(.created(channel: Self.id(3)))
         hold(r, 3)
@@ -378,6 +383,7 @@ final class SectionsModelTests: XCTestCase {
     func testASectionGoneBeforeTheChannelShowsLeavesItUnderChannels() async {
         let r = rig()
         tell(r, [(0xA1, "Work", [])])
+        r.channels.present = {}
         r.channels.openNew(in: Self.hex(0xA1))
         r.channels.finishCreate(.created(channel: Self.id(3)))
         tell(r, [])
@@ -392,8 +398,10 @@ final class SectionsModelTests: XCTestCase {
     func testAChannelMadeOutsideASectionIsNotMoved() async {
         let r = rig()
         tell(r, [(0xA1, "Work", [])])
+        r.channels.present = {}
         r.channels.openNew(in: Self.hex(0xA1))
         r.channels.close()
+        r.channels.present = {}
         r.channels.openNew()
         r.channels.finishCreate(.created(channel: Self.id(3)))
         hold(r, 3)

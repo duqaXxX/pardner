@@ -87,11 +87,24 @@ final class PairingModelTests: XCTestCase {
         let devices = DevicesModel(state: DevicesState(), page: .add, pasted: "00")
         devices.isOpen = true
         let model = PairingModel(phase: .paired, devices: devices)
+        model.settings.present = {}
         model.settings.open(.general)
         model.apply(.removed)
         XCTAssertFalse(devices.isOpen)
         XCTAssertEqual(devices.pasted, "")
         XCTAssertNil(model.settings.pane, "the Settings panel goes with it")
+    }
+
+    func testLeavingPairedTellsTheShellOnceAndOtherChangesDoNot() {
+        let model = PairingModel(phase: .paired)
+        var told = 0
+        model.onLeftPaired = { told += 1 }
+        model.apply(.paired)
+        XCTAssertEqual(told, 0)
+        model.apply(.removed)
+        XCTAssertEqual(told, 1, "the main window may be closed: the shell shows it")
+        model.apply(.keysMissing)
+        XCTAssertEqual(told, 1, "only the step out of paired")
     }
 
     func testTheSetupNameHintSaysTheNameIsTheSameOnEveryDevice() {
@@ -256,6 +269,7 @@ final class PairingModelTests: XCTestCase {
         list.rows = [DeviceRow(id: Data(repeating: 2, count: 32), kind: .bot, label: nil, shortForm: "0202-0202-0202-0202", adder: .none, position: 2,
                                active: true, isThisMac: false, seenAt: nil, onlyHolderEpochs: 0, addedWhileRemoving: false)]
         let model = PairingModel(phase: .paired, devices: DevicesModel(state: list))
+        model.channels.present = {}
         model.channels.openNew()
         model.channels.folder = "/work/app"
         // A failed write ends the connection with this fault: the sheet and the typed folder wait for Retry and the answer.
@@ -271,6 +285,7 @@ final class PairingModelTests: XCTestCase {
             XCTAssertNil(model.channels.sheet, "\(phase)")
             XCTAssertEqual(model.channels.folder, "")
             model.apply(.paired)
+            model.channels.present = {}
             model.channels.openNew()
             model.channels.folder = "/work/app"
         }

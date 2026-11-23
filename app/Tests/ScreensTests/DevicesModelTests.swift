@@ -303,24 +303,6 @@ final class DevicesModelTests: XCTestCase {
         XCTAssertTrue(model.chosen.isEmpty)
     }
 
-    func testTheRenameHandoffIsPendingFromTheSheetClosingUntilItIsTaken() {
-        let model = DevicesModel(state: state())
-        model.isOpen = true
-        model.closeForRename()
-        XCTAssertFalse(model.isOpen)
-        XCTAssertTrue(model.renamePending)
-        XCTAssertTrue(model.takeRename())
-        XCTAssertFalse(model.renamePending)
-        XCTAssertFalse(model.takeRename(), "taken once")
-    }
-
-    func testAResetForgetsAPendingRename() {
-        let model = DevicesModel(state: state())
-        model.closeForRename()
-        model.reset()
-        XCTAssertFalse(model.renamePending)
-    }
-
     func testAResetForgetsTheSheetAndKeepsTheControllersList() {
         let model = DevicesModel(state: state(), page: .add, pasted: "00")
         model.isOpen = true

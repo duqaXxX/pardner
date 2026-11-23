@@ -59,6 +59,8 @@ public final class PairingModel {
     public let devices: DevicesModel
     /// The Settings panel's model, over the Devices model; it follows the phase (closed unless paired).
     public let settings: SettingsModel
+    /// The pairing left `.paired`: the shell shows the main window, which may be closed, so the person is never left with no window.
+    @ObservationIgnored public var onLeftPaired: (() -> Void)?
     /// The main window's channel acts (New channel, Bind to a folder…), over the same controller and the devices' list.
     public let channels: ChannelsModel
     /// What the main window draws, over the same controller: it is emptied by an erase, not by a phase, since a new connection after a
@@ -76,7 +78,7 @@ public final class PairingModel {
         let composers = Composers(conversation: conversation, devices: devices) { channel, draft in try await controller.send(channel: channel, draft: draft) }
         channels.composers = composers
         sections = SectionsModel(conversation: conversation, channels: channels) { try await controller.arrange($0) }
-        (self.controller, storesOpen, self.devices, self.settings, self.channels, self.conversation, self.composers) = (controller, true, devices, SettingsModel(devices: devices), channels, conversation, composers)
+        (self.controller, storesOpen, self.devices, self.settings, self.channels, self.conversation, self.composers) = (controller, true, devices, SettingsModel(devices: devices, controller: controller), channels, conversation, composers)
     }
 
     /// This Mac's name as System Settings shows it. Read when the join form opens: the lookup can wait on the network, so it is not made at launch.
@@ -240,7 +242,10 @@ public final class PairingModel {
             // from a setup that ended unpaired (a declined sheet, a failure): it stays on the form, where its message is drawn.
             if !sameStep { cancelNote = nil }
             if case .unpaired = next, !phase.isUnpaired, !phase.isSettingUp, !phase.isRecovering { (showForm, showJoin, showRecover) = (false, false, false) }
-            if case .paired = next {} else { settings.reset() } // the Settings panel, its Devices pane and its half-made acts do not outlive the pairing
+            if case .paired = next {} else {
+                settings.reset() // the Settings window, its Devices pane and its half-made acts do not outlive the pairing
+                if case .paired = phase { onLeftPaired?() }
+            }
             // A failed write ends the connection with `fault(.failed)` and Retry brings the pairing back: the new-channel sheet and its folder wait for
             // the answer (`notSaved`) there, and go only when the pairing ends.
             switch next {
