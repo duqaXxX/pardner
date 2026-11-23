@@ -1,6 +1,6 @@
 // The main window (step-6 plan, screen 3.1; decisions in actions' app window design): the sidebar of channels,
 // the channel as a conversation with its Sessions tab, and the thread panel. Text an agent wrote is drawn
-// verbatim, never as markup (AD 4.4). Colours, radii and the gap come from the design system's tokens.
+// as written but for its code spans (`CodeSpans`, #73); nothing else is read as markup (AD 4.4). Colours, radii and the gap come from the design system's tokens.
 import Conversation
 import DesignSystem
 import SwiftUI
@@ -142,7 +142,7 @@ public struct MainWindow: View {
         PaneSplit(
             threadOpen: threadOpen,
             sidebar: pane(Sidebar(model: model, selected: shown?.id, choose: { channel = $0 }, openSettings: settings.map { settings in { settings.open($0) } },
-                                  channels: channels, sections: sections), background: PardnerColor.side),
+                                  channels: channels, sections: sections), background: PardnerColor.side, underTitleBar: false),
             conversation: pane(Group {
                 if let c = shown {
                     ChannelView(model: model, icons: icons, channel: c, channels: channels, composers: composers, tab: $tab, thread: $thread)
@@ -150,21 +150,25 @@ public struct MainWindow: View {
                     Empty(hint: Self.emptyHint(devicesRead: devices?.ready ?? false, hasBot: !bots.isEmpty,
                                                creating: channels?.creatingRow(known: Set(model.channels.keys)) != nil)).frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            }),
+            // With no channel the pane has no header to move the window by, so it keeps the title bar's inset.
+            }, underTitleBar: shown != nil),
             panel: pane(Group {
                 if let c = shown, let key = thread, let t = openThread {
                     ThreadPanel(model: model, icons: icons, thread: t, close: { thread = nil }, composer: composers?.composer(channel: c.id, thread: key))
                 }
             }))
         .frame(minWidth: Self.leastWidth(threadOpen: threadOpen))
-        // The window's top edge is the window's own, under the hidden title bar; each pane's host keeps its 32 point inset for the traffic lights.
+        // The window's top edge is the window's own, under the hidden title bar. Each pane's host has a 32 point inset there (measured, macOS 27):
+        // the sidebar keeps it for the traffic lights, the conversation and the panel draw their headers from the top edge, as the design does.
         .ignoresSafeArea(.container, edges: .top)
         .onChange(of: shown?.id) { thread = nil }
         .background(PardnerColor.bg)
     }
 
-    private func pane<Content: View>(_ content: Content, background: Color = PardnerColor.bg) -> AnyView {
-        AnyView(content.font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(PardnerColor.text).background(background)
+    private func pane<Content: View>(_ content: Content, background: Color = PardnerColor.bg, underTitleBar: Bool = true) -> AnyView {
+        AnyView(content.font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(PardnerColor.text)
+            .ignoresSafeArea(.container, edges: underTitleBar ? .top : [])
+            .background(background)
             .onExitCommand { closeThreadOnEscape() })
     }
 
@@ -200,9 +204,14 @@ struct Avatar: View {
     let isBot: Bool
     let icon: NSImage?
     var size: CGFloat = 32
+    /// The colour behind a person's initial where the default would not stand out, as on a tinted block.
+    var plate: Color? = nil
 
     /// The shape of a sender's mark by its kind.
     static func shape(isBot: Bool) -> Mark { isBot ? .roundedSquare : .circle }
+
+    /// The initial's point size for a mark's side, as the design draws it: 10 to 12 in a small mark (18 to 22), 12 to 13 in a large one (28 to 36).
+    static func initialSize(_ side: CGFloat) -> CGFloat { side < 24 ? side / 2 + 1 : max(12, side * 0.36) }
 
     var body: some View {
         // A circle is a rounded square whose radius is half its side.
@@ -212,10 +221,10 @@ struct Avatar: View {
                 Image(nsImage: icon).resizable().interpolation(.high)
             } else {
                 Text(Naming.initial(name))
-                    .font(PardnerFont.display(size: size * 0.42, weight: .bold))
+                    .font(PardnerFont.ui(size: Self.initialSize(size), weight: .bold))
                     .foregroundStyle(isBot ? PardnerColor.agentInk : PardnerColor.brandText)
                     .frame(width: size, height: size)
-                    .background(isBot ? PardnerColor.agent : PardnerColor.brandSoft)
+                    .background(isBot ? PardnerColor.agent : plate ?? PardnerColor.brandSoft)
             }
         }
         .frame(width: size, height: size)
@@ -393,9 +402,9 @@ struct ChannelRow: View {
     var body: some View {
         Button(action: choose) {
             HStack(spacing: PardnerMetrics.gap) {
-                // `#` against the name, as the name reads elsewhere ("#notes").
-                Text("\(Text("#").foregroundStyle(chosen ? PardnerColor.brandText : PardnerColor.muted))\(Text(verbatim: name))")
-                    .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                // `#` in a column of its own, so that the names line up.
+                Text("#").foregroundStyle(chosen ? PardnerColor.brandText : PardnerColor.muted).frame(width: 12, alignment: .leading).accessibilityHidden(true)
+                Text(verbatim: name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                 if let waiting {
                     WaitingBadge(count: waiting)
                 }
