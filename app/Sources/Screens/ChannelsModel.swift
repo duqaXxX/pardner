@@ -20,6 +20,8 @@ public final class ChannelsModel {
         case create
         case bind(channel: Data)
         case rename(NameTarget)
+        /// The channel's panel (channel folder design, 2).
+        case settings(channel: Data)
     }
 
     /// What Save would ask of the controller: the kind of name (14 a channel's, 15 the person's, 16 this device's), its channel and the text.
@@ -64,6 +66,8 @@ public final class ChannelsModel {
     public private(set) var working = false
     /// Which opening of the sheet an answer belongs to: a late answer never touches a sheet opened since.
     private(set) var ticket = 0
+    /// Change Folder… was asked from the panel: the panel closes and the bind sheet opens once it is gone, not in the same tick.
+    private var bindPending: (channel: Data, bot: Data?)?
 
     private let devices: DevicesModel
     private let controller: PairingController?
@@ -100,6 +104,7 @@ public final class ChannelsModel {
     /// The pairing ended: the sheet and its fields go.
     func reset() {
         sheet = nil
+        bindPending = nil
         clearFields()
     }
 
@@ -174,6 +179,27 @@ public final class ChannelsModel {
         sheet = nil
         clearFields()
     }
+
+    /// Opens the channel's panel.
+    public func openSettings(channel: Data) { open(.settings(channel: channel)) }
+
+    /// Change Folder… in the panel: the panel closes, and `takeBind` opens the bind sheet; nothing happens for a faulted channel.
+    public func closeForBind(bot: Data?) {
+        guard case .settings(let channel)? = sheet, canBind(channel) else { return }
+        close()
+        bindPending = (channel, bot)
+    }
+
+    /// The panel's dismissal asks whether a bind waits: the bind sheet opens now, once.
+    public func takeBind() {
+        guard let pending = bindPending else { return }
+        bindPending = nil
+        openBind(channel: pending.channel, bot: pending.bot)
+    }
+
+    /// `close()` leaves a waiting bind: SwiftUI's dismissal calls it before `onDismiss` asks `takeBind`. `reset()` and `takeBind` clear it.
+    /// A sheet of this model is up, or the bind sheet waits for the panel to go.
+    public var holdsSheet: Bool { sheet != nil || bindPending != nil }
 
     private func clearFields() { (folder, nameText, nameNote, written, nameTouched, bot, problem, working) = ("", "", nil, "", false, nil, nil, false) }
 
@@ -280,7 +306,7 @@ public final class ChannelsModel {
         switch sheet {
         case .create: return .create(bot: bot, folder: trimmedFolder, name: nameText.isEmpty ? nil : nameText)
         case .bind(let channel): return .bind(channel: channel, draft: Self.bindDraft(bot: bot, folder: trimmedFolder))
-        case .rename: return nil
+        case .rename, .settings: return nil
         }
     }
 
