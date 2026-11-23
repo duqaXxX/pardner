@@ -67,7 +67,7 @@ public enum PardnerFont {
         Font(ctFont(file: "InterVariable.ttf", size: size, weight: weight.rawValue))
     }
 
-    /// Space Grotesk: the name, the activity figures, avatar initials.
+    /// Space Grotesk: the name, the activity figures.
     public static func display(size: CGFloat, weight: DisplayWeight) -> Font {
         Font(ctFont(file: "SpaceGrotesk[wght].ttf", size: size, weight: weight.rawValue))
     }

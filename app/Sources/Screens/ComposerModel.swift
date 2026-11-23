@@ -81,7 +81,7 @@ public final class ComposerModel {
     public private(set) var text = ""
     /// The bot the channel composer's message is a prompt to; nil sends a text.
     public private(set) var label: Data?
-    /// Escape closed the bot list: it stays closed until the `@` that opened it goes.
+    /// Escape closed the bot list: it stays closed until the `@` that opened it goes, or the field is a lone `@` again.
     private var pickerClosed = false
     public private(set) var pickIndex = 0
     /// What the last key or send refused to do, until the next edit.
@@ -171,10 +171,12 @@ public final class ComposerModel {
     /// name after the `@`, followed by a space, becomes the label and the rest stays as the text, once what was typed starts no bot's
     /// name (`@mini ` waits while a bot is named `mini dev`). A name that is no bot's stays text, and so does any after Escape.
     public func edited(_ new: String) {
+        // A lone `@` that was not one before is a new one: the `@` the list was closed for went, by Backspace or a whole text typed over.
+        let freshAt = new == "@" && text != "@"
         text = new
         notice = nil
         pickIndex = 0
-        if text.first != "@" { pickerClosed = false }
+        if text.first != "@" || freshAt { pickerClosed = false }
         let typed = text.dropFirst().lowercased()
         let startsAName = choices().contains { $0.name.lowercased().hasPrefix(typed) }
         if thread == nil, label == nil, !pickerClosed, !startsAName, let named = Self.mention(in: text, bots: choices()) {
@@ -225,8 +227,31 @@ public final class ComposerModel {
     /// Set by the mention button, so that the field takes the keyboard (arrows, Return, Escape reach the list); cleared by `focusTaken` once honoured.
     public private(set) var focusRequested = false
 
-    /// The field took the keyboard the mention button asked for.
-    public func focusTaken() { focusRequested = false }
+    /// Set with `focusRequested` by the emoji button: once the field has the keyboard, the system's emoji palette opens on it.
+    public private(set) var paletteRequested = false
+
+    /// The field took the keyboard the mention or the emoji button asked for.
+    public func focusTaken() { (focusRequested, paletteRequested) = (false, false) }
+
+    /// The emoji button: the field takes the keyboard, then the system's emoji palette opens and types into it.
+    public func startEmoji() {
+        guard availability == .ready else { return }
+        (focusRequested, paletteRequested) = (true, true)
+    }
+
+    /// Whether this composer shows the formatting row; one per channel and thread, as the composer is.
+    public var formatting = false
+
+    /// What the empty field says: in a channel, its name, and how to reach a bot while no bot is named and one can be; in a session's thread,
+    /// the bot a reply goes to, named as the bot list names it, while a reply can go.
+    public var placeholder: String {
+        guard thread != nil else {
+            let message = "Message \(Naming.channel(channel, in: reading))"
+            return label == nil && !choices().isEmpty ? message + ", or type @ to hand a task to a bot" : message
+        }
+        guard availability == .ready, let bot = sessionBot?.id else { return "Reply in the thread" }
+        return "Reply to \(name(of: bot))"
+    }
 
     /// The mention button is on in a channel's composer that is ready, with a bot to choose, no bot named and nothing typed: the list opens from an `@` at the start.
     public var canMention: Bool { thread == nil && availability == .ready && label == nil && text.isEmpty && !choices().isEmpty }
@@ -433,8 +458,9 @@ public final class ComposerModel {
         entry.phase = .failed(line)
         replace(entry)
         if entry.restores, text.isEmpty, label == nil {
-            // A text that starts with `@` comes back as the text it was, the bot list closed.
-            (text, pickerClosed) = (entry.text, true)
+            // A text that starts with `@` comes back as the text it was, the bot list closed; any other leaves the list free, so that an
+            // `@` typed over it opens the list as in an empty field (#107).
+            (text, pickerClosed) = (entry.text, entry.text.first == "@")
             if thread == nil { label = entry.to }
         }
     }

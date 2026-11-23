@@ -60,7 +60,7 @@ enum Naming {
 }
 
 extension Message {
-    /// The text a message shows, as plain text: what an agent writes is never read as markup (AD 4.4).
+    /// The text a message shows, as written: only a bot's code spans are read, where it is drawn (`CodeSpans`, #73; AD 4.4).
     var shown: String {
         switch body {
         case .text(let markdown, _), .part(let markdown), .answer(let markdown): markdown
