@@ -1,4 +1,5 @@
-import { decode, isBytes, type Reader, Writer } from "./bytes.ts";
+import { applyAct } from "./arrangement-act.ts";
+import { decode, isBytes, type Reader, toHex, Writer } from "./bytes.ts";
 import {
   checkDeviceEntry,
   type DeviceEntry,
@@ -50,11 +51,13 @@ import {
 } from "./messages.ts";
 import type { Bytes, Platform } from "./platform.ts";
 import {
+  encodeArrangement,
   encodeName,
   encodeProfile,
   Names,
   type Profile,
   Profiles,
+  readArrangement,
   readName,
   readProfile,
 } from "./profile.ts";
@@ -229,8 +232,6 @@ const fromHex = (hex = ""): Bytes => {
   for (let i = 0; i < out.length; i++) out[i] = Number.parseInt(hex.slice(2 * i, 2 * i + 2), 16);
   return out;
 };
-const toHex = (bytes: Bytes): string =>
-  Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
 const idOf = (item: unknown[], schema: Schema[]): Bytes => {
   const w = new Writer();
@@ -912,6 +913,47 @@ function nameCase(c: Case): string {
   }
 }
 
+/**
+ * An `arrangement.json` case: `arrangement-read` reads `c.text` and writes it back; `arrangement-encode` writes `c.inputs`;
+ * `arrangement-shown` hands `c.values` (as `name-shown` does) to a `Names` and walks the space `c.text`: the outcome of each
+ * message in place order, then `|` and the section names of the standing tree (`-` when it has none, `none` when no tree stands);
+ * `arrangement-act` applies the act `c.text` (JSON) to the arrangement `c.values[0].shown`, the conversation channels `held` (hex) and the
+ * new section id `id`, and writes the result, or `error:` and the refusal.
+ */
+function arrangementCase(c: Case): string {
+  if (c.op === "arrangement-encode") return encodeArrangement(c.inputs as never);
+  if (c.op === "arrangement-shown") {
+    const names = new Names();
+    for (const m of (c.values ?? []) as NameShownJson[]) {
+      const h = {
+        kind: m.kind,
+        channel: fromHex(m.channel),
+        sender: fromHex(m.sender),
+        name: fromHex(m.name),
+        blobs: Array.from({ length: m.files ?? 0 }, (_, i) => new Uint8Array(32).fill(i)),
+      };
+      if (m.content === undefined) names.see(m.position, h);
+      else names.take(m.position, h, m.content);
+    }
+    const { steps, standing } = names.arrangement(fromHex(c.text ?? ""));
+    const tree = standing?.arrangement.sections.map((s) => s.name).join(",") || "-";
+    return `${steps.map((s) => s.status).join(",")}|${standing ? tree : "none"}`;
+  }
+  if (c.op === "arrangement-act") {
+    const { shown, held, id } = (c.values ?? [])[0] as {
+      shown: string;
+      held: string[];
+      id: string;
+    };
+    const from = readArrangement(shown);
+    if (!from.ok) return `error:${from.error}`;
+    const made = applyAct(from.value, JSON.parse(c.text ?? "null"), new Set(held), () => id);
+    return typeof made === "string" ? `error:${made}` : encodeArrangement(made);
+  }
+  const r = readArrangement(c.text ?? "");
+  return r.ok ? encodeArrangement(r.value) : `error:${r.error}`;
+}
+
 function outcome(
   p: Platform,
   file: VectorFile,
@@ -962,6 +1004,11 @@ function outcome(
     case "name-encode":
     case "name-shown":
       return nameCase(c);
+    case "arrangement-read":
+    case "arrangement-encode":
+    case "arrangement-shown":
+    case "arrangement-act":
+      return arrangementCase(c);
     case "blob-open": {
       const opened = openBlob(p, given(c.id), key, input);
       return opened.ok ? toHex(opened.value) : `error:${opened.error}`;
@@ -1142,6 +1189,7 @@ const STRUCTURES = [
   "profile",
   "space",
   "name",
+  "arrangement",
 ];
 
 /**

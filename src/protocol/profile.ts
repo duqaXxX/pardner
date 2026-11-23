@@ -3,9 +3,10 @@
  * the rule of which profile a device shows. Written once for the bot and the app.
  */
 
-import { bytesEqual } from "./bytes.ts";
+import { bytesEqual, toHex } from "./bytes.ts";
 import { idKey } from "./device-log.ts";
 import {
+  KIND_ARRANGEMENT,
   KIND_CHANNEL_NAME,
   KIND_DEVICE_NAME,
   KIND_PERSON_NAME,
@@ -256,6 +257,156 @@ export function encodeName(kind: number, name: string): string {
   return JSON.stringify({ name });
 }
 
+const MAX_ARRANGEMENT = 131_072; // bytes of content; above the sum of the limits below, so what is within them encodes
+export const MAX_SECTIONS = 64;
+export const MAX_CHANNELS = 1_024;
+const MAX_CARRIED = 8_192; // bytes of the carried fields as a writer emits them, in the whole content
+const MAX_DEPTH = 32;
+const HEX_ID = /^[0-9a-f]{32}$/; // a section id, a base's message name
+const HEX_CHANNEL = /^[0-9a-f]{64}$/; // a channel id, a base's sender
+
+/** One section of the sidebar: its id, its name, its channels in order, and the fields of a later version, carried. */
+export interface ArrangementSection {
+  id: string;
+  name: string;
+  channels: string[];
+  carried: Record<string, unknown>;
+}
+
+/** The arrangement of the sidebar's sections (kind 17, sidebar sections design 2); ids in lowercase hex. */
+export interface Arrangement {
+  base: { sender: string; name: string } | null;
+  sections: ArrangementSection[];
+  carried: Record<string, unknown>;
+}
+
+// The bytes of a string in UTF-8, counted by hand: the protocol uses no text API of an engine. A lone surrogate counts 3.
+function utf8Length(s: string): number {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c < 0xdc00 && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+      n += 4;
+      i++;
+    } else n += 3;
+  }
+  return n;
+}
+
+// Whether a container of the parsed value sits deeper than `MAX_DEPTH` (the top one is level 1): an explicit stack, so no depth of input can exhaust the engine's.
+function nestsPast(root: unknown): boolean {
+  const stack: [unknown, number][] = [[root, 1]];
+  for (let top = stack.pop(); top; top = stack.pop()) {
+    const [v, depth] = top;
+    if (typeof v !== "object" || v === null) continue;
+    if (depth > MAX_DEPTH) return true;
+    for (const child of Array.isArray(v) ? v : Object.values(v)) stack.push([child, depth + 1]);
+  }
+  return false;
+}
+
+// The fields of `from` a reader does not know, in an object with no prototype and set with `defineProperty`, so that one named `__proto__` is a field.
+function carry(from: Record<string, unknown>, known: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = Object.create(null);
+  for (const key of Object.keys(from))
+    if (!known.includes(key))
+      Object.defineProperty(out, key, {
+        value: from[key],
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+  return out;
+}
+
+// The bytes a carried object takes when written, braces included; one with no field counts nothing.
+const carriedBytes = (c: Record<string, unknown>): number =>
+  Object.keys(c).length === 0 ? 0 : utf8Length(JSON.stringify(c));
+
+const hexOf = (v: unknown, pattern: RegExp): v is string =>
+  typeof v === "string" && pattern.test(v);
+
+/**
+ * The arrangement of a message's content (sidebar sections design 2), or `bad-input`: whole, or not
+ * at all (crypto.md 9). A field it does not know is carried, so that a later version's field
+ * survives an older app's edit. The files of the body are the caller's to refuse, as `Names` does.
+ * Any exception inside is a refusal, so that no content can stop the caller.
+ */
+export function readArrangement(content: string): Result<Arrangement> {
+  try {
+    if (typeof content !== "string" || utf8Length(content) > MAX_ARRANGEMENT)
+      return fail("bad-input");
+    const json: unknown = JSON.parse(content);
+    if (nestsPast(json) || !record(json) || !Array.isArray(json.sections)) return fail("bad-input");
+    const b = json.base;
+    if (b !== null && !(record(b) && hexOf(b.sender, HEX_CHANNEL) && hexOf(b.name, HEX_ID)))
+      return fail("bad-input");
+    if (json.sections.length > MAX_SECTIONS) return fail("bad-input");
+    const ids = new Set<string>();
+    const channels = new Set<string>();
+    const sections: ArrangementSection[] = [];
+    for (const raw of json.sections as unknown[]) {
+      if (!record(raw) || !hexOf(raw.id, HEX_ID) || !Array.isArray(raw.channels))
+        return fail("bad-input");
+      const name = raw.name;
+      if (!nameFits(KIND_DEVICE_NAME, name) || ids.has(raw.id)) return fail("bad-input");
+      ids.add(raw.id);
+      for (const c of raw.channels as unknown[]) {
+        if (!hexOf(c, HEX_CHANNEL) || channels.has(c)) return fail("bad-input");
+        channels.add(c);
+      }
+      if (channels.size > MAX_CHANNELS) return fail("bad-input");
+      sections.push({
+        id: raw.id,
+        name,
+        channels: raw.channels as string[],
+        carried: carry(raw, ["id", "name", "channels"]),
+      });
+    }
+    const carried = carry(json, ["base", "sections"]);
+    const size = [carried, ...sections.map((s) => s.carried)].reduce(
+      (n, c) => n + carriedBytes(c),
+      0,
+    );
+    if (size > MAX_CARRIED) return fail("bad-input");
+    return ok({
+      base: b === null ? null : { sender: b.sender as string, name: b.name as string },
+      sections,
+      carried,
+    });
+  } catch {
+    return fail("bad-input");
+  }
+}
+
+/** The content of an arrangement, its carried fields written beside the known ones in the same objects; one `readArrangement` would refuse throws. */
+export function encodeArrangement(a: Arrangement): string {
+  const clashes = (carried: Record<string, unknown>, known: string[]) =>
+    Object.keys(carried).some((k) => known.includes(k));
+  if (
+    clashes(a.carried, ["base", "sections"]) ||
+    a.sections.some((s) => clashes(s.carried, ["id", "name", "channels"]))
+  )
+    throw new RangeError("a carried field named as a known one");
+  const content = JSON.stringify({
+    base: a.base && { sender: a.base.sender, name: a.base.name },
+    sections: a.sections.map((s) => ({
+      id: s.id,
+      name: s.name,
+      channels: s.channels,
+      ...s.carried,
+    })),
+    ...a.carried,
+  });
+  if (!readArrangement(content).ok) throw new RangeError("an arrangement readArrangement refuses");
+  return content;
+}
+
+/** Kind 17 takes a body from the copy at `first` alone (sidebar sections design 3.2). */
+const firstCopyOnly = (kind: number): boolean => kind === KIND_ARRANGEMENT;
+
 /** A name message's header as `Names` takes it: where it is, what it names, and who sent it. */
 type NameHeader = Pick<MessageHeader, "kind" | "channel" | "sender" | "name">;
 const copyKey = (h: NameHeader): string =>
@@ -267,18 +418,33 @@ interface Copy {
   name: Bytes;
   /** The place of the first copy seen, from its header, whether or not the body opened. */
   first: number;
-  /** The place of the first copy opened, and its name when it reads and carries no file. */
+  /** The place of the first copy opened (kind 17: the first copy only, opened or not under a held key), and its name when it reads and carries no file. */
   opened?: number;
   shown?: string | undefined;
+  /** The arrangement of a kind 17 copy that opened, reads and carries no file. */
+  arrangement?: Arrangement | undefined;
+}
+
+/** One kind 17 message of the walk (sidebar sections design 3.2): `passed` while its body has not opened, `none` when it takes no part, `stands` when it became the standing tree. */
+export interface ArrangementStep {
+  sender: Bytes;
+  name: Bytes;
+  status: "passed" | "none" | "stands";
+}
+
+/** The walk over the kind 17 messages of a space: each message's outcome in place order, and the tree that stands. */
+export interface ArrangementWalk {
+  steps: ArrangementStep[];
+  standing?: { sender: Bytes; name: Bytes; arrangement: Arrangement };
 }
 
 /**
  * Which name a device shows (names design 3, the model's `channelNameOf`, `personNameOf` and
- * `deviceNameOf`). The caller hands in the header of every message of kinds 14 to 16 it accepted
+ * `deviceNameOf`). The caller hands in the header of every message of kinds 14 to 17 it accepted
  * (SD 5.6), opened or not, and the content of those it opened, in any order, each with its place in
  * the relay's sequence. Copies of one name count once, at the place of the first copy, which the
  * header gives; the latest place wins whatever arrived last; a body that does not read or carries
- * files is no name. Kinds 15 and 16 count in the space the caller names alone. A caller builds a new
+ * files is no name. Kinds 15 and 16 count in the space the caller names alone. Kind 17 takes a body from the first copy alone and is read by `arrangement`, not by the name getters. A caller builds a new
  * one when the reading starts again from the start, as it does its `Profiles`.
  */
 export class Names {
@@ -287,28 +453,77 @@ export class Names {
 
   /** The header of an accepted message: the place of its sender's first copy of this name. */
   see(position: number, h: NameHeader): void {
-    if (h.kind < KIND_CHANNEL_NAME || h.kind > KIND_DEVICE_NAME) return;
+    if (h.kind < KIND_CHANNEL_NAME || h.kind > KIND_ARRANGEMENT) return;
     const key = copyKey(h);
     const had = this.#copies.get(key);
-    if (!had || position < had.first)
+    if (!had || position < had.first) {
+      // A body taken from a later copy no longer counts, for kind 17, where only the first copy's does.
       this.#copies.set(key, {
-        ...had,
+        ...(firstCopyOnly(h.kind) ? undefined : had),
         kind: h.kind,
         channel: h.channel,
         sender: h.sender,
         name: h.name,
         first: position,
       });
+    }
   }
 
-  /** A message once opened. The same place is the same message, taken again: it replaces what was taken. */
-  take(position: number, h: NameHeader & Pick<MessageHeader, "blobs">, content: string): void {
+  /** A message once opened. The same place is the same message, taken again: it replaces what was taken. `content` is undefined for a kind 17 body that did not open under a key the device holds: it takes no part (design 3.1). */
+  take(
+    position: number,
+    h: NameHeader & Pick<MessageHeader, "blobs">,
+    content: string | undefined,
+  ): void {
     this.see(position, h);
     const copy = this.#copies.get(copyKey(h));
-    if (!copy || (copy.opened !== undefined && copy.opened < position)) return;
-    const read = h.blobs.length === 0 ? readName(h.kind, content) : undefined;
+    if (!copy) return;
+    if (
+      firstCopyOnly(h.kind)
+        ? position !== copy.first
+        : copy.opened !== undefined && copy.opened < position
+    )
+      return;
     copy.opened = position;
+    if (h.kind === KIND_ARRANGEMENT) {
+      const read =
+        h.blobs.length === 0 && content !== undefined ? readArrangement(content) : undefined;
+      copy.arrangement = read?.ok ? read.value : undefined;
+      return;
+    }
+    const read =
+      h.blobs.length === 0 && content !== undefined ? readName(h.kind, content) : undefined;
     copy.shown = read?.ok ? read.value : undefined;
+  }
+
+  /**
+   * Which arrangement stands in `space` (sidebar sections design 3.2, the model's `arrangementWalk`): the kind 17
+   * messages of the space in the place of their first copies, each in its turn. A message whose first copy has not
+   * opened is passed over; one that does not read takes no part; one built over the standing tree, or over none
+   * while none stands, becomes the standing tree; any other takes no part. Run again whenever a body opens.
+   */
+  arrangement(space: Bytes): ArrangementWalk {
+    const steps: ArrangementStep[] = [];
+    let standing: ArrangementWalk["standing"];
+    const copies = [...this.#copies.values()]
+      .filter((c) => c.kind === KIND_ARRANGEMENT && bytesEqual(c.channel, space))
+      .sort((a, b) => a.first - b.first);
+    for (const c of copies) {
+      const step: ArrangementStep = { sender: c.sender, name: c.name, status: "none" };
+      steps.push(step);
+      if (c.opened === undefined) step.status = "passed";
+      else if (c.arrangement) {
+        const { base } = c.arrangement;
+        const over = base
+          ? standing && base.sender === toHex(standing.sender) && base.name === toHex(standing.name)
+          : !standing;
+        if (over) {
+          step.status = "stands";
+          standing = { sender: c.sender, name: c.name, arrangement: c.arrangement };
+        }
+      }
+    }
+    return standing ? { steps, standing } : { steps };
   }
 
   #latest(of: (c: Copy) => boolean): string | undefined {

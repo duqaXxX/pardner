@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bytesEqual } from "../../src/protocol/bytes.ts";
+import { bytesEqual, toHex } from "../../src/protocol/bytes.ts";
 import { checkDeviceEntry, idKey, recipientsOf } from "../../src/protocol/device-log.ts";
 import {
   checkHistorySeal,
@@ -30,7 +30,13 @@ import { decodeMessage, KIND_PROFILE, sealMessage } from "../../src/protocol/mes
 import { Run } from "../../src/protocol/outbox.ts";
 import { shortForm } from "../../src/protocol/pairing-string.ts";
 import type { Bytes, Platform } from "../../src/protocol/platform.ts";
-import { encodeName, encodeProfile } from "../../src/protocol/profile.ts";
+import {
+  type Arrangement,
+  encodeArrangement,
+  encodeName,
+  encodeProfile,
+  readArrangement,
+} from "../../src/protocol/profile.ts";
 import { platform } from "../relay/support.ts";
 import { epochEntry, fill, type Keyed, keyed, message, signedBy } from "../relay/world.ts";
 import { makeProof } from "./proof.ts";
@@ -1962,6 +1968,11 @@ test("names 2.1: a name is queued only in its own class and only when its conten
     "a name with a file",
   );
   assert.equal(
+    rs.link.send(space.channel, { kind: 17, content: `{"base":null,"sections":[]}` }, 10),
+    "bad-input",
+    "an arrangement, which `arrange` alone writes",
+  );
+  assert.equal(
     typeof rc.link.send(conv.channel, { kind: 14, content: encodeName(14, "docs") }, 10),
     "object",
   );
@@ -2397,4 +2408,753 @@ test("names 4.1, review V1: a refused creation leaves no pending name for the ch
     [],
     "gone with the channel",
   );
+});
+
+// Sidebar sections design 3 to 3.2 (PR P, unit 2a): `arrange`, its gate, the pending kind 17 entry and the order it goes out in.
+type Act = Parameters<Rig["link"]["arrange"]>[0];
+const SECTION = (n: number) => n.toString(16).padStart(2, "0").repeat(16);
+/** A tree's content: `sections` are `[id, name, channels]`; `base` the identity it was built over. */
+const treeOf = (
+  base: { sender: Bytes; name: Bytes } | null,
+  sections: [string, string, Bytes[]][],
+) =>
+  encodeArrangement({
+    base: base && { sender: toHex(base.sender), name: toHex(base.name) },
+    sections: sections.map(([id, name, channels]) => ({
+      id,
+      name,
+      channels: channels.map(toHex),
+      carried: Object.create(null),
+    })),
+    carried: Object.create(null),
+  });
+/** A kind 17 message of `by` in the space, sealed in `epoch`; its message name is `fill(120 + n)`. */
+function treeIn(s: Scene, epoch: { id: Bytes; key: Bytes }, by: Keyed, content: string, n: number) {
+  return signedBy(
+    by,
+    sealMessage(
+      platform,
+      epoch.key,
+      {
+        channel: s.channel,
+        counter: n,
+        epoch: epoch.id,
+        sender: by.id,
+        run: fill(4, 16),
+        incarnation: s.wire.incarnation,
+        time: 1_700_000_000_000,
+        kind: 17,
+        name: fill(120 + n, 16),
+      },
+      { files: [], content },
+    ),
+  );
+}
+const idOf = (by: Keyed, n: number) => ({ sender: by.id, name: fill(120 + n, 16) });
+/** alice's first device as the app, a second app of hers, the space, two conversation channels; `late`: an earlier epoch whose key arrives by a history seal. */
+function sectionsRig(options: { late?: boolean } = {}, over: Partial<AppLinkOptions> = {}) {
+  const s = scene({ space: true });
+  const other = keyed("app");
+  s.entry(s.alice.add(s.log, other));
+  const late = options.late ? lateEpoch(s) : undefined;
+  const home = s.epoch();
+  const talk = addChannel(s, fill(9, 16));
+  const docs = addChannel(s, fill(10, 16));
+  return { s, other, late, home, talk, docs, r: rig(s, over, s.alice.first) };
+}
+const queuedBy = (r: Rig, act: Act, now = 10) => {
+  const a = r.link.arrange(act, now);
+  assert.ok(typeof a === "object", `queued, not ${a}`);
+  return { ...a, effects: r.settle(a.effects, now) };
+};
+const NEW = (name: string): Act => ({ type: "section-new", name });
+const pendingTrees = (r: Rig) =>
+  storedNames(r)
+    .filter((n) => n.kind === 17)
+    .map((n) => ({
+      name: n.name,
+      tree: readArrangement(n.content).ok
+        ? (readArrangement(n.content) as { ok: true; value: Arrangement }).value
+        : undefined,
+    }));
+const submitted = (fx: AppEffect[]) =>
+  only(fx, "submit").flatMap((f) => {
+    const m = decodeMessage(f.signed);
+    return m.ok && m.value.header.kind === 17 ? [m.value.header.name] : [];
+  });
+
+test("sections 3: arrange stores one pending kind 17 entry, writes it into the space under its message name, and clears it when read back", () => {
+  const { s, r } = sectionsRig();
+  assert.equal(r.link.arrange(NEW("Work"), 5), "not-ready", "nothing is read");
+  r.connect();
+  const set = queuedBy(r, NEW("Work"));
+  assert.equal(set.answer, "queued");
+  const [mine] = storedNames(r);
+  assert.ok(mine);
+  assert.deepEqual([mine.kind, mine.setup, mine.channel], [17, false, undefined]);
+  assert.deepEqual(mine.name, set.name);
+  const read = readArrangement(mine.content);
+  assert.ok(read.ok);
+  assert.equal(read.value.base, null);
+  assert.deepEqual(
+    read.value.sections.map((x) => [x.name, x.channels]),
+    [["Work", []]],
+  );
+  assert.match(read.value.sections[0]?.id ?? "", /^[0-9a-f]{32}$/);
+  const sent = drive(s, r, set.effects, 11);
+  assert.deepEqual(submitted(sent), [mine.name], "into the space, under the entry's name");
+  assert.deepEqual(storedNames(r), [], "read back: no longer pending");
+});
+
+test("sections 3.1: arrange waits for the first rest of the connection; a push keeps it, a drop, a rewind and a refusal clear it", () => {
+  const { s, r, home } = sectionsRig();
+  const ok = () => typeof r.link.arrange(NEW("Work"), 12) === "object";
+  assert.equal(ok(), false, "before any read");
+  r.connect();
+  assert.equal(ok(), true, "at rest");
+  s.wire.put(4, nameIn(s, s.channel, home, 15, encodeName(15, "Alice"), 2));
+  r.give(s.wire.push(s.wire.items.length - 1), 13);
+  assert.equal(ok(), true, "a pushed message moves the reading to reading and back: kept");
+  r.drop(20);
+  assert.equal(ok(), false, "a dropped connection clears it");
+  r.connect(30_000);
+  assert.equal(ok(), true, "at rest again");
+  s.wire.incarnation = fill(8, 16);
+  r.give([s.wire.served()], 40);
+  assert.equal(ok(), false, "a rewind clears it, until the pass reaches rest");
+  r.give(s.wire.read(0), 41);
+  assert.equal(ok(), true);
+  r.give([{ type: "refused", reason: 3 }], 42);
+  assert.equal(ok(), false, "refused");
+  for (const [label, frame] of [
+    ["put-back", { type: "refused", reason: 6 }],
+    ["fault", s.wire.head(s.wire.items.length, fill(1))],
+  ] as const) {
+    const t = sectionsRig();
+    t.r.connect();
+    assert.equal(typeof t.r.link.arrange(NEW("Work"), 12), "object", label);
+    t.r.give([frame], 13);
+    assert.equal(t.r.link.arrange(NEW("Work"), 14), "not-ready", `after ${label}`);
+  }
+});
+
+test("sections 3.1: no act while the first copy of a kind 17 of the space waits for its key, whenever it was placed; other kinds, spares and later copies do not wait", () => {
+  const { s, r, late, home, other } = sectionsRig({ late: true });
+  assert.ok(late);
+  const act = () => r.link.arrange(NEW("Work"), 12);
+  // Placed before the tree that can be read, and unopened: a second tree (built over none, here) is not enough.
+  s.wire.put(4, treeIn(s, late.epoch, other, treeOf(null, [[SECTION(1), "Old", []]]), 1));
+  s.wire.put(4, treeIn(s, home, other, treeOf(null, [[SECTION(2), "New", []]]), 2));
+  s.wire.put(4, nameIn(s, s.channel, late.epoch, 15, encodeName(15, "Hidden"), 3)); // another kind, unopened: it does not count
+  r.connect();
+  assert.equal(act(), "not-ready", "behind");
+  const held = s.epochs[0];
+  assert.ok(held);
+  s.wire.seals = [historySeal(held, other, s.alice.first, late.epoch.key)];
+  r.drop(13);
+  r.connect(60_000);
+  assert.equal(typeof act(), "object", "the key came: current");
+});
+
+test("sections 3.1: a kind 17 that does not open under a key the device holds takes no part and is not waited for", () => {
+  const { s, r, home, other } = sectionsRig();
+  const wrong = { id: home.id, key: platform.random(32) };
+  s.wire.put(4, treeIn(s, wrong, other, treeOf(null, [[SECTION(1), "Gone", []]]), 1));
+  r.connect();
+  assert.equal(typeof r.link.arrange(NEW("Work"), 12), "object");
+});
+
+test("sections 3: arrange answers bad-input for a form, a name, a move before itself, an id the arrangement or the sequence does not hold, too-many past a limit, and stores nothing", () => {
+  const { r, talk } = sectionsRig();
+  r.connect();
+  const first = queuedBy(r, { type: "section-new", name: "Work", channel: toHex(talk.id) });
+  const section = readArrangement(storedNames(r)[0]?.content ?? "");
+  assert.ok(section.ok);
+  const id = section.value.sections[0]?.id ?? "";
+  const bad: [string, unknown][] = [
+    ["no type", {}],
+    ["null", null],
+    ["unknown type", { type: "section-copy", name: "x" }],
+    ["name not a string", { type: "section-new", name: 5 }],
+    ["name of spaces at the ends", NEW(" Work")],
+    ["empty name", NEW("")],
+    ["name past 64 code points", NEW("x".repeat(65))],
+    ["channel not a string", { type: "section-new", name: "A", channel: 3 }],
+    [
+      "a channel the sequence lacks",
+      { type: "section-new", name: "A", channel: SECTION(1).repeat(2) },
+    ],
+    ["rename of a section not there", { type: "section-rename", section: SECTION(9), name: "A" }],
+    ["move before itself", { type: "section-move", section: id, before: id }],
+    ["move before a section not there", { type: "section-move", section: id, before: SECTION(9) }],
+    ["remove of a section not there", { type: "section-remove", section: SECTION(9) }],
+    [
+      "channel move of a channel the sequence lacks",
+      { type: "channel-move", channel: SECTION(1).repeat(2), section: null, before: null },
+    ],
+    [
+      "a section move with a stray channel field, before itself",
+      { type: "section-move", section: id, before: id, channel: toHex(talk.id) },
+    ],
+    ["an act typed constructor", { type: "constructor" }],
+    ["an act typed __proto__", { type: "__proto__" }],
+    ["an act typed hasOwnProperty", { type: "hasOwnProperty" }],
+    ["an act typed toString", { type: "toString" }],
+    [
+      "channel move before itself",
+      { type: "channel-move", channel: toHex(talk.id), section: id, before: toHex(talk.id) },
+    ],
+    [
+      "channel move into a section not there",
+      { type: "channel-move", channel: toHex(talk.id), section: SECTION(9), before: null },
+    ],
+    [
+      "channel move before one not in that section",
+      { type: "channel-move", channel: toHex(talk.id), section: id, before: SECTION(1).repeat(2) },
+    ],
+    [
+      "channel move before with no section",
+      { type: "channel-move", channel: toHex(talk.id), section: null, before: toHex(talk.id) },
+    ],
+  ];
+  const before = JSON.stringify(storedNames(r));
+  for (const [label, act] of bad) assert.equal(r.link.arrange(act as Act, 11), "bad-input", label);
+  assert.equal(JSON.stringify(storedNames(r)), before, "nothing stored");
+  assert.ok(first.name);
+  for (let n = 1; n < 64; n++) queuedBy(r, NEW(`S${n}`));
+  assert.equal(r.link.arrange(NEW("one too many"), 12), "too-many", "65 sections");
+});
+
+test("sections 3: section-new takes a null channel as none", () => {
+  const { r } = sectionsRig();
+  r.connect();
+  queuedBy(r, { type: "section-new", name: "A", channel: null } as unknown as Act);
+  assert.deepEqual(
+    pendingTrees(r)[0]?.tree?.sections.map((x) => x.channels),
+    [[]],
+  );
+});
+
+test("sections 3.1: a connection the link ends itself (a deadline) clears the gate before the driver says closed, and a late closed of an earlier connection clears nothing", () => {
+  const { r } = sectionsRig();
+  const first = r.connect();
+  const conn1 = (first.find((e) => e.do === "dial") as { conn: number }).conn;
+  let now = 10;
+  for (let i = 0; i < 40; i++) {
+    now += 60_000;
+    if (r.settle(r.link.tick(now), now).some((e) => e.do === "close")) break;
+  }
+  assert.equal(r.link.arrange(NEW("Offline"), now + 1), "not-ready", "the link's own close");
+  now += 600_000;
+  r.connect(now);
+  assert.equal(typeof r.link.arrange(NEW("Back"), now + 1), "object");
+  r.settle(r.link.closed(conn1, now + 2), now + 2);
+  assert.equal(
+    typeof r.link.arrange(NEW("Again"), now + 3),
+    "object",
+    "a stale closed changes nothing",
+  );
+});
+
+test("sections 3: the five acts build the tree from the one shown, this device's pending entry first", () => {
+  const { r, talk, docs } = sectionsRig();
+  r.connect();
+  const tree = () =>
+    (pendingTrees(r).at(-1)?.tree?.sections ?? []).map((x) => [
+      x.name,
+      x.channels.map((c) => c.slice(0, 2)),
+    ]);
+  const c = (b: Bytes) => toHex(b);
+  queuedBy(r, { type: "section-new", name: "A" });
+  queuedBy(r, { type: "section-new", name: "B", channel: c(talk.id) });
+  assert.deepEqual(tree(), [
+    ["A", []],
+    ["B", [c(talk.id).slice(0, 2)]],
+  ]);
+  const ids =
+    pendingTrees(r)
+      .at(-1)
+      ?.tree?.sections.map((x) => x.id) ?? [];
+  queuedBy(r, {
+    type: "channel-move",
+    channel: c(docs.id),
+    section: ids[1] ?? null,
+    before: c(talk.id),
+  });
+  assert.deepEqual(tree(), [
+    ["A", []],
+    ["B", [c(docs.id).slice(0, 2), c(talk.id).slice(0, 2)]],
+  ]);
+  queuedBy(r, { type: "channel-move", channel: c(talk.id), section: ids[0] ?? null, before: null });
+  assert.deepEqual(tree(), [
+    ["A", [c(talk.id).slice(0, 2)]],
+    ["B", [c(docs.id).slice(0, 2)]],
+  ]);
+  queuedBy(r, { type: "section-move", section: ids[1] ?? "", before: ids[0] ?? null });
+  assert.deepEqual(
+    tree().map((x) => x[0]),
+    ["B", "A"],
+  );
+  queuedBy(r, { type: "section-rename", section: ids[0] ?? "", name: "Renamed" });
+  assert.deepEqual(
+    tree().map((x) => x[0]),
+    ["B", "Renamed"],
+  );
+  queuedBy(r, { type: "channel-move", channel: c(talk.id), section: null, before: null });
+  assert.deepEqual(tree(), [
+    ["B", [c(docs.id).slice(0, 2)]],
+    ["Renamed", []],
+  ]);
+  queuedBy(r, { type: "section-remove", section: ids[0] ?? "" });
+  assert.deepEqual(tree(), [["B", [c(docs.id).slice(0, 2)]]]);
+});
+
+test("sections 3: the channel ids the sequence does not hold are dropped from the tree an act builds, before the limits", () => {
+  const { s, r, home, other, talk } = sectionsRig();
+  const ghost = fill(77);
+  s.wire.put(
+    4,
+    treeIn(s, home, other, treeOf(null, [[SECTION(1), "Theirs", [talk.id, ghost]]]), 1),
+  );
+  r.connect();
+  queuedBy(r, { type: "section-rename", section: SECTION(1), name: "Mine" });
+  const [entry] = pendingTrees(r);
+  assert.deepEqual(
+    entry?.tree?.sections[0]?.channels,
+    [toHex(talk.id)],
+    "the held channel stays, the ghost goes",
+  );
+  assert.deepEqual(entry?.tree?.base, { sender: toHex(other.id), name: toHex(fill(121, 16)) });
+});
+
+test("sections 3: the base is the standing tree's identity, the earliest unsigned entry's base when one is replaced, and a signed entry's identity when it stays", () => {
+  const { s, r, home, other } = sectionsRig();
+  s.wire.put(4, treeIn(s, home, other, treeOf(null, [[SECTION(1), "Theirs", []]]), 1));
+  r.connect();
+  r.hold(true);
+  const a1 = r.link.arrange(NEW("A"), 10);
+  const a2 = r.link.arrange(NEW("B"), 10);
+  assert.ok(typeof a1 === "object" && typeof a2 === "object");
+  r.settle(a1.effects, 10);
+  r.settle(a2.effects, 10);
+  r.hold(false);
+  const sent = r.answer(true, 11);
+  assert.deepEqual(submitted(sent), [a2.name], "one item: the replaced entry's is gone");
+  const unsigned = pendingTrees(r);
+  assert.equal(unsigned.length, 1, "the second replaced the first, which was not signed");
+  assert.deepEqual(
+    unsigned[0]?.tree?.base,
+    { sender: toHex(other.id), name: toHex(fill(121, 16)) },
+    "over the standing tree",
+  );
+  assert.deepEqual(unsigned[0]?.name, a2.name);
+  assert.deepEqual(
+    unsigned[0]?.tree?.sections.map((x) => x.name),
+    ["Theirs", "A", "B"],
+  );
+  // Signed now: the next act leaves it and goes over it.
+  const next = queuedBy(r, NEW("C"), 12);
+  assert.deepEqual(next.name.length, 16);
+  const both = pendingTrees(r);
+  assert.equal(both.length, 2);
+  assert.deepEqual(both[1]?.tree?.base, { sender: toHex(s.alice.first.id), name: toHex(a2.name) });
+});
+
+test("sections 3.2: entries go out in the order they were made, and an item the relay drops (result 8) passes nothing on: its entry is written again at the next connection, before the later one", () => {
+  const { s, r } = sectionsRig();
+  r.connect();
+  const e1 = queuedBy(r, NEW("A"));
+  const e2 = queuedBy(r, NEW("B"), 11);
+  assert.deepEqual(submitted(e1.effects), [e1.name], "the first is in flight");
+  const after = r.give(results(e1.effects, 8), 12);
+  assert.deepEqual(submitted(after), [], "the second does not go out ahead of the first");
+  assert.deepEqual(
+    pendingTrees(r).map((p) => p.name),
+    [e1.name, e2.name],
+    "both still pending",
+  );
+  r.drop(13);
+  const conn = r.connect(2000);
+  const order = itemsOf(r.outWrites.at(-1), s.channel).map((i) => i.name);
+  assert.deepEqual(
+    order,
+    [e1.name, e2.name],
+    "its item is written again ahead of the later entry's",
+  );
+  const again = drive(s, r, conn, 20);
+  assert.deepEqual(submitted(again).slice(0, 2), [e1.name, e2.name]);
+  assert.deepEqual(storedNames(r), []);
+});
+
+test("sections 3: an act that replaces several unsigned entries takes the earliest one's base, over the last one's tree", () => {
+  const { r } = sectionsRig();
+  r.connect();
+  const e1 = queuedBy(r, NEW("A"));
+  const e2 = queuedBy(r, NEW("B"), 11);
+  r.give(results(e1.effects, 8), 12); // E1's item is dropped: both entries lack a signed item
+  const e3 = queuedBy(r, NEW("C"), 13);
+  const [only3] = pendingTrees(r);
+  assert.equal(pendingTrees(r).length, 1, "E1 and E2 are replaced");
+  assert.deepEqual(only3?.name, e3.name);
+  assert.equal(only3?.tree?.base, null, "E1's base, not E2's (which names E1)");
+  assert.deepEqual(
+    only3?.tree?.sections.map((x) => x.name),
+    ["A", "B", "C"],
+  );
+});
+
+test("sections 5: a refused kind 17 stays pending under its own mark: no fault, no more kind 17 on that connection, a name still goes, and a new connection sends it again", () => {
+  const { s, r } = sectionsRig();
+  r.connect();
+  const e1 = queuedBy(r, NEW("A"));
+  const refused = r.give(results(e1.effects, 1), 12);
+  assert.deepEqual(fxOf(refused, "channel-fault"), [], "never a fault");
+  const e2 = queuedBy(r, NEW("B"), 13);
+  assert.deepEqual(submitted(e2.effects), [], "held on this connection");
+  assert.deepEqual(itemsOf(r.outWrites.at(-1), s.channel), [], "and not even written");
+  const named = rename(r, 15, undefined, "Alice", 14);
+  assert.deepEqual(kindsOf(named), [15], "a name is not held back by it");
+  assert.equal(pendingTrees(r).length, 1, "the entry is pending");
+  r.drop(15);
+  const fx = drive(s, r, r.connect(2000), 20);
+  assert.equal(submitted(fx)[0]?.length, 16);
+  assert.deepEqual(pendingTrees(r), [], "sent again on the next connection and read back");
+});
+
+test("sections 5: a refused name holds back no kind 17", () => {
+  const { r } = sectionsRig();
+  r.connect();
+  const name = rename(r, 15, undefined, "Alice", 10);
+  r.give(results(name, 1), 11);
+  const e = queuedBy(r, NEW("A"), 12);
+  assert.equal(submitted(e.effects).length, 1);
+});
+
+test("sections 3: a kind 17 entry kept in the store goes out after a restart, under the same message name", () => {
+  const { s, r } = sectionsRig();
+  r.connect();
+  r.hold(true);
+  const set = r.link.arrange(NEW("A"), 10);
+  assert.ok(typeof set === "object");
+  const w = r.settle(set.effects, 10).at(-1);
+  assert.ok(w?.do === "write");
+  const t = rig(s, { outbox: w.outbox }, s.alice.first);
+  const sent = submitted(drive(s, t, t.connect(), 5));
+  assert.deepEqual(sent, [set.name]);
+});
+
+test("sections 2: send refuses a draft of kind 17, since arrange is its one writer", () => {
+  const { s, r } = sectionsRig();
+  r.connect();
+  assert.equal(r.link.send(s.channel, { kind: 17, content: treeOf(null, []) }, 10), "bad-input");
+});
+
+// Sidebar sections design 3.2 to 4.1 (PR P, unit 2b): after the walk, "not applied", the drop of entries that can no longer stand, the shown arrangement and the effect.
+const arrangementsOf = (fx: AppEffect[]) => fxOf(fx, "arrangement");
+const lastArrangement = (fx: AppEffect[]) => arrangementsOf(fx).at(-1);
+const names17 = (fx: AppEffect[]) =>
+  lastArrangement(fx)?.sections?.map((x) => [x.name, x.channels.length]);
+/** A kind 17 message is put on the wire after what is there and pushed to the reading. */
+const pushTree = (s: Scene, r: Rig, tree: ReturnType<typeof treeIn>, now: number) => {
+  const from = s.wire.items.length;
+  s.wire.put(4, tree);
+  return r.give(s.wire.push(from), now);
+};
+
+test("sections 4.1: the effect tells the shown tree, current and behind when any differs, and nothing when none does", () => {
+  const { s, r, home, other } = sectionsRig();
+  const first = r.connect();
+  assert.deepEqual(
+    arrangementsOf(first).map(({ do: _, ...e }) => e),
+    [{ sections: null, current: true, behind: false, notApplied: false }],
+    "at the first rest: none shown, current",
+  );
+  const theirs = pushTree(
+    s,
+    r,
+    treeIn(s, home, other, treeOf(null, [[SECTION(1), "Theirs", []]]), 1),
+    12,
+  );
+  assert.deepEqual(names17(theirs), [["Theirs", 0]], "a standing tree from another device");
+  const quiet = pushTree(s, r, nameIn(s, s.channel, home, 15, encodeName(15, "Alice"), 2), 13);
+  assert.deepEqual(arrangementsOf(quiet), [], "a message that changes nothing tells nothing");
+  const mine = queuedBy(r, NEW("Mine"), 14);
+  assert.deepEqual(
+    names17(mine.effects),
+    [
+      ["Theirs", 0],
+      ["Mine", 0],
+    ],
+    "this device's pending tree first",
+  );
+});
+
+test("sections 4.1: behind tells a first copy of a kind 17 that waits for its key, and current turns back on when it opens", () => {
+  const { s, r, late, other } = sectionsRig({ late: true });
+  assert.ok(late);
+  s.wire.put(4, treeIn(s, late.epoch, other, treeOf(null, [[SECTION(1), "Old", []]]), 1));
+  const fx = r.connect();
+  assert.deepEqual(
+    arrangementsOf(fx).map(({ do: _, ...e }) => e),
+    [{ sections: null, current: false, behind: true, notApplied: false }],
+  );
+  const held = s.epochs[0];
+  assert.ok(held);
+  s.wire.seals = [historySeal(held, other, s.alice.first, late.epoch.key)];
+  r.drop(13);
+  const again = r.connect(60_000);
+  const { do: _, ...last } = lastArrangement(again) as Extract<AppEffect, { do: "arrangement" }>;
+  assert.deepEqual(last, {
+    sections: [{ id: SECTION(1), name: "Old", channels: [] }],
+    current: true,
+    behind: false,
+    notApplied: false,
+  });
+});
+
+test("sections 3.2: an own tree that took no part, read back in this run, raises notApplied, and the next act clears it", () => {
+  const { s, r, home, other } = sectionsRig();
+  r.connect();
+  const mine = queuedBy(r, NEW("Mine"), 11);
+  pushTree(s, r, treeIn(s, home, other, treeOf(null, [[SECTION(1), "Theirs", []]]), 1), 12); // placed before ours
+  const placed = drive(s, r, mine.effects, 13);
+  const told = lastArrangement(placed);
+  assert.deepEqual(
+    [told?.notApplied, told?.current, names17(placed)],
+    [true, true, [["Theirs", 0]]],
+  );
+  const next = queuedBy(r, NEW("Again"), 20);
+  assert.equal(lastArrangement(next.effects)?.notApplied, false, "cleared at the next act");
+});
+
+test("sections 3.2: an own tree of an earlier run that took no part raises no line: only read-backs of this run are judged", () => {
+  const { s, r, home, other } = sectionsRig();
+  s.wire.put(4, treeIn(s, home, other, treeOf(null, [[SECTION(1), "Theirs", []]]), 1));
+  s.wire.put(4, treeIn(s, home, s.alice.first, treeOf(null, [[SECTION(2), "Stale", []]]), 2));
+  const fx = r.connect();
+  assert.deepEqual(names17(fx), [["Theirs", 0]]);
+  assert.ok(fx.every((e) => e.do !== "arrangement" || !e.notApplied));
+});
+
+test("sections 3.2: an own tree that stands, with another device's built over it, raises no notApplied", () => {
+  const { s, r, home, other } = sectionsRig();
+  r.connect();
+  const mine = queuedBy(r, NEW("Mine"), 11);
+  const fx = drive(s, r, mine.effects, 12);
+  const over = treeOf({ sender: s.alice.first.id, name: mine.name }, [[SECTION(2), "Later", []]]);
+  const later = pushTree(s, r, treeIn(s, home, other, over, 3), 30);
+  assert.deepEqual(names17(later), [["Later", 0]], "the later tree stands");
+  assert.ok([...fx, ...later].every((e) => e.do !== "arrangement" || !e.notApplied));
+});
+
+test("sections 3.2: an own tree that took no part is not counted, nor the entry over it dropped, while a first copy placed before it waits for its key (behind stays); both happen once the key arrives", () => {
+  const { s, r, late, home, other } = sectionsRig({ late: true });
+  assert.ok(late);
+  r.connect();
+  const mine = queuedBy(r, NEW("Mine"), 11);
+  const over = queuedBy(r, NEW("Over"), 11); // built over it
+  s.wire.put(4, treeIn(s, late.epoch, other, treeOf(null, [[SECTION(1), "Hidden", []]]), 1));
+  s.wire.put(4, treeIn(s, home, other, treeOf(null, [[SECTION(2), "Theirs", []]]), 2));
+  r.give(s.wire.push(s.wire.items.length - 2), 12);
+  const placed = place(s, r, [...mine.effects, ...over.effects], 13); // E1 lands; E2's item is in flight, not placed
+  assert.ok(
+    placed.every((e) => e.do !== "arrangement" || !e.notApplied),
+    "not judged",
+  );
+  assert.deepEqual(
+    storedNames(r).map((n) => n.name),
+    [over.name],
+    "nothing is dropped while the verdict can still change",
+  );
+  const held = s.epochs[0];
+  assert.ok(held);
+  s.wire.seals = [historySeal(held, other, s.alice.first, late.epoch.key)];
+  r.drop(20);
+  const after = r.connect(60_000);
+  assert.deepEqual(
+    [lastArrangement(after)?.behind, lastArrangement(after)?.notApplied],
+    [false, true],
+    "the key arrived: the verdict is given",
+  );
+  assert.deepEqual(storedNames(r), [], "and the entry built over it goes");
+});
+
+test("sections 3.2: an entry built over an own tree that took no part is dropped with its item when the item is not built, the line is raised, and a redo stands", () => {
+  const { s, r, home, other } = sectionsRig();
+  r.connect();
+  const e1 = queuedBy(r, NEW("A"), 11);
+  const e2 = queuedBy(r, NEW("B"), 12); // built over E1; its item waits behind E1's
+  pushTree(s, r, treeIn(s, home, other, treeOf(null, [[SECTION(1), "Theirs", []]]), 1), 13);
+  const placed = drive(s, r, [...e1.effects, ...e2.effects], 14);
+  assert.deepEqual(storedNames(r), [], "E1 read back, E2 dropped: nothing pending");
+  assert.deepEqual(itemsOf(r.outWrites.at(-1), s.channel), [], "E2's item is gone");
+  const told = lastArrangement(placed);
+  assert.deepEqual(
+    [told?.notApplied, names17(placed)],
+    [true, [["Theirs", 0]]],
+    "the standing tree shows, with the line",
+  );
+  const redo = queuedBy(r, NEW("Redo"), 30);
+  drive(s, r, redo.effects, 31);
+  const fresh = rig(s, {}, s.alice.first);
+  assert.deepEqual(
+    names17(fresh.connect()),
+    [
+      ["Theirs", 0],
+      ["Redo", 0],
+    ],
+    "a device that reads it all shows the redo",
+  );
+});
+
+test("sections 3.2: a built item of a dropped entry stays and goes out, and an entry built over it is dropped too; it takes no part where it lands", () => {
+  const { s, r, home, other } = sectionsRig();
+  r.connect();
+  const e1 = queuedBy(r, NEW("A"), 11);
+  r.give(results(e1.effects, 0), 12); // the relay holds E1; not read back
+  const e2 = queuedBy(r, NEW("B"), 13); // built over E1 and sent at once
+  assert.deepEqual(submitted(e2.effects), [e2.name]);
+  queuedBy(r, NEW("C"), 13); // built over E2, through it over E1
+  pushTree(s, r, treeIn(s, home, other, treeOf(null, [[SECTION(1), "Theirs", []]]), 1), 14);
+  const [first] = only(e1.effects, "submit");
+  assert.ok(first);
+  const from = s.wire.items.length;
+  s.wire.put(first.kind, { signed: first.signed, sig: first.sig });
+  const fx = r.give(s.wire.push(from), 15);
+  assert.deepEqual(
+    storedNames(r),
+    [],
+    "E1 read back, E2's entry dropped and E3's with it, through E2",
+  );
+  assert.deepEqual(
+    itemsOf(r.outWrites.at(-1), s.channel).map((i) => i.name),
+    [e2.name],
+    "E2's built item stays, E3's is gone",
+  );
+  assert.equal(lastArrangement(fx)?.notApplied, true);
+});
+
+test("sections 3.2: a restart whose stored entry was built over an own tree that took no part drops it and tells it, though that tree was not read back in this run", () => {
+  const { s, r, home, other } = sectionsRig();
+  r.connect();
+  const e1 = queuedBy(r, NEW("A"), 11);
+  const e2 = queuedBy(r, NEW("B"), 12);
+  const stored = r.outWrites.at(-1) as AppOutbox;
+  assert.equal(stored.names?.length, 2);
+  // Another device's tree is placed first; E1 lands and takes no part, read back by the first run.
+  pushTree(s, r, treeIn(s, home, other, treeOf(null, [[SECTION(1), "Theirs", []]]), 1), 13);
+  const [first] = only(e1.effects, "submit");
+  assert.ok(first);
+  s.wire.put(first.kind, { signed: first.signed, sig: first.sig });
+  const kept = {
+    ...stored,
+    names: (stored.names ?? []).filter((n) => bytesEqual(n.name, e2.name)),
+  };
+  const t = rig(s, { outbox: { ...kept, channels: [] } }, s.alice.first);
+  const fx = t.connect();
+  assert.deepEqual(storedNames(t), [], "dropped");
+  assert.equal(lastArrangement(fx)?.notApplied, true);
+});
+
+test("sections 4.1: a relay recreated with the same tree tells nothing new about it: current goes off for the pass and on at its rest (the none half is the next test)", () => {
+  const { s, r, home, other } = sectionsRig();
+  const content = treeOf(null, [[SECTION(1), "Theirs", []]]);
+  s.wire.put(4, treeIn(s, home, other, content, 1));
+  r.connect();
+  s.wire.incarnation = fill(8, 16);
+  const same = r.give([s.wire.served(), ...s.wire.read(0)], 20);
+  assert.deepEqual(
+    arrangementsOf(same).map((e) => [e.current, e.sections?.map((x) => x.name)]),
+    [
+      [false, ["Theirs"]],
+      [true, ["Theirs"]],
+    ],
+    "current goes off for the pass and on at its rest; the tree is never told as none",
+  );
+});
+
+test("sections 4.1: after a rewind the tree is told as none at the rest when the new pass cannot open it, and not before", () => {
+  const { s, r, late, other } = sectionsRig({ late: true });
+  assert.ok(late);
+  s.wire.put(4, treeIn(s, late.epoch, other, treeOf(null, [[SECTION(1), "Old", []]]), 1));
+  const held = s.epochs[0];
+  assert.ok(held);
+  s.wire.seals = [historySeal(held, other, s.alice.first, late.epoch.key)];
+  assert.deepEqual(names17(r.connect()), [["Old", 0]]);
+  s.wire.seals = []; // the new incarnation lacks the seal: the key is gone
+  s.wire.incarnation = fill(9, 16);
+  const none = r.give([s.wire.served(), ...s.wire.read(0)], 30);
+  assert.deepEqual(
+    arrangementsOf(none).map((e) => [e.current, e.behind, e.sections?.map((x) => x.name) ?? null]),
+    [
+      [false, false, ["Old"]],
+      [false, true, null],
+    ],
+    "the tree stands for the pass, and none is told at its rest",
+  );
+});
+
+test("sections 3.2: the walk is judged at rest alone: a push fed frame by frame and in one chunk gives the same drop and the same line", () => {
+  const { s, r, late, home, other } = sectionsRig({ late: true });
+  assert.ok(late);
+  r.connect();
+  queuedBy(r, NEW("A"), 11);
+  const stored = r.outWrites.at(-1) as AppOutbox;
+  const template = stored.names?.[0];
+  assert.ok(template);
+  s.wire.put(4, treeIn(s, home, other, treeOf(null, [[SECTION(1), "Theirs", []]]), 1));
+  // An entry built over an own tree that will take no part; a first copy that waits comes after that tree, in the same push.
+  const over = {
+    ...template,
+    name: fill(50, 16),
+    content: treeOf(idOf(s.alice.first, 2), [[SECTION(3), "B", []]]),
+  };
+  const box = { ...stored, names: [over], channels: [] };
+  const [byFrame, inOne] = [
+    rig(s, { outbox: box }, s.alice.first),
+    rig(s, { outbox: box }, s.alice.first),
+  ];
+  byFrame.connect();
+  inOne.connect();
+  const from = s.wire.items.length;
+  s.wire.put(4, treeIn(s, home, s.alice.first, treeOf(null, [[SECTION(2), "Mine", []]]), 2));
+  s.wire.put(4, treeIn(s, late.epoch, other, treeOf(null, [[SECTION(4), "Hidden", []]]), 3));
+  const frames = s.wire.push(from);
+  const [a, b] = [byFrame.give(frames, 20), inOne.chunk(frames, 20)];
+  for (const [t, fx] of [
+    [byFrame, a],
+    [inOne, b],
+  ] as const) {
+    assert.equal(storedNames(t).length, 1, "the entry is kept while a first copy waits");
+    assert.ok(
+      fx.every((e) => e.do !== "arrangement" || !e.notApplied),
+      "and no line",
+    );
+  }
+});
+
+test("sections 3.2: an own tree whose first copy waits for its key is not judged; once it opens and took no part, the line rises", () => {
+  const { s, r, late, home, other } = sectionsRig({ late: true });
+  assert.ok(late);
+  r.connect();
+  queuedBy(r, NEW("A"), 11);
+  const stored = r.outWrites.at(-1) as AppOutbox;
+  const template = stored.names?.[0];
+  assert.ok(template);
+  s.wire.put(4, treeIn(s, home, other, treeOf(null, [[SECTION(1), "Theirs", []]]), 1));
+  // The pending entry's message is placed in the epoch whose key has not come: read back, not opened.
+  s.wire.put(4, treeIn(s, late.epoch, s.alice.first, treeOf(null, [[SECTION(2), "Mine", []]]), 2));
+  const t = rig(
+    s,
+    { outbox: { ...stored, names: [{ ...template, name: fill(122, 16) }], channels: [] } },
+    s.alice.first,
+  );
+  const first = t.connect();
+  assert.ok(first.every((e) => e.do !== "arrangement" || !e.notApplied));
+  const held = s.epochs[0];
+  assert.ok(held);
+  s.wire.seals = [historySeal(held, other, s.alice.first, late.epoch.key)];
+  t.drop(30);
+  const after = t.connect(60_000);
+  assert.equal(lastArrangement(after)?.notApplied, true, "the verdict comes with the key");
 });

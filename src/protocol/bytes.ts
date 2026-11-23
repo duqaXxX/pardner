@@ -203,3 +203,7 @@ export function decode<T>(bytes: Bytes, read: (r: Reader) => T): Result<T> {
     throw error;
   }
 }
+
+/** The lowercase hex text of `bytes`. */
+export const toHex = (bytes: Bytes): string =>
+  Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");

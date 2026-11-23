@@ -72,6 +72,7 @@ for (const name of [
   "profile",
   "space",
   "name",
+  "arrangement",
 ]) {
   test(`every case of ${name}.json passes on the joined script, platform on Node`, () => {
     const file = JSON.parse(

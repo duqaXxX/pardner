@@ -689,6 +689,7 @@ public final class RelayConnection: @unchecked Sendable {
                 out.yield(.delivered(view))
             case "profile": out.yield(.profile(fx))
             case "names": out.yield(.names(fx))
+            case "arrangement": break // the sections' screens come in a later unit; until then the effect tells nothing the app uses
             case "devices": out.yield(.devices(fx))
             case "outbox": out.yield(.outbox(fx))
             case "creating": out.yield(.creating(fx))

@@ -7,6 +7,7 @@ import { idKey } from "./device-log.ts";
 import {
   decodeMessage,
   fits,
+  KIND_ARRANGEMENT,
   KIND_CHANNEL_NAME,
   KIND_DEVICE_NAME,
   KIND_PERSON_NAME,
@@ -14,7 +15,7 @@ import {
 } from "./messages.ts";
 import type { OutboxItem } from "./outbox.ts";
 import type { Bytes } from "./platform.ts";
-import { readName } from "./profile.ts";
+import { readArrangement, readName } from "./profile.ts";
 
 /** A name the person set that this device has not read back (names design 4.4): its message name is chosen when it is set, and only a read-back of a message under it clears it. A channel's carries its `channel`; the person's and the device's go into the space. */
 export interface PendingName {
@@ -92,18 +93,20 @@ function clean(raw: unknown): OutboxItem | undefined {
   return ok ? item : undefined;
 }
 
-/** The pending name a stored value holds, or `undefined` when it is not one. */
+/** The pending name a stored value holds, or `undefined` when it is not one; a kind 17 (sections design 3) is kept when its content reads. */
 function cleanName(raw: unknown): PendingName | undefined {
   if (!object(raw)) return undefined;
   const { kind, channel, name, content, setup } = raw;
   const named = kind === KIND_CHANNEL_NAME;
+  const arranged = kind === KIND_ARRANGEMENT;
   const ok =
-    (named || kind === KIND_PERSON_NAME || kind === KIND_DEVICE_NAME) &&
+    (named || arranged || kind === KIND_PERSON_NAME || kind === KIND_DEVICE_NAME) &&
     sized(name, 16) &&
     typeof content === "string" &&
-    readName(kind as number, content).ok &&
+    (arranged ? readArrangement(content).ok : readName(kind as number, content).ok) &&
     (named ? sized(channel, 32) : channel == null) &&
-    typeof setup === "boolean";
+    typeof setup === "boolean" &&
+    (!arranged || setup === false); // a kind 17 is never a setup name
   return ok
     ? {
         kind: kind as number,
