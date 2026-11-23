@@ -1,0 +1,106 @@
+{
+  "structure": "control-content",
+  "version": 1,
+  "source": "the app's Stop and session menu (#73 step A), 2026-11-23. `content` is the JSON of a kind 2 prompt; `control` is what a reader takes from it (true only for a JSON boolean true beside one of the five words the app's controls send); `appBuilt` marks the bodies the app writes, which the app's tests rebuild and compare field by field. The bot reads `text` and `thread` alone, so each case reaches its core as the same prompt with or without the flag",
+  "cases": [
+    {
+      "name": "control /stop",
+      "content": {
+        "control": true,
+        "text": "/stop",
+        "thread": "0a0b0c0d"
+      },
+      "control": true,
+      "appBuilt": true
+    },
+    {
+      "name": "control /bypass on",
+      "content": {
+        "control": true,
+        "text": "/bypass on",
+        "thread": "0a0b0c0d"
+      },
+      "control": true,
+      "appBuilt": true
+    },
+    {
+      "name": "control /bypass off",
+      "content": {
+        "control": true,
+        "text": "/bypass off",
+        "thread": "0a0b0c0d"
+      },
+      "control": true,
+      "appBuilt": true
+    },
+    {
+      "name": "control /plan on",
+      "content": {
+        "control": true,
+        "text": "/plan on",
+        "thread": "0a0b0c0d"
+      },
+      "control": true,
+      "appBuilt": true
+    },
+    {
+      "name": "control /plan off",
+      "content": {
+        "control": true,
+        "text": "/plan off",
+        "thread": "0a0b0c0d"
+      },
+      "control": true,
+      "appBuilt": true
+    },
+    {
+      "name": "typed word, no flag",
+      "content": {
+        "text": "/stop",
+        "thread": "0a0b0c0d"
+      },
+      "control": false,
+      "appBuilt": false
+    },
+    {
+      "name": "flag is the number 1",
+      "content": {
+        "control": 1,
+        "text": "/stop",
+        "thread": "0a0b0c0d"
+      },
+      "control": false,
+      "appBuilt": false
+    },
+    {
+      "name": "flag is the text true",
+      "content": {
+        "control": "true",
+        "text": "/stop",
+        "thread": "0a0b0c0d"
+      },
+      "control": false,
+      "appBuilt": false
+    },
+    {
+      "name": "flag false",
+      "content": {
+        "control": false,
+        "text": "/stop",
+        "thread": "0a0b0c0d"
+      },
+      "control": false,
+      "appBuilt": false
+    },
+    {
+      "name": "flag with a text that is no control word",
+      "content": {
+        "control": true,
+        "text": "/stop now",
+        "thread": "0a0b0c0d"
+      },
+      "control": false,
+      "appBuilt": false
+    }
+  ]
+}

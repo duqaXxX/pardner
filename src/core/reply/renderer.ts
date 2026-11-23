@@ -143,6 +143,10 @@ export function terminalStatus(status: TaskOutcome): [status: TaskStatus, output
 export class TurnRenderer {
   // The turn was cut outside the agent's stream with its calls stopped (`feedEnding`).
   #callsStopped = false;
+  // The owner asked to stop this turn: a call the agent then ends in error was cut, not failed.
+  #stopAsked = false;
+  // Tasks the core ended itself (a stop), whose lines read as cut where the agent's own `TaskStop` reads as done.
+  readonly #cut = new Set<string>();
   readonly #sink: Sink;
   /** The session's folder, which previews name paths from. */
   readonly #cwd: string | null;
@@ -490,15 +494,28 @@ export class TurnRenderer {
       if (running.has(entry.id)) {
         closing.push({ ...entry, status: "in_progress", details: BACKGROUND, task: true });
       } else if (entry.status === "pending" || entry.status === "in_progress") {
+        // Only the owner's stop is a failure to draw: `/terminal` moves the turn, which goes on.
         closing.push({
           ...entry,
-          status: "complete",
-          output: interrupted ? STOPPED : entry.output,
+          status: this.#stopAsked ? "error" : "complete",
+          output: interrupted || this.#stopAsked ? STOPPED : entry.output,
         });
       }
     }
     for (const entry of closing) this.#lines.set(entry.id, entry);
+    // A later turn of the same reply (a report) is not the stop's.
+    this.#stopAsked = false;
     await this.#sink.finish(closing, signal);
+  }
+
+  /** The owner asked to stop the turn: a call the agent ends in error from now on reads `Stopped`. */
+  stopAsked(): void {
+    this.#stopAsked = true;
+  }
+
+  /** The core ends this task itself (a stop): its line reads as cut, not as the agent's own end of it. */
+  cutTask(taskId: string): void {
+    this.#cut.add(taskId);
   }
 
   /** Whether this reply has already ended. */
@@ -759,7 +776,7 @@ export class TurnRenderer {
       const resumed = this.#resumed.get(event.callId);
       if (resumed !== undefined && event.isError) {
         // The words were drawn; a call that failed says why on a card, as any failed call does.
-        await this.#set({ ...resumed, status: "error", output: resultSummary(event.output) });
+        await this.#set({ ...resumed, status: "error", output: this.#said(event) });
       }
       await this.#settleLaunches();
       return;
@@ -785,12 +802,13 @@ export class TurnRenderer {
         ...entry,
         details: BACKGROUND,
         task: true,
-        output: resultSummary(event.output),
+        status: event.isError && this.#stopAsked ? "error" : entry.status,
+        output: this.#said(event),
       });
     } else if (entry.output === STOPPED) {
       // Its task already ended as stopped; the result that follows only reports the rejection
-      // (recorded: `interrupt.jsonl`, CLI 2.1.283), and must not turn a stopped call into a
-      // failed one.
+      // (recorded: `interrupt.jsonl`, CLI 2.1.283), and must not replace the line's `Stopped`
+      // with the agent's words.
     } else {
       const kept = this.#answers.get(event.callId) ?? null;
       this.#answers.delete(event.callId);
@@ -805,11 +823,16 @@ export class TurnRenderer {
             ? entry.title
             : `${entry.title} · ${model}`,
         status: event.isError ? "error" : "complete",
-        output: resultSummary(event.output),
+        output: this.#said(event),
         preview: shown,
       });
     }
     await this.#settleLaunches();
+  }
+
+  /** What a call's line says of its end: the agent's words, but not its rejection of a call the owner's stop cut. */
+  #said(event: EventOf<"call_ended">): string | null {
+    return event.isError && this.#stopAsked ? STOPPED : resultSummary(event.output);
   }
 
   async #taskStarted(event: TaskStarted): Promise<void> {
@@ -977,7 +1000,7 @@ export class TurnRenderer {
     const [final, stopped] = terminalStatus(status);
     await this.#set({
       ...entry,
-      status: final,
+      status: stopped !== null && (this.#cut.has(taskId) || this.#stopAsked) ? "error" : final,
       // The command line of a timed call that is still a call's card is the card's content, which
       // a run lists once it has ended (a provider that folds a run of calls); any other details were progress.
       details: entry.startedAt !== null && !entry.task ? entry.details : null,

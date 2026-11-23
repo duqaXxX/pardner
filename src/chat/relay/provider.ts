@@ -3,7 +3,8 @@
  * daemon's own written as texts (kind 1), and the owner's prompts and answers handed to the core
  * by `Inbound`; a request to the owner (kind 9) and its withdrawal or rewrite (kind 11) are written
  * here. A reply is written as parts (kind 4), each naming the answer its prompt gets when the core is
- * done with the prompt (`Inbound`, 3.8); text only: tasks, the footer and the running list draw nothing.
+ * done with the prompt (`Inbound`, 3.8), and the turn's tool calls as lines (a text, then an edit when the
+ * line changes); the footer and the running list draw nothing.
  */
 
 import { refKey } from "../../protocol/device-reader.ts";
@@ -19,11 +20,13 @@ import {
   type MessageId,
   type OwnerRequest,
   type Reply,
+  type TaskUpdate,
   type ThreadChat,
   type ThreadRef,
 } from "../seam.ts";
 import { fromHex, referenceOf, toHex } from "./hex.ts";
 import { type Inbound, questionsOf } from "./inbound.ts";
+import { fitLine, type Line } from "./line.ts";
 import type { Outbox } from "./outbox.ts";
 
 const NONE: ChatCapabilities = {
@@ -94,15 +97,20 @@ export class RelayProvider implements ChatProvider {
   #self: Bytes;
   #random: Platform["random"];
   #link: Link | undefined;
+  #steady: { time(): number } | undefined;
+  #now: () => number;
 
   constructor(
     self: Bytes,
     outbox: Outbox,
     inbound: Inbound,
-    platform: Pick<Platform, "random">,
+    platform: Pick<Platform, "random" | "now">,
     link?: Link,
+    steady?: { time(): number },
   ) {
     this.#link = link;
+    this.#steady = steady;
+    this.#now = () => platform.now();
     this.#self = self;
     this.#random = (length) => platform.random(length);
     this.identities = [`relay:${toHex(self)}`];
@@ -188,6 +196,8 @@ export class RelayProvider implements ChatProvider {
     const inbound = this.#inbound;
     const me = this.#self;
     const random = this.#random;
+    const wall = this.#now;
+    const steady = this.#steady;
     const reference = prompt ? referenceOf(prompt) : undefined;
     const names: Bytes[] = [];
     let lost = false;
@@ -200,6 +210,43 @@ export class RelayProvider implements ChatProvider {
       const draft = { kind, re, name, content };
       if (await outbox.queue(fromHex(ref.channel), draft).catch(() => false)) names.push(name);
       else lost = true;
+    };
+    // The lines written for this reply, by the core's id: the line's text name and the update as last written.
+    // A line is no part of `names`: one the outbox refuses must not make the reply unlanded (design 2.5).
+    const lines = new Map<string, { name: Bytes; last: TaskUpdate }>();
+    let finished = false;
+    const lineOf = (u: TaskUpdate): Line => {
+      const { id: _id, name: _name, folded: _folded, startedAt, ...rest } = u;
+      const ago = steady && startedAt !== null ? (steady.time() - startedAt) * 1000 : null;
+      return { ...rest, startedAt: ago === null ? null : Math.round(wall() - ago) };
+    };
+    /** Writes a line's text (`first`) or its edit, both by the text's `name`; true when queued. */
+    const putLine = async (u: TaskUpdate, name: Bytes, first: boolean) => {
+      const frame = first ? { thread: ref.thread, say: "task" } : { thread: ref.thread };
+      const content = fitLine(frame, lineOf(u), REQUEST_ROOM);
+      if (content === undefined) return;
+      const draft = first
+        ? { kind: 1, re: reference, name, content }
+        : { kind: 11, re: { device: me, name }, content };
+      return outbox.queue(fromHex(ref.channel), draft).catch(() => false);
+    };
+    const writing = () => !!reference && !finished && !inbound.closed(reference);
+    // A line's edit follows when its status, output or preview changed; at the turn's end, when any field did.
+    const changed = (a: TaskUpdate, b: TaskUpdate, any: boolean) =>
+      any
+        ? JSON.stringify(a) !== JSON.stringify(b)
+        : a.status !== b.status ||
+          a.output !== b.output ||
+          JSON.stringify(a.preview) !== JSON.stringify(b.preview);
+    const update = async (u: TaskUpdate, closing: boolean) => {
+      const held = lines.get(u.id);
+      if (!held) {
+        const name = random(16);
+        // Kept whether or not the queue said yes: a refusal is mostly a store write that failed after the draft
+        // was held, so writing the line again would show one call twice. A line too large to write is not kept.
+        if ((await putLine(u, name, true)) !== undefined) lines.set(u.id, { name, last: u });
+      } else if (changed(held.last, u, closing) && (await putLine(u, held.name, false)))
+        held.last = u;
     };
     const landed = (signal?: AbortSignal) =>
       lost ? Promise.resolve(false) : outbox.landed(names, signal);
@@ -228,8 +275,13 @@ export class RelayProvider implements ChatProvider {
           }
         }
       },
-      async task() {},
-      async finish() {},
+      async task(u) {
+        if (writing()) await update(u, false);
+      },
+      async finish(closing, signal) {
+        if (writing()) for (const u of closing) if (!signal?.aborted) await update(u, true);
+        finished = true;
+      },
       rest() {},
       showFooter: async () => false, // owed: the footer is read and offered again (seam)
       // At once, as the seam splits it: false when a part is still unread, and the core then waits in `waitLanded`.

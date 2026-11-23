@@ -190,8 +190,9 @@ export async function relayWorld(t: TestContext) {
           .filter((m) => !mine.has(re(m)))
           .map((m) => ({ name: name(m), re: re(m), body: r.body(m) as JsonObject })),
         requests: requests.map((m) => ({ name: name(m), body: r.body(m) as JsonObject })),
+        // A line's edit (a body with a task) names a line's text: the turn's lines are not requests.
         edits: of(11)
-          .filter((m) => !setups.has(re(m)))
+          .filter((m) => !setups.has(re(m)) && (r.body(m) as JsonObject).task === undefined)
           .map((m) => ({ re: re(m), body: r.body(m) as JsonObject })),
       };
     },

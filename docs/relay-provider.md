@@ -18,11 +18,21 @@ sessions close; `close` erases the keys held in memory.
 
 `openReply(onOpenMessage, prompt)` takes the owner's message the reply is for; the core passes it for
 every turn of an owner's prompt, `!command` included, and nothing for a report turn. The reply
-writes text only. While that prompt has no answer, each `text` call becomes parts (kind 4), each at
+writes text and the turn's lines. While that prompt has no answer, each `text` call becomes parts (kind 4), each at
 most 64 KiB of UTF-8 and cut between characters, each naming by `re` the answer the prompt will get;
 the text is added to that answer. Text written after the prompt's answer, or by a reply with no
-prompt, goes out as texts of the thread (kind 1, "say"), also split at 64 KiB. `task`, `finish`,
-`rest` and `showFooter` draw nothing (`showFooter` answers false, so the footer stays owed).
+prompt, goes out as texts of the thread (kind 1, "say"), also split at 64 KiB. `rest` and `showFooter`
+draw nothing (`showFooter` answers false, so the footer stays owed).
+
+A tool call is a line, under the same condition as the parts: a reply opened for a prompt, while the prompt
+has no answer and before `finish`. `task` writes a text (kind 1, `re` the prompt, content `say` `task` and
+the line) when it first sees a call, and an edit (kind 11, `re` the line's text) when the line's status,
+output or preview differs from what was last written; `finish` writes an edit for each line it closes that
+differs in any field. The line is the core's `TaskUpdate` without `id`, `name` and `folded`, with `startedAt`
+in wall-clock milliseconds. A content past the room of a message has its longest field (the preview's body,
+the details or the output) cut at a line end with `… +N lines`, a single line past the room between
+characters with `…`. A line is not counted in what the reply waits to land, so a line the outbox refuses
+never makes the reply unlanded.
 
 `closeOut` answers at once: true when every part is already read back, false while one is not, and
 the core then waits in the background with `waitLanded`, as the seam splits them. `waitLanded` resolves true once every part is read back, false when a part was refused or dropped

@@ -452,3 +452,40 @@ test("a prompt of a thread not handed on is answered with no flag (#68)", async 
   assert.equal(answer.markdown, "The bot did not run this prompt.");
   assert.equal("session" in answer, false);
 });
+
+test("the bot's own edit of a line (a body with a task) ends no request and keeps no key", async () => {
+  const r = rig();
+  const edit = async (content: object, name: number) => {
+    const asked = r.bot.say({
+      kind: 9,
+      re: { device: r.app.id, name: fill(60, 16) },
+      name: fill(name, 16),
+      content: "{}",
+    });
+    r.bot.flush(r.seq, E1, inc);
+    r.inbound.expect(asked.name, {
+      requestId: `id${name}`,
+      ref: { channel: "c", thread: "t" },
+      type: "setup",
+    });
+    r.bot.say({
+      kind: 11,
+      re: { device: r.bot.id, name: asked.name },
+      content: JSON.stringify(content),
+    });
+    r.bot.flush(r.seq, E1, inc);
+    await r.feed();
+  };
+  await edit({ thread: "t", task: { title: "Bash(ls)", status: "complete" } }, 1);
+  assert.equal(r.inbound.waiting.size, 1, "a line's edit leaves the name alone");
+  await edit({ thread: "t", withdrawn: true }, 2);
+  assert.equal(
+    r.inbound.waiting.size,
+    1,
+    "a withdrawal ends its own request (the other still waits)",
+  );
+  assert.deepEqual(
+    [...r.inbound.waiting.values()].map((w) => w.requestId),
+    ["id1"],
+  );
+});

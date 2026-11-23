@@ -55,3 +55,37 @@ for (const c of cases) {
     assert.equal(JSON.parse(verdict.draft.content).markdown, "", "with an empty kind 5");
   });
 }
+
+/**
+ * The prompts the app's Stop and session menu send (`control-content.json`, whose `appBuilt` bodies the Swift tests rebuild and
+ * compare field by field): the bot reads `text` and `thread` alone, so each reaches the core as the same prompt without the `control` field.
+ */
+type Prompt = { name: string; content: Record<string, unknown> };
+const { cases: prompts } = JSON.parse(
+  readFileSync(
+    new URL("../../protocol/content-vectors/control-content.json", import.meta.url),
+    "utf8",
+  ),
+) as { cases: Prompt[] };
+
+async function reaches(content: Record<string, unknown>) {
+  const r = rig();
+  r.prompt({ text: "start" });
+  await r.feed();
+  await r.echo();
+  const thread = r.messages[0]?.ref.thread;
+  r.prompt({ ...content, thread });
+  await r.feed();
+  await r.echo();
+  const m = r.messages[1];
+  return [m?.text, m?.topLevel, m?.literal, m?.ref.thread === thread, await m?.content()];
+}
+
+for (const c of prompts) {
+  test(`the bot reads the app's prompt as it reads the typed one: ${c.name}`, async () => {
+    const { control: _flag, ...typed } = c.content;
+    const [text] = await reaches(c.content);
+    assert.equal(text, c.content.text);
+    assert.deepEqual(await reaches(c.content), await reaches(typed));
+  });
+}

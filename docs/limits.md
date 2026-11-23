@@ -175,7 +175,10 @@ What it writes is text, and the rows below are what a reader of those messages w
 
 | What differs | In the terminal | From the relay chat | Looked into |
 |---|---|---|---|
-| The reply's tool lines and tasks | A line for each call, with its status | Nothing: a reply holds the agent's text alone (the owner's decision, 2026-11-17) | none |
+| The reply's tool lines | A line for each call, with its status, and the terminal folds a run of calls into a count (`Read 3 files`) | A line for each call of a reply opened for a prompt, as a text when the call starts and an edit when its status, output or preview changes; no folding into a count. Nothing is written for a report turn, after the prompt's answer or after the turn's end. A line your `/stop` cut ends as an error reading `Stopped` (the agent's own rejection text is not shown); one cut any other way (the move to the terminal, a task Claude stopped itself) reads `Stopped` as complete, one whose task runs on `Running in background` | [#27](https://github.com/duqaXxX/pardner/issues/27) |
+| A call waiting for the owner's approval | The call shows as waiting | The call's line reads `Running`, with the wait on its timer, beside the request's card, until the core marks a call that waits | none |
+| A preview of a call in a thread | One scrollable block | The body is drawn in rows of at most 200 lines, so a selection stops at a row's end | none |
+| A line past the size of a message | The whole call | The longest of the preview's body, the details and the output is cut at a line end with `… +N lines`; a single line past the limit is cut between characters and ends with `…`. A line that cannot fit even so is not written | none |
 | The footer, the list of what still runs, a status on the thread's root | Under the prompt, and in the session's title | Nothing is drawn: the footer stays owed to the reply and is offered again the next time the session has ended everything | none |
 | A reply longer than 64 KiB | One growing message | Several parts, each at most 64 KiB of text and cut between characters; the answer that closes the prompt holds the whole text | none |
 | An answer longer than the relay's 1 MiB frame | The whole reply | The relay is told the frame is too large and the answer is dropped, so the app shows the prompt with no answer; the parts hold the text | none |

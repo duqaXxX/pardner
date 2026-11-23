@@ -338,12 +338,19 @@ export function relayChat(): ChatEntry {
           configured,
           log,
         });
-        return new RelayProvider(self, outbox, inbound, platform, {
-          start: () => connection.start(),
-          stop: () => connection.stop(),
-          close: () => platform.erase(),
-          account: (account) => profile.account(account),
-        });
+        return new RelayProvider(
+          self,
+          outbox,
+          inbound,
+          platform,
+          {
+            start: () => connection.start(),
+            stop: () => connection.stop(),
+            close: () => platform.erase(),
+            account: (account) => profile.account(account),
+          },
+          context.steady,
+        );
       } catch (error) {
         platform.erase();
         throw error;

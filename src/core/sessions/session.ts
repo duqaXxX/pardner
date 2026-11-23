@@ -461,6 +461,9 @@ export class ThreadSession {
   // Set by a `/stop` that found prompts sent and no turn: the turn that starts next is not
   // covered by the stop's own status (`ActiveTurn.afterStop`).
   private stopInGap = false;
+  // Set by a `/stop` that found no open turn (its end is under way, or it waits on the owner)
+  // with prompts sent: the next prompt turn is the one the stop cuts, and its calls read so.
+  private stopAtBoundary = false;
   // A report turn was awaited when a prompt's own turn started in its place: it is awaited
   // again once that turn ends (`settle`).
   private reportDue = false;
@@ -1962,6 +1965,9 @@ export class ThreadSession {
     // Only background tasks, or the report of one, are left. Stopping them one by one makes the
     // agent open a turn of its own to react 1-2 s later and carry on; closing its
     // process ends them all for good, and the owner's next message resumes the session.
+    for (const taskId of tasks) {
+      (this.taskReplies.get(taskId) ?? this.active?.renderer)?.cutTask(taskId);
+    }
     if (!this.busy && (await this.endWithProcess(client, tasks))) {
       this.react("done", { byOwner: true });
       return true;
@@ -1985,6 +1991,11 @@ export class ThreadSession {
         this.gapSent.push(...this.sent.filter((turn) => !this.gapSent.includes(turn)));
       }
     } else this.interrupting = true;
+    const turn = this.active;
+    // A turn whose result is in has its renderer closing: a stop then is the next turn's.
+    if (turn !== null && !turn.ended) {
+      turn.renderer.stopAsked();
+    } else if (!gap && this.pending.length > 0) this.stopAtBoundary = true;
     this.stopTail = this.stopTail ?? new Event();
     for (const pending of this.deps.approvals.denyAll(this.channelId, this.threadId)) {
       await this.deleteRequest(pending.messageId);
@@ -1997,6 +2008,7 @@ export class ThreadSession {
     }
     for (const taskId of tasks) {
       this.stopped.add(taskId);
+      (this.taskReplies.get(taskId) ?? this.active?.renderer)?.cutTask(taskId);
       try {
         await client.stopTask?.(taskId);
       } catch (error) {
@@ -3398,6 +3410,9 @@ export class ThreadSession {
     if (event.type === "call_ended" && event.fileChange !== null) {
       this.turnChanges.note(event.fileChange);
     }
+    // Before the feed, which writes the turn's final text: a `/stop` during that write is the
+    // next turn's.
+    if (event.type === "turn_ended") active.ended = true;
     await active.renderer.feed(event);
     this.adoptPromoted(active.renderer);
     // A call's end can leave its task running in the background, which the list then counts.
@@ -4355,10 +4370,14 @@ export class ThreadSession {
       released: [],
       takenNoted: false,
       unanswered: null,
+      ended: false,
       run,
       startedAt: this.now(),
     };
     this.active = active;
+    // The stop given in the gap before this turn cut it: its calls read as the stop's.
+    if (active.afterStop || (turn !== null && this.stopAtBoundary)) renderer.stopAsked();
+    if (turn !== null) this.stopAtBoundary = false;
     this.stopInGap = false;
     this.noTurn.clear();
     this.endNotesRead = false;
@@ -5125,6 +5144,7 @@ export class ThreadSession {
     this.injectedExpected = false;
     this.announced = [];
     this.stopInGap = false;
+    this.stopAtBoundary = false;
     this.reportDue = false;
     this.notificationWaits = false;
     this.unfolded.clear();

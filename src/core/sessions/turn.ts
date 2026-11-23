@@ -106,6 +106,12 @@ export interface ActiveTurn {
    * report's and did not release it. A normal end sends it back to wait for a turn of its own.
    */
   unanswered: Turn | null;
+  /**
+   * This turn's own `turn_ended` came: its reply is closing, and a `/stop` is the next turn's.
+   * The renderer's `result` cannot say it: a report turn shares a reply that holds an earlier
+   * turn's.
+   */
+  ended: boolean;
   /** A scheduled run: its words go to the loop card and it touches neither status nor footer. */
   readonly run: boolean;
   /** When the turn began, epoch milliseconds: a run is dated and timed from it. */
