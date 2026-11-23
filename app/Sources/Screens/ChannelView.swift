@@ -65,7 +65,7 @@ struct ChannelView: View {
                         ForEach(channel.sessions, id: \.key) { t in
                             HStack(spacing: PardnerMetrics.gap) {
                                 Summary(model: model, icons: icons, thread: t, open: { thread = t.key }, showsTitle: true)
-                                if t.state != .idle, let composers { StopButton(composer: composers.composer(channel: channel.id, thread: t.key)) }
+                                if t.state != .idle, let composers { StopButton(composer: composers.composer(channel: channel.id, thread: t.key), blinks: true) }
                             }
                         }
                     }
@@ -328,13 +328,17 @@ struct Answered: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PardnerMetrics.gap) {
-            ForEach(Array(thread.items.enumerated()), id: \.offset) { _, item in
-                switch item {
+            // The same rows as the thread panel, with their stable identities: a row's own state stays with it when an answer replaces its segments.
+            ForEach(ThreadRows.build(thread)) { row in
+                switch row.content {
                 case .message(let line): MessageRow(model: model, icons: icons, message: line)
-                case .answer(let answer):
+                case .unreadable(let count, let first): UnreadableRow(model: model, icons: icons, message: first, count: count, mark: .conversation)
+                case .line(let line): LineRow(line: line, state: thread.state(of: line), indent: 0)
+                case .body(let line, let index): LineBodyRow(line: line, index: index, indent: 0)
+                case .segment(let answer):
                     // Spans are read once the answer has landed; while parts come it is drawn as written (#73, section 7).
-                    Text(answer.done ? CodeSpans.styled(answer.markdown) : AttributedString(answer.markdown)).designLines().textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                        .contextMenu { Button("Copy") { Clipboard.copy(answer.markdown) } }
+                    Text(answer.done ? CodeSpans.styled(answer.shown) : AttributedString(answer.shown)).designLines().textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        .contextMenu { Button("Copy") { Clipboard.copy(thread.text(of: answer)) } }
                 }
             }
             if let state { Text(state).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted) }

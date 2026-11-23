@@ -6,7 +6,7 @@ import ProtocolHost
 import XCTest
 
 /// A channel with alice (the owner) and her bot `mini`, and the views the link would deliver for them.
-private struct World {
+struct World {
     let channel = Data(repeating: 1, count: 32)
     let alice = Data(repeating: 2, count: 32)
     let bot = Data(repeating: 3, count: 32)
@@ -508,6 +508,125 @@ extension ConversationTests {
         let before = w.c.threads[s.thread]?.lastReply
         w.deliver(kind: 5, from: w.bot, json: ["thread": "", "markdown": ""], re: s.reply, time: 1_800_000_000_000)
         XCTAssertGreaterThan(w.c.threads[s.thread]!.lastReply!, before!)
+    }
+
+    // MARK: control prompts (Stop and the mode words, sent by the app's own controls)
+
+    /// A session whose turn runs, then a Stop prompt in its thread with the flag, its start and the bot's answer.
+    private func stopped(_ w: inout World, control: Bool = true) -> (root: MessageRef, stop: MessageRef) {
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "build it"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        w.deliver(kind: 1, from: w.bot, json: ["thread": root.hex, "say": "say", "markdown": "working"], re: root)
+        var fields: [String: Any] = ["text": "/stop", "thread": root.hex]
+        if control { fields["control"] = true }
+        let stop = w.deliver(kind: 2, from: w.alice, json: fields, to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: stop)
+        w.deliver(kind: 4, from: w.bot, json: ["thread": root.hex, "markdown": "Stop"], re: stop)
+        w.deliver(kind: 1, from: w.bot, json: ["thread": root.hex, "say": "tell", "markdown": "Stopping"], re: stop)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": root.hex, "markdown": "Stopped."], re: stop)
+        return (root, stop)
+    }
+
+    func testAControlPromptItsStartAndItsAnswerDrawNothingAndMoveNothing() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "build it"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        w.deliver(kind: 1, from: w.bot, json: ["thread": root.hex, "say": "say", "markdown": "working"], re: root)
+        let before = w.c.threads[root.hex]!
+        let stop = w.deliver(kind: 2, from: w.alice, json: ["text": "/stop", "thread": root.hex, "control": true], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: stop, time: 1_800_000_000_000)
+        w.deliver(kind: 4, from: w.bot, json: ["thread": root.hex, "markdown": "Stop"], re: stop, time: 1_800_000_000_000)
+        w.deliver(kind: 1, from: w.bot, json: ["thread": root.hex, "say": "tell", "markdown": "Stopping"], re: stop, time: 1_800_000_000_000)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": root.hex, "markdown": "Stopped."], re: stop, time: 1_800_000_000_000)
+        let after = w.c.threads[root.hex]!
+        XCTAssertEqual(after.items, before.items)
+        XCTAssertEqual(after.lastReply, before.lastReply)
+        XCTAssertEqual(after.state, .running, "the turn's own prompt still runs")
+        XCTAssertEqual(w.c.threads.count, 1)
+        XCTAssertEqual(w.c.timeline, [10])
+        XCTAssertEqual(w.c.sessions.map(\.key), [root.hex])
+    }
+
+    func testAPromptWithTheFlagFromAnotherSenderOrWithOtherTextIsDrawnWithItsWholeTurn() {
+        var w = World()
+        let stranger = Data(repeating: 7, count: 32)
+        // Another sender, with a word of the controls: a top-level prompt like any other, and its thread.
+        let theirs = w.deliver(kind: 2, from: stranger, json: ["text": "/stop", "control": true], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: theirs)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": theirs.hex, "markdown": "Stopped."], re: theirs)
+        XCTAssertEqual(w.c.timeline, [10])
+        XCTAssertEqual(w.c.threads[theirs.hex]?.items.count, 1)
+        // The owner's own device, with text that is not a word of the controls.
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "go"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        let odd = w.deliver(kind: 2, from: w.alice, json: ["text": "rm everything", "thread": root.hex, "control": true], to: w.bot)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": root.hex, "markdown": "done"], re: odd)
+        let items = w.c.threads[root.hex]!.items
+        XCTAssertTrue(items.contains { if case .message(let m) = $0, m.ref == odd { true } else { false } })
+        XCTAssertTrue(items.contains { if case .answer(let a) = $0 { a.markdown == "done" } else { false } })
+    }
+
+    func testAFlagThatIsNotABooleanIsNoControl() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "go"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        for (i, flag) in [1, "true", 0].enumerated() as EnumeratedSequence<[Any]> {
+            let p = w.deliver(kind: 2, from: w.alice, json: ["text": "/stop", "thread": root.hex, "control": flag], to: w.bot)
+            XCTAssertFalse(w.c.messages.last!.control, "case \(i)")
+            XCTAssertTrue(w.c.threads[root.hex]!.items.contains { if case .message(let m) = $0, m.ref == p { true } else { false } })
+        }
+    }
+
+    func testARequestNamingAControlPromptIsDrawnAndTheSessionWaits() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "go"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        let mode = w.deliver(kind: 2, from: w.alice, json: ["text": "/bypass off", "thread": root.hex, "control": true], to: w.bot)
+        let request: [String: Any] = ["type": "permission"]
+        let asked = w.deliver(kind: 9, from: w.bot, json: ["thread": root.hex, "request": request, "title": "Edit?"], re: mode)
+        let t = w.c.threads[root.hex]!
+        XCTAssertEqual(t.state, .waiting)
+        XCTAssertTrue(t.items.contains { if case .message(let m) = $0, m.ref == asked { true } else { false } })
+    }
+
+    func testTheAnswerToAModeWordIsDrawnWithNoPromptAboveIt() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "go"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        let mode = w.deliver(kind: 2, from: w.alice, json: ["text": "/bypass on", "thread": root.hex, "control": true], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: mode)
+        w.deliver(kind: 5, from: w.bot, json: ["thread": root.hex, "markdown": "Bypass is not available."], re: mode)
+        let items = w.c.threads[root.hex]!.items
+        XCTAssertTrue(items.contains { if case .answer(let a) = $0 { a.markdown == "Bypass is not available." } else { false } })
+        XCTAssertFalse(items.contains { if case .message(let m) = $0, m.ref == mode { true } else { false } })
+        XCTAssertEqual(w.c.threads[root.hex]?.state, .running, "the turn's own prompt still runs")
+    }
+
+    func testALineOfAStopsTurnIsStillDrawn() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "go"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        let stop = w.deliver(kind: 2, from: w.alice, json: ["text": "/stop", "thread": root.hex, "control": true], to: w.bot)
+        let task: [String: Any] = ["title": "Run tests", "status": "in_progress"]
+        w.deliver(kind: 1, from: w.bot, json: ["thread": root.hex, "say": "task", "task": task], re: stop)
+        XCTAssertTrue(w.c.threads[root.hex]!.items.contains { if case .line = $0 { true } else { false } })
+    }
+
+    func testAStopTypedByTheOwnerIsStillDrawnWithItsAnswer() {
+        var w = World()
+        let s = stopped(&w, control: false)
+        let items = w.c.threads[s.root.hex]!.items
+        XCTAssertTrue(items.contains { if case .message(let m) = $0, case .prompt(let t) = m.body { t == "/stop" } else { false } })
+        XCTAssertTrue(items.contains { if case .answer(let a) = $0 { a.markdown == "Stopped." } else { false } })
+    }
+
+    func testAControlPromptIsHeldInTheMessagesAndDrawnNowhere() {
+        var w = World()
+        let s = stopped(&w)
+        XCTAssertTrue(w.c.messages.contains { $0.ref == s.stop && $0.control })
+        let items = w.c.threads[s.root.hex]!.items
+        XCTAssertFalse(items.contains { if case .message(let m) = $0, m.ref == s.stop { true } else { false } })
+        XCTAssertFalse(items.contains { if case .answer = $0 { true } else { false } })
     }
 
     // MARK: a prompt answered as a word, or a session (#68)

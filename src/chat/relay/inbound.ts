@@ -232,7 +232,11 @@ export class Inbound {
   #ownRequest(message: Message, key: Bytes | undefined): void {
     const h = message.header;
     if (h.kind === 11) {
-      if (h.re) this.end(h.re.name);
+      if (!h.re) return;
+      // A line's edit names a line's text, never a request: it keeps no key in `#ended` (turn work design, T2).
+      const edit = key ? openMessage(this.#o.platform, key, message) : undefined;
+      if (edit?.ok && parse(edit.value.content)?.task !== undefined) return;
+      this.end(h.re.name);
       return;
     }
     const at = refKey({ device: this.#o.self, name: h.name });

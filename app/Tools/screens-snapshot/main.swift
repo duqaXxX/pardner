@@ -153,6 +153,18 @@ MainActor.assumeIsolated {
                 let window = MainWindow(model: live.model, devices: DevicesModel(), channels: ChannelsModel(devices: devices), composers: hub, channel: live.channel, thread: live.queuedThread)
                 try render(appearance, window, size: NSSize(width: 1280, height: 800), to: "stop-header-\(theme).png")
             }
+            // A session that runs: the activity row says `Working…` and the header's and the row's Stop are drawn.
+            var running = DevicesState()
+            running.rows = [Data([0x57, 0x0D, 0x10, 0x04] + Array(repeating: 4, count: 28))].map {
+                DeviceRow(id: $0, kind: .bot, label: nil, shortForm: "", adder: .none, position: 1, active: true, isThisMac: false, seenAt: nil, onlyHolderEpochs: 0, addedWhileRemoving: false)
+            }
+            let runningDevices = DevicesModel(state: running)
+            let runningThread = live.model.channels[live.channel]?.sessions.first { $0.state == .running }?.key
+            for (appearance, theme) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
+                let hub = Composers(conversation: ConversationModel(reading: live.model), devices: runningDevices) { _, _ in .ended }
+                let window = MainWindow(model: live.model, devices: DevicesModel(), channels: ChannelsModel(devices: runningDevices), composers: hub, channel: live.channel, thread: runningThread)
+                try render(appearance, window, size: NSSize(width: 1280, height: 800), to: "activity-running-\(theme).png")
+            }
             exit(0)
         }
         if ProcessInfo.processInfo.environment["SNAPSHOT_ONLY"] == "sections" {

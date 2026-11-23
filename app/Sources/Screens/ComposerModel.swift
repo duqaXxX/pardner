@@ -318,11 +318,12 @@ public final class ComposerModel {
     }
 
     /// Sends `text` as a prompt in the thread to the session's bot (a word of the daemon's: `/stop`, `/bypass on`), leaving the field as it is.
+    /// The prompt carries `"control": true`, which the bot ignores: no device draws it, nor the bot's answer to it.
     /// Nothing is sent from a channel's composer, one that is not ready, or a session whose bot was removed.
     @discardableResult
     public func command(_ text: String) -> Task<Void, Never>? {
         guard canCommand, let bot = promptBot else { return nil }
-        return queue(OutboxDraft(kind: 2, to: bot, content: Self.body(prompt: true, text: text, thread: thread)), text: text, restores: false)
+        return queue(OutboxDraft(kind: 2, to: bot, content: Self.body(prompt: true, text: text, thread: thread, control: true)), text: text, restores: false)
     }
 
     /// Whether `command` sends: a thread of a session whose bot is one of the person's active devices.
@@ -404,8 +405,9 @@ public final class ComposerModel {
     }
 
     /// The body's JSON as the relay chat module reads it: a prompt is `{text, thread?}`, a text `{markdown, thread?}` (its design 3.7 and 3.8).
-    static func body(prompt: Bool, text: String, thread: String?) -> String {
+    static func body(prompt: Bool, text: String, thread: String?, control: Bool = false) -> String {
         var fields: [String: Any] = [prompt ? "text" : "markdown": text]
+        if control { fields["control"] = true }
         if let thread { fields["thread"] = thread }
         let json = try? JSONSerialization.data(withJSONObject: fields, options: [.withoutEscapingSlashes, .sortedKeys])
         return String(decoding: json ?? Data(), as: UTF8.self)
@@ -487,6 +489,10 @@ public final class ComposerModel {
 
     private static func ref(_ re: MessageReference) -> MessageRef { MessageRef(device: re.device, name: re.name) }
 
+    private static func isControl(_ content: String) -> Bool {
+        ControlPrompt.holds((try? JSONSerialization.jsonObject(with: Data(content.utf8))) as? [String: Any])
+    }
+
     private static func shownText(_ content: String) -> String {
         let fields = (try? JSONSerialization.jsonObject(with: Data(content.utf8))) as? [String: Any]
         return (fields?["text"] as? String) ?? (fields?["markdown"] as? String) ?? ""
@@ -551,6 +557,13 @@ public final class ComposerModel {
         let held = heldNames
         let calling = Set(entries.filter { $0.phase == .calling }.map(\.content))
         return entries.compactMap { entry in
+            // A control's prompt is not drawn while it is on its way, or held by the relay; one that failed shows its failure like any prompt.
+            if Self.isControl(entry.content) {
+                switch entry.phase {
+                case .calling, .bound: return nil
+                case .failed, .refused: break
+                }
+            }
             if entry.re != nil { return nil } // a reply is drawn on its request's card
             if entry.fromOutbox, case .bound = entry.phase, calling.contains(entry.content) { return nil } // the call that queued it is still to answer
             let status: Status

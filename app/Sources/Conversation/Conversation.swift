@@ -41,7 +41,8 @@ public enum SessionState: Sendable, Equatable {
     case idle, running, waiting
 }
 
-/// A bot's answer to a prompt: its parts joined as they are written, replaced by the answer once it lands.
+/// A bot's answer to a prompt, in segments: a run of its parts joined as they are written, ended by a line or any other entry. Every
+/// segment of one answer has the same `ref`; the answer marks them all done, and replaces them when they do not add up to it.
 public struct AnswerGroup: Sendable, Equatable {
     /// The bot and the answer's name: what each part's `re` names.
     public let ref: MessageRef
@@ -53,20 +54,62 @@ public struct AnswerGroup: Sendable, Equatable {
     public internal(set) var done: Bool
     /// The prompt it answers, once the answer names it.
     public internal(set) var prompt: MessageRef?
+    /// An earlier segment of the same answer stands above it: no header of its own.
+    public internal(set) var continues = false
+    /// The newest segment of its answer, where `Writing…` stands while the answer is not done.
+    public internal(set) var last = true
+
+    /// The text a segment draws: without the line ends at its edges, which the bot writes to set a block apart in a reply read as one
+    /// text. Copy and the comparison with the answer keep `markdown` as written.
+    public var shown: String {
+        let ends: Set<Character> = ["\n", "\r", "\r\n"]
+        guard let first = markdown.firstIndex(where: { !ends.contains($0) }), let last = markdown.lastIndex(where: { !ends.contains($0) }) else { return "" }
+        return String(markdown[first...last])
+    }
+}
+
+/// A line of a turn (turn work design 2.2): a call or a task, with what its newest message says.
+public struct WorkLine: Sendable, Equatable {
+    public let ref: MessageRef
+    public let position: Int
+    public let time: Date
+    /// The prompt the line names: it is open while that prompt runs.
+    public let prompt: MessageRef?
+    public internal(set) var fields: LineFields
+}
+
+/// How a line stands now (turn work design 2.3).
+public enum LineState: Sendable, Equatable {
+    /// Open and running, since `since` when the call is timed.
+    case running(since: Date?)
+    /// Open and waiting for the owner: the request's card stands under it.
+    case waiting
+    /// Closed: drawn as written.
+    case written
+    /// Its prompt was cut or never read, or is not one of this thread.
+    case interrupted
 }
 
 /// One entry of a thread, in position order.
 public enum Item: Sendable, Equatable {
     case message(Message)
     case answer(AnswerGroup)
+    case line(WorkLine)
 
     /// Where the entry sits in the relay's sequence.
     public var position: Int {
         switch self {
         case .message(let m): m.position
         case .answer(let a): a.position
+        case .line(let l): l.position
         }
     }
+}
+
+/// What a thread draws: an item, or the messages that cannot be read as one counted row.
+public enum Entry: Sendable, Equatable {
+    case item(Item)
+    case unreadable(count: Int, first: Message)
 }
 
 /// What the first sign of the prompt's bot says the opening prompt was: the bot's setup, parts or answer say a session; a line of its
@@ -119,6 +162,38 @@ public struct MessageThread: Sendable, Equatable {
     var owners: Set<Data> = []
     // The person's own devices (the Devices list): their replies count whether or not they prompted in this thread.
     var own: Set<Data> = []
+    // The index in `items` of each segment of an answer and of each line: items are only appended to, so an edit or a part never
+    // looks at the whole thread. Rebuilt when an answer replaces its segments.
+    var segments: [MessageRef: [Int]] = [:]
+    var lineIndex: [MessageRef: Int] = [:]
+
+    /// The thread's entries: its items, the messages that do not open grouped when they come one after another.
+    public var entries: [Entry] {
+        var out: [Entry] = []
+        for item in items {
+            if case .message(let m) = item, m.body == .unreadable {
+                if case .unreadable(let n, let first)? = out.last { out[out.count - 1] = .unreadable(count: n + 1, first: first) } else { out.append(.unreadable(count: 1, first: m)) }
+            } else {
+                out.append(.item(item))
+            }
+        }
+        return out
+    }
+
+    /// The whole text of the answer `segment` belongs to: its segments joined, which is the answer's text once it landed.
+    public func text(of segment: AnswerGroup) -> String {
+        (segments[segment.ref] ?? []).compactMap { if case .answer(let a) = items[$0] { a.markdown } else { nil } }.joined()
+    }
+
+    /// How `line` stands: open while its newest status is not an end and its prompt runs.
+    public func state(of line: WorkLine) -> LineState {
+        guard line.fields.status == .pending || line.fields.status == .inProgress else { return .written }
+        switch line.prompt.flatMap({ prompts[$0] }) {
+        case .running: return line.fields.status == .pending ? .waiting : .running(since: line.fields.startedAt)
+        case .answered: return .written
+        default: return .interrupted
+        }
+    }
 
     /// Waiting for the owner while a request is open; running while a prompt runs; idle otherwise.
     public var state: SessionState {
@@ -161,6 +236,9 @@ public struct Channel: Sendable, Equatable {
     // The replies of the owner's read, by their reference: the request each answers and the bot it went to. What the bot says to one is its
     // verdict, found by `re` (the body's `thread` may be empty), and never a prompt's state or a thread item.
     var replies: [MessageRef: ReplyRecord] = [:]
+    // The control prompts of the owner's own devices (`ControlPrompt`), by their reference: the prompt is never drawn; for `/stop` (true) the
+    // bot's start, parts, answer and text to it are not drawn either. Whatever else names one with `re` (a request, its lines) is read as usual.
+    var controls: [MessageRef: Bool] = [:]
     /// The newest bind answer of the channel: the bot's line to a `/bind` prompt that carries the field (channel folder design, 2).
     public internal(set) var bound: BindAnswer?
 
@@ -176,6 +254,11 @@ public struct Channel: Sendable, Equatable {
 
     mutating func fold(_ m: Message) {
         messages.append(m)
+        if m.control, case .prompt(let text) = m.body, trusts(controlFrom: m) {
+            controls[m.ref] = ControlPrompt.hidesAnswer(text)
+            return
+        }
+        if let re = m.re, controls[re] == true, hidden(answerTo: m) { return }
         if let re = m.re, let reply = replies[re], let key = threadOf[re], [3, 5, 6, 7].contains(m.kind) {
             threads[key]?.take(verdict: m, of: re, reply: reply)
             return
@@ -197,11 +280,14 @@ public struct Channel: Sendable, Equatable {
             key = m.ref.hex
             threads[key!, default: MessageThread(key: key!)].root = m
             timeline.append(m.position)
-        case .start, .cut, .notRead, .reply, .edit:
+        case .start, .cut, .notRead, .reply, .edit, .lineEdit:
             key = m.re.flatMap { threadOf[$0] } ?? m.thread
         case .unreadable where m.thread == nil:
-            key = nil
-            timeline.append(m.position) // its thread is in the body it lacks: shown in its place
+            // Its thread is in the body it lacks, but its `re` is in the clear: a message of a thread names that thread (design 2.9).
+            // Only a line's text (kind 1, naming its prompt) and a line's edit (kind 11, naming a message that is no thread's root) are
+            // routed so; any other message that does not open stays in the channel's list.
+            key = m.re.flatMap { re in threadOf[re].flatMap { k in m.kind == 1 || (m.kind == 11 && k != re.hex) ? k : nil } }
+            if key == nil { timeline.append(m.position) } // shown in the channel in its place
         default:
             key = m.thread
         }
@@ -216,6 +302,21 @@ public struct Channel: Sendable, Equatable {
     }
 }
 
+extension Channel {
+    // A control prompt counts only from the person's own devices, or from one whose prompt the thread's bot started.
+    private func trusts(controlFrom m: Message) -> Bool {
+        own.contains(m.sender) || (m.thread.flatMap { threads[$0] }?.owners.contains(m.sender) ?? false)
+    }
+
+    // What the bot writes to a `/stop` control: its start, cut, not-read, parts, answer and text. A request, its edits and lines stay.
+    private func hidden(answerTo m: Message) -> Bool {
+        switch m.body {
+        case .start, .cut, .notRead, .part, .answer, .text: true
+        default: false
+        }
+    }
+}
+
 extension MessageThread {
     // A start, cut, not-read, answer, part, request or edit counts only from the session's bot (invariant 1: the
     // other bots of a channel act on nothing here); a reply only from a device whose prompt the bot started.
@@ -224,7 +325,7 @@ extension MessageThread {
         // The first sign decides what the opening prompt was (a prompt's start is no sign).
         if fromBot, settlement == nil {
             switch m.body {
-            case .request, .part: settlement = .session
+            case .request, .part, .line: settlement = .session
             // A `tell` is the bot answering a Stop or a reply typed in the thread: it can precede a word's own line.
             case .text(_, let say) where m.thread != nil && say != "tell": settlement = .session
             case .answer where m.re == root?.ref: settlement = m.noSession ? .noSession : .session
@@ -245,19 +346,40 @@ extension MessageThread {
         case .notRead where fromBot: if let re = m.re, prompts[re] != nil { prompts[re] = .notRead }
         case .part(let markdown) where fromBot:
             guard let re = m.re, re.device == m.sender else { return }
-            if let i = answerIndex(re), case .answer(var a) = items[i] {
+            // A part joins the entry before it when that is a segment of the same answer; else it opens a segment (design 2.4).
+            if case .answer(var a)? = items.last, a.ref == re {
                 a.markdown += markdown
-                items[i] = .answer(a)
+                items[items.count - 1] = .answer(a)
             } else {
-                items.append(.answer(AnswerGroup(ref: re, position: m.position, time: m.time, markdown: markdown, done: false)))
+                var group = AnswerGroup(ref: re, position: m.position, time: m.time, markdown: markdown, done: false)
+                if let before = segments[re]?.last, case .answer(var a) = items[before] {
+                    (a.last, group.continues) = (false, true)
+                    items[before] = .answer(a)
+                }
+                segments[re, default: []].append(items.count)
+                items.append(.answer(group))
             }
         case .answer(let markdown) where fromBot:
             if let re = m.re, prompts[re] != nil { prompts[re] = .answered }
-            if let i = answerIndex(m.ref), case .answer(var a) = items[i] {
-                // An empty answer keeps the text its parts already showed.
-                (a.markdown, a.done, a.prompt) = (markdown.isEmpty ? a.markdown : markdown, true, m.re)
-                items[i] = .answer(a)
+            if let indices = segments[m.ref] {
+                var joined = ""
+                for i in indices {
+                    guard case .answer(var a) = items[i] else { continue }
+                    joined += a.markdown
+                    (a.done, a.prompt) = (true, m.re)
+                    items[i] = .answer(a)
+                }
+                // The answer is the whole text: it replaces segments that do not add up to it (a part that did not open here, or never
+                // queued). An empty answer keeps the text its parts already showed.
+                if !markdown.isEmpty, markdown != joined, case .answer(var first) = items[indices[0]] {
+                    first.markdown = markdown
+                    items[indices[0]] = .answer(first)
+                    for i in indices.dropFirst().reversed() { items.remove(at: i) }
+                    reindex()
+                    if let i = segments[m.ref]?.last, case .answer(var a) = items[i] { a.last = true; items[i] = .answer(a) }
+                }
             } else if !markdown.isEmpty {
+                segments[m.ref] = [items.count]
                 items.append(.answer(AnswerGroup(ref: m.ref, position: m.position, time: m.time, markdown: markdown, done: true, prompt: m.re)))
             }
         case .request where fromBot:
@@ -273,8 +395,18 @@ extension MessageThread {
             if withdrawn { if requests[re] != .answered { requests[re] = .withdrawn } } else if answered { requests[re] = .answered } else if let markdown { requests[re] = .rewritten(markdown: markdown) }
             // Answered elsewhere: a reply of the owner's the bot has not taken does not stand for it.
             if answered, replied[re]?.taken == false { replied[re] = nil }
-        case .text, .unreadable:
+        case .line(let fields) where fromBot:
+            lineIndex[m.ref] = items.count
+            items.append(.line(WorkLine(ref: m.ref, position: m.position, time: m.time, prompt: m.re, fields: fields)))
+        case .lineEdit(let fields) where fromBot:
+            // A line the app does not hold (its text did not open here) changes nothing.
+            guard let re = m.re, let i = lineIndex[re], case .line(var line) = items[i] else { return }
+            line.fields = fields
+            items[i] = .line(line)
+        case .text:
             if m.thread != nil { items.append(.message(m)) } // the opening message is the thread's root, not an item
+        case .unreadable:
+            items.append(.message(m))
         default:
             return
         }
@@ -333,8 +465,15 @@ extension MessageThread {
         return result
     }
 
-    private func answerIndex(_ ref: MessageRef) -> Int? {
-        items.firstIndex { if case .answer(let a) = $0 { a.ref == ref } else { false } }
+    private mutating func reindex() {
+        (segments, lineIndex) = ([:], [:])
+        for (i, item) in items.enumerated() {
+            switch item {
+            case .answer(let a): segments[a.ref, default: []].append(i)
+            case .line(let l): lineIndex[l.ref] = i
+            case .message: break
+            }
+        }
     }
 }
 

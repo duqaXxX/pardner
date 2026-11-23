@@ -49,6 +49,14 @@ enum Naming {
         }
     }
 
+    /// The words on the rule under the opening message: nil while nothing but lines answered.
+    static func dividerWords(_ replies: Int) -> String? { replies > 0 ? Naming.replies(replies) : nil }
+
+    /// What stands for `count` messages that cannot be read, one after another.
+    static func unreadable(_ count: Int) -> String {
+        count == 1 ? "This message cannot be read on this device." : "\(count) messages cannot be read on this device."
+    }
+
     /// The count of a thread's replies, as its summary words it.
     static func replies(_ count: Int) -> String { count == 1 ? "1 reply" : "\(count) replies" }
 
@@ -68,7 +76,8 @@ extension Message {
         case .request(let title, _, _): title
         case .reply: "Answered"
         case .edit(let withdrawn, let answered, let markdown): withdrawn ? "Withdrawn" : answered ? "Answered" : markdown ?? ""
-        case .unreadable: "This message cannot be read on this device."
+        case .unreadable: Naming.unreadable(1)
+        case .line(let line), .lineEdit(let line): line.title
         case .start, .cut, .notRead, .state, .build, .profile: ""
         }
     }
@@ -78,8 +87,17 @@ extension MessageThread {
     /// The thread's title: the first line of its opening message.
     var title: String { root?.shown.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? "" }
 
-    /// The replies after the opening message.
-    var replies: Int { items.count }
+    /// The replies after the opening message: a line is no reply, and the segments of one answer are one.
+    var replies: Int {
+        var answers = Set<MessageRef>()
+        return entries.reduce(0) { count, entry in
+            switch entry {
+            case .unreadable, .item(.message): count + 1 // a run that cannot be read is the one row the panel draws
+            case .item(.answer(let a)): answers.insert(a.ref).inserted ? count + 1 : count
+            case .item(.line): count
+            }
+        }
+    }
 
     /// The time of the newest entry, for the summary under the opening message.
     var lastTime: Date? {
@@ -103,4 +121,13 @@ extension SessionState {
 
     /// The state word a summary and the panel's header show: only a session that runs or waits writes one.
     var pill: String? { self == .idle ? nil : label }
+
+    /// The words of the row above the composer: only a session that runs or waits has one.
+    var activityWords: String? {
+        switch self {
+        case .idle: nil
+        case .running: "Working…"
+        case .waiting: "Waiting for you"
+        }
+    }
 }

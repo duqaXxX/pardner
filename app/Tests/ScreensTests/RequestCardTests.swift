@@ -6,6 +6,7 @@ import Foundation
 import ProtocolHost
 @testable import Relay
 @testable import Screens
+import SwiftUI
 import XCTest
 
 @MainActor
@@ -407,11 +408,41 @@ final class RequestCardTests: XCTestCase {
         await task?.value
         let draft = try XCTUnwrap(sent.first?.1)
         XCTAssertEqual([draft.kind, draft.to == mini ? 1 : 0], [2, 1])
-        XCTAssertEqual(object(draft.content) as NSDictionary, ["text": "/stop", "thread": s.thread])
+        XCTAssertEqual(object(draft.content) as NSDictionary, ["text": "/stop", "thread": s.thread, "control": true])
         outcome = .ended
         await c.command("/plan on")?.value
         XCTAssertEqual(c.text, "a draft in progress", "a command that was not sent leaves the draft where it was")
-        XCTAssertEqual(c.rows().last?.status, .notSent("Pardner is not connected. Try again in a moment."))
+        XCTAssertEqual(c.rows().last?.status, .notSent("Pardner is not connected. Try again in a moment."), "a control that failed shows its failure")
+    }
+
+    func testTheBodiesTheAppBuildsForItsControlsAreTheSharedFixturesBytes() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("test/protocol/content-vectors/control-content.json")
+        let file = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        for c in try XCTUnwrap(file["cases"] as? [[String: Any]]) where c["appBuilt"] as? Bool == true {
+            let content = try XCTUnwrap(c["content"] as? [String: Any])
+            let built = ComposerModel.body(prompt: true, text: try XCTUnwrap(content["text"] as? String), thread: content["thread"] as? String, control: true)
+            XCTAssertEqual(object(built) as NSDictionary, content as NSDictionary, c["name"] as? String ?? "?")
+        }
+    }
+
+    func testATypedSlashWordStaysAVisibleDraftWithoutTheFlag() async throws {
+        let s = session(permission)
+        let c = composer(s.thread)
+        c.edited("/stop")
+        let task = c.submit()
+        await task?.value
+        let draft = try XCTUnwrap(sent.first?.1)
+        XCTAssertEqual(object(draft.content) as NSDictionary, ["text": "/stop", "thread": s.thread])
+    }
+
+    func testAControlThatIsOnItsWayShowsNoPendingRow() async {
+        let s = session(permission)
+        let c = composer(s.thread)
+        let task = c.command("/stop")
+        XCTAssertEqual(c.rows(), [], "while the call is in flight")
+        await task?.value
+        XCTAssertEqual(c.rows(), [], "while the relay holds it")
     }
 
     func testTheModeMenuSendsItsFourWords() async throws {
@@ -429,5 +460,27 @@ final class RequestCardTests: XCTestCase {
         XCTAssertNil(composer(s.thread, devices: devices(botActive: false)).command("/stop"))
         let channelComposer = ComposerModel(channel: channel, thread: nil, conversation: conversation, devices: devices()) { _, _ in .ended }
         XCTAssertFalse(channelComposer.canCommand, "a command goes to a session's bot")
+    }
+
+    // MARK: The session's activity row
+
+    func testTheActivityRowSaysWorkingWhileRunningAndWaitingForYouWhileWaitingAndNothingIdle() {
+        XCTAssertEqual(SessionState.running.activityWords, "Working…")
+        XCTAssertEqual(SessionState.waiting.activityWords, "Waiting for you")
+        XCTAssertNil(SessionState.idle.activityWords)
+    }
+
+    @MainActor
+    func testTheActivityRowIsDrawnOnlyWhileTheSessionIsNotIdle() throws {
+        let s = session(permission)
+        let thread = try XCTUnwrap(conversation.reading.channels[channel]?.sessions.first { $0.key == s.thread })
+        XCTAssertEqual(thread.state, .waiting, "an open request makes the session wait")
+        func height(_ state: SessionState) throws -> CGFloat {
+            let row = ActivityRow(model: conversation.reading, icons: [:], bot: mini, state: state, composer: composer(s.thread))
+            return ImageRenderer(content: row).nsImage?.size.height ?? 0
+        }
+        XCTAssertGreaterThan(try height(.running), 20)
+        XCTAssertGreaterThan(try height(.waiting), 20)
+        XCTAssertEqual(try height(.idle), 0)
     }
 }

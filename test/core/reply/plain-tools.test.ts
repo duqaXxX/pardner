@@ -8,7 +8,7 @@ import { test } from "node:test";
 import type { SessionEvent } from "../../../src/agent/seam.ts";
 import type { TaskUpdate } from "../../../src/chat/seam.ts";
 import { Previews } from "../../../src/core/reply/previews.ts";
-import { type Sink, TurnRenderer } from "../../../src/core/reply/renderer.ts";
+import { type Sink, type TurnEnded, TurnRenderer } from "../../../src/core/reply/renderer.ts";
 import { MEMORY_NAMES } from "../../support/names.ts";
 import { call, PLAIN_TOOLS, PlainAgent, say } from "../../support/plain-agent.ts";
 
@@ -86,4 +86,176 @@ test("a finished edit of a file previews as the tool's declared title", async ()
 test("a failed call ends its card in error", async () => {
   const cards = await cardsOf(say("Trying."), call("run", { command: "false" }, { isError: true }));
   assert.equal(cards.at(-1)?.status, "error");
+});
+
+/** What the renderer's sink took while `steps` ran on a call of the plain agent, then the turn closed. */
+async function afterCall(
+  steps: (renderer: TurnRenderer) => Promise<void>,
+  ending: TurnEnded["ending"] = "done",
+): Promise<TaskUpdate[]> {
+  const updates: TaskUpdate[] = [];
+  const sink: Sink = {
+    text: async () => undefined,
+    task: async (update) => {
+      updates.push(update);
+    },
+    finish: async (closed) => {
+      updates.push(...closed);
+    },
+    closeOut: async () => true,
+    waitLanded: async () => true,
+    settle: async () => true,
+  };
+  const renderer = new TurnRenderer(sink, MEMORY_NAMES, PREVIEWS);
+  await renderer.feed({
+    type: "call_started",
+    callId: "c1",
+    toolName: "run",
+    input: { command: "sleep 30" },
+    parentCallId: null,
+  });
+  await steps(renderer);
+  renderer.result = {
+    type: "turn_ended",
+    sessionId: null,
+    startedBy: "owner",
+    finalText: null,
+    ending,
+    steps: 1,
+    answers: [],
+    tokens: {},
+  };
+  await renderer.close();
+  return updates;
+}
+
+const ENDED_IN_ERROR = (output: string, callId = "c1"): SessionEvent => ({
+  type: "call_ended",
+  callId,
+  isError: true,
+  output,
+  fileChange: null,
+  model: null,
+  parentCallId: null,
+});
+
+const last = (updates: TaskUpdate[]) => [updates.at(-1)?.status, updates.at(-1)?.output];
+
+test("a call still open when the owner's stop ends the turn reads as an error, `Stopped`", async () => {
+  const updates = await afterCall(async (renderer) => renderer.stopAsked(), "interrupted");
+  assert.deepEqual(last(updates), ["error", "Stopped"]);
+});
+
+test("a call open when a turn ends cut by anything else than the owner's stop closes as it did", async () => {
+  // `/terminal` ends the turn here and the terminal goes on with it.
+  const updates = await afterCall(async () => undefined, "interrupted");
+  assert.deepEqual(last(updates), ["complete", "Stopped"]);
+});
+
+test("a call the agent ends in error after the owner's stop reads `Stopped`, not the agent's words", async () => {
+  const updates = await afterCall(async (renderer) => {
+    renderer.stopAsked();
+    await renderer.feed(ENDED_IN_ERROR("The user doesn't want to proceed with this tool use."));
+  }, "interrupted");
+  assert.deepEqual(last(updates), ["error", "Stopped"]);
+});
+
+test("a call that outlives its turn as a task and fails after a stop reads `Stopped` too", async () => {
+  const updates = await afterCall(async (renderer) => {
+    await renderer.feed({
+      type: "task_started",
+      taskId: "t1",
+      kind: "other",
+      taskType: null,
+      description: "sleep",
+      callId: "c1",
+      agentType: null,
+      background: false,
+      parentTaskId: null,
+    });
+    renderer.stopAsked();
+    await renderer.feed(ENDED_IN_ERROR("rejected"));
+  }, "interrupted");
+  assert.ok(updates.some((update) => update.output === "Stopped"));
+  assert.ok(updates.every((update) => update.output !== "rejected"));
+});
+
+test("a call that ends in error with no stop asked keeps the agent's words", async () => {
+  const updates = await afterCall(async (renderer) => renderer.feed(ENDED_IN_ERROR("boom")));
+  assert.deepEqual(last(updates), ["error", "boom"]);
+});
+
+test("a stop asked in one turn marks no failure of a later one of the same reply", async () => {
+  const updates = await afterCall(async (renderer) => {
+    renderer.stopAsked();
+    await renderer.close();
+    await renderer.feed(ENDED_IN_ERROR("later", "c2"));
+    await renderer.feed({
+      type: "call_started",
+      callId: "c3",
+      toolName: "run",
+      input: { command: "false" },
+      parentCallId: null,
+    });
+    await renderer.feed(ENDED_IN_ERROR("real failure", "c3"));
+  });
+  assert.equal(
+    updates.find((update) => update.id === "c3" && update.status === "error")?.output,
+    "real failure",
+  );
+});
+
+test("a task the agent stopped itself ends as it said, and one the core cut reads as an error", async () => {
+  for (const [cut, expected] of [
+    [false, ["complete", "Stopped"]],
+    [true, ["error", "Stopped"]],
+  ] as const) {
+    const updates = await afterCall(async (renderer) => {
+      await renderer.feed({
+        type: "task_started",
+        taskId: "t1",
+        kind: "other",
+        taskType: null,
+        description: "watch",
+        callId: "c1",
+        agentType: null,
+        background: false,
+        parentTaskId: null,
+      });
+      if (cut) renderer.cutTask("t1");
+      await renderer.feed({
+        type: "task_ended",
+        taskId: "t1",
+        status: "stopped",
+        summary: "watch",
+        durationMs: null,
+        callId: null,
+        report: null,
+        reportSent: false,
+        foldNamed: false,
+      });
+    });
+    assert.deepEqual(last(updates), expected);
+  }
+});
+
+test("a task the process's end closes (`stopRunning`) reads as complete, not as cut by the owner", async () => {
+  const updates = await afterCall(async (renderer) => {
+    await renderer.feed({
+      type: "task_started",
+      taskId: "t1",
+      kind: "other",
+      taskType: null,
+      description: "watch",
+      callId: null,
+      agentType: null,
+      background: false,
+      parentTaskId: null,
+    });
+    await renderer.stopRunning();
+  });
+  assert.deepEqual(last(updates.filter((update) => update.id === "task-t1")), [
+    "complete",
+    "Stopped",
+  ]);
 });

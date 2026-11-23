@@ -21,8 +21,8 @@ struct ThreadPanel: View {
         let _ = redraw // read, so that a change draws the day words again
         let queued = thread.queued
         // The day word before the root and each later entry that opens a day, a bot's answer by the time of its first part.
-        let entries: [Date?] = [thread.root?.time] + thread.items.map { if case .message(let m) = $0 { m.time } else if case .answer(let a) = $0 { a.time } else { nil } }
-        let days = Naming.dayLabels(entries, now: Date(), calendar: .current)
+        let rows = ThreadRows.build(thread)
+        let days = Naming.dayLabels([thread.root?.time] + rows.map(\.time), now: Date(), calendar: .current)
         VStack(spacing: 0) {
             HStack(spacing: PardnerMetrics.gap) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -42,28 +42,31 @@ struct ThreadPanel: View {
             .movesWindow()
             Divider().overlay(PardnerColor.line)
             ScrollView {
-                VStack(alignment: .leading, spacing: PardnerMetrics.gap * 2) {
+                // Lazy, as the conversation is: a turn of hundreds of lines and a diff of thousands build the rows on screen alone.
+                LazyVStack(alignment: .leading, spacing: PardnerMetrics.gap * 2) {
                     if let day = days[0] { DaySeparator(label: day) }
                     if let root = thread.root {
                         MessageRow(model: model, icons: icons, message: root, queued: queued.contains(root.ref), mark: .thread)
                         // The count of replies between the opening message and the replies, as the conversation's summary says it; none while
                         // nothing has answered.
-                        if thread.replies > 0 {
+                        if !rows.isEmpty {
                             HStack(spacing: 10) {
-                                Text(Naming.replies(thread.replies)).font(PardnerFont.ui(size: 12, weight: .semibold)).foregroundStyle(PardnerColor.muted)
+                                if let words = Naming.dividerWords(thread.replies) {
+                                    Text(words).font(PardnerFont.ui(size: 12, weight: .semibold)).foregroundStyle(PardnerColor.muted)
+                                }
                                 Rectangle().fill(PardnerColor.line).frame(height: 1)
                             }
-                            .accessibilityElement(children: .ignore).accessibilityLabel(Naming.replies(thread.replies))
+                            .accessibilityElement(children: .ignore).accessibilityLabel(Naming.dividerWords(thread.replies) ?? "")
                         }
                     }
-                    ForEach(Array(thread.items.enumerated()), id: \.offset) { index, item in
-                        switch item {
-                        case .message(let m):
-                            if let day = days[index + 1] { DaySeparator(label: day) }
-                            entry(m, queued: queued)
-                        case .answer(let a):
-                            if let day = days[index + 1] { DaySeparator(label: day) }
-                            AnswerRow(model: model, icons: icons, answer: a)
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        if let day = days[index + 1] { DaySeparator(label: day) }
+                        switch row.content {
+                        case .message(let m): entry(m, queued: queued)
+                        case .unreadable(let count, let first): UnreadableRow(model: model, icons: icons, message: first, count: count)
+                        case .segment(let a): AnswerRow(model: model, icons: icons, answer: a, whole: thread.text(of: a))
+                        case .line(let l): LineRow(line: l, state: thread.state(of: l))
+                        case .body(let l, let i): LineBodyRow(line: l, index: i)
                         }
                     }
                     if let composer { PendingRows(model: composer, mark: .thread) }
@@ -77,6 +80,7 @@ struct ThreadPanel: View {
             .defaultScrollAnchor(.bottom)
             .defaultScrollAnchor(.top, for: .alignment)
             if let composer {
+                if let bot = thread.bot { ActivityRow(model: model, icons: icons, bot: bot, state: thread.state, composer: composer) }
                 ComposerView(model: composer)
             }
         }
@@ -105,28 +109,60 @@ struct AnswerRow: View {
     let model: ReadingModel
     let icons: [Data: NSImage]
     let answer: AnswerGroup
+    /// The whole answer, which Copy puts on the pasteboard whichever segment it is chosen on.
+    let whole: String
 
     var body: some View {
         let name = Naming.sender(answer.ref.device, in: model)
         let mark = MessageRow.Mark.thread
+        // `Writing…` stands on the last segment of an answer that is not done.
+        let writing = !answer.done && answer.last
         HStack(alignment: .top, spacing: mark.gap) {
-            Avatar(name: name, isBot: true, icon: icons[answer.ref.device], size: mark.size)
+            // A segment that continues its answer stands under the header above it, in the same column.
+            if answer.continues { Color.clear.frame(width: mark.size, height: 0) } else { Avatar(name: name, isBot: true, icon: icons[answer.ref.device], size: mark.size) }
             VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: PardnerMetrics.gap) {
-                    Text(name).font(PardnerFont.ui(size: 14, weight: .semibold))
-                    BotBadge()
-                    Text(Naming.time(answer.time)).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
-                        .help(Naming.dateTime(answer.time))
-                    if !answer.done {
-                        Text("Writing…").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                if !answer.continues {
+                    HStack(alignment: .firstTextBaseline, spacing: PardnerMetrics.gap) {
+                        Text(name).font(PardnerFont.ui(size: 14, weight: .semibold))
+                        BotBadge()
+                        Text(Naming.time(answer.time)).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                            .help(Naming.dateTime(answer.time))
+                        if writing {
+                            Text("Writing…").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                        }
                     }
+                    .designLines()
                 }
-                .designLines()
                 // Spans are read once the answer has landed; while parts come it is drawn as written (#73, section 7).
-                Text(answer.done ? CodeSpans.styled(answer.markdown) : AttributedString(answer.markdown)).designLines().textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                Text(answer.done ? CodeSpans.styled(answer.shown) : AttributedString(answer.shown)).designLines().textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                if writing && answer.continues {
+                    Text("Writing…").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                }
             }
         }
-        .contextMenu { Button("Copy") { Clipboard.copy(answer.markdown) } }
+        .contextMenu { Button("Copy") { Clipboard.copy(whole) } }
+    }
+}
+
+/// Messages that cannot be opened on this device, one after another: one row with their count (turn work design 2.9).
+struct UnreadableRow: View {
+    let model: ReadingModel
+    let icons: [Data: NSImage]
+    let message: Message
+    let count: Int
+    var mark = MessageRow.Mark.thread
+
+    var body: some View {
+        if count == 1 {
+            MessageRow(model: model, icons: icons, message: message, mark: mark)
+        } else {
+            HStack(spacing: 6) {
+                Image(systemName: "lock").font(.system(size: 12, weight: .medium)).accessibilityHidden(true)
+                Text(verbatim: Naming.unreadable(count))
+            }
+            .font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(PardnerColor.muted)
+            .padding(.leading, mark.size + mark.gap)
+        }
     }
 }
 
@@ -138,7 +174,7 @@ struct SessionControls: View {
 
     var body: some View {
         HStack(spacing: PardnerMetrics.gap) {
-            if state != .idle { StopButton(composer: composer) }
+            if state != .idle { StopButton(composer: composer, blinks: false) }
             Menu {
                 Button("Bypass on") { composer.command("/bypass on") }
                 Button("Bypass off") { composer.command("/bypass off") }
@@ -151,14 +187,64 @@ struct SessionControls: View {
     }
 }
 
-/// Sends `/stop` to the session's bot.
+/// Sends `/stop` to the session's bot: a red square, which blinks where nothing else on the row moves.
 struct StopButton: View {
+    let composer: ComposerModel
+    let blinks: Bool
+
+    var body: some View {
+        Button { composer.command("/stop") } label: {
+            Image(systemName: "stop.fill").font(.system(size: 13, weight: .semibold)).foregroundStyle(.red).frame(width: 30, height: 30).contentShape(Rectangle())
+                .pulses(blinks)
+        }
+        .buttonStyle(.plain).pointerStyle(composer.canCommand ? .link : nil).disabled(!composer.canCommand)
+        .accessibilityLabel("Stop the session").help("Stop")
+    }
+}
+
+/// The session's activity above the composer while it runs or waits: the bot, what it does (the word pulses) and Stop.
+struct ActivityRow: View {
+    let model: ReadingModel
+    let icons: [Data: NSImage]
+    let bot: Data
+    let state: SessionState
     let composer: ComposerModel
 
     var body: some View {
-        Button("Stop") { composer.command("/stop") }
-            .buttonStyle(PardnerButton(prominent: false)).disabled(!composer.canCommand).accessibilityLabel("Stop the session")
+        if let words = state.activityWords {
+            let name = Naming.sender(bot, in: model)
+            HStack(spacing: PardnerMetrics.gap) {
+                Avatar(name: name, isBot: true, icon: icons[bot], size: 20).accessibilityHidden(true)
+                Text(verbatim: name).font(PardnerFont.ui(size: 13, weight: .semibold)).lineLimit(1)
+                Text(verbatim: words).font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.muted).pulses(true)
+                StopButton(composer: composer, blinks: false)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16).padding(.vertical, 4)
+        }
     }
+}
+
+/// Fades to a third of its opacity and back, 2.4 s a round, while `active`; still under Reduce Motion, which also stills a pulse already running.
+private struct Pulse: ViewModifier {
+    let active: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dim = false
+
+    func body(content: Content) -> some View {
+        content.opacity(dim ? 0.35 : 1).onAppear(perform: start).onChange(of: reduceMotion) {
+            if reduceMotion { withAnimation(.easeInOut(duration: 0.2)) { dim = false } } else { start() }
+        }
+    }
+
+    private func start() {
+        guard active, !reduceMotion else { return }
+        withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) { dim = true }
+    }
+}
+
+extension View {
+    func pulses(_ active: Bool) -> some View { modifier(Pulse(active: active)) }
 }
 
 /// The frame of a request: `agent` while it waits for the owner, `line` once it ended.
