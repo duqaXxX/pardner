@@ -16,6 +16,10 @@ struct ThreadPanel: View {
     @FocusState private var focus: MessageRef?
     /// Only makes the view draw again when the day, the time zone or the clock changes; the day words are computed from the moment of drawing.
     @State private var redraw = 0
+    /// The row the scroll view keeps in view; the end of the thread until the owner scrolls away. A lazy stack counts the rows it has not built
+    /// with an estimate, so `defaultScrollAnchor` alone leaves the view over rows never built when rows are added to a long thread.
+    @State private var scrolledID: String? = ThreadPanel.end
+    private static let end = "end"
 
     var body: some View {
         let _ = redraw // read, so that a change draws the day words again
@@ -70,12 +74,17 @@ struct ThreadPanel: View {
                         }
                     }
                     if let composer { PendingRows(model: composer, mark: .thread) }
+                    // The end of the thread, the row the scroll position names while the view follows it; its spacing is the room under the last row, one point more than before.
+                    Color.clear.frame(height: 1).id(Self.end)
                 }
-                .padding(PardnerMetrics.gap * 2)
+                .scrollTargetLayout()
+                .padding([.horizontal, .top], PardnerMetrics.gap * 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             // One identity per thread: the anchor is read when the scroll view is made, so a thread opened after another would keep its offset.
             .id(thread.key)
+            .scrollPosition(id: $scrolledID, anchor: .bottom)
+            .onChange(of: thread.key) { scrolledID = Self.end }
             // The newest entry in view, and a short thread starting under its header.
             .defaultScrollAnchor(.bottom)
             .defaultScrollAnchor(.top, for: .alignment)
