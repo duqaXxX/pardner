@@ -505,6 +505,7 @@ test("/stop in the gap of two prompts: a turn the agent starts behind the cut pr
     steps: 1,
     answers: [],
     tokens: {},
+    cost: null,
   });
   await settledTurn();
   await world.clock.advance(INJECTED_TURN_WAIT);
@@ -531,6 +532,7 @@ test("/stop in the gap of two prompts: an empty turn of the agent behind the cut
     steps: 0,
     answers: [],
     tokens: {},
+    cost: null,
   });
   await settledTurn();
   await world.clock.advance(INJECTED_TURN_WAIT);
@@ -659,6 +661,7 @@ test("/stop in the gap, an agent that says idle: work that ran before the idle m
     steps: 1,
     answers: [],
     tokens: {},
+    cost: null,
   });
   await settledTurn();
   assert.ok(!world.shown(ref).some(notSentOf("third")), "nothing is dropped before the idle");
@@ -798,6 +801,7 @@ test("/stop in the gap, an agent that says idle: a turn the agent opens with a c
     steps: 1,
     answers: [],
     tokens: {},
+    cost: null,
   });
   await settledTurn();
   // Taken as the dead prompt's turn, the reply would carry its not-sent note under these words.
@@ -835,6 +839,7 @@ test("/stop in the gap, an agent that says idle: a prompt in doubt whose turn co
     steps: 1,
     answers: [],
     tokens: {},
+    cost: null,
   });
   await settledTurn();
   plain.emit({ type: "state_changed", state: "idle" });
@@ -866,6 +871,7 @@ for (const startedBy of ["agent", "owner"] as const) {
         steps: 1,
         answers: [],
         tokens: {},
+        cost: null,
       });
       await settledTurn();
       if (declaredState) plain.emit({ type: "state_changed", state: "idle" });
@@ -926,6 +932,7 @@ test("/stop twice in the gap: a turn the agent starts that ends with no step nev
     steps: 0,
     answers: [],
     tokens: {},
+    cost: null,
   });
   await settledTurn();
   plain.emit({ type: "state_changed", state: "idle" });
@@ -961,6 +968,7 @@ test("/stop twice in the gap, then a prompt: a turn the agent starts with no ste
     steps: 0,
     answers: [],
     tokens: {},
+    cost: null,
   });
   await settledTurn();
   release();
@@ -995,6 +1003,7 @@ test("/stop twice in the gap: a turn that names no prompt and ends with no step 
     steps: 0,
     answers: [],
     tokens: {},
+    cost: null,
   });
   await settledTurn();
   plain.emit({ type: "state_changed", state: "idle" });
@@ -1030,6 +1039,7 @@ test("/stop in the gap, an agent that says idle: a prompt replayed before the id
     steps: 1,
     answers: [],
     tokens: {},
+    cost: null,
   });
   await until("idle", () => !session.busy);
   await settledTurn();
@@ -1119,6 +1129,7 @@ async function endedBehindARejectedSend(
     steps: 1,
     answers: [],
     tokens: {},
+    cost: null,
   });
   await until("the own turn is shown", () =>
     world.shown(ref).some((l) => l.startsWith("On my own")),

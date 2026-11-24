@@ -1370,8 +1370,8 @@ background tasks), so you know where to answer or send `/stop`; `/status` typed 
 lists that channel's threads the same way and counts those of other channels without naming
 them, since its answer is a post every member of the channel reads. An approval or a question Claude asks meanwhile stays open and can be answered, so
 a session that restarts the daemon can still finish its turn. The daemon's `/words` keep working:
-`/stop` ends a long turn so the restart goes on. A thread left with only background tasks says so
-when the chat can show an activity line (`Stop or restart waits for 1 shell · /stop ends it now`), since
+`/stop` ends a long turn so the restart goes on. A thread left with only background tasks says so,
+in one message in the app (``pardner stops or restarts once these background tasks end: 1 shell. `/stop` ends them now.``), since
 pardner cannot tell whether a task such as a dev server ever ends; `/stop` there stops
 them and the restart goes on. A restart posts nothing in a thread that has nothing running, bypass on or not, since
 bypass outlives it. The signal does not say who sent it, and a session that sends it

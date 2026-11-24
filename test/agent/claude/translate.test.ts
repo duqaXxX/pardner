@@ -145,8 +145,24 @@ test("a turn's end carries its last text, who started it and the tokens of each 
       tokens: {
         [HAIKU]: { input: 936, output: 328, cacheRead: 26480, cacheCreation: 4645 },
       },
+      cost: 0.014513999999999999,
     },
   ]);
+});
+
+test("a turn's end carries the running cost, null for a result that may carry zeroed values", () => {
+  const cost = (change: JsonObject) => {
+    const [ended] = new Translator()
+      .translate({ ...record("tools", -1 + sdkRecords("tools").length), ...change })
+      .filter((event) => event.type === "turn_ended");
+    return ended?.type === "turn_ended" ? ended.cost : "none";
+  };
+  assert.equal(cost({ total_cost_usd: 1.84 }), 1.84);
+  assert.equal(cost({ total_cost_usd: 0 }), 0, "a success at 0 is the new total, after /clear");
+  assert.equal(cost({ total_cost_usd: 1.84, startup_failure_reason: "config_file_invalid" }), null);
+  assert.equal(cost({ total_cost_usd: 0, is_error: true }), null);
+  assert.equal(cost({ total_cost_usd: 2.5, is_error: true }), 2.5, "an error with a real total");
+  assert.equal(cost({ total_cost_usd: null }), null);
 });
 
 test("a turn's end names the prompt it answered, a command's with no step too", () => {

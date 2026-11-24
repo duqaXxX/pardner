@@ -4,7 +4,8 @@
  * by `Inbound`; a request to the owner (kind 9) and its withdrawal or rewrite (kind 11) are written
  * here. A reply is written as parts (kind 4), each naming the answer its prompt gets when the core is
  * done with the prompt (`Inbound`, 3.8), and the turn's tool calls as lines (a text, then an edit when the
- * line changes); the footer and the running list draw nothing.
+ * line changes); a work's end is a text of its own (`footer`), a session's title another (`title`), and the
+ * running list draws nothing.
  */
 
 import { refKey } from "../../protocol/device-reader.ts";
@@ -25,6 +26,7 @@ import {
   type ThreadRef,
 } from "../seam.ts";
 import { type Clock, realClock } from "./connection.ts";
+import { footerContent, type Owner, ownerAlone } from "./footer.ts";
 import { fromHex, referenceOf, toHex } from "./hex.ts";
 import { type Inbound, questionsOf } from "./inbound.ts";
 import { fitLine, type Line, REQUEST_ROOM } from "./line.ts";
@@ -42,7 +44,7 @@ const CAPABILITIES: ChatCapabilities = {
   messageFold: false,
   threadTags: false,
   threadPins: false,
-  threadTitles: false,
+  threadTitles: true,
   threadDelete: false,
   channelClean: false,
   threadOpen: false,
@@ -104,6 +106,9 @@ export class RelayProvider implements ChatProvider {
   #clock: Clock;
   /** The flush of each reply not yet closed out, by thread. */
   #open = new Map<string, Set<() => Promise<void>>>();
+  #owner: Owner | undefined;
+  /** The last title queued per thread, so a session object that gives the same words again writes nothing (D2 3.2). */
+  #titles = new Map<string, string>();
 
   constructor(
     self: Bytes,
@@ -113,7 +118,9 @@ export class RelayProvider implements ChatProvider {
     link?: Link,
     steady?: { time(): number },
     clock: Clock = realClock,
+    owner?: Owner,
   ) {
+    this.#owner = owner;
     this.#clock = clock;
     this.#link = link;
     this.#steady = steady;
@@ -213,10 +220,12 @@ export class RelayProvider implements ChatProvider {
     const wall = this.#now;
     const steady = this.#steady;
     const clock = this.#clock;
+    const owner = this.#owner;
     const threadKey = `${ref.channel}/${ref.thread}`;
     const reference = prompt ? referenceOf(prompt) : undefined;
     const names: Bytes[] = [];
     let lost = false;
+    let footered = false;
     const write = async (
       kind: number,
       name: Bytes,
@@ -377,7 +386,27 @@ export class RelayProvider implements ChatProvider {
           finished = true;
         }),
       rest() {},
-      showFooter: async () => false, // owed: the footer is read and offered again (seam)
+      // A text of its own after what is still held; the flag keeps the first footer drawn (seam). A footer is no
+      // part of `names`, so a refused one leaves the reply landed. A rejected queue keeps the flag: the draft is
+      // held and the next pump sends it.
+      showFooter: (footer) =>
+        enqueue(async () => {
+          await flush();
+          // A reply whose end never landed takes no footer (seam): refused at the queue, or taken and dropped.
+          if (lost || !outbox.holds(names)) return false;
+          if (footered) return true;
+          footered = true;
+          const content = JSON.stringify({
+            thread: ref.thread,
+            ...footerContent(footer, wall(), ownerAlone(owner, fromHex(ref.channel))),
+          });
+          const queued = await outbox
+            .queue(fromHex(ref.channel), { kind: 1, content })
+            .catch(() => undefined);
+          if (queued === undefined) return false;
+          if (!queued) footered = false;
+          return queued;
+        }),
       // At once, as the seam splits it: false when a part is still unread, and the core then waits in `waitLanded`.
       closeOut: async () => {
         // Closed first: a text that comes while the flush is written is queued behind it, never held.
@@ -426,6 +455,20 @@ export class RelayProvider implements ChatProvider {
       endReply: async () => false,
       close: async () => {},
     };
+  }
+
+  /** The title as a text the app reads as the thread's name; the root keeps the owner's words, so `keep` is never called. */
+  async titleThread(ref: ThreadRef, title: string): Promise<void> {
+    const key = `${ref.channel}/${ref.thread}`;
+    const before = this.#titles.get(key);
+    if (before === title) return;
+    // Taken before the await, so two calls with the same words write one.
+    this.#titles.set(key, title);
+    const content = JSON.stringify({ thread: ref.thread, say: "title", markdown: title });
+    if (await this.#outbox.queue(fromHex(ref.channel), { kind: 1, content })) return;
+    if (this.#titles.get(key) === title)
+      before === undefined ? this.#titles.delete(key) : this.#titles.set(key, before);
+    throw new ChatError("relay_not_queued", { failure: "failed" });
   }
 
   channel(channel: string): ChannelChat {

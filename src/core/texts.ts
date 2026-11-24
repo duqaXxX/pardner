@@ -377,8 +377,10 @@ export const REFUSED_RETRACTED = "↩ Retracted: the {model} attempt above.";
 export const PEER_MESSAGE = "📨 From another session:\n{text}";
 // A message a background subagent sent while it ran, at its place in the reply.
 export const SUBAGENT_MESSAGE = "Message from {name}:\n{text}";
-export const COMPACTED = "Compacted the conversation: {before} → {after} tokens.";
-export const COMPACTED_PLAIN = "Compacted the conversation.";
+// A compaction's line in its reply, in the terminal's words (read in Claude Code 2.1.292).
+export const COMPACTING = "Compacting conversation";
+export const COMPACTED = "Conversation compacted";
+export const COMPACTED_TOKENS = "{before} → {after} tokens";
 // A goal's lines in its reply, in the terminal's words (captured 2026-10-20, Claude Code 2.1.303).
 export const GOAL_NOT_MET = "◯ Goal not yet met… continuing";
 export const GOAL_ACHIEVED = "✔ Goal achieved";
@@ -475,7 +477,7 @@ export const STOPPED = "Stopped the current turn.";
 // An answered question, as the terminal keeps it in the transcript.
 export const ANSWERED = naming("User answered {author}'s questions:");
 export const STOPPED_CHANNEL = "Stopped what was running in this channel.";
-// The same as a message, only where the chat refuses the app an activity line.
+// The same as a message, where the chat draws no activity line.
 export const RESTART_WAITS_MESSAGE =
   "pardner stops or restarts once these background tasks end: {counts}. `/stop` ends them now.";
 export const NOTHING_TO_STOP = "Nothing is running in this channel.";

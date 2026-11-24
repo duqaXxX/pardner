@@ -1,0 +1,387 @@
+{
+  "structure": "session-text-content",
+  "version": 2,
+  "source": "steps D2 and D3 designs (#73): D2 sections 3.1 and 3.2, D3 sections 3.2 and 3.3, 2026-11-24; synthetic values. `content` is the JSON of a kind 1 message the session's bot writes; `reads` is what the app takes from it: for `say` `footer` the line under the reply (`duration`, null when `markdown` is empty), the session's line for the panel's header (`session`, null when absent or not a string) and the account's values (`usage`: `at`, the two windows and `cost`, the session's estimated cost in US dollars, which the bot writes only for an account with no plan; null when absent or not of this shape); for `say` `title` the thread's name (`title`, null when empty). `usageLines` are the account's line, under a thread's composer (`place` `composer`) and in Settings, Bots (`place` `bots`), or null for no line: `profileRead` whether the bot's profile has been read, `plan` its plan, `windows` the bot's newest `usage` that carries a window, `cost` the thread's own newest `usage` that carries a cost (composer only), `apiSeen` whether any `usage` of that bot carried a cost, `now` epoch milliseconds; `<until>` is the core's `formatUntil` of `resetsAt - now`, a reset already passed leaves out its `↻`, and `as of HH:mm` in `timeZone` follows when the `at` of the usage the line draws is more than 10 minutes before `now`",
+  "texts": [
+    {
+      "name": "work end with every part",
+      "content": {
+        "say": "footer",
+        "markdown": "4m 12s",
+        "session": "⚡ bypass · Opus 5.5 · advisor Opus · effort high · main (+12,-3) · ctx 34% · 182.0k tokens · demo/project",
+        "usage": {
+          "at": 1763999820000,
+          "session": {
+            "percent": 40,
+            "resetsAt": 1764007500000
+          },
+          "week": {
+            "percent": 24,
+            "resetsAt": null
+          }
+        }
+      },
+      "reads": {
+        "kind": "footer",
+        "duration": "4m 12s",
+        "session": "⚡ bypass · Opus 5.5 · advisor Opus · effort high · main (+12,-3) · ctx 34% · 182.0k tokens · demo/project",
+        "usage": {
+          "at": 1763999820000,
+          "session": {
+            "percent": 40,
+            "resetsAt": 1764007500000
+          },
+          "week": {
+            "percent": 24,
+            "resetsAt": null
+          }
+        }
+      }
+    },
+    {
+      "name": "work end in a channel shared with another person: no usage",
+      "content": {
+        "say": "footer",
+        "markdown": "12s",
+        "session": "⏸ plan · Opus 5.5"
+      },
+      "reads": {
+        "kind": "footer",
+        "duration": "12s",
+        "session": "⏸ plan · Opus 5.5",
+        "usage": null
+      }
+    },
+    {
+      "name": "work end with one window known",
+      "content": {
+        "say": "footer",
+        "markdown": "1h 2m 3s",
+        "usage": {
+          "at": 1763999820000,
+          "session": null,
+          "week": {
+            "percent": 21,
+            "resetsAt": 1764277800000
+          }
+        }
+      },
+      "reads": {
+        "kind": "footer",
+        "duration": "1h 2m 3s",
+        "session": null,
+        "usage": {
+          "at": 1763999820000,
+          "session": null,
+          "week": {
+            "percent": 21,
+            "resetsAt": 1764277800000
+          }
+        }
+      }
+    },
+    {
+      "name": "work end of an account with no plan: the cost alone",
+      "content": {
+        "say": "footer",
+        "markdown": "38s",
+        "usage": {
+          "at": 1763999820000,
+          "session": null,
+          "week": null,
+          "cost": 1.84
+        }
+      },
+      "reads": {
+        "kind": "footer",
+        "duration": "38s",
+        "session": null,
+        "usage": {
+          "at": 1763999820000,
+          "session": null,
+          "week": null,
+          "cost": 1.84
+        }
+      }
+    },
+    {
+      "name": "work end with no length known",
+      "content": {
+        "say": "footer",
+        "markdown": "",
+        "session": "Opus 5.5"
+      },
+      "reads": {
+        "kind": "footer",
+        "duration": null,
+        "session": "Opus 5.5",
+        "usage": null
+      }
+    },
+    {
+      "name": "work end with a session that is not a string",
+      "content": {
+        "say": "footer",
+        "markdown": "5s",
+        "session": 42
+      },
+      "reads": {
+        "kind": "footer",
+        "duration": "5s",
+        "session": null,
+        "usage": null
+      }
+    },
+    {
+      "name": "work end with a cost that is not a number",
+      "content": {
+        "say": "footer",
+        "markdown": "5s",
+        "usage": {
+          "at": 1763999820000,
+          "session": null,
+          "week": null,
+          "cost": "1.84"
+        }
+      },
+      "reads": {
+        "kind": "footer",
+        "duration": "5s",
+        "session": null,
+        "usage": null
+      }
+    },
+    {
+      "name": "work end with a usage of another shape",
+      "content": {
+        "say": "footer",
+        "markdown": "5s",
+        "usage": {
+          "at": "yesterday",
+          "session": {
+            "percent": 40
+          }
+        }
+      },
+      "reads": {
+        "kind": "footer",
+        "duration": "5s",
+        "session": null,
+        "usage": null
+      }
+    },
+    {
+      "name": "title",
+      "content": {
+        "say": "title",
+        "markdown": "Fix the footer"
+      },
+      "reads": {
+        "kind": "title",
+        "title": "Fix the footer"
+      }
+    },
+    {
+      "name": "empty title",
+      "content": {
+        "say": "title",
+        "markdown": ""
+      },
+      "reads": {
+        "kind": "title",
+        "title": null
+      }
+    }
+  ],
+  "usageLines": [
+    {
+      "name": "a plan with both windows, the week with no reset, read 3 minutes ago",
+      "place": "composer",
+      "profileRead": true,
+      "plan": "Claude Max",
+      "windows": {
+        "at": 1763999820000,
+        "session": {
+          "percent": 40,
+          "resetsAt": 1764007500000
+        },
+        "week": {
+          "percent": 24,
+          "resetsAt": null
+        }
+      },
+      "cost": null,
+      "apiSeen": false,
+      "now": 1764000000000,
+      "timeZone": "UTC",
+      "text": "Claude Max · 5h 40% ↻ 2h · 7d 24%"
+    },
+    {
+      "name": "minutes to a reset, and days and hours",
+      "place": "bots",
+      "profileRead": true,
+      "plan": "Claude Pro",
+      "windows": {
+        "at": 1763999820000,
+        "session": {
+          "percent": 7,
+          "resetsAt": 1764000750000
+        },
+        "week": {
+          "percent": 61,
+          "resetsAt": 1764277800000
+        }
+      },
+      "cost": null,
+      "apiSeen": false,
+      "now": 1764000000000,
+      "timeZone": "UTC",
+      "text": "Claude Pro · 5h 7% ↻ 12m · 7d 61% ↻ 3d 5h"
+    },
+    {
+      "name": "a reset already passed",
+      "place": "composer",
+      "profileRead": true,
+      "plan": "Claude Max",
+      "windows": {
+        "at": 1763999820000,
+        "session": {
+          "percent": 100,
+          "resetsAt": 1763999940000
+        },
+        "week": {
+          "percent": 24,
+          "resetsAt": 1764180000000
+        }
+      },
+      "cost": null,
+      "apiSeen": false,
+      "now": 1764000000000,
+      "timeZone": "UTC",
+      "text": "Claude Max · 5h 100% · 7d 24% ↻ 2d 2h"
+    },
+    {
+      "name": "a reading older than 10 minutes says when",
+      "place": "bots",
+      "profileRead": true,
+      "plan": "Claude Max",
+      "windows": {
+        "at": 1763998500000,
+        "session": null,
+        "week": {
+          "percent": 21,
+          "resetsAt": 1764172740000
+        }
+      },
+      "cost": null,
+      "apiSeen": false,
+      "now": 1764000000000,
+      "timeZone": "Europe/Rome",
+      "text": "Claude Max · 7d 21% ↻ 47h · as of 16:35"
+    },
+    {
+      "name": "a plan and no window read yet: the plan alone",
+      "place": "composer",
+      "profileRead": true,
+      "plan": "Claude Max",
+      "windows": null,
+      "cost": null,
+      "apiSeen": false,
+      "now": 1764000000000,
+      "timeZone": "UTC",
+      "text": "Claude Max"
+    },
+    {
+      "name": "a profile not read yet: no line",
+      "place": "composer",
+      "profileRead": false,
+      "plan": null,
+      "windows": {
+        "at": 1763999820000,
+        "session": {
+          "percent": 40,
+          "resetsAt": 1764007500000
+        },
+        "week": {
+          "percent": 24,
+          "resetsAt": null
+        }
+      },
+      "cost": null,
+      "apiSeen": false,
+      "now": 1764000000000,
+      "timeZone": "UTC",
+      "text": null
+    },
+    {
+      "name": "no plan and a cost seen: API and the thread's cost",
+      "place": "composer",
+      "profileRead": true,
+      "plan": null,
+      "windows": null,
+      "cost": {
+        "at": 1763999820000,
+        "session": null,
+        "week": null,
+        "cost": 1.84
+      },
+      "apiSeen": true,
+      "now": 1764000000000,
+      "timeZone": "UTC",
+      "text": "API · $1.84 this session"
+    },
+    {
+      "name": "no plan, an old cost",
+      "place": "composer",
+      "profileRead": true,
+      "plan": null,
+      "windows": null,
+      "cost": {
+        "at": 1763998500000,
+        "session": null,
+        "week": null,
+        "cost": 12.5
+      },
+      "apiSeen": true,
+      "now": 1764000000000,
+      "timeZone": "UTC",
+      "text": "API · $12.50 this session · as of 15:35"
+    },
+    {
+      "name": "no plan, a cost seen elsewhere, none in this thread",
+      "place": "composer",
+      "profileRead": true,
+      "plan": null,
+      "windows": null,
+      "cost": null,
+      "apiSeen": true,
+      "now": 1764000000000,
+      "timeZone": "UTC",
+      "text": "API"
+    },
+    {
+      "name": "no plan in Settings, Bots: API alone",
+      "place": "bots",
+      "profileRead": true,
+      "plan": null,
+      "windows": null,
+      "cost": null,
+      "apiSeen": true,
+      "now": 1764000000000,
+      "timeZone": "UTC",
+      "text": "API"
+    },
+    {
+      "name": "no plan and no cost seen: no line",
+      "place": "composer",
+      "profileRead": true,
+      "plan": null,
+      "windows": null,
+      "cost": null,
+      "apiSeen": false,
+      "now": 1764000000000,
+      "timeZone": "UTC",
+      "text": null
+    }
+  ]
+}

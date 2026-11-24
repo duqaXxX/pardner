@@ -112,6 +112,7 @@ test("a reply is one message: text and task lines in order, what runs, then the 
     weekLimit: null,
     account: null,
     accountPlan: null,
+    sessionCost: null,
     work: null,
   });
   provider
@@ -150,6 +151,7 @@ test("a chat that cannot rewrite a message draws no list and posts the footer as
     weekLimit: null,
     account: null,
     accountPlan: null,
+    sessionCost: null,
     work: null,
   };
   assert.equal(await reply.showFooter(footer), true, "the footer landed");
@@ -210,6 +212,7 @@ test("the footer goes under the reply it is drawn on, and a footer drawn before 
     weekLimit: null,
     account: null,
     accountPlan: null,
+    sessionCost: null,
     work: null,
   };
   const upper = thread.openReply(() => {});
@@ -414,6 +417,7 @@ test("task lines and footers are recorded with the texts, in the order they were
     weekLimit: null,
     account: null,
     accountPlan: null,
+    sessionCost: null,
     work: { durationMs: 5, doneAt: 9 },
   });
   assert.deepEqual(

@@ -897,6 +897,11 @@ export type SessionEvent =
       readonly answers: readonly string[];
       /** By model. Empty when the turn used none (a command the agent ran itself). */
       readonly tokens: Readonly<Record<string, ModelTokens>>;
+      /**
+       * The agent's estimate of the session's spend so far, in US dollars, null when it gives
+       * none. Cumulative over the session, not the turn's own; an estimate, not a bill.
+       */
+      readonly cost: number | null;
     }
   /**
    * The agent wrote a message about a failed request of its own, in place of an answer.

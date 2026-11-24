@@ -353,6 +353,7 @@ export function relayChat(): ChatEntry {
           },
           context.steady,
           clock,
+          { person: pairing.person, reading: connection.reading },
         );
       } catch (error) {
         platform.erase();

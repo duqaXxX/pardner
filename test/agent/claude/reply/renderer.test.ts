@@ -949,11 +949,94 @@ function silentResult(): JsonObject {
   return { ...result, result: "" };
 }
 
-test("a compaction says how many tokens it saved", async () => {
+const STARTED: SessionEvent = { type: "compaction_started" };
+
+test("a compaction is a line of its reply that runs, then says how many tokens it saved", async () => {
+  const [sink] = await render(
+    [STARTED, ...translated([COMPACT_BOUNDARY, silentResult()])],
+    () => 7,
+  );
+  const [open, done] = sink.tasks;
+  assert.equal(sink.tasks.length, 2);
+  assert.deepEqual(
+    [open?.id, open?.title, open?.status, open?.startedAt, open?.task, open?.name],
+    ["compaction:1", texts.COMPACTING, "in_progress", 7, false, ""],
+  );
+  assert.deepEqual(
+    [done?.id, done?.title, done?.status, done?.details, done?.startedAt],
+    ["compaction:1", texts.COMPACTED, "complete", "15.0k → 2.0k tokens", 7],
+  );
+  // The line is the whole reply: no sentence and no `No output`.
+  assert.deepEqual(sink.texts, []);
+  assert.deepEqual(sink.finished, []);
+});
+
+test("a compaction whose start the turn did not see is a closed line of its own", async () => {
   const [sink] = await render(translated([COMPACT_BOUNDARY, silentResult()]));
-  assert.equal(
-    sink.texts.join("").trim(),
-    texts.fill(texts.COMPACTED, { before: "15.0k", after: "2.0k" }),
+  assert.deepEqual(
+    sink.tasks.map((t) => [t.id, t.title, t.status]),
+    [["compaction:1", texts.COMPACTED, "complete"]],
+  );
+});
+
+test("a compaction still open when its turn ends on its own failed", async () => {
+  const [sink] = await render([
+    STARTED,
+    { type: "compaction_started" },
+    ...translated([silentResult()]),
+  ]);
+  assert.equal(sink.tasks.length, 1, "a second start while one is open is the same line");
+  assert.deepEqual(
+    sink.finished?.map((t) => [t.id, t.status, t.output]),
+    [["compaction:1", "error", null]],
+  );
+});
+
+test("a compaction the owner stops reads stopped", async () => {
+  const sink = new RecordingSink();
+  const renderer = new TurnRenderer(sink, NAMES, CLAUDE_PREVIEWS);
+  await renderer.feed(STARTED);
+  renderer.stopAsked();
+  for (const event of translated([silentResult()])) await renderer.feed(event);
+  await renderer.close();
+  assert.deepEqual(
+    sink.finished?.map((t) => [t.id, t.status, t.output]),
+    [["compaction:1", "error", STOPPED]],
+  );
+});
+
+test("a compaction the turn's move to a terminal cut closes as the other open lines do", async () => {
+  const sink = new RecordingSink();
+  const renderer = new TurnRenderer(sink, NAMES, CLAUDE_PREVIEWS);
+  await renderer.feed(STARTED);
+  await renderer.feedEnding("moved", { callsStopped: true });
+  await renderer.close();
+  assert.deepEqual(
+    sink.finished?.map((t) => [t.id, t.status, t.output]),
+    [["compaction:1", "complete", STOPPED]],
+  );
+});
+
+test("each compaction is a line of its own, and a closed one is never rewritten", async () => {
+  const sink = new RecordingSink();
+  const renderer = new TurnRenderer(sink, NAMES, CLAUDE_PREVIEWS);
+  const compacted: SessionEvent = { type: "compacted", tokensBefore: null, tokensAfter: null };
+  await renderer.feed(STARTED);
+  await renderer.feed(compacted);
+  await renderer.feed(STARTED);
+  await renderer.close();
+  // The turn closed the second one; a later turn into the same reply opens a third.
+  await renderer.feed(STARTED);
+  await renderer.feed(compacted);
+  assert.deepEqual(
+    sink.tasks.map((t) => [t.id, t.title, t.status, t.details]),
+    [
+      ["compaction:1", texts.COMPACTING, "in_progress", null],
+      ["compaction:1", texts.COMPACTED, "complete", null],
+      ["compaction:2", texts.COMPACTING, "in_progress", null],
+      ["compaction:3", texts.COMPACTING, "in_progress", null],
+      ["compaction:3", texts.COMPACTED, "complete", null],
+    ],
   );
 });
 

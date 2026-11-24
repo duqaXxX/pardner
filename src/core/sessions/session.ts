@@ -589,6 +589,8 @@ export class ThreadSession {
   workingDirectory: string | null = null;
   /** The session's token count as the client's last result reported it, for `/status`. */
   sessionTokens: number | null = null;
+  /** The latest estimate of the session's spend any turn's end carried, in memory alone; reset with the tokens. */
+  sessionCost: number | null = null;
   /** Set when the daemon stops: the turns already sent finish, no other one starts. */
   draining = false;
   /**
@@ -1440,6 +1442,7 @@ export class ThreadSession {
     this.workingDirectory = null; // the new process starts in the bound folder
     this.modelSwitched = null; // the new client starts from its own state
     this.sessionTokens = null; // counted by the client process, which starts at zero
+    this.sessionCost = null; // the agent's running total starts again with it
     this.reader = new Task((reading) => this.read(client, reading));
     this.idleTimerCheck(); // a daemon word (`/status`, say) connects with no turn
     return client;
@@ -1878,9 +1881,9 @@ export class ThreadSession {
    * During a stop: bring the thread's activity line up to date. Once only background tasks are
    * left it says which ones the restart waits for (`threadActivity`), since only the owner knows
    * whether a task (a dev server, a watcher) ever ends. A line and not a message: a message
-   * would notify, and would stay in the thread after the restart. Where the chat refuses this
-   * app an activity line, a message says it, once: a restart that waits without a word is worse
-   * than one notification.
+   * would notify, and would stay in the thread after the restart. Where the chat draws no
+   * activity line (it declares none, or refuses this app one), a message says it, once: a
+   * restart that waits without a word is worse than one notification.
    */
   async showRestartWait(): Promise<void> {
     this.showThreadStatus();
@@ -1889,8 +1892,9 @@ export class ThreadSession {
     if (this.reacts && this.lastStatus === "working" && !this.errorStanding) {
       this.thread.showStatus?.(this.rootStatus("working"))?.catch(() => {});
     }
-    if (!this.deps.chat.capabilities.activityLine) return;
-    if (this.thread.activityRefused !== true || this.toldWaiting || this.busy) return;
+    // Only a drawn activity line says it: a chat with none, or one refused it, gets the message.
+    if (this.deps.chat.capabilities.activityLine && this.thread.activityRefused !== true) return;
+    if (this.toldWaiting || this.busy) return;
     const held = this.runningKindsOf({ awaitedOnly: true });
     if (held) {
       this.toldWaiting = true;
@@ -4849,6 +4853,7 @@ export class ThreadSession {
       // Kept for `/status`, even when this result reports none (`/usage`, `/clear`): the two
       // lines never disagree.
       this.sessionTokens = sessionTokens(result.tokens);
+      if (result.cost !== null) this.sessionCost = result.cost;
       this.contextKept = false;
       stopped = result.ending === "interrupted";
       // A turn that did not end well is no ground to wait for a report under its reply.
@@ -5379,6 +5384,10 @@ export class ThreadSession {
       weekLimit: usage?.week ?? null,
       account: account?.name ?? null,
       accountPlan: account?.plan ?? null,
+      // The plan the agent reported at connect, which the bot's profile carries and the app reads:
+      // an account with one has no cost to draw. Never the limits' account, which a reading kept
+      // from before a login switch can still name.
+      sessionCost: this.account?.plan ? null : this.sessionCost,
       work: null,
     };
     return { fields, untrusted: reading.untrusted };

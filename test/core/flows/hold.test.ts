@@ -643,6 +643,7 @@ function reportTurn(world: HoldWorld, sessionId: string | null) {
     steps: 1,
     answers: [],
     tokens: {},
+    cost: null,
   });
 }
 

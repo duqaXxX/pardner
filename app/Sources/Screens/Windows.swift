@@ -53,7 +53,7 @@ public struct LiveSettingsWindow: View {
     public var body: some View {
         let reading = conversation.reading
         let icons = reading.profiles.compactMapValues { $0.icon.flatMap(NSImage.init(data:)) }
-        SettingsPanel(model: settings, bots: MainWindow.listedBots(devices: settings.devices, profiles: reading.profiles), icons: icons, personName: reading.personName, renameThisMac: {
+        SettingsPanel(model: settings, bots: MainWindow.listedBots(devices: settings.devices, profiles: reading.profiles), usage: reading.windows, apiBots: reading.apiBots, icons: icons, personName: reading.personName, renameThisMac: {
             // Settings stays open under the form window.
             let this = settings.devices.rows.first(where: \.isThisMac)
             channels.openRename(.device, current: this.flatMap { reading.names.devices[$0.id] ?? $0.label })

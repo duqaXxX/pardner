@@ -14,6 +14,7 @@ import type { Capabilities, ListedSession, SessionEvent } from "../../../../src/
 import type { TaskUpdate } from "../../../../src/chat/seam.ts";
 import { BypassUnavailable, DirectoryUntrusted } from "../../../../src/core/sessions/errors.ts";
 import { DEFAULT } from "../../../../src/core/setup.ts";
+import * as texts from "../../../../src/core/texts.ts";
 import { CHANNEL, THREAD } from "../../../support/ids.ts";
 import {
   event,
@@ -39,6 +40,7 @@ const OWNER_TURN_ENDED: SessionEvent = {
   steps: 1,
   answers: [],
   tokens: {},
+  cost: null,
 };
 
 const AGENT_TURN_ENDED: SessionEvent = { ...OWNER_TURN_ENDED, startedBy: "agent" };
@@ -364,7 +366,8 @@ test("compaction off: a compaction is neither announced nor shown", async (t) =>
   play(h, sdkMessages("auto-compact"));
   await running.done.wait();
   await h.idle();
-  assert.ok(!said(h).includes("Compacted the conversation"));
+  assert.ok(!said(h).includes(texts.COMPACTED));
+  assert.ok(!said(h).includes(texts.COMPACTING));
   // The chat records the activity it is told of: the line was drawn, and never for compaction.
   assert.ok(activityKinds(h).length > 0);
   assert.ok(!activityKinds(h).includes("compacting"));

@@ -16,6 +16,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { INJECTED_TURN_WAIT } from "../../../../src/core/sessions/constants.ts";
+import * as texts from "../../../../src/core/texts.ts";
 import {
   END_OF_STREAM,
   type Harness,
@@ -51,17 +52,6 @@ function compacting(items: readonly Item[]): number {
   return found;
 }
 
-/** What each reply says, with the lines of its task cards left out: the memory chat draws them in it. */
-function words(h: Harness): string[] {
-  return h.replies().map((text) =>
-    text
-      .split("\n")
-      .filter((line) => !line.startsWith("[complete] "))
-      .join("\n")
-      .trim(),
-  );
-}
-
 /** How many replies of the thread the daemon has not ended. */
 function openReplies(h: Harness): number {
   return h.room.written(h.channel).filter((message) => message.unfinished).length;
@@ -73,10 +63,11 @@ test("a compact command says how many tokens it saved and the session goes on", 
   for (const prompt of ["remember a word", "read the ledger", "/compact", "which word"]) {
     await (await h.session().submit(prompt)).done.wait();
   }
-  assert.deepEqual(words(h), [
+  // The compaction is the `/compact` reply's one line: no text, and no `No output` either.
+  assert.deepEqual(h.replies(), [
     "ok",
-    "read",
-    "Compacted the conversation: 20.7k → 5.0k tokens.",
+    "[complete] Read: /home/dev/project/notes/ledger-one.txt\nread",
+    `[complete] ${texts.COMPACTED}`,
     "MARK-ALPHA",
   ]);
 });
@@ -86,12 +77,13 @@ test("a compaction before a turns first words shows above them", async (t) => {
   const running = await send(h, h.session(), "read the ledgers again");
   play(h, sdkMessages("auto-compact"));
   await running.done.wait();
-  const [text, ...more] = words(h);
+  const [text, ...more] = h.replies();
   assert.equal(more.length, 0);
-  assert.deepEqual(text?.split("\n"), [
-    "Compacted the conversation: 67.9k → 10.6k tokens.",
-    "read",
+  assert.deepEqual(text?.split("\n").slice(0, 2), [
+    `[complete] ${texts.COMPACTED}`,
+    "[complete] Read: /home/dev/project/notes/ledger-one.txt",
   ]);
+  assert.equal(text?.split("\n").at(-1), "read");
 });
 
 test("a boundary with no turn due starts no reply", async (t) => {
@@ -187,7 +179,7 @@ test("a report turn that compacts first is waited for", async (t) => {
   assert.equal(activityKinds(h).at(-1), COMPACTING);
   h.clients[0]?.inject(report.slice(began));
   await h.until(() => openReplies(h) === 0);
-  const [text, ...more] = words(h);
+  const [text, ...more] = h.replies();
   assert.equal(more.length, 0);
-  assert.ok(text?.includes("Compacted the conversation: 68.2k → 10.7k tokens."));
+  assert.ok(text?.includes(`[complete] ${texts.COMPACTED}`));
 });

@@ -202,6 +202,9 @@ export class TurnRenderer {
   /** A question's answers, until its call ends. */
   readonly #answers = new Map<string, Preview>();
   #wroteText = false;
+  /** The open compaction's line, or null; `#compactions` numbers them, so each is a line of its own. */
+  #compaction: string | null = null;
+  #compactions = 0;
   /** Whether the chat shows a text as it is written; without it a text is held until it ends. */
   readonly #streaming: boolean;
   /** The pieces of the text being written, not yet handed to the sink (`streaming` off). */
@@ -337,6 +340,9 @@ export class TurnRenderer {
         if (event.terminal && event.status !== null) {
           await this.#taskEnded(event.taskId, event.status, null);
         }
+        break;
+      case "compaction_started":
+        await this.#compactionStarted();
         break;
       case "compacted":
         await this.#compacted(event.tokensBefore, event.tokensAfter);
@@ -486,6 +492,13 @@ export class TurnRenderer {
     for (const entry of this.#lines.values()) {
       if (running.has(entry.id)) {
         closing.push({ ...entry, status: "in_progress", details: BACKGROUND, task: true });
+      } else if (entry.id === this.#compaction) {
+        // A compaction still open when the turn ended on its own failed: `complete` would read as done.
+        closing.push({
+          ...entry,
+          status: this.#stopAsked || !interrupted ? "error" : "complete",
+          output: interrupted || this.#stopAsked ? STOPPED : null,
+        });
       } else if (entry.status === "pending" || entry.status === "in_progress") {
         // Only the owner's stop is a failure to draw: `/terminal` moves the turn, which goes on.
         closing.push({
@@ -496,6 +509,7 @@ export class TurnRenderer {
       }
     }
     for (const entry of closing) this.#lines.set(entry.id, entry);
+    this.#compaction = null;
     // A later turn of the same reply (a report) is not the stop's.
     this.#stopAsked = false;
     await this.#sink.finish(closing, signal);
@@ -631,13 +645,39 @@ export class TurnRenderer {
     await this.#text(`\n\n${text}`, { notice: true, ending: true });
   }
 
-  /** The agent compacted the conversation, on request or on its own: say by how much. */
+  /**
+   * The agent compacts the conversation: a line of the reply, running until `compacted`. The id's
+   * prefix is the core's, never an agent's call id. A second start while one is open is the same one.
+   */
+  async #compactionStarted(): Promise<void> {
+    if (this.#compaction !== null) return;
+    this.#compactions += 1;
+    this.#compaction = `compaction:${this.#compactions}`;
+    await this.#set(
+      line(this.#compaction, texts.COMPACTING, "in_progress", { startedAt: this.#now() }),
+    );
+  }
+
+  /** The agent compacted the conversation, on request or on its own: its line says by how much. */
   async #compacted(before: number | null, after: number | null): Promise<void> {
-    const said =
+    const details =
       before !== null && after !== null
-        ? texts.fill(texts.COMPACTED, { before: formatTokens(before), after: formatTokens(after) })
-        : texts.COMPACTED_PLAIN;
-    await this.#text(`${this.#wroteText ? "\n\n" : ""}${said}\n\n`, { notice: true });
+        ? texts.fill(texts.COMPACTED_TOKENS, {
+            before: formatTokens(before),
+            after: formatTokens(after),
+          })
+        : null;
+    // A compaction whose start this turn did not see gets a line of its own.
+    const open = this.#compaction === null ? undefined : this.#lines.get(this.#compaction);
+    this.#compaction = null;
+    if (open === undefined) {
+      this.#compactions += 1;
+      await this.#set(
+        line(`compaction:${this.#compactions}`, texts.COMPACTED, "complete", { details }),
+      );
+    } else {
+      await this.#set({ ...open, title: texts.COMPACTED, status: "complete", details });
+    }
   }
 
   /**

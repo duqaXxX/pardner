@@ -173,6 +173,7 @@ async function commandAfterQueued(t: Parameters<typeof AskingWorld.make>[0], she
     steps: 1,
     answers: [],
     tokens: {},
+    cost: null,
   });
   if (shell) await until("the command ran", () => existsSync(marker));
   else await until("the command is sent", () => sent(agent).length === 3);

@@ -1,5 +1,6 @@
 // The Settings window (settings design 2, app windows design 3.1): 760 by 560 points, the panes listed at the left on `side` and the chosen pane
 // at the right with its title, a line under it and its own action. Colours, radii and the gap are the design system's tokens.
+import Conversation
 import DesignSystem
 import SwiftUI
 
@@ -9,12 +10,15 @@ public struct SettingsPanel: View {
     let renameThisMac: (() -> Void)?
     /// The Bots pane's bots, from `MainWindow.listedBots`, and their icons decoded once for the window.
     let bots: [DevicesModel.ListedBot]
+    /// The newest usage of each bot that carries a window (`ReadingModel.windows`), and the bots with a cost seen (`ReadingModel.apiBots`): the account's line.
+    let usage: [Data: SessionUsage]
+    let apiBots: Set<Data>
     let icons: [Data: NSImage]
     /// The person's name as the device read it, for the Profile pane.
     let personName: String?
 
-    public init(model: SettingsModel, bots: [DevicesModel.ListedBot] = [], icons: [Data: NSImage] = [:], personName: String? = nil, renameThisMac: (() -> Void)? = nil) {
-        (self.model, self.bots, self.icons, self.personName, self.renameThisMac) = (model, bots, icons, personName, renameThisMac)
+    public init(model: SettingsModel, bots: [DevicesModel.ListedBot] = [], usage: [Data: SessionUsage] = [:], apiBots: Set<Data> = [], icons: [Data: NSImage] = [:], personName: String? = nil, renameThisMac: (() -> Void)? = nil) {
+        (self.model, self.bots, self.usage, self.apiBots, self.icons, self.personName, self.renameThisMac) = (model, bots, usage, apiBots, icons, personName, renameThisMac)
     }
 
     public var body: some View {
@@ -26,7 +30,7 @@ public struct SettingsPanel: View {
                 case .general?: GeneralPane()
                 case .profile?: ProfilePane(model: model.profile, live: personName, ready: model.devices.ready)
                 case .devices?: DevicesPane(model: model.devices, renameThisMac: renameThisMac)
-                case .bots?: BotsPane(bots: bots, icons: icons, listRead: model.devices.ready)
+                case .bots?: BotsPane(bots: bots, usage: usage, apiBots: apiBots, icons: icons, listRead: model.devices.ready)
                 case nil: EmptyView()
                 }
             }
@@ -149,6 +153,8 @@ struct ProfilePane: View {
 /// Bots: each active bot of the person by its mark, its name and its account, or its label and `Not seen yet` until a channel carries its profile.
 struct BotsPane: View {
     let bots: [DevicesModel.ListedBot]
+    let usage: [Data: SessionUsage]
+    let apiBots: Set<Data>
     let icons: [Data: NSImage]
     /// The device list is read: before that the bots are not known, and an empty list says nothing about them.
     let listRead: Bool
@@ -174,6 +180,13 @@ struct BotsPane: View {
                                     if let label = bot.label { NameText(name: label, font: PardnerFont.ui(size: 14, weight: .regular)) } else { Text(Naming.short(bot.id)) }
                                     // The profile comes with the first channel that carries the bot.
                                     Text("Not seen yet").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                                }
+                                // Redrawn each minute, so a reset's `↻` counts down and goes once it has passed.
+                                TimelineView(.periodic(from: .now, by: 60)) { context in
+                                    if let line = UsageLine.text(profileRead: bot.profile != nil, plan: bot.profile?.plan, windows: usage[bot.id], cost: nil,
+                                                                 apiSeen: apiBots.contains(bot.id), place: .bots, now: context.date, timeZone: .current) {
+                                        Text(verbatim: line).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                                    }
                                 }
                             }
                             Spacer()
