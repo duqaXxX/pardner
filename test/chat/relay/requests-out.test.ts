@@ -22,7 +22,8 @@ const HOLD: OwnerRequest = {
 /** The thread of alice's first prompt (sender and name in hex), as the core names it. */
 const threadOf = (r: Rig, prompt = fill(100, 16)) => hex(r.alice.first.id) + hex(prompt);
 
-const provider = (r: Rig, b: Bot) => new RelayProvider(r.botId, b.outbox, b.inbound, platform);
+const provider = (r: Rig, b: Bot) =>
+  new RelayProvider(r.botId, b.outbox, b.inbound, platform, undefined, undefined, b.clock);
 const bodyOf = async (r: Rig, kind: number) => {
   const held = await r.held();
   return held.messages.filter((m) => m.kind === kind);

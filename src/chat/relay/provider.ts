@@ -1,5 +1,5 @@
 /**
- * The relay chat as the seam's provider (design 3.8, 3.9): every capability false, the lines of the
+ * The relay chat as the seam's provider (design 3.8, 3.9): every capability false but `nativeStreaming`, the lines of the
  * daemon's own written as texts (kind 1), and the owner's prompts and answers handed to the core
  * by `Inbound`; a request to the owner (kind 9) and its withdrawal or rewrite (kind 11) are written
  * here. A reply is written as parts (kind 4), each naming the answer its prompt gets when the core is
@@ -24,13 +24,14 @@ import {
   type ThreadChat,
   type ThreadRef,
 } from "../seam.ts";
+import { type Clock, realClock } from "./connection.ts";
 import { fromHex, referenceOf, toHex } from "./hex.ts";
 import { type Inbound, questionsOf } from "./inbound.ts";
 import { fitLine, type Line } from "./line.ts";
 import type { Outbox } from "./outbox.ts";
 
-const NONE: ChatCapabilities = {
-  nativeStreaming: false,
+const CAPABILITIES: ChatCapabilities = {
+  nativeStreaming: true,
   rootStatus: false,
   acknowledgement: false,
   activityLine: false,
@@ -55,6 +56,10 @@ const REQUEST_ROOM = 1_048_576 - 4096;
 /** The request as the app needs it: the core's id and the agent's call id stay on the bot (store the minimum). */
 const shown = (request: OwnerRequest) =>
   Object.fromEntries(Object.entries(request).filter(([k]) => k !== "requestId" && k !== "callId"));
+
+/** Text held in a reply goes out 5 seconds after its first character, or 1 second after its last call. */
+const FIRST_MS = 5000;
+const PAUSE_MS = 1000;
 
 /** A part holds at most 64 KiB of text (3.8); a longer text becomes several, cut between characters. */
 const PART = 65_536;
@@ -91,7 +96,7 @@ export interface Link {
 export class RelayProvider implements ChatProvider {
   readonly name = "relay";
   readonly identities: readonly string[];
-  readonly capabilities = NONE;
+  readonly capabilities = CAPABILITIES;
   #outbox: Outbox;
   #inbound: Inbound;
   #self: Bytes;
@@ -99,6 +104,9 @@ export class RelayProvider implements ChatProvider {
   #link: Link | undefined;
   #steady: { time(): number } | undefined;
   #now: () => number;
+  #clock: Clock;
+  /** The flush of each reply not yet closed out, by thread. */
+  #open = new Map<string, Set<() => Promise<void>>>();
 
   constructor(
     self: Bytes,
@@ -107,7 +115,9 @@ export class RelayProvider implements ChatProvider {
     platform: Pick<Platform, "random" | "now">,
     link?: Link,
     steady?: { time(): number },
+    clock: Clock = realClock,
   ) {
+    this.#clock = clock;
     this.#link = link;
     this.#steady = steady;
     this.#now = () => platform.now();
@@ -116,6 +126,12 @@ export class RelayProvider implements ChatProvider {
     this.identities = [`relay:${toHex(self)}`];
     this.#outbox = outbox;
     this.#inbound = inbound;
+  }
+
+  /** What the open replies of a thread hold is written first, so nothing the module adds stands above the text before it. */
+  async #flushed(ref: ThreadRef) {
+    const open = this.#open.get(`${ref.channel}/${ref.thread}`);
+    if (open) await Promise.all([...open].map((flush) => flush()));
   }
 
   /** A text of the bot's own (3.8): `say` says how the app draws it. */
@@ -150,6 +166,7 @@ export class RelayProvider implements ChatProvider {
    * answer must have before anything is written, so that no reply can arrive first.
    */
   async #ask(ref: ThreadRef, requestId: string, request: OwnerRequest, title: string) {
+    await this.#flushed(ref);
     const re = this.#inbound.promptOf(ref);
     if (!re) throw new ChatError("relay_no_prompt", { failure: "refused", permanent: true });
     const body = shown(request);
@@ -198,6 +215,8 @@ export class RelayProvider implements ChatProvider {
     const random = this.#random;
     const wall = this.#now;
     const steady = this.#steady;
+    const clock = this.#clock;
+    const threadKey = `${ref.channel}/${ref.thread}`;
     const reference = prompt ? referenceOf(prompt) : undefined;
     const names: Bytes[] = [];
     let lost = false;
@@ -248,53 +267,144 @@ export class RelayProvider implements ChatProvider {
       } else if (changed(held.last, u, closing) && (await putLine(u, held.name, false)))
         held.last = u;
     };
+    // The module flushes this reply before it writes anything else into the thread (a request's card).
+    const flushNow = () => enqueue(flush);
+    const open = this.#open.get(threadKey) ?? new Set<() => Promise<void>>();
+    open.add(flushNow);
+    this.#open.set(threadKey, open);
     const landed = (signal?: AbortSignal) =>
       lost ? Promise.resolve(false) : outbox.landed(names, signal);
+    // Every write of the reply goes through one chain, so a flush the timer asks for lands after the call in
+    // progress and the parts keep the order of the deltas.
+    let chain: Promise<unknown> = Promise.resolve();
+    const enqueue = <T>(step: () => Promise<T>): Promise<T> => {
+      const run = chain.then(step);
+      chain = run.catch(() => {});
+      return run;
+    };
+    // The text held for the next flush, and the one wait that ends it: at the earlier of FIRST_MS after the
+    // first character (only for a text that grows an answer) and PAUSE_MS after the last call.
+    let buffer = "";
+    let firstAt = 0;
+    let lastAt = 0;
+    let fiveSeconds = false;
+    let timer: AbortController | undefined;
+    let queued = false; // a flush of the timer waits on the chain: one at a time
+    let closed = false;
+    const disarm = () => {
+      timer?.abort();
+      timer = undefined;
+    };
+    const deadline = () =>
+      fiveSeconds ? Math.min(lastAt + PAUSE_MS, firstAt + FIRST_MS) : lastAt + PAUSE_MS;
+    const arm = () => {
+      disarm();
+      const own = new AbortController();
+      timer = own;
+      // Past the deadline (a write kept the chain busy) the wait is 0, never negative.
+      const ms = Math.max(0, deadline() - clock.now());
+      void clock.wait(ms, own.signal).then((passed) => {
+        if (!passed || own.signal.aborted || queued) return;
+        queued = true;
+        // At its turn the flush reads the buffer and the deadline as they are then: text that came meanwhile
+        // moved the deadline, and a buffer a call already flushed is empty.
+        void enqueue(async () => {
+          queued = false;
+          if (!buffer) return;
+          if (clock.now() >= deadline()) await flush();
+          else arm();
+        }).catch(() => {});
+      });
+    };
+    /** Writes what is held, as a text call writes; runs on the chain. */
+    const flush = async () => {
+      disarm();
+      const markdown = buffer;
+      buffer = "";
+      if (markdown) await put(markdown);
+    };
+    const put = async (markdown: string, options?: { ending?: boolean }) => {
+      const pieces = splitParts(markdown);
+      if (reference && !inbound.closed(reference)) {
+        const answer = inbound.replyOf(reference);
+        answer.text += markdown;
+        if (pieces.length === 0 && options?.ending) pieces.push("");
+        for (const [i, piece] of pieces.entries()) {
+          const ending = options?.ending && i === pieces.length - 1;
+          const content = JSON.stringify({
+            thread: ref.thread,
+            markdown: piece,
+            ...(ending ? { ending } : {}),
+          });
+          await write(4, random(16), content, { device: me, name: answer.name });
+        }
+      } else {
+        for (const piece of pieces) {
+          const content = JSON.stringify({ thread: ref.thread, say: "say", markdown: piece });
+          await write(1, random(16), content);
+        }
+      }
+    };
     return {
       last: true, // a reply is never moved: nothing below it changes where it ends
       overtaken: false,
-      async text(markdown, options) {
-        const pieces = splitParts(markdown);
-        if (reference && !inbound.closed(reference)) {
-          const answer = inbound.replyOf(reference);
-          answer.text += markdown;
-          if (pieces.length === 0 && options?.ending) pieces.push("");
-          for (const [i, piece] of pieces.entries()) {
-            const ending = options?.ending && i === pieces.length - 1;
-            const content = JSON.stringify({
-              thread: ref.thread,
-              markdown: piece,
-              ...(ending ? { ending } : {}),
-            });
-            await write(4, random(16), content, { device: me, name: answer.name });
-          }
-        } else {
-          for (const piece of pieces) {
-            const content = JSON.stringify({ thread: ref.thread, say: "say", markdown: piece });
-            await write(1, random(16), content);
-          }
+      text(markdown, options) {
+        const held =
+          !closed && !options?.notice && !options?.ending && !options?.aside && !options?.answers;
+        if (!held)
+          return enqueue(async () => {
+            await flush();
+            await put(markdown, options);
+          });
+        lastAt = clock.now();
+        if (!buffer) {
+          firstAt = lastAt;
+          fiveSeconds = writing();
         }
+        buffer += markdown;
+        arm();
+        return Promise.resolve();
       },
-      async task(u) {
-        if (writing()) await update(u, false);
-      },
-      async finish(closing, signal) {
-        if (writing()) for (const u of closing) if (!signal?.aborted) await update(u, true);
-        finished = true;
-      },
+      task: (u) =>
+        enqueue(async () => {
+          await flush();
+          if (writing()) await update(u, false);
+        }),
+      finish: (closing, signal) =>
+        enqueue(async () => {
+          await flush();
+          if (writing()) for (const u of closing) if (!signal?.aborted) await update(u, true);
+          finished = true;
+        }),
       rest() {},
       showFooter: async () => false, // owed: the footer is read and offered again (seam)
       // At once, as the seam splits it: false when a part is still unread, and the core then waits in `waitLanded`.
-      closeOut: async () => !lost && outbox.holds(names),
-      waitLanded: landed,
+      closeOut: async () => {
+        // Closed first: a text that comes while the flush is written is queued behind it, never held.
+        closed = true;
+        open.delete(flushNow);
+        await enqueue(flush);
+        // Behind whatever queued meanwhile, so the answer covers it.
+        return enqueue(async () => !lost && outbox.holds(names));
+      },
+      waitLanded: async (signal) => {
+        await enqueue(flush);
+        return landed(signal);
+      },
       // A last look: whether the reply has landed now. It never waits, so an idle close does not stall on an unreachable relay.
-      settle: async () => !lost && outbox.holds(names),
+      settle: () =>
+        enqueue(async () => {
+          await flush();
+          return !lost && outbox.holds(names);
+        }),
     };
   }
 
   thread(ref: ThreadRef): ThreadChat {
-    const text = (say: "notice" | "say" | "tell") => (markdown: string) =>
-      this.#text(ref.channel, say, markdown, ref.thread);
+    const text = (say: "notice" | "say" | "tell") => async (markdown: string) => {
+      await this.#flushed(ref);
+      return this.#text(ref.channel, say, markdown, ref.thread);
+    };
     return {
       showRunning() {},
       openReply: (_onOpen, prompt) => this.#reply(ref, prompt),

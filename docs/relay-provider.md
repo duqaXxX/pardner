@@ -18,7 +18,7 @@ sessions close; `close` erases the keys held in memory.
 
 `openReply(onOpenMessage, prompt)` takes the owner's message the reply is for; the core passes it for
 every turn of an owner's prompt, `!command` included, and nothing for a report turn. The reply
-writes text and the turn's lines. While that prompt has no answer, each `text` call becomes parts (kind 4), each at
+writes text and the turn's lines. The chat declares `nativeStreaming`, so the core hands the reply each delta of a text. A plain `text` call (no notice, ending, aside or answers) is held; the reply writes what it holds 5 seconds after the first held character (only while the prompt has no answer and the turn has not finished), 1 second after the last held call, and before any other call of the reply (`task`, `finish`, `closeOut`, `settle`, `waitLanded`, a text that is not plain). One chain orders every write of the reply, a flush reading the held text when its turn comes. Before the chat writes anything else into the thread (a request's card, a notice), it flushes the thread's open replies and waits for them, so a question stands below the text that introduces it. When it writes, and while that prompt has no answer, the text becomes parts (kind 4), each at
 most 64 KiB of UTF-8 and cut between characters, each naming by `re` the answer the prompt will get;
 the text is added to that answer. Text written after the prompt's answer, or by a reply with no
 prompt, goes out as texts of the thread (kind 1, "say"), also split at 64 KiB. `rest` and `showFooter`

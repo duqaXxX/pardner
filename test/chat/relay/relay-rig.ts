@@ -309,6 +309,8 @@ export function botOn(
   const queued = () => store.saved.outboxes.get(hex(r.channel)) ?? [];
   return {
     connection,
+    /** The clock the connection runs on; a provider built for the bot takes it too (design 2.5). */
+    clock: over.clock,
     outbox,
     profile,
     store,
