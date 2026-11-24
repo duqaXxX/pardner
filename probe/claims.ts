@@ -259,19 +259,19 @@ export const CLAIMS: readonly Claim[] = [
     "P21",
     "gesture",
     "the reply to `/compact` is the compaction's line: its `compact_boundary` comes before " +
-      "every frame of its turn that starts one, and a result follows it",
+      "every frame of its turn that starts one, and a result with no text follows it",
     "src/agent/claude/translate.ts#Translator.translate",
-    "send `/compact` in a thread with a few turns; the reply is `Compacted the " +
-      "conversation:` and the tokens before and after",
+    "send `/compact` in a thread with a few turns; the reply is one line, `Conversation " +
+      "compacted` with the tokens before and after beside it, and no text under it",
   ),
   claim(
     "P22",
     "gesture",
-    "`/compact` opens with a `status` system message that says `compacting`: the thread's " +
-      "status line reads `Compacting conversation…` while it runs",
+    "`/compact` opens with a `status` system message that says `compacting`: the reply's " +
+      "line reads `Compacting conversation` while it runs",
     "src/agent/claude/translate.ts#Translator.translate",
-    "send `/compact` in a thread with a few turns; the line under the thread reads " +
-      "`Compacting conversation…` until the reply appears",
+    "send `/compact` in a thread with a few turns; the reply's line reads `Compacting " +
+      "conversation` with `Running` and its time until it turns `Conversation compacted`",
   ),
   claim(
     "P23",

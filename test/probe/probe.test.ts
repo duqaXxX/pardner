@@ -817,6 +817,7 @@ test("P48 judges the order of idle after a gap stop, and fails a stream that bre
       steps,
       answers: [],
       tokens: {},
+      cost: null,
     }) as const;
   const idle = { type: "state_changed", state: "idle" } as const;
   const taken = { type: "prompt_taken", promptId: "p" } as const;

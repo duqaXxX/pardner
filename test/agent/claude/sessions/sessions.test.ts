@@ -2313,6 +2313,50 @@ function effortShown(h: Harness): string | null | undefined {
     : `${footer.effort} (${footer.effortObserved})`;
 }
 
+test("the footer carries the session's latest estimated cost, and a result with none keeps it", async (t) => {
+  const tools = sdkMessages("tools");
+  const last = recordOf(tools.at(-1));
+  assert.ok(last !== null);
+  // The same turn ending in an error with a zeroed total, as a crashed turn may.
+  const zeroed = [
+    ...tools.slice(0, -1),
+    { record: { ...last, is_error: true, total_cost_usd: 0 } },
+  ];
+  const h = memoryHarnessFor(t)({ turns: [tools, zeroed] });
+  const session = h.session();
+  await (await session.submit("one")).done.wait();
+  await h.idle();
+  const cost = lastFooter(h)?.sessionCost;
+  assert.equal(typeof cost, "number");
+  assert.ok((cost as number) > 0);
+  await (await session.submit("two")).done.wait();
+  await h.idle();
+  assert.equal(
+    lastFooter(h)?.sessionCost,
+    cost,
+    "a zeroed error result does not replace the total",
+  );
+});
+
+// The plan the agent reported at connect decides, as the bot's profile does: a limits reading kept
+// from before a login switch never hides the cost of an account with no plan (D3-B1).
+test("the footer carries a cost only for an account the agent reported with no plan", async (t) => {
+  const run = async (plan: string | undefined, usagePlan: string | null) => {
+    const account: Record<string, string> = { email: "alice@example.com" };
+    if (plan !== undefined) account.subscriptionType = plan;
+    const h = memoryHarnessFor(t)({
+      turns: [sdkMessages("tools")],
+      info: infoOf({ commands: [], current_permission_mode: "default", account }),
+    });
+    h.usageAccount = { name: "alice@example.com", plan: usagePlan };
+    await (await h.session().submit("one")).done.wait();
+    await h.idle();
+    return lastFooter(h)?.sessionCost;
+  };
+  assert.equal(typeof (await run(undefined, "Claude Max")), "number", "a stale plan in the limits");
+  assert.equal(await run("Claude Max", null), null, "a plan at connect");
+});
+
 test("the footer follows an effort set from the chat", async (t) => {
   const effortTurn = withResult(
     sdkMessages("usage"),
@@ -3746,7 +3790,8 @@ test("a stop shows the root of a thread it waits for as restarting, until the cl
   const drain = startDrain(h);
   await polled(h);
   await h.until(() => statuses(h).at(-1) === "restarting");
-  assert.deepEqual(posted(h), []);
+  // The root's mark names no task: a chat with no activity line also gets the message, once.
+  assert.deepEqual(posted(h), [texts.fill(texts.RESTART_WAITS_MESSAGE, { counts: "1 shell" })]);
   assert.equal(thread(h).status, "working"); // shown only: the state keeps the session's own
   assert.ok(await session.stop());
   await drainEnds(h, drain);
@@ -5216,6 +5261,31 @@ test("a stop says what it waits for in a message where the chat refuses a status
   await polled(h);
   assert.ok(!drain.done());
   assert.deepEqual(posted(h), [texts.fill(texts.RESTART_WAITS_MESSAGE, { counts: "1 shell" })]); // once, however long
+  drain.cut.abort();
+  await drain.promise;
+});
+
+test("a stop says what it waits for in a message where the chat draws no activity line", async (t) => {
+  const [first] = splitBackground();
+  const h = memoryHarnessFor(t, { chatCapabilities: { activityLine: false } })({ turns: [first] });
+  await (await h.session().submit("start it")).done.wait();
+  const drain = startDrain(h);
+  await polled(h);
+  await polled(h);
+  assert.ok(!drain.done());
+  assert.deepEqual(posted(h), [texts.fill(texts.RESTART_WAITS_MESSAGE, { counts: "1 shell" })]); // once, however long
+  drain.cut.abort();
+  await drain.promise;
+});
+
+test("a stop posts nothing where the activity line draws the wait", async (t) => {
+  const [first] = splitBackground();
+  const h = memoryHarnessFor(t, {}, { activityLine: true })({ turns: [first] });
+  await (await h.session().submit("start it")).done.wait();
+  const drain = startDrain(h);
+  await polled(h);
+  assert.ok(!drain.done());
+  assert.deepEqual(posted(h), []);
   drain.cut.abort();
   await drain.promise;
 });

@@ -124,6 +124,7 @@ async function afterCall(
     steps: 1,
     answers: [],
     tokens: {},
+    cost: null,
   };
   await renderer.close();
   return updates;

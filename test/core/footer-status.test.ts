@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FooterFields } from "../../src/chat/seam.ts";
-import { formatStatusFields } from "../../src/core/footer.ts";
+import { footerFields, formatStatusFields } from "../../src/core/footer.ts";
 
 const NOW = Date.UTC(2026, 8, 23, 19, 0);
 const MINUTE = 60_000;
@@ -32,6 +32,7 @@ function fields(known: Partial<FooterFields> = {}): FooterFields {
     weekLimit: null,
     account: null,
     accountPlan: null,
+    sessionCost: null,
     work: null,
     ...known,
   };
@@ -95,4 +96,10 @@ test("every value of the footer is a line of the status, in the footer's order",
       "7d limit",
     ],
   );
+});
+
+test("the session's estimated cost is in no field of the footer and no line of the status", () => {
+  const data = fields({ sessionCost: 1.84, model: "Opus 5.5" });
+  assert.equal(JSON.stringify(footerFields(data, NOW)).includes("1.84"), false);
+  assert.equal(formatStatusFields(data, NOW).join("\n").includes("1.84"), false);
 });

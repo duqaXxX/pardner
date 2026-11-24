@@ -161,3 +161,13 @@ test("a refresh that rejects does not stop the later ones", async (t) => {
   await title.refresh();
   assert.equal(calls, 2, "the second refresh still reached the chat");
 });
+
+test("a chat that never calls keep stores nothing of the root", async (t) => {
+  const titles: string[] = [];
+  const world = setup(t, async (title) => {
+    titles.push(title);
+  });
+  await world.make().refresh();
+  assert.deepEqual(titles, ["Fix the footer"]);
+  assert.equal(world.state.thread(CHANNEL, THREAD)?.rootPrompt, null);
+});

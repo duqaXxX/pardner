@@ -158,6 +158,13 @@ public struct MessageThread: Sendable, Equatable {
     var reasons: [MessageRef: Refusal] = [:]
     /// The time of the newest message of the session's bot: the Sessions tab's order.
     public internal(set) var lastReply: Date?
+    /// The session's title, from the newest `title` text of its bot in position order (step D2 3.2).
+    public internal(set) var sessionTitle: String?
+    /// The session's line, from the newest work's end of its bot that has one.
+    public internal(set) var session: String?
+    /// The newest `usage` (by `usage.at`) among this thread's own works' ends that carries a window, and the newest that carries a cost; `ReadingModel.windows` is the bot's across channels.
+    public internal(set) var windowUsage: SessionUsage?
+    public internal(set) var costUsage: SessionUsage?
     // The devices whose prompts the bot started here: its owner's, the only ones whose reply it takes (SD 5.8).
     var owners: Set<Data> = []
     // The person's own devices (the Devices list): their replies count whether or not they prompted in this thread.
@@ -412,6 +419,20 @@ extension MessageThread {
             guard let re = m.re, let i = lineIndex[re], case .line(var line) = items[i] else { return }
             line.fields = fields
             items[i] = .line(line)
+        case .text where fromBot && m.sessionText != nil:
+            switch m.sessionText {
+            case .title(let title)?:
+                if let title { sessionTitle = title }
+                return // a title is no reply
+            case .footer(let duration, let line, let newest)?:
+                if duration != nil { items.append(.message(m)) }
+                if let line { session = line }
+                if let newest {
+                    if newest.hasWindow, newest.at > windowUsage?.at ?? -.infinity { windowUsage = newest }
+                    if newest.cost != nil, newest.at > costUsage?.at ?? -.infinity { costUsage = newest }
+                }
+            case nil: break
+            }
         case .text:
             if m.thread != nil { items.append(.message(m)) } // the opening message is the thread's root, not an item
         case .unreadable:
@@ -420,6 +441,12 @@ extension MessageThread {
             return
         }
         if fromBot { lastReply = max(lastReply ?? .distantPast, m.time) }
+    }
+
+    /// Whether `m` is a work's end of the session's bot: the line under a reply, which is no reply itself.
+    public func isFooter(_ m: Message) -> Bool {
+        if case .footer? = m.sessionText { return bot != nil && m.sender == bot }
+        return false
     }
 
     /// Whether `m`, a text with no thread, is the line of the session's bot that answers the opening prompt.
@@ -621,6 +648,23 @@ public struct ReadingModel: Sendable, Equatable {
 
     /// Whether `device` is one of the person's own apps, as the Devices list names them.
     public func isOwn(_ device: Data) -> Bool { ownDevices.contains(device) }
+
+    /// The newest `usage` of each bot that carries a window, by `usage.at`, across every channel read.
+    public var windows: [Data: SessionUsage] {
+        var out: [Data: SessionUsage] = [:]
+        for channel in channels.values {
+            for thread in channel.threads.values {
+                guard let bot = thread.bot, let u = thread.windowUsage, u.at > out[bot]?.at ?? -.infinity else { continue }
+                out[bot] = u
+            }
+        }
+        return out
+    }
+
+    /// The bots with any `usage`, in any channel read, that carried a cost: the bot writes one only for an account with no plan.
+    public var apiBots: Set<Data> {
+        Set(channels.values.flatMap { $0.threads.values.compactMap { $0.costUsage == nil ? nil : $0.bot } })
+    }
 
     /// One `profile` effect of the link: the profile shown for a bot, or none.
     public mutating func take(profile: HostValue) {

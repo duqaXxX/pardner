@@ -84,14 +84,15 @@ extension Message {
 }
 
 extension MessageThread {
-    /// The thread's title: the first line of its opening message.
-    var title: String { root?.shown.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? "" }
+    /// The thread's title: the session's own, else the first line of its opening message.
+    var title: String { sessionTitle ?? root?.shown.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? "" }
 
     /// The replies after the opening message: a line is no reply, and the segments of one answer are one.
     var replies: Int {
         var answers = Set<MessageRef>()
         return entries.reduce(0) { count, entry in
             switch entry {
+            case .item(.message(let m)) where isFooter(m): count // the line under a reply, no reply of its own
             case .unreadable, .item(.message): count + 1 // a run that cannot be read is the one row the panel draws
             case .item(.answer(let a)): answers.insert(a.ref).inserted ? count + 1 : count
             case .item(.line): count

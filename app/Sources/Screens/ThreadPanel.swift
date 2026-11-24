@@ -30,10 +30,15 @@ struct ThreadPanel: View {
         VStack(spacing: 0) {
             HStack(spacing: PardnerMetrics.gap) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Thread").font(PardnerFont.ui(size: 15, weight: .semibold))
+                    Text(verbatim: thread.sessionTitle ?? "Thread").font(PardnerFont.ui(size: 15, weight: .semibold)).lineLimit(1)
                     if let bot = thread.bot {
                         Text([Naming.sender(bot, in: model), thread.state.pill].compactMap { $0 }.joined(separator: " · "))
                             .font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted).lineLimit(1)
+                    }
+                    // The session's values at its newest work's end; the whole line is the help tag when it is cut.
+                    if let session = thread.session {
+                        Text(verbatim: session).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                            .lineLimit(1).truncationMode(.tail).help(session)
                     }
                 }
                 Spacer()
@@ -96,6 +101,7 @@ struct ThreadPanel: View {
                     }
                 }
                 ComposerView(model: composer)
+                if let bot = thread.bot { AccountLine(model: model, thread: thread, bot: bot) }
             }
         }
         .background(PardnerColor.panel)
@@ -106,7 +112,9 @@ struct ThreadPanel: View {
 
     @ViewBuilder
     private func entry(_ m: Message, queued: Set<MessageRef>) -> some View {
-        if case .request(let title, _, _) = m.body {
+        if thread.isFooter(m), case .footer(let duration?, _, _)? = m.sessionText {
+            Text(verbatim: duration).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+        } else if case .request(let title, _, _) = m.body {
             if let composer {
                 RequestCardView(card: composer.card(for: m), focus: $focus)
             } else {
@@ -213,6 +221,27 @@ struct StopButton: View {
         }
         .buttonStyle(.plain).pointerStyle(composer.canCommand ? .link : nil).disabled(!composer.canCommand)
         .accessibilityLabel("Stop the session").help("Stop")
+    }
+}
+
+/// The account's line under the composer (step D3 design, 3.3): the usage of the thread's bot, in sight where the terminal keeps its status line.
+/// A timeline of its own redraws the line alone each minute, so a reset's `↻` counts down and `as of` appears: the panel's `redraw` moves only
+/// at a day's change.
+struct AccountLine: View {
+    let model: ReadingModel
+    let thread: MessageThread
+    let bot: Data
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            let profile = model.profiles[bot]
+            if let line = UsageLine.text(profileRead: profile != nil, plan: profile?.plan, windows: model.windows[bot], cost: thread.costUsage,
+                                         apiSeen: model.apiBots.contains(bot), place: .composer, now: context.date, timeZone: .current) {
+                Text(verbatim: line).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                    .lineLimit(1).truncationMode(.tail).help(line)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.bottom, 8)
+            }
+        }
     }
 }
 

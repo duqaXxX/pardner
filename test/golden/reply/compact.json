@@ -78,10 +78,40 @@
   {
    "calls": [
     {
-     "call": "text",
-     "ending": false,
-     "markdown": "Compacted the conversation: 20.7k → 5.0k tokens.\n\n",
-     "notice": true
+     "call": "task",
+     "update": {
+      "agent": null,
+      "calls": 0,
+      "details": null,
+      "folded": null,
+      "id": "compaction:1",
+      "message": false,
+      "name": "",
+      "output": null,
+      "preview": null,
+      "startedAt": 0,
+      "status": "in_progress",
+      "task": false,
+      "title": "Compacting conversation"
+     }
+    },
+    {
+     "call": "task",
+     "update": {
+      "agent": null,
+      "calls": 0,
+      "details": "20.7k → 5.0k tokens",
+      "folded": null,
+      "id": "compaction:1",
+      "message": false,
+      "name": "",
+      "output": null,
+      "preview": null,
+      "startedAt": 0,
+      "status": "complete",
+      "task": false,
+      "title": "Conversation compacted"
+     }
     },
     {
      "call": "finish",
@@ -165,10 +195,40 @@
     "notice": false
    },
    {
-    "call": "text",
-    "ending": false,
-    "markdown": "\n\nCompacted the conversation: 20.7k → 5.0k tokens.\n\n",
-    "notice": true
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "compaction:1",
+     "message": false,
+     "name": "",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": false,
+     "title": "Compacting conversation"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": "20.7k → 5.0k tokens",
+     "folded": null,
+     "id": "compaction:1",
+     "message": false,
+     "name": "",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": false,
+     "title": "Conversation compacted"
+    }
    },
    {
     "call": "text",

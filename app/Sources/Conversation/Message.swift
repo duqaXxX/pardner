@@ -173,6 +173,9 @@ public struct Message: Sendable, Equatable {
     public let noSession: Bool
     /// A kind 1 that carries a bind field (the bot's answer to `/bind`).
     public let bind: Bind?
+    /// A kind 1 whose `say` is `footer` or `title`: what the session's bot says around its turn (step D2). It is still a `.text` body, drawn so
+    /// when it comes from anyone but the session's bot.
+    public let sessionText: SessionText?
     /// A kind 2 whose content says `"control": true` with one of the words the app's controls send (`ControlPrompt`). Whether it is the owner's
     /// is the reading's to decide (`Channel.fold`): the prompt is never drawn.
     public let control: Bool
@@ -199,6 +202,7 @@ public struct Message: Sendable, Equatable {
         let fields = view["text"]?.stringValue.flatMap(Self.object)
         thread = fields?["thread"] as? String
         bind = kind == 1 ? Bind(fields?["bind"]) : nil
+        sessionText = kind == 1 ? fields.flatMap { o in (o["markdown"] as? String).flatMap { SessionText(o, markdown: $0) } } : nil
         control = kind == 2 && ControlPrompt.holds(fields)
         noSession = kind == 5 && fields?["session"] as? Bool == false
         body = fields.map { Self.body(kind: Int(kind), $0, text: view["text"]?.stringValue ?? "") } ?? .unreadable

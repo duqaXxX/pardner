@@ -867,6 +867,7 @@ export class PlainSession implements AgentSession {
       steps: turn.messages + turn.calls === 0 ? 0 : turn.calls + 1,
       answers,
       tokens: {},
+      cost: null,
     });
     if (turn.suggestion !== null) this.#push({ type: "next_prompt", text: turn.suggestion });
   }

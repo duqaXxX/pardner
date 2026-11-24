@@ -331,6 +331,10 @@ struct Answered: View {
             // The same rows as the thread panel, with their stable identities: a row's own state stays with it when an answer replaces its segments.
             ForEach(ThreadRows.build(thread)) { row in
                 switch row.content {
+                case .message(let line) where thread.isFooter(line):
+                    if case .footer(let duration?, _, _)? = line.sessionText {
+                        Text(verbatim: duration).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                    }
                 case .message(let line): MessageRow(model: model, icons: icons, message: line)
                 case .unreadable(let count, let first): UnreadableRow(model: model, icons: icons, message: first, count: count, mark: .conversation)
                 case .line(let line): LineRow(line: line, state: thread.state(of: line), indent: 0)
@@ -367,6 +371,8 @@ struct Summary: View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 2) {
                 if showsTitle { Text(verbatim: thread.title).font(PardnerFont.ui(size: 14, weight: .semibold)).lineLimit(1) }
+                // In the conversation the root's first line stands right above: only the session's own title is new there.
+                else if let title = thread.sessionTitle { Text(verbatim: title).font(PardnerFont.ui(size: 13, weight: .semibold)).lineLimit(1) }
                 HStack(spacing: 10) {
                     if let bot = thread.bot { Avatar(name: Naming.sender(bot, in: model), isBot: true, icon: icons[bot], size: 22).accessibilityHidden(true) }
                     Text(Naming.replies(thread.replies)).font(PardnerFont.ui(size: 13, weight: .semibold)).foregroundStyle(PardnerColor.brandText).lineLimit(1)
@@ -395,7 +401,7 @@ struct Summary: View {
     static func spoken(model: ReadingModel, thread: MessageThread, showsTitle: Bool) -> String {
         let bot = thread.bot.map { Naming.sender($0, in: model) }
         let state = thread.bot == nil ? nil : thread.state.pill
-        return [showsTitle ? thread.title : nil, bot, Naming.replies(thread.replies), thread.lastReplyWords, state].compactMap { $0 }.joined(separator: ", ")
+        return [showsTitle ? thread.title : thread.sessionTitle, bot, Naming.replies(thread.replies), thread.lastReplyWords, state].compactMap { $0 }.joined(separator: ", ")
     }
 
     private func pill(_ word: String) -> some View {

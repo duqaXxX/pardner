@@ -675,8 +675,21 @@ function result(memory: Memory, record: WireRecord): SessionEvent[] {
       steps: typeof record.num_turns === "number" ? record.num_turns : null,
       answers,
       tokens: tokensOf(record.modelUsage),
+      cost: costOf(record),
     },
   ];
+}
+
+/**
+ * The session's running estimate, `total_cost_usd` (`sdk.d.ts` 0.3.330: "an estimate, not a
+ * billing statement"). A result that carries a `startup_failure_reason`, or that ends in an error
+ * with a total of 0, may carry zeroed values (`:6275`), and a 0 would replace the running total
+ * the core keeps: null for both.
+ */
+function costOf(record: WireRecord): number | null {
+  const cost = number(record.total_cost_usd);
+  if (cost === null || string(record.startup_failure_reason) !== null) return null;
+  return record.is_error === true && cost === 0 ? null : cost;
 }
 
 /**

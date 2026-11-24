@@ -245,6 +245,7 @@ test("/stop while a report turn is in its slow end: the next prompt's call reads
     steps: 1,
     answers: [],
     tokens: {},
+    cost: null,
   });
   await until("the report turn is in its slow end", () => inGate);
   agent.next(call("Shell", { command: "ls" }, { permission: true }));

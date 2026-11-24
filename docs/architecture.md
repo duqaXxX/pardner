@@ -267,7 +267,7 @@ the same capabilities. A part appears when the pair declares what it describes: 
 | `nativeStreaming` | the renderer holds the pieces of a text and hands the reply sink each text whole |
 | `rootStatus` | the session asks for no status on the root, the crash repair sets no error status, `ChatProvider.statusMark` is absent and a channel's `/status` writes each session's status as a word |
 | `acknowledgement` | `ThreadChat.acknowledge` is absent and a word that took effect is not marked on the owner's message |
-| `activityLine` | `ThreadChat.showActivity` and `activityRefused` are absent, the session shows no activity line, and no message says that a restart waits |
+| `activityLine` | `ThreadChat.showActivity` and `activityRefused` are absent, the session shows no activity line, and one message says that a restart waits (`texts.RESTART_WAITS_MESSAGE`) |
 | `fileUpload` | `ChatProvider.openFile` and `ThreadChat.share` are absent, `/open` answers that the chat cannot show a file (`texts.OPEN_UNAVAILABLE`), and `/diff` is not offered |
 | `threadLists` | `ThreadChat.offer` is absent and `/diff` and `/rewind` are not offered: `/help`, `/guide` and the suggestions leave them out, and typing one answers `texts.DIFF_UNAVAILABLE` or `texts.REWIND_UNAVAILABLE`. The picks of such a list reach the core as `diff-file`, `diff-view`, `rewind-point` and `rewind-action` (`ListPick`) |
 | `messageFold` | `ThreadChat.fold` and `Reply.posted` are absent: `/rewind` still goes back, and a line says the replies after the prompt were not marked as removed (`texts.REWIND_NO_FOLD`) |
@@ -467,8 +467,9 @@ text, since it can quote a message; the daemon logs the states of the connection
   (`ThreadSession.threadActivity`, an `Activity` of kind `restart-wait`, brought up to date by `ThreadSession.showRestartWait` at every poll
   of the drain), naming them by their counts (`1 shell`, `2 agents`), since the daemon cannot tell whether a task (a
   dev server, a watcher) ever ends. A status line does not notify and goes with the restart, where a
-  message would do both. Where the chat refuses the activity line (`ThreadChat.activityRefused`),
-  one message says it (`texts.RESTART_WAITS_MESSAGE`). `/stop` while a turn runs interrupts
+  message would do both. Where the chat draws no activity line (it declares none, or refuses it:
+  `ThreadChat.activityRefused`), one message says it (`texts.RESTART_WAITS_MESSAGE`), once per stop
+  and never while a turn runs. `/stop` while a turn runs interrupts
   it and ends the tasks with `AgentSession.stopTask`; Claude Code starts no turn to report a task
   stopped this way (measured: "Stopped task, no report turn"), so neither the drain nor the
   thread's next prompt waits `constants.INJECTED_TURN_WAIT` for one. `/stop` with no turn running
@@ -843,7 +844,8 @@ left unfinished does not hide the next turn's text.
 | `agent_error` of kind `authentication` | the same, with `error` `authentication_failed` | a note asking to run `claude` and `/login` on the host. Claude Code sends this category for a 401 and for a 403 alike |
 | any other `agent_error` | the same, with any other `error` | the text of the message, as a notice (note 5) |
 | `model_refused` | a `system` record of subtype `model_refusal_fallback` (with a `model_changed` to `fallback_model` after it, unless `scope` is `local`) or `model_refusal_no_fallback` | a quoted warning (`> ⚠️ ` and the record's `content`, or `<model> refused this request (<category>); no other model answered.` when `content` is empty), and when `retracted_message_uuids` holds any, `> ↩ Retracted: the <model> attempt above.`. What the refused attempt wrote stays: the reply only grows. Written as a line, so it does not stand in for the turn's final text |
-| `compacted` | a `system` record of subtype `compact_boundary` | `Compacted the conversation: 15.0k → 2.0k tokens.`, from its `compact_metadata`, whether the owner asked (`/compact`) or Claude Code compacted on its own (note 6) |
+| `compaction_started` | a `system` record of subtype `status` with `status` `compacting` | a line of the reply, `Compacting conversation`, `in_progress` with its start, where the compaction comes: before a turn's first words, among its calls, or the whole reply to `/compact`. A line still open when the turn ends on its own closes as an error; the owner's stop closes it `Stopped` |
+| `compacted` | a `system` record of subtype `compact_boundary` | the compaction's line turns `complete` and reads `Conversation compacted`, with `15.0k → 2.0k tokens` from its `compact_metadata` as its details, whether the owner asked (`/compact`) or Claude Code compacted on its own (note 6); a boundary whose start the turn did not see is a closed line of its own |
 | `turn_ended` | a `result` record | its text, when nothing else was written (note 7) |
 
 Notes on the table:
@@ -1008,7 +1010,7 @@ and the footer, `ThreadSession.sessionEnded`: nobody to answer, no unlanded repl
 `ThreadSession.quiet`, so a condition added to it reaches both. An error does not hold the footer
 back as it holds the checkmark. The footer goes under the reply the session's latest work wrote
 into (`ThreadSession.footerOwedTo`: a turn that started, a report, a standalone update), through
-`Reply.showFooter`, and stays owed until the chat says it landed there; work that starts while it
+`Reply.showFooter`, and stays owed until the chat says it landed there. The relay chat draws it as a text of its own below the reply (`say` `footer`): the work's length, then the session's line (the fields below in the footer's order, each left out when not known, `effort high` or `effort auto (medium)`, `⏸ plan` in place of `⚡ bypass`, the folder's last two names), written by `footer.footerFields` and `footer.valueWithDetail` as `/status` writes them, and in a channel of the owner's alone the 5-hour and weekly limits as numbers and `FooterFields.sessionCost`: the latest non-null `turn_ended.cost` of the session, null for an account the agent reported with a plan when it connected (the plan the bot's profile carries, never the limits' account, which a reading kept from before a login switch can still name), kept in memory and reset with the tokens at a new client. The cost is money and stays out of `footerFields`, so neither the session's line nor `/status` carries it. The account's email and plan are not written: the app reads the plan from the bot's profile. Work that starts while the footer
 is read owes its own, on its own reply, and the read is dropped. It goes on a reply and never on a
 line of the daemon's own: after `/stop` it stays on the reply the stop ended, with the line that
 says the stop below it. A prompt that could not start wrote no work and is never named, so it
@@ -1381,7 +1383,7 @@ closed when the start returns (`ThreadSession.connect`).
   by side, so the line gives way to the footer with nothing blank between them. The last state
   is forgotten when the agent's process is lost. The
   line never counts what still runs: the list under the last reply at rest does. `Compacting conversation…` from the event `compaction_started` to
-  `compaction_ended`, a report turn included: Claude Code
+  `compaction_ended` (beside the compaction's line in the reply, which every chat gets), a report turn included: Claude Code
   opens a compaction with a `status` system record that says `compacting`, repeats it while it
   lasts, and ends it with the `status` record that carries `compact_result`, and the back end says
   each once. The first event also starts the turn it belongs to, when one is due. During a stop
@@ -1668,6 +1670,8 @@ thread, not to the Claude Code session id, so a session `/resume` opens starts w
 How each case reaches the agent is in the doc comment of `ThreadSession.bypassChoice`.
 
 ### The title on the root
+
+A chat that cannot or need not replace the root gives the thread its title beside it: the relay chat writes the title as a text of its own (`say` `title`) that the app reads as the thread's name, keeps the last title written per thread in memory so a session object rebuilt after an idle close writes nothing again, and never calls `keep`, so `root_prompt` stays empty and `/status` shows no `Prompt:` line. The rest of this section describes a chat that replaces the root.
 
 At the end of every turn (`ThreadSession` calls `title.ThreadTitle.refresh` after the status is
 shown, and does not await it), at a `/status` that read a title, and once more after an idle close

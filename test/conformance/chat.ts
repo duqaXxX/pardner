@@ -341,6 +341,7 @@ const FOOTER: FooterFields = {
   weekLimit: null,
   account: null,
   accountPlan: null,
+  sessionCost: null,
   work: null,
 };
 

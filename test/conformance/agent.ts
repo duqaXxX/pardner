@@ -319,6 +319,13 @@ function assertWellFormed(events: readonly SessionEvent[]): void {
     1,
     "one turn_ended per turn",
   );
+  for (const event of events) {
+    if (event.type !== "turn_ended") continue;
+    assert.ok(
+      event.cost === null || (Number.isFinite(event.cost) && event.cost >= 0),
+      "a cost is null or a finite amount of dollars",
+    );
+  }
 }
 
 /** No event of a feature the back end does not declare. */

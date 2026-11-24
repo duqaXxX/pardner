@@ -244,14 +244,16 @@ a release with no notice, so it is the first place to look when a release misbeh
 | `SDKPartialAssistantMessage` | `event` | field | translate.ts: kindOf, messageStart, contentBlockStart, contentBlockDelta | reference | none |
 | `SDKPartialAssistantMessage` | `parent_tool_use_id` | field | translate.ts: parentOf | reference | none |
 | `SDKPromptSuggestionMessage` | `suggestion` | field | translate.ts: promptSuggestion | reference | P47 |
-| `SDKResultMessage` | `is_error` | field | translate.ts: endingOf; session.ts: ClaudeSession.#pump | reference | none |
+| `SDKResultMessage` | `is_error` | field | translate.ts: endingOf, costOf; session.ts: ClaudeSession.#pump | reference | none |
 | `SDKResultMessage` | `local_command` | field | translate.ts: effortChanged | package | P26 |
 | `SDKResultMessage` | `modelUsage` | field | translate.ts: result | reference | none |
 | `SDKResultMessage` | `num_turns` | field | translate.ts: result | reference | none |
 | `SDKResultMessage` | `origin` | field | translate.ts: result | reference | P25 |
 | `SDKResultMessage` | `result` | field | translate.ts: result, effortChanged | reference | none |
 | `SDKResultMessage` | `session_id` | field | translate.ts: result | reference | P3 |
+| `SDKResultMessage` | `startup_failure_reason` | field | translate.ts: costOf | reference | none |
 | `SDKResultMessage` | `terminal_reason` | field | translate.ts: endingOf | reference | none |
+| `SDKResultMessage` | `total_cost_usd` | field | translate.ts: costOf | reference | none |
 | `SDKResultMessage` | `user_message_uuid` | field | translate.ts: answersOf | reference | none |
 | `SDKResultMessage` | `user_message_uuids` | field | translate.ts: answersOf | reference | none |
 | `SDKSessionInfo` | `customTitle` | field | info.ts: listedSession; backend.ts: ClaudeBackend.sessionTitle | reference | P32 |

@@ -1162,7 +1162,10 @@ async function compact(s: Stage): Promise<Seen> {
     ["message_started", "text_started", "text_delta", "text", "call_started"].includes(event.type),
   );
   const compacted = ofType(turn.events, "compacted")[0];
-  const shown = boundary >= 0 && (starts < 0 || boundary < starts) && result > boundary;
+  // The reply is the compaction's line alone: a text in the result would read as an answer under it.
+  const said = ofType(turn.events, "turn_ended")[0]?.finalText ?? "";
+  const shown =
+    boundary >= 0 && (starts < 0 || boundary < starts) && result > boundary && said === "";
   const announced = at("compaction_started") >= 0 && at("compaction_started") < boundary;
   return {
     P21: observation(
@@ -1170,7 +1173,9 @@ async function compact(s: Stage): Promise<Seen> {
       shown,
       shown
         ? `tokens ${compacted?.tokensBefore ?? "none"} to ${compacted?.tokensAfter ?? "none"}`
-        : `the turn's events: ${turn.events.map((event) => event.type).join(",")}`,
+        : said !== ""
+          ? `the result carries a text: ${JSON.stringify(said.slice(0, 80))}`
+          : `the turn's events: ${turn.events.map((event) => event.type).join(",")}`,
       // The token counts differ on every run: only that they were reported is a fact, and the
       // one the pass does not require.
       { tokensReported: compacted?.tokensBefore != null && compacted?.tokensAfter != null },

@@ -98,8 +98,9 @@ export interface TaskUpdate {
   readonly folded: string | null;
   /**
    * When a call the terminal times began (a shell command), in seconds on the clock the chat is
-   * built with as `ChatContext.steady`; null for every other call. A task's line that a call launched keeps the call's start. A chat
-   * that shows how long the call has run reads it against that clock, and may ignore it.
+   * built with as `ChatContext.steady`; null for every other call. A task's line that a call launched keeps the call's start,
+   * and a compaction's line carries its own. A chat that shows how long the call has run reads
+   * it against that clock, and may ignore it.
    */
   readonly startedAt: number | null;
 }
@@ -138,6 +139,13 @@ export interface FooterFields {
   readonly account: string | null;
   /** The account's plan, which `/status` shows beside it; null when not known. */
   readonly accountPlan: string | null;
+  /**
+   * The agent's latest estimate of the session's spend, in US dollars (the newest `turn_ended.cost`
+   * that had one); null when none, and for an account the agent reported with a plan at connect
+   * (a plan's spend is not this figure). A provider that draws it keeps it to the owner alone: it is
+   * money, and the generic footer and `/status` never write it.
+   */
+  readonly sessionCost: number | null;
   /**
    * The work the footer closes, from the prompt that began it to the moment the session ended
    * everything, background reports included; `doneAt` is epoch milliseconds. Null when not known
@@ -366,7 +374,8 @@ export interface Reply extends ReplySink {
    * message, by an edit, which notifies nobody, and stays there. Written at once; true when it
    * landed, false when it did not or when the reply's end never landed (no footer for it then).
    *
-   * A chat that cannot rewrite a message, or whose rewrites notify, draws it as it can: as a
+   * A chat that cannot rewrite a message, whose rewrites notify, or whose reader draws a footer
+   * only as a message of its own, draws it as it can: as a
    * message of its own below the reply (true once posted, and the push is that chat's), or not
    * at all (false). The core asks nothing more of it: on false the footer stays owed to this
    * reply and is read and offered again the next time the session has ended everything, and it
@@ -1084,8 +1093,9 @@ export interface ChatProvider {
    */
   pinThread?(ref: ThreadRef, pinned: boolean): Promise<void>;
   /**
-   * Makes the thread's root show `title`, and the tag it carries, and nothing else: the owner's
-   * own words leave it. With `keep`, the chat reads the root once and hands `keep` the words it
+   * Gives the thread `title` as its name: on its root, or beside it. A chat that replaces the
+   * root's words, and the tag it carries, with the title makes the root show nothing else: the
+   * owner's own words leave it. One that leaves them in place never calls `keep`. With `keep`, the chat reads the root once and hands `keep` the words it
    * held, in the form the agent receives a message (the chat's own markup turned to the plain
    * text of a prompt, the tag left out), and edits only after `keep` has finished; when `keep`
    * throws, nothing is edited and the error is rethrown. Rejects with a `ChatError` when the chat

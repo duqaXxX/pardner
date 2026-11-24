@@ -200,6 +200,7 @@ test("a turn the agent opens in a copy that never ran ends with its status", asy
     steps: 1,
     answers: [],
     tokens: {},
+    cost: null,
   });
   await world.settle();
   const copy = stored(world, ref);
@@ -310,6 +311,7 @@ test("the rename waits for a turn the agent opened, and runs on an idle session"
     steps: 1,
     answers: [],
     tokens: {},
+    cost: null,
   });
   await world.settle();
   assert.deepEqual(busyAtRename, [false]);
@@ -347,6 +349,7 @@ const agentTurnEnd = (sessionId: string | null) =>
     steps: 1,
     answers: [],
     tokens: {},
+    cost: null,
   }) as const;
 
 test("the rename waits for a report turn the core already expects", async (t) => {
