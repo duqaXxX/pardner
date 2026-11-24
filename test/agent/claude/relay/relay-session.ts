@@ -46,7 +46,15 @@ export interface Read {
 export async function relayWorld(t: TestContext) {
   const r = await rig();
   const b = botOn(r);
-  const provider = new RelayProvider(r.botId, b.outbox, b.inbound, platform);
+  const provider = new RelayProvider(
+    r.botId,
+    b.outbox,
+    b.inbound,
+    platform,
+    undefined,
+    undefined,
+    b.clock,
+  );
   let stopped = false;
   const stop = async () => {
     if (stopped) return;

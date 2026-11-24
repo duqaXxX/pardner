@@ -17,7 +17,7 @@ import { checkPairingName, decodePairingString, shortForm } from "../../protocol
 import type { Bytes } from "../../protocol/platform.ts";
 import { encodeProfile, type Profile, refusedInName } from "../../protocol/profile.ts";
 import type { ChatProvider } from "../seam.ts";
-import { Connection } from "./connection.ts";
+import { Connection, realClock } from "./connection.ts";
 import { AGAIN, fromHex, toHex } from "./hex.ts";
 import { Inbound } from "./inbound.ts";
 import { Outbox } from "./outbox.ts";
@@ -298,7 +298,9 @@ export function relayChat(): ChatEntry {
         const self = deviceId(platform, pairing.device.signing, pairing.device.receiving);
         const run = new Run(platform);
         const log = (line: string) => logger.info(line);
+        const clock = realClock;
         const connection = new Connection({
+          clock,
           address: () => ({
             host: address.slice(0, colon).replace(/^\[|\]$/g, ""),
             port: Number(address.slice(colon + 1)),
@@ -350,6 +352,7 @@ export function relayChat(): ChatEntry {
             account: (account) => profile.account(account),
           },
           context.steady,
+          clock,
         );
       } catch (error) {
         platform.erase();

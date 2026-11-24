@@ -29,7 +29,7 @@ export interface Clock {
 
 const sleep = (ms: number, signal: AbortSignal) => delay(ms, true, { signal }).catch(() => false);
 
-const realClock: Clock = { now: () => performance.now(), wait: sleep, idle: sleep };
+export const realClock: Clock = { now: () => performance.now(), wait: sleep, idle: sleep };
 
 export interface ConnectionOptions {
   /** Where the relay is, read at each dial. */
