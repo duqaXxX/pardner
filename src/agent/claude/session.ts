@@ -439,7 +439,10 @@ export class ClaudeSession implements AgentSession {
         // asked about is refused here, and only the error's name is kept: its message may quote
         // the tool's input.
         try {
-          const request = toRequest(toolName, input, context);
+          // After the records the SDK delivered before it asked (as a hook's input is), so the
+          // call's start is on the events when the request names it.
+          await this.#inChain();
+          const request = toRequest(toolName, input, context, (id) => this.#translator.started(id));
           if (request.type === "question") {
             return questionResult(await requests.question(request, context.signal), input);
           }
@@ -508,6 +511,11 @@ export class ClaudeSession implements AgentSession {
     this.#work = this.#work.then(work).catch((error: unknown) => {
       logger.error(`could not read ${what}: ${errorName(error)}`);
     });
+  }
+
+  /** Resolves once all the work put in line so far is done. */
+  #inChain(): Promise<void> {
+    return new Promise((resolve) => this.#inLine(resolve, "a request"));
   }
 
   /**

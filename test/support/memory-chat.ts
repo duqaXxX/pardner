@@ -99,6 +99,11 @@ export interface MemoryChatOptions {
    * runs is not drawn, and the session's footer is a message of its own.
    */
   readonly edits?: boolean;
+  /**
+   * The reply's `text` and `task` resolve this many turns of the event loop after they record
+   * (`Room.writeDelay`): a chat that writes slowly. 0 when absent.
+   */
+  readonly writeDelay?: number;
 }
 
 /** The identity of a memory chat given none. */
@@ -201,5 +206,6 @@ export function memoryChat(options: MemoryChatOptions = {}): MemoryChat {
   );
   chat.noUnshare = options.unshare === false;
   chat.noShare = options.share === false;
+  chat.writeDelay = options.writeDelay ?? 0;
   return chat;
 }

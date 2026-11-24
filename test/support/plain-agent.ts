@@ -172,6 +172,13 @@ export interface CallOptions {
   readonly permission?: boolean;
   /** The agent gives the request up while the handler waits (aborts the signal it passed). */
   readonly giveUp?: boolean;
+  /**
+   * With `permission`: the agent asks only once this settles, after `call_started` is out, as a
+   * back end whose request waits for the records before it (the Claude back end's order).
+   */
+  readonly asksAfter?: Promise<void>;
+  /** With `permission`: the request names no call (`callId` null), as a back end that cannot say which. */
+  readonly unnamed?: boolean;
   /** What the call did to a file, as the end of a call reports it; none when absent. */
   readonly fileChange?: FileChange;
 }
@@ -966,9 +973,10 @@ export class PlainSession implements AgentSession {
     let allowed = true;
     let message = "";
     if (options.permission === true) {
+      await options.asksAfter;
       const request: PermissionRequest = {
         type: "permission",
-        callId,
+        callId: options.unnamed === true ? null : callId,
         toolName,
         input,
         title: null,

@@ -357,6 +357,13 @@ export class ThreadSession {
   // The request handlers in flight (`askOwner`). A close resolves them and waits for each:
   // none may write the root's status after the close has settled it.
   private readonly asking = new Set<Promise<unknown>>();
+  // The calls `read` has dispatched the start of and not the end of, and the requests waiting for
+  // a call's start (`askOwner`): the agent names a call in a request only once its start is on
+  // `events` (the seam's contract), so a request shows after the call's line.
+  private readonly callsInFlight = new Set<string>();
+  private readonly callWaiters = new Map<string, Array<() => void>>();
+  // The calls a request is open for, which the renderer draws `pending` (`askOwner`).
+  private readonly callsAsked = new Set<string>();
   // The starts a caller gave up (its signal aborted) with the process still launching, each as
   // the promise of its disconnect. `close` waits for them before `doneClosing`: the seam's
   // `start` takes no signal, so the process can only be closed once it is there.
@@ -2928,6 +2935,7 @@ export class ThreadSession {
   private async read(client: AgentSession, signal: AbortSignal): Promise<void> {
     let reason = texts.named(PROCESS_EXITED, this.names);
     const events = client.events[Symbol.asyncIterator]();
+    this.callsInFlight.clear();
     try {
       for (;;) {
         const next = await cancellable(events.next(), signal);
@@ -2944,6 +2952,7 @@ export class ThreadSession {
           // one event that fails to render must not end it all
           logger.error(`could not render a message in ${this.where}: ${errorName(error)}`);
         }
+        this.noteCall(event);
         // A task event or a turn's own end (through `dispatch`) may leave the session idle
         // again, or may end it: re-armed or cancelled here either way.
         this.idleTimerCheck();
@@ -2957,6 +2966,9 @@ export class ThreadSession {
       reason = errorName(error);
     }
     logger.error(`session reader stopped in ${this.where}: ${reason}`);
+    // A request still waiting for a call's start is denied below (`settleRequests`).
+    this.callsInFlight.clear();
+    this.callWaiters.clear();
     if (this.client === client) this.client = null;
     this.settleGoalDebt();
     try {
@@ -2991,6 +3003,31 @@ export class ThreadSession {
       // from outside this loop's own per-event check above, so it needs its own call.
       this.idleTimerCheck();
     }
+  }
+
+  /** Records a call's start or end `read` has dispatched, and lets the requests waiting for the start go on. */
+  private noteCall(event: SessionEvent): void {
+    if (event.type === "call_ended") this.callsInFlight.delete(event.callId);
+    if (event.type !== "call_started") return;
+    this.callsInFlight.add(event.callId);
+    for (const wake of this.callWaiters.get(event.callId) ?? []) wake();
+    this.callWaiters.delete(event.callId);
+  }
+
+  /** Resolves once `read` has dispatched the start of `callId`; `forget` drops the wait. */
+  private callStarted(callId: string): { promise: Promise<void>; forget: () => void } {
+    let wake: () => void = () => undefined;
+    const promise = new Promise<void>((resolve) => {
+      wake = resolve;
+    });
+    this.callWaiters.set(callId, [...(this.callWaiters.get(callId) ?? []), wake]);
+    // A request settled before the call's start takes its waiter back.
+    const forget = () => {
+      const left = (this.callWaiters.get(callId) ?? []).filter((one) => one !== wake);
+      if (left.length === 0) this.callWaiters.delete(callId);
+      else this.callWaiters.set(callId, left);
+    };
+    return { promise, forget };
   }
 
   /**
@@ -4719,6 +4756,7 @@ export class ThreadSession {
       (taskId) => this.starts.has(taskId) && !this.tasks.has(taskId),
       () => this.deps.clock.time(),
       (text) => this.deps.chat.escape(text, "reference"),
+      (callId) => this.callsAsked.has(callId),
     );
     this.replyOf.set(renderer, reply);
     return renderer;
@@ -5339,6 +5377,9 @@ export class ThreadSession {
     this.waiting.add(approvalId);
     this.idleTimerCheck(); // an open approval or question holds the session
     this.react("waiting");
+    const callId = request.callId;
+    // Synchronously with the check of `callsInFlight` below: a line drawn from here on is `pending`.
+    if (callId !== null) this.callsAsked.add(callId);
     // Set only when the agent's abort settled a request still open, so an abort after the answer
     // changes nothing.
     let givenUp = false;
@@ -5349,7 +5390,23 @@ export class ThreadSession {
     signal.addEventListener("abort", giveUp, { once: true });
     let messageId: MessageId;
     let decision: Decision;
+    // The reply the call's line is in, which marks it waiting and, once allowed, running.
+    let marked: TurnRenderer | null = null;
     try {
+      if (callId !== null) {
+        // The request comes after its call's line, never above it: the call's start is read first
+        // unless the request is settled without the owner (a close, the agent's abort).
+        if (!this.callsInFlight.has(callId)) {
+          const started = this.callStarted(callId);
+          await Promise.race([started.promise, pending.decision]);
+          started.forget();
+        }
+        if (pending.decided) return await pending.decision;
+        marked = this.active?.renderer ?? null;
+        await marked?.hold(callId).catch((error: unknown) => {
+          logger.error(`could not mark a call waiting in ${this.where}: ${errorName(error)}`);
+        });
+      }
       try {
         messageId = await this.thread.ask(
           approvalId,
@@ -5390,7 +5447,14 @@ export class ThreadSession {
         await this.deleteRequest(messageId); // decided while it was posted
       }
       decision = await pending.decision;
+      // The line runs from the owner's word, before the agent has it and runs the call.
+      if (callId !== null && "allow" in decision && decision.allow) {
+        await marked?.release(callId).catch((error: unknown) => {
+          logger.error(`could not mark a call running in ${this.where}: ${errorName(error)}`);
+        });
+      }
     } finally {
+      if (callId !== null) this.callsAsked.delete(callId);
       signal.removeEventListener("abort", giveUp);
       this.deps.approvals.discard(approvalId);
       this.waiting.delete(approvalId);

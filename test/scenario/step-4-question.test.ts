@@ -34,7 +34,11 @@ test("the agent asks a question with two options, the owner answers and the agen
       ],
     },
   ]);
-  assert.deepEqual(world.kinds(thread).at(-2), ["request", "Ask"]);
+  // The plain agent's `Ask` is no asker of its vocabulary, so its line is drawn: it waits, above the request.
+  assert.deepEqual(world.kinds(thread).slice(-2), [
+    ["reply", "Asking.\n[pending] Ask"],
+    ["request", "Ask"],
+  ]);
 
   const answer = { "Which colour?": "blue" };
   assert.equal(

@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
@@ -76,6 +76,21 @@ function hasToolUse(record: JsonObject): boolean {
   return (
     Array.isArray(content) && content.some((block) => (block as JsonObject).type === "tool_use")
   );
+}
+
+/** The id of the first `tool_use` of a recorded assistant message. */
+function toolUseId(record: JsonObject | undefined): string {
+  const message = record?.message as JsonObject;
+  const block = (message.content as JsonObject[]).find((one) => one.type === "tool_use");
+  return (block as JsonObject).id as string;
+}
+
+/** The id of the call the first `tool_use` of the recorded `tools` turn makes. */
+const FIRST_CALL_ID = toolUseId(TOOLS[FIRST_CALL]);
+
+/** Whether `events` holds the start of call `callId`. */
+function startedCall(events: readonly SessionEvent[], callId: string): boolean {
+  return events.some((event) => event.type === "call_started" && event.callId === callId);
 }
 
 /** A handler that records what it is asked and answers with `permission` and `question`. */
@@ -453,7 +468,7 @@ test("a permission request reaches the handler and an allow is passed on", LIMIT
     ask({
       toolName: "Bash",
       input: BASH,
-      toolUseID: "toolu_000",
+      toolUseID: FIRST_CALL_ID,
       description: "Print ok",
     }),
     ...TOOLS.slice(FIRST_CALL + 1),
@@ -464,7 +479,7 @@ test("a permission request reaches the handler and an allow is passed on", LIMIT
   assert.deepEqual(handler.asked, [
     {
       type: "permission",
-      callId: "toolu_000",
+      callId: FIRST_CALL_ID,
       toolName: "Bash",
       input: BASH,
       title: null,
@@ -476,6 +491,91 @@ test("a permission request reaches the handler and an allow is passed on", LIMIT
   // The turn went on after the answer: the call and the end are both there.
   assert.ok(types(seen).includes("call_started"));
   assert.equal(seen.at(-1)?.type, "turn_ended");
+});
+
+/** A transcript whose reads wait until a test lets them through: a record still in the chain. */
+class HeldTranscript extends Transcript {
+  readonly #gate: Promise<void>;
+  readonly open: () => void;
+
+  constructor(path: string, folder: string) {
+    super(async () => path, { project: folder });
+    let open: () => void = () => undefined;
+    this.#gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    this.open = open;
+  }
+
+  override async read(until: number | null): Promise<unknown[]> {
+    await this.#gate;
+    return super.read(until);
+  }
+}
+
+test(
+  "a request whose record is still in the chain waits for it and then names the call",
+  LIMIT,
+  async (t) => {
+    const { path } = await transcriptOf(t);
+    const transcript = new HeldTranscript(path, dirname(path));
+    const handler = handlerOf({ allow: true });
+    const batch: Batch = [
+      ...TOOLS.slice(0, FIRST_CALL + 1),
+      ask({ toolName: "Bash", input: BASH, toolUseID: FIRST_CALL_ID }),
+      ...TOOLS.slice(FIRST_CALL + 1),
+    ];
+    const { session, events } = await started(t, { turns: [batch] }, { transcript }, handler);
+    const taken: SessionEvent[] = [];
+    const reading = (async () => {
+      for (let next = await events.next(); !next.done; next = await events.next()) {
+        taken.push(next.value);
+      }
+    })();
+    await session.send(PROMPT);
+    for (let turn = 0; turn < 20; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+
+    // The call's record is held behind the transcript read: the owner is not asked about it yet.
+    // A failure here must not leave the chain held, or the session's close would wait for it.
+    try {
+      assert.equal(handler.asked.length, 0, "the request was handed on before its call's record");
+      assert.equal(taken.filter((event) => event.type === "call_started").length, 0);
+    } finally {
+      transcript.open();
+    }
+    for (let turn = 0; turn < 200 && handler.asked.length === 0; turn += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(handler.asked.length, 1);
+    assert.equal(handler.asked[0]?.callId, FIRST_CALL_ID);
+    assert.ok(
+      startedCall(taken, FIRST_CALL_ID),
+      "the call's start was on the events when the request was handed on",
+    );
+    await session.close();
+    await reading;
+  },
+);
+
+test("a toolUseID no record named is a request for no call", LIMIT, async (t) => {
+  const handler = handlerOf({ allow: true });
+  const batch: Batch = [
+    ...TOOLS.slice(0, FIRST_CALL + 1),
+    ask({ toolName: "Bash", input: BASH, toolUseID: "toolu_no_record_named_it" }),
+    ...TOOLS.slice(FIRST_CALL + 1),
+  ];
+  const { session, query, events } = await started(t, { turns: [batch] }, {}, handler);
+  await session.send(PROMPT);
+  const seen = await until(events, "turn_ended");
+  assert.equal(handler.asked.length, 1);
+  assert.equal(handler.asked[0]?.callId, null);
+  // The owner is still asked and the answer still goes back.
+  assert.deepEqual(query.permissionResults, [{ behavior: "allow", updatedInput: BASH }]);
+  assert.ok(
+    !seen.some(
+      (event) => event.type === "call_started" && event.callId === "toolu_no_record_named_it",
+    ),
+  );
 });
 
 // Invariant 2: the project owns no permission rule, so no tool is answered without the owner.
@@ -560,8 +660,8 @@ test(
       {
         turns: [
           [
-            ...TOOLS.slice(0, 2),
-            ask({ toolName: "AskUserQuestion", input, toolUseID: "toolu_001" }),
+            ...TOOLS.slice(0, FIRST_CALL + 1),
+            ask({ toolName: "AskUserQuestion", input, toolUseID: FIRST_CALL_ID }),
             ...TOOLS.slice(-1),
           ],
         ],
@@ -573,7 +673,7 @@ test(
     await until(events, "turn_ended");
     const [request] = handler.asked;
     assert.equal(request?.type, "question");
-    assert.equal(request?.callId, "toolu_001");
+    assert.equal(request?.callId, FIRST_CALL_ID);
     assert.deepEqual(query.permissionResults, [
       { behavior: "allow", updatedInput: { questions: input.questions, answers } },
     ]);

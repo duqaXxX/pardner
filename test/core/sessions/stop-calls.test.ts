@@ -82,7 +82,7 @@ for (const where of ["finish", "reactDoneIfIdle"] as const) {
   test(`/stop at a turn boundary (a slow ${where}): the next turn's call reads as stopped`, async (t) => {
     const agent = new PlainAgent({ promptDuringTurn: true });
     const world = await AskingWorld.make(t, { agent });
-    const { ref, session } = world.thread();
+    const { session } = world.thread();
     agent.next(say("a"));
     agent.next(call("Shell", { command: "ls" }, { permission: true }));
     let open!: () => void;
@@ -111,7 +111,12 @@ for (const where of ["finish", "reactDoneIfIdle"] as const) {
     await session.submit("first");
     await until("the first turn is in its slow end", () => inGate);
     await session.submit("second");
-    await world.asked(ref, "permission");
+    // The agent's second turn asks while the first turn's end is slow. The core shows a request
+    // only after it has read its call's start, which waits behind that end: the stop lands first,
+    // with the request open and not yet posted.
+    const [plain] = agent.sessions;
+    await until("the second turn asked", () => plain?.prompts.length === 2);
+    await settledTurn();
     assert.equal(await session.stop(), true);
     open();
     await until("idle", () => !session.busy);
@@ -180,7 +185,7 @@ test("/terminal ending the process draws a running task as it did, complete and 
 test("/stop while a report turn is in its slow end: the next prompt's call reads as stopped", async (t) => {
   const agent = new Background();
   const world = await AskingWorld.make(t, { agent });
-  const { ref, session } = world.thread();
+  const { session } = world.thread();
   agent.next(say("Started."), hold());
   await session.submit("watch it");
   await until("the turn runs", () => agent.sessions[0]?.holding === true);
@@ -244,7 +249,10 @@ test("/stop while a report turn is in its slow end: the next prompt's call reads
   await until("the report turn is in its slow end", () => inGate);
   agent.next(call("Shell", { command: "ls" }, { permission: true }));
   await session.submit("second");
-  await world.asked(ref, "permission");
+  // The core shows the request after it has read its call's start, which waits behind the slow
+  // end: the stop lands first, with the request open and not yet posted.
+  await until("the second prompt is sent", () => agent.sessions[0]?.prompts.length === 2);
+  await settledTurn();
   assert.equal(await session.stop(), true);
   open();
   await until("idle", () => !session.busy);
@@ -255,7 +263,7 @@ test("/stop while a report turn is in its slow end: the next prompt's call reads
 test("/stop while a turn's own end is being written: the next prompt's call reads as stopped", async (t) => {
   const agent = new PlainAgent({ promptDuringTurn: true });
   const world = await AskingWorld.make(t, { agent });
-  const { ref, session } = world.thread();
+  const { session } = world.thread();
   agent.next(say("a"));
   agent.next(call("Shell", { command: "ls" }, { permission: true }));
   let open!: () => void;
@@ -281,7 +289,10 @@ test("/stop while a turn's own end is being written: the next prompt's call read
   await session.submit("first");
   await until("the turn's end is being written", () => inGate);
   await session.submit("second");
-  await world.asked(ref, "permission");
+  // The core shows the request after it has read its call's start, which waits behind the slow
+  // end: the stop lands first, with the request open and not yet posted.
+  await until("the second prompt is sent", () => agent.sessions[0]?.prompts.length === 2);
+  await settledTurn();
   assert.equal(await session.stop(), true);
   open();
   await until("idle", () => !session.busy);

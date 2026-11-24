@@ -238,6 +238,10 @@ export class TurnRenderer {
   readonly #now: () => number;
   /** Text the agent passed on from elsewhere, made to show as written in the reply's Markdown. */
   readonly #asWritten: (text: string) => string;
+  /** Whether a request is open for the call: its line starts `pending`. */
+  readonly #asked: (callId: string) => boolean;
+  /** The calls the terminal times (their line carries `startedAt` when they run). */
+  readonly #clocked = new Set<string>();
   // Calls that continue an agent that has ended: a line of words and no card, kept by id so that a
   // call that fails can still draw the card that says why.
   readonly #resumed = new Map<string, TaskUpdate>();
@@ -253,6 +257,7 @@ export class TurnRenderer {
     endedBefore: (taskId: string) => boolean = () => false,
     now: () => number = () => monotonicClock.time(),
     asWritten: (text: string) => string = (text) => text,
+    asked: (callId: string) => boolean = () => false,
   ) {
     this.#sink = sink;
     this.#names = names;
@@ -264,6 +269,7 @@ export class TurnRenderer {
     this.#endedBefore = endedBefore;
     this.#now = now;
     this.#asWritten = asWritten;
+    this.#asked = asked;
   }
 
   /** One event of the session into the reply. An event that shows nothing is left out. */
@@ -740,8 +746,45 @@ export class TurnRenderer {
       );
       this.#afterText = false;
     } else {
-      await this.#set(line(event.callId, title, "in_progress", this.#timed(event)));
+      const timed = this.#timed(event);
+      if (timed.startedAt !== undefined) this.#clocked.add(event.callId);
+      // A call that asks the owner first waits: no timer until it runs (`release`).
+      if (this.#asked(event.callId)) {
+        await this.#set(line(event.callId, title, "pending", { ...timed, startedAt: null }));
+      } else {
+        await this.#set(line(event.callId, title, "in_progress", timed));
+      }
     }
+  }
+
+  /**
+   * A request for the call is about to be shown: its line, when drawn and running, waits. A line
+   * not drawn (held, a subagent's, another reply's) is left alone. No `await` comes between the
+   * status read and the sink's write, so `close` sees the line before or after both.
+   */
+  hold(callId: string): Promise<void> {
+    const entry = this.#lines.get(callId);
+    if (entry === undefined || !this.#drawn.has(callId) || entry.task) return Promise.resolve();
+    if (entry.status !== "in_progress") return Promise.resolve();
+    const waiting = { ...entry, status: "pending" as const, startedAt: null };
+    this.#lines.set(callId, waiting);
+    return this.#sink.task(waiting);
+  }
+
+  /**
+   * The owner allowed the call: its line runs, with the timer started now when the terminal times
+   * the call. Written before the agent has the decision, so the call's end comes after it.
+   */
+  release(callId: string): Promise<void> {
+    const entry = this.#lines.get(callId);
+    if (entry === undefined || entry.status !== "pending") return Promise.resolve();
+    const running = {
+      ...entry,
+      status: "in_progress" as const,
+      startedAt: this.#clocked.has(callId) ? this.#now() : null,
+    };
+    this.#lines.set(callId, running);
+    return this.#sink.task(running);
   }
 
   /**

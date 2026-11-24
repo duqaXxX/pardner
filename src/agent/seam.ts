@@ -943,6 +943,7 @@ export type SessionEventType = SessionEvent["type"];
 
 export interface PermissionRequest {
   readonly type: "permission";
+  /** The call that waits, null when none is named (see `RequestHandler`). */
   readonly callId: string | null;
   readonly toolName: string;
   readonly input: Readonly<Record<string, unknown>>;
@@ -1002,6 +1003,11 @@ export type QuestionAnswer =
  * takes the request back from the owner and the promise resolves as refused, like a request
  * still waiting when the session closes. A signal already aborted when the request arrives
  * shows the owner nothing.
+ *
+ * A request names a call (`callId`) only once that call's `call_started` is on `events` and while
+ * its `call_ended` is not; the core waits for the start before it shows the request. A back end
+ * that cannot say so passes `callId` null, and the core shows the request at once and marks
+ * nothing.
  */
 export interface RequestHandler {
   permission(request: PermissionRequest, signal: AbortSignal): Promise<PermissionAnswer>;

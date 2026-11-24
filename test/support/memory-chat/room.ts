@@ -312,6 +312,12 @@ export class Room {
   /** The thread chat has no `share`: set before the chat is built. */
   noShare = false;
   /**
+   * How many turns of the event loop a reply's `text` and `task` take to resolve once they have
+   * recorded: a chat whose writes lag behind the agent, as a relay outbox does. The write is
+   * stored when the call is made, as the relay's is; only the answer to the caller waits.
+   */
+  writeDelay = 0;
+  /**
    * Seconds of the clock each end of a reply costs, one after the other (`closeOut`), as the
    * limiter of a chat that rations its writes makes a shutdown of many replies take long; 0 for none.
    */
@@ -527,6 +533,13 @@ export class Room {
     const start = Math.max(clock.time(), this.#paceTail);
     this.#paceTail = start + this.pace;
     await clock.sleep(this.#paceTail - clock.time());
+  }
+
+  /** Waits `writeDelay` turns of the event loop; returns at once when it is 0. */
+  async lag(): Promise<void> {
+    for (let turn = 0; turn < this.writeDelay; turn += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
   }
 
   /** Keeps a call the core made, for `calls`. */

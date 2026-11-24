@@ -71,13 +71,19 @@ function questionsOf(input: Input): Question[] | null {
   return questions;
 }
 
-/** One call of the permission callback as the request the core shows. */
+/**
+ * One call of the permission callback as the request the core shows. The request names its call
+ * only when `started` says the translator has emitted that call's start (the seam's contract of
+ * `RequestHandler`): the core waits for a named call's start before it shows the request.
+ */
 export function toRequest(
   toolName: string,
   input: Input,
   context: CallContext,
+  started: (callId: string) => boolean,
 ): PermissionRequest | QuestionRequest {
-  const callId = words(context.toolUseID);
+  const named = words(context.toolUseID);
+  const callId = named !== null && started(named) ? named : null;
   const questions = toolName === QUESTION_TOOL ? questionsOf(input) : null;
   if (questions !== null) {
     return {
