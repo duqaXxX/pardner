@@ -645,7 +645,7 @@ test("a turn with no replay and no notification waiting is the prompt s", async 
   assert.deepEqual(misrouted(warnings), []);
   // The memory chat draws a reply's task line and the list of what still runs in its text.
   assert.deepEqual(h.bodies(), [
-    "[complete] Sleep for 20 seconds in background\n**Bash**(Sleep for 20 seconds in background)\n⎿ Running in background\n\nSTARTED",
+    "[in_progress] Sleep for 20 seconds in background\nSTARTED",
     "PINEAPPLE\n1 shell still running\n- Sleep for 20 seconds in background",
   ]);
 });

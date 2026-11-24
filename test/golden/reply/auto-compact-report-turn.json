@@ -6,6 +6,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -23,6 +24,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -40,6 +42,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -57,6 +60,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -74,6 +78,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -91,6 +96,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -108,6 +114,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ sleep 25; echo ledger-done",
       "folded": null,
@@ -123,37 +130,48 @@
      }
     },
     {
-     "call": "text",
-     "ending": false,
-     "markdown": "\n\n**Bash**(sleep 25; echo ledger-done)\n⎿ Running in background",
-     "notice": true
-    },
-    {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
-      "details": "$ sleep 25; echo ledger-done",
+      "details": "Running in background",
       "folded": null,
       "id": "toolu_01S4Zo6WwvXe5mEVGuBqBXoL",
       "message": false,
       "name": "Bash",
-      "output": "Command running in background with ID: bc6460gsr. Output is being written to: /private/tmp/claude-502/-home-dev-project/650a01ad-87f1-4c26-96c5-b466225aea58/tasks/bc6460gsr.output. You will be notifi…",
+      "output": null,
       "preview": null,
       "startedAt": 0,
-      "status": "complete",
-      "task": false,
+      "status": "in_progress",
+      "task": true,
       "title": "Bash: sleep 25; echo ledger-done"
      }
     },
     {
      "call": "text",
      "ending": false,
-     "markdown": "\n\nstarted",
+     "markdown": "started",
      "notice": false
     },
     {
      "call": "finish",
-     "closing": []
+     "closing": [
+      {
+       "agent": null,
+       "calls": 0,
+       "details": "Running in background",
+       "folded": null,
+       "id": "toolu_01S4Zo6WwvXe5mEVGuBqBXoL",
+       "message": false,
+       "name": "Bash",
+       "output": null,
+       "preview": null,
+       "startedAt": 0,
+       "status": "in_progress",
+       "task": true,
+       "title": "Bash: sleep 25; echo ledger-done"
+      }
+     ]
     },
     {
      "call": "close_out"
@@ -169,6 +187,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -186,6 +205,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -209,6 +229,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -226,6 +247,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -347,6 +369,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -364,6 +387,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -381,6 +405,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -398,6 +423,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -415,6 +441,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -432,6 +459,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -449,6 +477,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ sleep 25; echo ledger-done",
      "folded": null,
@@ -464,33 +493,64 @@
     }
    },
    {
-    "call": "text",
-    "ending": false,
-    "markdown": "\n\n**Bash**(sleep 25; echo ledger-done)\n⎿ Running in background",
-    "notice": true
-   },
-   {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
-     "details": "$ sleep 25; echo ledger-done",
+     "details": "Running in background",
      "folded": null,
      "id": "toolu_01S4Zo6WwvXe5mEVGuBqBXoL",
      "message": false,
      "name": "Bash",
-     "output": "Command running in background with ID: bc6460gsr. Output is being written to: /private/tmp/claude-502/-home-dev-project/650a01ad-87f1-4c26-96c5-b466225aea58/tasks/bc6460gsr.output. You will be notifi…",
+     "output": null,
      "preview": null,
      "startedAt": 0,
-     "status": "complete",
-     "task": false,
+     "status": "in_progress",
+     "task": true,
      "title": "Bash: sleep 25; echo ledger-done"
     }
    },
    {
     "call": "text",
     "ending": false,
-    "markdown": "\n\nstarted",
+    "markdown": "started",
     "notice": false
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01S4Zo6WwvXe5mEVGuBqBXoL",
+     "message": false,
+     "name": "Bash",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Bash: sleep 25; echo ledger-done"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01S4Zo6WwvXe5mEVGuBqBXoL",
+     "message": false,
+     "name": "Bash",
+     "output": "Background command \"sleep 25; echo ledger-done\" completed (exit code 0)",
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Bash: sleep 25; echo ledger-done"
+    }
    },
    {
     "call": "text",
@@ -501,6 +561,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -518,6 +579,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,

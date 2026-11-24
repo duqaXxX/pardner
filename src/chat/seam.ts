@@ -81,6 +81,11 @@ export interface TaskUpdate {
    * a chat shows whatever the status, as it keeps a call's result to itself.
    */
   readonly message: boolean;
+  /**
+   * The task an agent of the session was given (its description), when this line is that agent's
+   * work or its reply; null on any other line. A chat draws an agent's line by it, never by a tool's name.
+   */
+  readonly agent: string | null;
   /** Calls made inside it (a subagent's), counted in its title. */
   readonly calls: number;
   readonly preview: Preview | null;
@@ -93,7 +98,7 @@ export interface TaskUpdate {
   readonly folded: string | null;
   /**
    * When a call the terminal times began (a shell command), in seconds on the clock the chat is
-   * built with as `ChatContext.steady`; null for every other call and for a task's line. A chat
+   * built with as `ChatContext.steady`; null for every other call. A task's line that a call launched keeps the call's start. A chat
    * that shows how long the call has run reads it against that clock, and may ignore it.
    */
   readonly startedAt: number | null;

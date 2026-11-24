@@ -91,8 +91,9 @@ export function promptOf(turn: Turn): PromptContent {
 }
 
 // A report opens with Claude Code's notification summary (recorded: `Background command "..."
-// completed (exit code 0)`, `Agent "..." finished`), never with a tool line.
-export const REPORT = /^[✓✗] (Background command|Agent) "/m;
+// completed (exit code 0)`, `Agent "..." finished`), never with a tool line. An agent's end with a
+// card is the card alone, where it ended.
+export const REPORT = /^(?:[✓✗] (?:Background command|Agent) "|\[complete\] Message from )/m;
 
 /** A reply of Claude Code's own turn about a background task (not the owner's). */
 export function isReport(reply: string): boolean {

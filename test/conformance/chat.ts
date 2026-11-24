@@ -354,6 +354,7 @@ function line(id: string, title: string, status: TaskUpdate["status"]): TaskUpda
     name: "Read",
     task: false,
     message: false,
+    agent: null,
     calls: 0,
     preview: null,
     folded: null,

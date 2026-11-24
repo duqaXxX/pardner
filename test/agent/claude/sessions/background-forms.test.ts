@@ -24,8 +24,6 @@ import {
 } from "../../../support/sessions.ts";
 
 const NAME = "background-forms";
-const LAUNCHED =
-  "**3 background tasks launched**\n├ ticks\n├ Sleep 12 seconds then print done\n└ Run sleep 20 and reply ok";
 const STARTED =
   'The Monitor reported "tick one"; I\'m waiting for "tick two" before stopping it with TaskStop.';
 const MONITOR_SAID =
@@ -34,7 +32,6 @@ const SHELL_ENDED =
   '✓ Background command "Sleep 12 seconds then print done" completed (exit code 0)';
 const SHELL_SAID =
   "I was told the background `sleep 12; echo done` command finished with exit code 0.";
-const AGENT_ENDED = '✓ Agent "Run sleep 20 and reply ok" finished';
 const AGENT_SAID = 'I was told the subagent that ran `sleep 20` finished and replied "ok".';
 
 /** A reply without the memory chat's own lines: the `[complete]` calls and the footer. */
@@ -85,15 +82,11 @@ test("a Monitor, a command and an agent in the background read in one form", asy
   // message: the memory chat's own lines (`[complete]` calls, the footer) are left out, and
   // a chat's layout (the cards, the ending posted below) is that chat's drawing.
   assert.deepEqual(h.bodies().map(plain), [
-    // One launch line for the three, whatever their kind, under the run of the calls. The
-    // Monitor's line is in no record: the turn it opens has no line to say what woke it, and its
-    // stop is the end line of any task in the background (the TaskStop call before it is a
-    // left-out line, so only a newline parts it from the first words).
-    [
-      `${LAUNCHED}\n\n${STARTED}\n✓ ticks\n\n${MONITOR_SAID}`,
-      `${SHELL_ENDED}\n\n${SHELL_SAID}`,
-      `${AGENT_ENDED} · 23s\n${AGENT_SAID}`,
-    ].join("\n\n"),
+    // Each of the three has a line of its own, a left-out line here, and no text. The Monitor's
+    // line is in no record: the turn it opens has no line to say what woke it, and its stop
+    // closes its line (the TaskStop call before it is a left-out line, so only a newline parts
+    // it from the first words).
+    [`${STARTED}\n${MONITOR_SAID}`, `${SHELL_ENDED}\n\n${SHELL_SAID}\n${AGENT_SAID}`].join("\n\n"),
   ]);
   // The form adds no reply: one for the owner's turn.
   assert.equal(h.room.written(h.channel).filter((m) => m.kind === "reply").length, 1);

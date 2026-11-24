@@ -66,6 +66,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -120,6 +121,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -137,6 +139,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -190,6 +193,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -243,6 +247,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -303,6 +308,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -407,6 +413,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -461,6 +468,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -478,6 +486,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -531,6 +540,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -584,6 +594,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -644,6 +655,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,

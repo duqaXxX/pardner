@@ -10,6 +10,8 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { TaskUpdate } from "../../../../src/chat/seam.ts";
+import { STOPPED } from "../../../../src/core/reply/words.ts";
 import { INJECTED_TURN_WAIT } from "../../../../src/core/sessions/constants.ts";
 import * as texts from "../../../../src/core/texts.ts";
 import { AsyncEvent } from "../../../support/fake-clock.ts";
@@ -452,4 +454,36 @@ test("a model switch while the turn-end read is on its way voids it", async (t) 
   await session.stop();
   await h.idle();
   assert.doesNotMatch(stopFooter(h), /5% context/);
+});
+
+/** The cards of the chat, each as `[status] title`, in the order written. */
+function cardLines(h: Harness): string[] {
+  return shown(h).flatMap((text) => text.split("\n").filter((line) => /^\[[a-z_]+\] /.test(line)));
+}
+
+test("a move to the terminal during a turn ends the background work of the replies before it", async (t) => {
+  const first = launching("session-state-agent");
+  const second = sdkMessages("tools").slice(0, -1);
+  const h = memoryHarnessFor(t, {}, { rootStatus: true })({ turns: [first, second] });
+  const session = h.session();
+  await (await session.submit("launch it")).done.wait();
+  await h.until(() => session.stillRunning !== "");
+  const agent = cardLines(h).find((line) => line.includes("Agent"));
+  assert.ok(agent?.startsWith("[in_progress]"), `the agent runs: ${agent}`);
+  await session.submit("go on");
+  await h.until(() => session.busy && h.clients[0] !== undefined);
+  assert.equal(await session.moveToTerminal(), "cut");
+  await h.idle();
+  assert.equal(session.stillRunning, "", "no task is left running");
+  assert.equal(session.runningKinds, "");
+  // Closed `Stopped`, not ended on its own: `complete` alone holds for both.
+  const closed = h.room
+    .calls("task")
+    .map((call) => call.args[0] as TaskUpdate)
+    .filter((update) => update.title.includes("Agent"))
+    .at(-1);
+  assert.equal(closed?.status, "complete");
+  assert.equal(closed?.output, STOPPED);
+  assert.ok(shown(h).join("\n").includes(texts.MOVED_TO_TERMINAL));
+  assert.equal(rootStatuses(h).at(-1), "done");
 });

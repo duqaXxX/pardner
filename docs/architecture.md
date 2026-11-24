@@ -834,9 +834,9 @@ left unfinished does not hide the next turn's text.
 | none | a top-level text block in an `assistant` record whose message id a `message_start` announced | nothing more: the same text already arrived as deltas |
 | `text` | the same in a top-level `assistant` record whose message id no `message_start` announced; a subagent's gives none | the text, where it arrives, a paragraph apart from text before it (note 1) |
 | `call_started` with no parent call | a `tool_use` or `server_tool_use` block | a new tool line, in progress, titled `Name: first string argument`, or with its description for a command (`Previews.described`), as the terminal titles its line. A command's line also carries `$ <command>` as its `details` (`Previews.commandLine`) and when it started (`TaskUpdate.startedAt`), for a chat that shows its seconds. A call of a tool that starts an agent is held until its task starts, and a message that continues an agent that has ended is no line (note 2) |
-| the same with `parentCallId` set, from the record's `parent_tool_use_id` (a subagent, or a skill run in a forked context) | the same blocks | the parent's line counts the subagent's calls and holds its latest ones; nothing under the call of a subagent in the background (note 2) |
+| the same with `parentCallId` set, from the record's `parent_tool_use_id` (a subagent, or a skill run in a forked context) | the same blocks | the parent's line counts the subagent's calls and holds its latest ones; for a subagent in the background the line only counts them, its steps are not shown while it works (note 2) |
 | `call_ended` for a line | a `tool_result` or `advisor_tool_result` block; `model` is `resolvedModel` of the Agent call's `tool_use_result` when it differs from the main thread's last `message.model` | the line completes, or shows an error with the output's first line when `isError`; a line whose task already ended as stopped keeps `Stopped` |
-| `task_started` | a `system` record of subtype `task_started`; `agentType` is its `subagent_type`, `background` its `is_backgrounded` | for a tool call, nothing yet; a task's line once the call's result arrives with the task still running (note 3). For a subagent in the background, its launch line as text and no line (note 2) |
+| `task_started` | a `system` record of subtype `task_started`; `agentType` is its `subagent_type`, `background` its `is_backgrounded` | for a tool call, nothing yet; a task's line once the call's result arrives with the task still running (note 3). For a task in the background, its call's line becomes the task's, `Running in background`, and for an agent it carries `agent`, the task the agent was given (note 2) |
 | `task_progress` | subtype `task_progress` | the line shows the task's description |
 | `task_ended`, a terminal `task_updated` | subtype `task_notification`; subtype `task_updated` whose patch names the status `completed`, `failed`, `stopped` or `killed` | the line completes, shows an error when the task failed, or completes with `Stopped`. The status is a `TaskOutcome` of the seam (`completed`, `failed`, `stopped`, `killed`); the Claude translator maps any other word of a notification to `completed` |
 | `agent_error` with `parentCallId` set | an `assistant` record that carries `error` | nothing in the reply's text; its words become a nested line of the call's card, when the call has one (note 4) |
@@ -858,39 +858,41 @@ Notes on the table:
 2. A call of a tool that starts an agent (`ToolVocabulary.launchers`) is kept from the sink until its
    task starts, since a stream cannot take back a card. A task that starts in the background
    (`background` true: every subagent Claude Code starts with fork mode on, a command or a
-   Monitor left running, a task of any other kind) is written in one form whatever its kind, two
-   lines of text and no card: its name in bold and its description, then
-   `⎿ Running in background` (`Previews.launched`, `texts.TASK_LAUNCHED`). The two lines are the ones the
-   terminal writes for a subagent (captured on Claude Code 2.1.296), with words under the name
-   that fit every task. The name is the agent's type when it names one
-   (`**mechanical**(Background sleeper)`; the type `general-purpose` reads `Agent`), else the
-   name of the call that started the task (`**Monitor**(ticks)`). A held call is that line alone;
-   any other call stays a call, counted in its run. The tasks one message starts share one line,
-   `3 background tasks launched` with what each does under it (`Previews.launchedTogether`): the
-   line is written when the message has ended and every held call of it has said how its agent
-   runs, below the cards of the message's calls and before anything else the reply writes. A
-   task that starts again under another call (a subagent a message continues) writes no second
+   Monitor left running, a task of any other kind) keeps its call's line, which becomes the
+   task's: `task` true and `details` `Running in background`, one line under the call as the terminal
+   draws it (captured on Claude Code 2.1.296). A held call is written at that moment, with
+   `agent` set to the task the agent was given (`TaskUpdate.agent`, set whenever the task is a
+   `subagent`, on the line and on the card of its reply) and with the call's start as
+   `startedAt`; the call's result, which comes after, adds the model to the title
+   (`Agent: review · Haiku`) and sets no output, since it names a path of the bot's machine. A
+   command's call is written as any call and becomes the task's line at its result. Each task has
+   its line, as the terminal draws a line per call. A task's end closes its line in place
+   (`terminalStatus`, its summary as `output`). A subagent that ends while a task of its own still
+   runs is not done: neither of its end events reaches its line, which stays running with its
+   record in the session, and the session writes `Agent "<description>" is waiting on its own
+   background work` where the conversation is; its final end closes the line. A subagent's report
+   is a card, `message` true and `agent` set, written when its end comes whether or not the reply
+   shows the task on a line, and the session writes no end text for a task whose card it writes.
+   A task that starts again under another call (a subagent a message continues) writes no second
    line when the reply saw it start before, or the session did, which counts each task's starts
    past its end: a resumed task keeps its id, and nothing else says it is one. A message to an
    agent whose task has ended (`Previews.continued`, `SendMessage` naming the task in `to`) draws
    no line at all: the reply writes `⎿ Resuming agent <id>` as a line about the work
    (`previews.resuming`), as the terminal does (captured on Claude Code 2.1.301), and the task that
-   starts again under it gets no card and no launch line; such a message that fails shows its
+   starts again under it gets no card and no line; such a message that fails shows its
    error as any failed call. A message to an agent still running, or one the session never saw
-   start (after a restart), keeps its card. Nothing under a held call writes
-   a line from then on, and the task stays one of the reply's running tasks. A subagent the call waits
+   start (after a restart), keeps its card. A subagent the call waits
    for (a skill run in a fork) gets its card when its task starts: the count reads
    `Skill: review · 12 calls`, the line holds its latest calls (`renderer.CHILD_LINES`) as the
    card's `details`, and it keeps a card of its own once it ends. A call that ends with no task
    shows as any other call. A task in the background whose call the reply does not hold (a
-   subagent that starts again after that reply ended, a task a subagent started) gets no card and
-   no launch line.
+   subagent that starts again after that reply ended, a task a subagent started) gets no line.
 3. Claude Code starts a task for a long command in the foreground too, which ends before the call's
    result. When the call's result arrives with its task still running, a command's call ends as
-   any other and is counted in its run: the command goes on with no line, as the terminal draws
-   none for it (`TurnRenderer.lineless`), and its end is the session's end line. For any other
-   kind of task the line becomes a task's line, notes "Running in background" on its nested line
-   and stays in progress. A task started by a
+   any other and is counted in its run: the command goes on with no line of its own
+   (`TurnRenderer.lineless`), and its end is the session's end line. For any other kind of task
+   the line becomes a task's line, notes "Running in background" on its nested line and stays in
+   progress. A task started by a
    call inside another call (a long command a subagent runs) is held aside while that call is open:
    it gets no line and the session does not track it. If it ends before the call's result, it was
    the subagent's foreground work and stays off the reply; if it is still running at the call's

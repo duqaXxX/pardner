@@ -18,7 +18,7 @@ import {
   splitBackground,
 } from "./helpers.ts";
 
-const AGENT_REPORT = /^✓ Agent "/m;
+const AGENT_REPORT = /^\[complete\] Message from /m;
 const COMMAND_REPORT = /^✓ Background command "/m;
 
 test("two reports for tasks of earlier replies render into the last reply, at rest", async (t) => {

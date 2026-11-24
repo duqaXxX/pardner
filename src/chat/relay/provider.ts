@@ -27,7 +27,7 @@ import {
 import { type Clock, realClock } from "./connection.ts";
 import { fromHex, referenceOf, toHex } from "./hex.ts";
 import { type Inbound, questionsOf } from "./inbound.ts";
-import { fitLine, type Line } from "./line.ts";
+import { fitLine, type Line, REQUEST_ROOM } from "./line.ts";
 import type { Outbox } from "./outbox.ts";
 
 const CAPABILITIES: ChatCapabilities = {
@@ -49,9 +49,6 @@ const CAPABILITIES: ChatCapabilities = {
   commandSuggestions: false,
   loopCard: false,
 };
-
-/** What a request's body may hold: the frame (1 MiB, PD 6.7) less room for the header, the signature and the seal. */
-const REQUEST_ROOM = 1_048_576 - 4096;
 
 /** The request as the app needs it: the core's id and the agent's call id stay on the bot (store the minimum). */
 const shown = (request: OwnerRequest) =>
@@ -244,17 +241,20 @@ export class RelayProvider implements ChatProvider {
       const frame = first ? { thread: ref.thread, say: "task" } : { thread: ref.thread };
       const content = fitLine(frame, lineOf(u), REQUEST_ROOM);
       if (content === undefined) return;
+      // Before the text is queued, which can be read back at once: the bot closes no line this process wrote.
+      if (first) inbound.mine.add(toHex(name));
       const draft = first
         ? { kind: 1, re: reference, name, content }
         : { kind: 11, re: { device: me, name }, content };
       return outbox.queue(fromHex(ref.channel), draft).catch(() => false);
     };
     const writing = () => !!reference && !finished && !inbound.closed(reference);
-    // A line's edit follows when its status, output or preview changed; at the turn's end, when any field did.
+    // A line's edit follows when its status, task, output or preview changed; at the turn's end, when any field did.
     const changed = (a: TaskUpdate, b: TaskUpdate, any: boolean) =>
       any
         ? JSON.stringify(a) !== JSON.stringify(b)
         : a.status !== b.status ||
+          a.task !== b.task ||
           a.output !== b.output ||
           JSON.stringify(a.preview) !== JSON.stringify(b.preview);
     const update = async (u: TaskUpdate, closing: boolean) => {
@@ -368,12 +368,12 @@ export class RelayProvider implements ChatProvider {
       task: (u) =>
         enqueue(async () => {
           await flush();
-          if (writing()) await update(u, false);
+          await update(u, false);
         }),
       finish: (closing, signal) =>
         enqueue(async () => {
           await flush();
-          if (writing()) for (const u of closing) if (!signal?.aborted) await update(u, true);
+          for (const u of closing) if (!signal?.aborted) await update(u, true);
           finished = true;
         }),
       rest() {},

@@ -73,9 +73,6 @@ export const TOOLS: ToolVocabulary = Object.freeze({
   // A command that exits with an error was seen counted in `ran 4 shell commands` (captured on
   // Claude Code 2.1.296, 2026-10-13). No other tool's failure was captured.
   failsCounted: Object.freeze(["Bash"]),
-  // The terminal does not name this type in an agent's launch line: it reads `Agent(...)`, the
-  // call's name, as for no type.
-  plainAgentType: "general-purpose",
   // A command's running line reads its description (`Sleeping 20 seconds then printing
   // marker`), with the command itself under it.
   described: Object.freeze({ Bash: "description" }),

@@ -20,8 +20,14 @@ function recorder(): [TurnRenderer, string[]] {
 test("two subagents that end together each have their card under their own line", async () => {
   const [renderer, written] = recorder();
   const ends: EndLine[] = [
-    { text: '✓ Agent "a" finished', card: { id: "message-1", title: "Message from a", body: "A" } },
-    { text: '✓ Agent "b" finished', card: { id: "message-2", title: "Message from b", body: "B" } },
+    {
+      text: '✓ Agent "a" finished',
+      card: { id: "message-1", agent: "a", title: "Message from a", body: "A" },
+    },
+    {
+      text: '✓ Agent "b" finished',
+      card: { id: "message-2", agent: "b", title: "Message from b", body: "B" },
+    },
     { text: '✓ Background command "c" completed (exit code 0)', card: null },
   ];
   await writeEnds(renderer, ends, async (text) => {

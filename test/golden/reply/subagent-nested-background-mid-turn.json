@@ -40,15 +40,45 @@
      "notice": false
     },
     {
-     "call": "text",
-     "ending": false,
-     "markdown": "\n\n**Agent**(Run background sleep command)\n⎿ Running in background",
-     "notice": true
+     "call": "task",
+     "update": {
+      "agent": "Run background sleep command",
+      "calls": 0,
+      "details": "Running in background",
+      "folded": null,
+      "id": "toolu_01GnFbhWKZz1fvAwE1B5xJx8",
+      "message": false,
+      "name": "Agent",
+      "output": null,
+      "preview": null,
+      "startedAt": 0,
+      "status": "in_progress",
+      "task": true,
+      "title": "Agent: Run background sleep command"
+     }
+    },
+    {
+     "call": "task",
+     "update": {
+      "agent": "Run background sleep command",
+      "calls": 0,
+      "details": "Running in background",
+      "folded": null,
+      "id": "toolu_01GnFbhWKZz1fvAwE1B5xJx8",
+      "message": false,
+      "name": "Agent",
+      "output": null,
+      "preview": null,
+      "startedAt": 0,
+      "status": "in_progress",
+      "task": true,
+      "title": "Agent: Run background sleep command"
+     }
     },
     {
      "call": "text",
      "ending": false,
-     "markdown": "\n\nLaunc",
+     "markdown": "Launc",
      "notice": false
     },
     {
@@ -88,6 +118,24 @@
      "notice": false
     },
     {
+     "call": "task",
+     "update": {
+      "agent": "Run background sleep command",
+      "calls": 1,
+      "details": "Running in background",
+      "folded": null,
+      "id": "toolu_01GnFbhWKZz1fvAwE1B5xJx8",
+      "message": false,
+      "name": "Agent",
+      "output": null,
+      "preview": null,
+      "startedAt": 0,
+      "status": "in_progress",
+      "task": true,
+      "title": "Agent: Run background sleep command"
+     }
+    },
+    {
      "call": "text",
      "ending": false,
      "markdown": "d Pyt",
@@ -120,6 +168,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ python3 -c \"import time; time.sleep(40)\"",
       "folded": null,
@@ -137,6 +186,43 @@
     {
      "call": "task",
      "update": {
+      "agent": "Run background sleep command",
+      "calls": 1,
+      "details": null,
+      "folded": null,
+      "id": "toolu_01GnFbhWKZz1fvAwE1B5xJx8",
+      "message": false,
+      "name": "Agent",
+      "output": null,
+      "preview": null,
+      "startedAt": 0,
+      "status": "complete",
+      "task": true,
+      "title": "Agent: Run background sleep command"
+     }
+    },
+    {
+     "call": "task",
+     "update": {
+      "agent": "Run background sleep command",
+      "calls": 1,
+      "details": null,
+      "folded": null,
+      "id": "toolu_01GnFbhWKZz1fvAwE1B5xJx8",
+      "message": false,
+      "name": "Agent",
+      "output": "Done! I've started the background command with ID `bc0v28vjw`. It will sleep for 15 seconds and then echo \"done\". You'll be notified when it completes.",
+      "preview": null,
+      "startedAt": 0,
+      "status": "complete",
+      "task": true,
+      "title": "Agent: Run background sleep command"
+     }
+    },
+    {
+     "call": "task",
+     "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ python3 -c \"import time; time.sleep(40)\"",
       "folded": null,
@@ -154,6 +240,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ python3 -c \"import time; time.sleep(40)\"",
       "folded": null,
@@ -316,15 +403,45 @@
     "notice": false
    },
    {
-    "call": "text",
-    "ending": false,
-    "markdown": "\n\n**Agent**(Run background sleep command)\n⎿ Running in background",
-    "notice": true
+    "call": "task",
+    "update": {
+     "agent": "Run background sleep command",
+     "calls": 0,
+     "details": "Running in background",
+     "folded": null,
+     "id": "toolu_01GnFbhWKZz1fvAwE1B5xJx8",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": true,
+     "title": "Agent: Run background sleep command"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Run background sleep command",
+     "calls": 0,
+     "details": "Running in background",
+     "folded": null,
+     "id": "toolu_01GnFbhWKZz1fvAwE1B5xJx8",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": true,
+     "title": "Agent: Run background sleep command"
+    }
    },
    {
     "call": "text",
     "ending": false,
-    "markdown": "\n\nLaunc",
+    "markdown": "Launc",
     "notice": false
    },
    {
@@ -364,6 +481,24 @@
     "notice": false
    },
    {
+    "call": "task",
+    "update": {
+     "agent": "Run background sleep command",
+     "calls": 1,
+     "details": "Running in background",
+     "folded": null,
+     "id": "toolu_01GnFbhWKZz1fvAwE1B5xJx8",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": true,
+     "title": "Agent: Run background sleep command"
+    }
+   },
+   {
     "call": "text",
     "ending": false,
     "markdown": "d Pyt",
@@ -396,6 +531,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ python3 -c \"import time; time.sleep(40)\"",
      "folded": null,
@@ -413,6 +549,43 @@
    {
     "call": "task",
     "update": {
+     "agent": "Run background sleep command",
+     "calls": 1,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01GnFbhWKZz1fvAwE1B5xJx8",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Agent: Run background sleep command"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Run background sleep command",
+     "calls": 1,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01GnFbhWKZz1fvAwE1B5xJx8",
+     "message": false,
+     "name": "Agent",
+     "output": "Done! I've started the background command with ID `bc0v28vjw`. It will sleep for 15 seconds and then echo \"done\". You'll be notified when it completes.",
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Agent: Run background sleep command"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ python3 -c \"import time; time.sleep(40)\"",
      "folded": null,
@@ -430,6 +603,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ python3 -c \"import time; time.sleep(40)\"",
      "folded": null,
@@ -479,6 +653,42 @@
     "ending": false,
     "markdown": "hed.",
     "notice": false
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Run background sleep command",
+     "calls": 1,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01GnFbhWKZz1fvAwE1B5xJx8",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Agent: Run background sleep command"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Run background sleep command",
+     "calls": 1,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01GnFbhWKZz1fvAwE1B5xJx8",
+     "message": false,
+     "name": "Agent",
+     "output": "The background command has completed successfully. The 15-second sleep finished and the \"done\" message was echoed (exit code 0).",
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Agent: Run background sleep command"
+    }
    },
    {
     "call": "text",

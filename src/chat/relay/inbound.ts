@@ -20,6 +20,7 @@ import type {
   ThreadRef,
 } from "../seam.ts";
 import { referenceOf, toHex } from "./hex.ts";
+import { fitLine, type Line, REQUEST_ROOM } from "./line.ts";
 import type { Outbox } from "./outbox.ts";
 import type { Store } from "./store.ts";
 
@@ -50,6 +51,9 @@ export interface InboundOptions {
   run: Run;
   log: (line: string) => void;
 }
+
+/** What the app reads on a line the bot closed after its own restart. */
+const STOPPED = "Stopped: the bot restarted";
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -128,6 +132,8 @@ export class Inbound {
    * restart those rebuilt from the bot's own kind 9 read back (`#ownRequest`).
    */
   readonly waiting = new Map<string, Waiting>();
+  /** The text name (hex) of every line this process wrote, added before its text is queued, never dropped: the bot closes no line of these. */
+  readonly mine = new Set<string>();
   /** The requests this process saw withdrawn, rewritten or answered: a read-back never brings one back. */
   readonly #ended = new Set<string>();
   #o: InboundOptions;
@@ -138,6 +144,8 @@ export class Inbound {
   #channels = new Map<string, Bytes>(); // the channel of each prompt or reply read, for the notices of `caughtUp`
   #replies = new Map<string, { name: Bytes; text: string }>(); // by prompt: its answer's name and the text of its replies
   #answered = new Set<string>(); // the prompts of this process that have their answer queued
+  // The bot's own lines read back that are still open, by the text's name: its channel and the newest body read.
+  #lines = new Map<string, { channel: Bytes; name: Bytes; body: Record<string, unknown> }>();
 
   constructor(options: InboundOptions) {
     this.#o = options;
@@ -204,11 +212,14 @@ export class Inbound {
     } else if (out.do === "rest") {
       if (out.first) this.#queue(undefined, this.#reader.caughtUp());
       this.#channels.clear();
+      this.#closeLines();
     } else if (out.do === "message") {
       const { message, place } = out;
       const h = message.header;
       if (bytesEqual(h.sender, this.#o.self) && (h.kind === 9 || h.kind === 11))
         this.#ownRequest(message, place.key);
+      if (bytesEqual(h.sender, this.#o.self) && (h.kind === 1 || h.kind === 11))
+        this.#ownLine(message, place.key);
       const step = this.#reader.read(message, place, () => "gone"); // files come with step 6: a prompt with one is not read (Q5)
       if (h.kind === 2 || h.kind === 10)
         this.#channels.set(refKey({ device: h.sender, name: h.name }), h.channel);
@@ -257,6 +268,43 @@ export class Inbound {
       return;
     }
     this.waiting.set(at, { ...base, type: type as Exclude<OwnerAnswer["type"], "question"> });
+  }
+
+  /**
+   * The bot's own line read back (a text with `say` task, or an edit with a `task`): the newest body is kept by the
+   * text's name unless this process wrote it, and a line read closed leaves. Nothing is stored (turn work C2, 3.4).
+   */
+  #ownLine(message: Message, key: Bytes | undefined): void {
+    const h = message.header;
+    const name = h.kind === 11 ? h.re?.name : h.name;
+    if (!name || this.mine.has(toHex(name))) return;
+    const opened = key ? openMessage(this.#o.platform, key, message) : undefined;
+    const body = opened?.ok ? parse(opened.value.content) : undefined;
+    const line = record(body?.task);
+    if (!body || !line || (h.kind === 1 ? body.say !== "task" : false)) return;
+    if (line.status === "pending" || line.status === "in_progress")
+      this.#lines.set(toHex(name), { channel: h.channel, name, body });
+    else this.#lines.delete(toHex(name));
+  }
+
+  /**
+   * At each rest of the reading every line a dead process left open is closed, as last read: its end, if it
+   * came, was read before the rest. The line leaves the map once queued; one that does not fit the room a line
+   * write keeps, or that the outbox refuses, stays for the next rest.
+   */
+  #closeLines(): void {
+    for (const [at, held] of this.#lines) {
+      const { channel, name, body } = held;
+      const task = { ...record(body.task), status: "error", output: STOPPED, details: null };
+      const content = fitLine({ thread: body.thread }, task as Line, REQUEST_ROOM);
+      if (content === undefined) continue;
+      this.#lines.delete(at); // not queued twice by a rest that comes before the write is answered
+      void this.#put(channel, { kind: 11, re: { device: this.#o.self, name }, content }).then(
+        (queued) => {
+          if (!queued && !this.#lines.has(at)) this.#lines.set(at, held);
+        },
+      );
+    }
   }
 
   #stored = (e: Error) => this.#o.log(`relay: the store did not write: ${e.message}`);

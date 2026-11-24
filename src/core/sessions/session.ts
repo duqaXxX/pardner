@@ -162,12 +162,15 @@ type TaskEnded = Extract<SessionEvent, { type: "task_ended" }>;
 /** A card of the daemon's under an end line: a subagent's words, closed under `title`. */
 export interface EndCard {
   readonly id: string;
+  /** The task the agent was given: what a chat draws the card by. */
+  readonly agent: string | null;
   readonly title: string;
   readonly body: string;
 }
 
 /** A task's end as the thread says it: its line, and the card of its words when it has one. */
 export interface EndLine {
+  /** Empty for an end that is its card alone. */
   readonly text: string;
   readonly card: EndCard | null;
 }
@@ -190,10 +193,10 @@ export async function writeEnds(
     run = [];
   };
   for (const end of ends) {
-    run.push(end.text);
+    if (end.text !== "") run.push(end.text);
     if (end.card === null) continue;
     await flush();
-    await renderer.feedCard(end.card.id, end.card.title, end.card.body);
+    await renderer.feedCard(end.card.id, end.card.title, end.card.body, end.card.agent);
   }
   await flush();
 }
@@ -1190,10 +1193,10 @@ export class ThreadSession {
     if (turns.length === 0) return;
     try {
       if (options.error) this.reactError();
-      // End lines with no reply left to say them ride on the note, as plain text: a note holds no card.
-      const note = [notSent(turns, because), ...(options.lines ?? []).map((end) => end.text)].join(
-        "\n",
-      );
+      // End lines with no reply left to say them ride on the note, as plain text: a note holds no
+      // card, and an end that is a card alone has no text to ride.
+      const texts = (options.lines ?? []).map((end) => end.text).filter((text) => text !== "");
+      const note = [notSent(turns, because), ...texts].join("\n");
       if (this.busy && !this.endNotesRead) this.endNotes.push(note);
       else await this.post(note);
     } finally {
@@ -3263,6 +3266,13 @@ export class ThreadSession {
     }
     const stopped = task !== null && this.stopped.has(task.taskId);
     const owned = task !== null && this.ownedBySubagent.has(task.taskId);
+    // A subagent that ends while its own background work runs is not done: neither of its end
+    // events reaches its line, which stays running until its final end.
+    const waiting =
+      task !== null &&
+      ((task.type === "task_ended" && task.status === "completed") ||
+        (task.type === "task_updated" && task.terminal && task.status === "completed")) &&
+      this.waitsOnOwnWork(task.taskId);
     if (
       event.type === "task_ended" &&
       this.active === null &&
@@ -3271,16 +3281,27 @@ export class ThreadSession {
       !owned &&
       this.background
     ) {
-      this.ended.push([event.taskId, this.endedLine(event)]);
+      const line = this.endedLine(event);
+      const origin = this.taskReplies.get(event.taskId);
+      // A task with a line of its own closes it, and its card is the row where it ended: no end text.
+      const carded =
+        !waiting &&
+        line.card !== null &&
+        origin?.inBackground(event.taskId) === true &&
+        !origin.lineless(event.taskId);
+      this.ended.push([event.taskId, carded ? { text: "", card: line.card } : line]);
     }
     if (event.type === "task_ended" && !stopped && !owned) {
-      // An agent in the background that ends while a turn runs: with no card to complete, its
-      // end is said where the conversation is, as the terminal prints `Agent "..." finished`
-      // among the turn's calls (captured 2026-10-13 on Claude Code 2.1.296). One that ends
-      // with a message of the owner's already waiting says it in that message's reply.
+      // A task in the background that ends while a turn runs. With no line to close, its end is
+      // said where the conversation is, as the terminal prints `Agent "..." finished` among the
+      // turn's calls (captured 2026-10-13 on Claude Code 2.1.296); one that ends with a message
+      // of the owner's already waiting says it in that message's reply. A task with a line
+      // closes it, and what an agent said back is the row where it ended, a card.
       const writing = this.active?.renderer ?? null;
       const reply = this.taskReplies.get(event.taskId) ?? writing;
-      if (reply?.lineless(event.taskId)) {
+      const lineless = reply?.lineless(event.taskId) === true;
+      const lined = !lineless && reply?.inBackground(event.taskId) === true;
+      if (reply !== null && (lineless || lined)) {
         if (
           writing !== null &&
           event.foldNamed &&
@@ -3288,9 +3309,20 @@ export class ThreadSession {
         ) {
           this.unfolded.set(event.taskId, reply);
         }
-        if (writing !== null) await this.writeEnds(writing, [this.endedLine(event)]);
-        else if (this.owed().length > 0)
-          this.endedAhead.push([event.taskId, this.endedLine(event)]);
+        if (lineless || waiting) {
+          if (writing !== null) await this.writeEnds(writing, [this.endedLine(event)]);
+          else if (this.owed().length > 0)
+            this.endedAhead.push([event.taskId, this.endedLine(event)]);
+        } else {
+          // The agent's words are the row where it ended: a card, with no end text, where the
+          // conversation is, whichever reply holds the line that closes.
+          const { card } = this.endedLine(event);
+          if (card !== null) {
+            const end: EndLine = { text: "", card };
+            if (writing !== null) await this.writeEnds(writing, [end]);
+            else if (this.owed().length > 0) this.endedAhead.push([event.taskId, end]);
+          }
+        }
       }
     }
     if (
@@ -3317,13 +3349,16 @@ export class ThreadSession {
       this.noteMessage(event);
       // Read above for the end line, which comes after the terminal task_updated (recorded
       // order); a task whose notification never comes goes with the process.
-      this.tasks.delete(event.taskId);
-      this.forgetSteps(event.taskId);
+      // A subagent that waits on its own work keeps its record: the list still names it.
+      if (!waiting) {
+        this.tasks.delete(event.taskId);
+        this.forgetSteps(event.taskId);
+      }
     }
     const holder = task === null ? undefined : this.taskReplies.get(task.taskId);
     if (task !== null && holder !== undefined) {
       // A task that outlived its turn shows only on its own line, wherever it started.
-      await holder.feed(task);
+      if (!waiting) await holder.feed(task);
       this.showRunning();
       if (this.active === null && event.type === "task_ended" && !stopped) this.notified();
       // The task that just ended may have been the last thing keeping this reply's stream
@@ -3352,7 +3387,7 @@ export class ThreadSession {
           `${this.deps.agent.name} reported a subagent's error in ${this.where}: ${event.category}`,
         );
       }
-      await origin.feed(event);
+      if (!waiting) await origin.feed(event);
       this.adoptPromoted(origin);
       if (event.type === "task_started") {
         this.taskReplies.set(event.taskId, origin);
@@ -3450,7 +3485,7 @@ export class ThreadSession {
     // Before the feed, which writes the turn's final text: a `/stop` during that write is the
     // next turn's.
     if (event.type === "turn_ended") active.ended = true;
-    await active.renderer.feed(event);
+    if (!waiting) await active.renderer.feed(event);
     this.adoptPromoted(active.renderer);
     // A call's end can leave its task running in the background, which the list then counts.
     if (event.type === "call_ended" && active.renderer.backgroundTasks.length > 0)
@@ -3663,7 +3698,10 @@ export class ThreadSession {
         : report;
     this.cardsMade += 1;
     const title = texts.fill(texts.MESSAGE_FROM, { name: agentType ?? name });
-    return { text: line, card: { id: `message-${this.cardsMade}`, title, body } };
+    return {
+      text: line,
+      card: { id: `message-${this.cardsMade}`, agent: description || null, title, body },
+    };
   }
 
   /**

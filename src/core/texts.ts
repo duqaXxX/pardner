@@ -355,16 +355,6 @@ export const RESTART_HOLD_TURN = "a turn is running";
 export const RESTART_HOLD_TASKS = "{counts} running";
 // Ends by itself (`INJECTED_TURN_WAIT`): `/stop` has nothing to stop there.
 export const RESTART_HOLD_REPORT = "a background task is about to report, within 30 seconds";
-// The one form of a task started in the background, whatever its kind: the
-// terminal's two lines for an agent it starts in the background, `**type**(description)` and
-// `⎿ Backgrounded agent` without its key hints (captured on Claude Code 2.1.296, 2026-10-13),
-// with words that fit every task under the name. `{model}` is the model an agent ran on when it
-// is not the session's, a space and its name after the description as the terminal writes it
-// (captured on Claude Code 2.1.300, 2026-10-15), and empty otherwise.
-export const TASK_LAUNCHED = "**{name}**({description}){model}\n⎿ Running in background";
-// The terminal's one line for several agents started in one message, with what each does under
-// it as a tree (captured the same day: `2 background agents launched`), for every task.
-export const TASKS_LAUNCHED = "**{n} background tasks launched**";
 // The title of the card of a subagent's words, the terminal's header for them: `› Message from
 // mechanical`, which `ctrl+o` opens on the report (captured 2026-10-24 on Claude Code 2.1.310).
 // The card opens and closes as the chat draws it; the report is its body.
@@ -376,8 +366,6 @@ export const MESSAGE_LIMIT = 1500;
 // still runs: `Agent "<description>" is waiting on its own background work · 13s` (captured
 // 2026-10-24 on Claude Code 2.1.310; the same words reach the model on 2.1.309).
 export const AGENT_WAITING = "is waiting on its own background work";
-export const TASKS_LAUNCHED_BRANCH = "├ {description}";
-export const TASKS_LAUNCHED_LAST = "└ {description}";
 export const PROMPT_IMAGE = "an image";
 // A refusal in the reply: the agent's own words behind the mark, or the sentence built from
 // what it said when it gave none; and the mark of what the refused attempt left in the reply.

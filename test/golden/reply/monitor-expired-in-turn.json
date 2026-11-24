@@ -6,6 +6,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -23,6 +24,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -40,6 +42,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -57,23 +60,25 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
-      "details": null,
+      "details": "Running in background",
       "folded": null,
       "id": "toolu_01CAZmHJJpBw2ADQLR8KiWhm",
       "message": false,
       "name": "Monitor",
-      "output": "Monitor started (task bgj8vj1om, expires in 12s unless the source ends first; you get one notice at expiry — re-arm if you still need the watch). You will be notified on each event. Keep working — do…",
+      "output": null,
       "preview": null,
       "startedAt": null,
-      "status": "complete",
-      "task": false,
+      "status": "in_progress",
+      "task": true,
       "title": "Monitor: idle watch"
      }
     },
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ sleep 50",
       "folded": null,
@@ -91,23 +96,25 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
-      "details": "$ sleep 50",
+      "details": "Running in background",
       "folded": null,
       "id": "toolu_01Td1gCHsiirDMRhW8bLiMLr",
       "message": false,
       "name": "Bash",
-      "output": "Command running in background with ID: bptl9g32d. Output is being written to: /tmp/claude-1000/-home-dev-project/tasks/bptl9g32d.output. You will be notified when it completes. To check interim outpu…",
+      "output": null,
       "preview": null,
       "startedAt": 0,
-      "status": "complete",
-      "task": false,
+      "status": "in_progress",
+      "task": true,
       "title": "Background sleep 50"
      }
     },
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ sleep 55",
       "folded": null,
@@ -125,23 +132,25 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
-      "details": "$ sleep 55",
+      "details": "Running in background",
       "folded": null,
       "id": "toolu_01RefenAZD6eLikxHPLNrWYt",
       "message": false,
       "name": "Bash",
-      "output": "Command running in background with ID: b620ks1ya. Output is being written to: /tmp/claude-1000/-home-dev-project/tasks/b620ks1ya.output. You will be notified when it completes. To check interim outpu…",
+      "output": null,
       "preview": null,
       "startedAt": 0,
-      "status": "complete",
-      "task": false,
+      "status": "in_progress",
+      "task": true,
       "title": "Background sleep 55"
      }
     },
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ python3 -c 'import time; time.sleep(30)'",
       "folded": null,
@@ -157,14 +166,45 @@
      }
     },
     {
-     "call": "text",
-     "ending": false,
-     "markdown": "\n\n**3 background tasks launched**\n├ idle watch\n├ Background sleep 50\n└ Background sleep 55",
-     "notice": true
+     "call": "task",
+     "update": {
+      "agent": null,
+      "calls": 0,
+      "details": null,
+      "folded": null,
+      "id": "toolu_01CAZmHJJpBw2ADQLR8KiWhm",
+      "message": false,
+      "name": "Monitor",
+      "output": "Stopped",
+      "preview": null,
+      "startedAt": null,
+      "status": "complete",
+      "task": true,
+      "title": "Monitor: idle watch"
+     }
     },
     {
      "call": "task",
      "update": {
+      "agent": null,
+      "calls": 0,
+      "details": null,
+      "folded": null,
+      "id": "toolu_01CAZmHJJpBw2ADQLR8KiWhm",
+      "message": false,
+      "name": "Monitor",
+      "output": "Stopped",
+      "preview": null,
+      "startedAt": null,
+      "status": "complete",
+      "task": true,
+      "title": "Monitor: idle watch"
+     }
+    },
+    {
+     "call": "task",
+     "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ python3 -c 'import time; time.sleep(30)'",
       "folded": null,
@@ -182,6 +222,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ python3 -c 'import time; time.sleep(30)'",
       "folded": null,
@@ -199,7 +240,7 @@
     {
      "call": "text",
      "ending": false,
-     "markdown": "\n\nThe",
+     "markdown": "The",
      "notice": false
     },
     {
@@ -234,7 +275,38 @@
     },
     {
      "call": "finish",
-     "closing": []
+     "closing": [
+      {
+       "agent": null,
+       "calls": 0,
+       "details": "Running in background",
+       "folded": null,
+       "id": "toolu_01Td1gCHsiirDMRhW8bLiMLr",
+       "message": false,
+       "name": "Bash",
+       "output": null,
+       "preview": null,
+       "startedAt": 0,
+       "status": "in_progress",
+       "task": true,
+       "title": "Background sleep 50"
+      },
+      {
+       "agent": null,
+       "calls": 0,
+       "details": "Running in background",
+       "folded": null,
+       "id": "toolu_01RefenAZD6eLikxHPLNrWYt",
+       "message": false,
+       "name": "Bash",
+       "output": null,
+       "preview": null,
+       "startedAt": 0,
+       "status": "in_progress",
+       "task": true,
+       "title": "Background sleep 55"
+      }
+     ]
     },
     {
      "call": "close_out"
@@ -251,6 +323,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -268,6 +341,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -310,6 +384,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -327,6 +402,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -389,6 +465,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -406,6 +483,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -423,6 +501,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -440,23 +519,25 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
-     "details": null,
+     "details": "Running in background",
      "folded": null,
      "id": "toolu_01CAZmHJJpBw2ADQLR8KiWhm",
      "message": false,
      "name": "Monitor",
-     "output": "Monitor started (task bgj8vj1om, expires in 12s unless the source ends first; you get one notice at expiry — re-arm if you still need the watch). You will be notified on each event. Keep working — do…",
+     "output": null,
      "preview": null,
      "startedAt": null,
-     "status": "complete",
-     "task": false,
+     "status": "in_progress",
+     "task": true,
      "title": "Monitor: idle watch"
     }
    },
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ sleep 50",
      "folded": null,
@@ -474,23 +555,25 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
-     "details": "$ sleep 50",
+     "details": "Running in background",
      "folded": null,
      "id": "toolu_01Td1gCHsiirDMRhW8bLiMLr",
      "message": false,
      "name": "Bash",
-     "output": "Command running in background with ID: bptl9g32d. Output is being written to: /tmp/claude-1000/-home-dev-project/tasks/bptl9g32d.output. You will be notified when it completes. To check interim outpu…",
+     "output": null,
      "preview": null,
      "startedAt": 0,
-     "status": "complete",
-     "task": false,
+     "status": "in_progress",
+     "task": true,
      "title": "Background sleep 50"
     }
    },
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ sleep 55",
      "folded": null,
@@ -508,23 +591,25 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
-     "details": "$ sleep 55",
+     "details": "Running in background",
      "folded": null,
      "id": "toolu_01RefenAZD6eLikxHPLNrWYt",
      "message": false,
      "name": "Bash",
-     "output": "Command running in background with ID: b620ks1ya. Output is being written to: /tmp/claude-1000/-home-dev-project/tasks/b620ks1ya.output. You will be notified when it completes. To check interim outpu…",
+     "output": null,
      "preview": null,
      "startedAt": 0,
-     "status": "complete",
-     "task": false,
+     "status": "in_progress",
+     "task": true,
      "title": "Background sleep 55"
     }
    },
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ python3 -c 'import time; time.sleep(30)'",
      "folded": null,
@@ -540,14 +625,45 @@
     }
    },
    {
-    "call": "text",
-    "ending": false,
-    "markdown": "\n\n**3 background tasks launched**\n├ idle watch\n├ Background sleep 50\n└ Background sleep 55",
-    "notice": true
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01CAZmHJJpBw2ADQLR8KiWhm",
+     "message": false,
+     "name": "Monitor",
+     "output": "Stopped",
+     "preview": null,
+     "startedAt": null,
+     "status": "complete",
+     "task": true,
+     "title": "Monitor: idle watch"
+    }
    },
    {
     "call": "task",
     "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01CAZmHJJpBw2ADQLR8KiWhm",
+     "message": false,
+     "name": "Monitor",
+     "output": "Stopped",
+     "preview": null,
+     "startedAt": null,
+     "status": "complete",
+     "task": true,
+     "title": "Monitor: idle watch"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ python3 -c 'import time; time.sleep(30)'",
      "folded": null,
@@ -565,6 +681,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ python3 -c 'import time; time.sleep(30)'",
      "folded": null,
@@ -582,7 +699,7 @@
    {
     "call": "text",
     "ending": false,
-    "markdown": "\n\nThe",
+    "markdown": "The",
     "notice": false
    },
    {
@@ -616,6 +733,42 @@
     "notice": false
    },
    {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01Td1gCHsiirDMRhW8bLiMLr",
+     "message": false,
+     "name": "Bash",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Background sleep 50"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01Td1gCHsiirDMRhW8bLiMLr",
+     "message": false,
+     "name": "Bash",
+     "output": "Background command \"Background sleep 50\" completed (exit code 0)",
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Background sleep 50"
+    }
+   },
+   {
     "call": "text",
     "ending": false,
     "markdown": "\n\nnoted",
@@ -626,6 +779,42 @@
     "ending": false,
     "markdown": ".",
     "notice": false
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01RefenAZD6eLikxHPLNrWYt",
+     "message": false,
+     "name": "Bash",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Background sleep 55"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01RefenAZD6eLikxHPLNrWYt",
+     "message": false,
+     "name": "Bash",
+     "output": "Background command \"Background sleep 55\" completed (exit code 0)",
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Background sleep 55"
+    }
    },
    {
     "call": "text",

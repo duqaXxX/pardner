@@ -26,6 +26,7 @@ const update = (over: Partial<TaskUpdate> = {}): TaskUpdate => ({
   name: "Bash",
   task: false,
   message: false,
+  agent: null,
   calls: 0,
   preview: null,
   folded: null,
@@ -47,9 +48,12 @@ const preview = (body: string, over = {}) => ({
 function setup(options: { prompt?: boolean; refuse?: (d: Draft) => boolean } = {}) {
   const queued: Draft[] = [];
   const state = { closed: false };
+  const mine = new Set<string>();
   const outbox = {
     queue: async (_: unknown, draft: Draft) => {
       if (options.refuse?.(draft)) return false;
+      // The name must be in the set already: the text can be read back as soon as it is queued.
+      if (draft.kind === 1) assert.ok(mine.has(Buffer.from(draft.name ?? []).toString("hex")));
       queued.push(draft);
       return true;
     },
@@ -57,6 +61,7 @@ function setup(options: { prompt?: boolean; refuse?: (d: Draft) => boolean } = {
   } as unknown as Outbox;
   const inbound = {
     closed: () => state.closed,
+    mine,
     replyOf: () => ({ name: new Uint8Array(16), text: "" }),
   } as unknown as Inbound;
   let now = 1_000_000;
@@ -73,7 +78,7 @@ function setup(options: { prompt?: boolean; refuse?: (d: Draft) => boolean } = {
     .thread(ref)
     .openReply(() => {}, options.prompt === false ? undefined : prompt);
   const body = (d: Draft | undefined) => JSON.parse(d?.content ?? "null");
-  return { reply, queued, state, body, tick: (ms: number) => (now += ms) };
+  return { reply, queued, state, mine, body, tick: (ms: number) => (now += ms) };
 }
 
 test("a line is a text at first sight and an edit only when status, output or preview changes", async () => {
@@ -104,6 +109,7 @@ test("a line is a text at first sight and an edit only when status, output or pr
       output: null,
       task: false,
       message: false,
+      agent: null,
       calls: 0,
       preview: null,
       startedAt: 1_000_000 - 2000,
@@ -116,6 +122,21 @@ test("a line is a text at first sight and an edit only when status, output or pr
   assert.equal(body(ended).task.status, "complete");
   assert.equal(body(output).task.output, "first line");
   assert.equal(body(output).task.id, undefined);
+});
+
+test("a call's line that becomes a task's line is an edit, and its agent goes out with it", async () => {
+  // A background command's call: the call's end only makes the line a task's (`task`, `details`).
+  const { reply, queued, body } = setup();
+  await reply.task(update({ startedAt: 48 }));
+  await reply.task(update({ startedAt: 48, task: true, details: "Running in background" }));
+  await reply.task(update({ startedAt: 48, task: true, details: "Running in background" })); // nothing
+  assert.deepEqual(
+    queued.map((d) => d.kind),
+    [1, 11],
+  );
+  assert.equal(body(queued[1]).task.task, true);
+  await reply.task(update({ id: "toolu_2", task: true, agent: "Run ls", startedAt: 48 }));
+  assert.equal(body(queued[2]).task.agent, "Run ls");
 });
 
 test("a changed preview is an edit; an unchanged one is not", async () => {
@@ -150,24 +171,50 @@ test("finish writes an edit for each closed line that differs, a text for one fi
   assert.equal(body(queued[5]).say, "task");
 });
 
-test("nothing is written without a prompt, after the answer or after finish", async () => {
-  const none = setup({ prompt: false });
-  await none.reply.task(update());
-  await none.reply.finish([update({ id: "x" })]);
-  assert.deepEqual(none.queued, []);
-
+test("a line is written for as long as the reply lives: after the answer, after finish, with no prompt", async () => {
   const answered = setup();
   answered.state.closed = true;
-  await answered.reply.task(update());
+  await answered.reply.task(update({ task: true }));
+  await answered.reply.task(update({ task: true, status: "complete" }));
   await answered.reply.finish([update({ id: "y" })]);
-  assert.deepEqual(answered.queued, []);
+  assert.deepEqual(
+    answered.queued.map((d) => d.kind),
+    [1, 11, 1],
+    "a text, its edit, and a text first seen at finish",
+  );
+  assert.equal(Buffer.from(answered.queued[0]?.re?.name ?? []).toString("hex"), "cd".repeat(16));
 
+  // A reply with no prompt (a scheduled run, a report turn that opened its own reply): the line has no `re`.
+  const none = setup({ prompt: false });
+  await none.reply.task(update());
+  await none.reply.finish([update({ status: "complete" })]);
+  assert.deepEqual(
+    none.queued.map((d) => d.kind),
+    [1, 11],
+  );
+  assert.equal(none.queued[0]?.re, undefined);
+  assert.deepEqual(none.queued[1]?.re, { device: self, name: none.queued[0]?.name });
+
+  // Once finish has run the reply still writes a line's later edit (a task that ends after the turn).
   const done = setup();
-  await done.reply.task(update());
+  await done.reply.task(update({ task: true }));
   await done.reply.finish([]);
-  await done.reply.task(update({ status: "complete" }));
-  await done.reply.task(update({ id: "z" }));
-  assert.equal(done.queued.length, 1);
+  await done.reply.task(update({ task: true, status: "complete" }));
+  await done.reply.task(update({ id: "z", task: true }));
+  assert.deepEqual(
+    done.queued.map((d) => d.kind),
+    [1, 11, 1],
+  );
+});
+
+test("a line's name is in the bot's own set before its text is queued, and stays", async () => {
+  const { reply, queued, mine } = setup();
+  const seen: boolean[] = [];
+  await reply.task(update());
+  await reply.task(update({ status: "complete" }));
+  seen.push(mine.has(Buffer.from(queued[0]?.name ?? []).toString("hex")));
+  assert.deepEqual(seen, [true]);
+  assert.equal(mine.size, 1, "the edit adds no name of its own");
 });
 
 test("a refused line never makes the reply unlanded, and is written once whatever the queue said", async () => {
@@ -183,13 +230,14 @@ test("a refused line never makes the reply unlanded, and is written once whateve
   );
 });
 
-test("finish stops at an aborted signal and still ends the reply's lines", async () => {
+test("finish stops at an aborted signal; a task's update after it is still written", async () => {
   const { reply, queued } = setup();
   const abort = new AbortController();
   abort.abort();
   await reply.finish([update({ id: "a" })], abort.signal);
-  await reply.task(update({ id: "b" }));
   assert.deepEqual(queued, []);
+  await reply.task(update({ id: "b" }));
+  assert.equal(queued.length, 1);
 });
 
 test("startedAt is wall-clock milliseconds computed when the line is written", async () => {
@@ -208,6 +256,7 @@ const lineOf = (body: string): Line => ({
   output: null,
   task: false,
   message: false,
+  agent: null,
   calls: 0,
   preview: preview(body),
   startedAt: null,

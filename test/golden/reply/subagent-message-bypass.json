@@ -4,15 +4,45 @@
   {
    "calls": [
     {
-     "call": "text",
-     "ending": false,
-     "markdown": "**Agent**(Worker: send message, then sleep)\n⎿ Running in background",
-     "notice": true
+     "call": "task",
+     "update": {
+      "agent": "Worker: send message, then sleep",
+      "calls": 0,
+      "details": "Running in background",
+      "folded": null,
+      "id": "toolu_01Kp573c45pYDkwxwReQg6wN",
+      "message": false,
+      "name": "Agent",
+      "output": null,
+      "preview": null,
+      "startedAt": 0,
+      "status": "in_progress",
+      "task": true,
+      "title": "Agent: Worker: send message, then sleep"
+     }
+    },
+    {
+     "call": "task",
+     "update": {
+      "agent": "Worker: send message, then sleep",
+      "calls": 0,
+      "details": "Running in background",
+      "folded": null,
+      "id": "toolu_01Kp573c45pYDkwxwReQg6wN",
+      "message": false,
+      "name": "Agent",
+      "output": null,
+      "preview": null,
+      "startedAt": 0,
+      "status": "in_progress",
+      "task": true,
+      "title": "Agent: Worker: send message, then sleep"
+     }
     },
     {
      "call": "text",
      "ending": false,
-     "markdown": "\n\nstar",
+     "markdown": "star",
      "notice": false
     },
     {
@@ -23,7 +53,23 @@
     },
     {
      "call": "finish",
-     "closing": []
+     "closing": [
+      {
+       "agent": "Worker: send message, then sleep",
+       "calls": 0,
+       "details": "Running in background",
+       "folded": null,
+       "id": "toolu_01Kp573c45pYDkwxwReQg6wN",
+       "message": false,
+       "name": "Agent",
+       "output": null,
+       "preview": null,
+       "startedAt": 0,
+       "status": "in_progress",
+       "task": true,
+       "title": "Agent: Worker: send message, then sleep"
+      }
+     ]
     },
     {
      "call": "close_out"
@@ -39,6 +85,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -56,6 +103,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -73,6 +121,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -90,6 +139,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -107,6 +157,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -124,6 +175,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -147,6 +199,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ python3 -c \"import time; time.sleep(25)\"",
       "folded": null,
@@ -255,6 +308,7 @@
      "call": "finish",
      "closing": [
       {
+       "agent": null,
        "calls": 0,
        "details": "$ python3 -c \"import time; time.sleep(25)\"",
        "folded": null,
@@ -282,6 +336,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -299,6 +354,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -443,15 +499,45 @@
  "whole": {
   "calls": [
    {
-    "call": "text",
-    "ending": false,
-    "markdown": "**Agent**(Worker: send message, then sleep)\n⎿ Running in background",
-    "notice": true
+    "call": "task",
+    "update": {
+     "agent": "Worker: send message, then sleep",
+     "calls": 0,
+     "details": "Running in background",
+     "folded": null,
+     "id": "toolu_01Kp573c45pYDkwxwReQg6wN",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": true,
+     "title": "Agent: Worker: send message, then sleep"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Worker: send message, then sleep",
+     "calls": 0,
+     "details": "Running in background",
+     "folded": null,
+     "id": "toolu_01Kp573c45pYDkwxwReQg6wN",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": true,
+     "title": "Agent: Worker: send message, then sleep"
+    }
    },
    {
     "call": "text",
     "ending": false,
-    "markdown": "\n\nstar",
+    "markdown": "star",
     "notice": false
    },
    {
@@ -461,10 +547,82 @@
     "notice": false
    },
    {
+    "call": "task",
+    "update": {
+     "agent": "Worker: send message, then sleep",
+     "calls": 1,
+     "details": "Running in background",
+     "folded": null,
+     "id": "toolu_01Kp573c45pYDkwxwReQg6wN",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": true,
+     "title": "Agent: Worker: send message, then sleep"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Worker: send message, then sleep",
+     "calls": 2,
+     "details": "Running in background",
+     "folded": null,
+     "id": "toolu_01Kp573c45pYDkwxwReQg6wN",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": true,
+     "title": "Agent: Worker: send message, then sleep"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Worker: send message, then sleep",
+     "calls": 3,
+     "details": "Running in background",
+     "folded": null,
+     "id": "toolu_01Kp573c45pYDkwxwReQg6wN",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": true,
+     "title": "Agent: Worker: send message, then sleep"
+    }
+   },
+   {
     "call": "text",
     "ending": false,
     "markdown": "\n\nMessage from general-purpose:\n> halfway there",
     "notice": true
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Worker: send message, then sleep",
+     "calls": 4,
+     "details": "Running in background",
+     "folded": null,
+     "id": "toolu_01Kp573c45pYDkwxwReQg6wN",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": true,
+     "title": "Agent: Worker: send message, then sleep"
+    }
    },
    {
     "call": "text",
@@ -555,6 +713,42 @@
     "ending": false,
     "markdown": "es.",
     "notice": false
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Worker: send message, then sleep",
+     "calls": 4,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01Kp573c45pYDkwxwReQg6wN",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Agent: Worker: send message, then sleep"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Worker: send message, then sleep",
+     "calls": 4,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01Kp573c45pYDkwxwReQg6wN",
+     "message": false,
+     "name": "Agent",
+     "output": "finished",
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Agent: Worker: send message, then sleep"
+    }
    },
    {
     "call": "text",

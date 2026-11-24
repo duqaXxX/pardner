@@ -68,6 +68,8 @@ public struct LineFields: Sendable, Equatable {
     public let calls: Int
     public let preview: LinePreview?
     public let startedAt: Date?
+    /// The task an agent was given, on that agent's line and on its reply; nil on any other line, and from a bot that predates the field.
+    public let agent: String?
 
     init?(_ o: [String: Any]) {
         guard let title = o["title"] as? String, let word = o["status"] as? String, let status = LineStatus(rawValue: word) else { return nil }
@@ -78,6 +80,7 @@ public struct LineFields: Sendable, Equatable {
         message = o["message"] as? Bool ?? false
         calls = (o["calls"] as? NSNumber)?.intValue ?? 0
         preview = LinePreview(o["preview"])
+        agent = o["agent"] as? String
         startedAt = (o["startedAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) }
     }
 }

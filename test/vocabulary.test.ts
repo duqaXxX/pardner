@@ -440,7 +440,6 @@ export function toolNames(tools: ToolVocabulary): string[] {
     ...tools.askers,
     ...tools.launchers,
     ...tools.failsCounted,
-    ...(tools.plainAgentType === null ? [] : [tools.plainAgentType]),
     ...Object.keys(tools.described),
     ...Object.keys(tools.commanded),
     ...Object.keys(tools.continuers),

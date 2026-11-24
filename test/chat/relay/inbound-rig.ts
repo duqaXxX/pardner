@@ -28,8 +28,10 @@ export function rig() {
     saved,
     change: async (edit: (s: typeof saved) => void) => edit(saved),
   } as unknown as Store;
+  const refusing = { on: false };
   const outbox = {
     queue: async (channel: Bytes, draft: Draft, also?: (s: typeof saved) => void) => {
+      if (refusing.on) return false;
       also?.(saved); // the same write as the message
       return !!queued.push({ channel, draft });
     },
@@ -90,6 +92,7 @@ export function rig() {
     bot,
     seq,
     queued,
+    refusing,
     store,
     inbound,
     messages,

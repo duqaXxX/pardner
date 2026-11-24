@@ -121,13 +121,22 @@ extension SessionState {
 
     /// The state word a summary and the panel's header show: only a session that runs or waits writes one.
     var pill: String? { self == .idle ? nil : label }
+}
 
-    /// The words of the row above the composer: only a session that runs or waits has one.
-    var activityWords: String? {
-        switch self {
+extension Naming {
+    /// The words of the row above the composer: nil while the session is idle; `Waiting for you` while a request is open, else the count of
+    /// the tasks that run (C2 3.3).
+    static func activityWords(_ state: SessionState, tasks: Int) -> String? {
+        switch state {
         case .idle: nil
-        case .running: "Working…"
         case .waiting: "Waiting for you"
+        case .running: tasks == 0 ? "Working…" : "Working · " + (tasks == 1 ? "1 task running" : "\(tasks) tasks running")
         }
     }
+
+    /// What a task is called in the list: the task an agent was given, else the line's title.
+    static func taskName(_ f: LineFields) -> String { f.agent ?? f.title }
+
+    /// `Running` and, when the line is timed, the time since it started.
+    static func runningWords(since: Date?, now: Date) -> String { since.map { "Running · " + elapsed(now.timeIntervalSince($0)) } ?? "Running" }
 }

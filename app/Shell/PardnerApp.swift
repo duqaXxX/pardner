@@ -129,6 +129,11 @@ struct PardnerApp: App {
             LiveFormWindow(conversation: delegate.pairing.conversation, channels: delegate.pairing.channels)
         }
         .windowStyle(.hiddenTitleBar).windowResizability(.contentSize).restorationBehavior(.disabled).commandsRemoved()
+        // A reply read whole (turn work C1, 3.4): one window per reply, closed by the window's controls.
+        WindowGroup("Reply", id: WindowID.reply, for: ReplyContent.self) { $content in
+            ReplyWindow(content: content)
+        }
+        .defaultSize(width: 640, height: 520).restorationBehavior(.disabled).commandsRemoved()
     }
 }
 

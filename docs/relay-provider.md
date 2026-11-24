@@ -24,15 +24,26 @@ the text is added to that answer. Text written after the prompt's answer, or by 
 prompt, goes out as texts of the thread (kind 1, "say"), also split at 64 KiB. `rest` and `showFooter`
 draw nothing (`showFooter` answers false, so the footer stays owed).
 
-A tool call is a line, under the same condition as the parts: a reply opened for a prompt, while the prompt
-has no answer and before `finish`. `task` writes a text (kind 1, `re` the prompt, content `say` `task` and
+A tool call is a line, written for as long as the reply lives: `task` and `finish` write whatever the
+prompt's state, after its answer and after `finish` too, so a task that ends after the turn closes its line
+and its end text and card follow where it ended. A reply with no prompt (a scheduled run, a report turn that
+opened a reply of its own) writes its lines with no `re`. `task` writes a text (kind 1, `re` the prompt when
+there is one, content `say` `task` and
 the line) when it first sees a call, and an edit (kind 11, `re` the line's text) when the line's status,
 output or preview differs from what was last written; `finish` writes an edit for each line it closes that
 differs in any field. The line is the core's `TaskUpdate` without `id`, `name` and `folded`, with `startedAt`
 in wall-clock milliseconds. A content past the room of a message has its longest field (the preview's body,
 the details or the output) cut at a line end with `… +N lines`, a single line past the room between
 characters with `…`. A line is not counted in what the reply waits to land, so a line the outbox refuses
-never makes the reply unlanded.
+never makes the reply unlanded. The name of every line the process writes goes into a set (`Inbound.mine`)
+before its text is queued, and stays there until the process ends.
+
+At each rest of the reading the bot closes the lines a dead process left open. `Inbound` opens its own kind 1
+texts with `say` `task` and kind 11 edits with a `task`, keeps each line whose newest status is `pending` or
+`in_progress` by its text's name (the newest body read) unless the name is in `mine`, and drops a line read
+closed. At the rest every line in the map gets an edit, `status` `error`, `output` `Stopped: the bot
+restarted` and `details` null, and leaves the map once queued. The map is built from the journal at every
+start and nothing is stored.
 
 `closeOut` answers at once: true when every part is already read back, false while one is not, and
 the core then waits in the background with `waitLanded`, as the seam splits them. `waitLanded` resolves true once every part is read back, false when a part was refused or dropped

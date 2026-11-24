@@ -439,6 +439,7 @@ const call = (id: string): TaskUpdate => ({
   name: "Read",
   task: false,
   message: false,
+  agent: null,
   calls: 0,
   preview: null,
   folded: null,

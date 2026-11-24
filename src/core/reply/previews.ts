@@ -11,16 +11,7 @@
  */
 import type { DiffHunk, FileChange, Question, ToolVocabulary } from "../../agent/seam.ts";
 import type { Preview } from "../../chat/seam.ts";
-import {
-  ANSWERED,
-  fill,
-  type Names,
-  named,
-  TASK_LAUNCHED,
-  TASKS_LAUNCHED,
-  TASKS_LAUNCHED_BRANCH,
-  TASKS_LAUNCHED_LAST,
-} from "../texts.ts";
+import { ANSWERED, fill, type Names, named } from "../texts.ts";
 import { oneLine, spaced, splitLines, TITLE_LIMIT } from "./words.ts";
 
 // A diff line's colour where a chat draws none (mobile); an emoji is two columns wide, so a
@@ -32,16 +23,6 @@ export const MARKS: Readonly<Record<string, string>> = {
 };
 // The terminal shows a new file's first lines, then how many it leaves out.
 export const NEW_FILE_LINES = 10;
-/** A task started in the background, as its launch line names it. */
-export interface Launch {
-  /** The name of the call that started it. */
-  readonly name: string;
-  readonly agentType: string | null;
-  readonly description: string;
-  /** The name of the model the agent runs on when it is not the session's; null otherwise. */
-  readonly model: string | null;
-}
-
 const RESUMING = "\u23bf Resuming agent {id}";
 // The terminal names an agent by the first characters of its id.
 const AGENT_ID_CHARS = 7;
@@ -193,39 +174,10 @@ export class Previews {
 
   /**
    * Whether the tool starts a task. A reply holds a call of one until its task says how it runs:
-   * in the background the terminal writes a line and no more (`launched`).
+   * in the background its line stays, as the work's.
    */
   launches(name: string): boolean {
     return this.#tools.launchers.includes(name);
-  }
-
-  /**
-   * The launch line of a task started in the background: the agent's type when it names one, else
-   * the name of the call that started it, then what the task does.
-   */
-  launched(launch: Launch): string {
-    const { name, agentType, description, model } = launch;
-    const plain = agentType === null || agentType === this.#tools.plainAgentType;
-    return fill(TASK_LAUNCHED, {
-      name: plain ? name : (agentType as string),
-      description: oneLine(description, TITLE_LIMIT),
-      model: model === null ? "" : ` ${model}`,
-    });
-  }
-
-  /**
-   * The lines for the tasks one message started in the background: one task's own line, or for
-   * several a count and what each does, with no name.
-   */
-  launchedTogether(launches: readonly Launch[]): string {
-    const [only] = launches;
-    if (only !== undefined && launches.length === 1) return this.launched(only);
-    const lines = launches.map(({ description }, index) =>
-      fill(index === launches.length - 1 ? TASKS_LAUNCHED_LAST : TASKS_LAUNCHED_BRANCH, {
-        description: oneLine(description, TITLE_LIMIT),
-      }),
-    );
-    return [fill(TASKS_LAUNCHED, { n: launches.length }), ...lines].join("\n");
   }
 
   /** Whether a failed call of that tool is counted in its run with the calls that ended well. */

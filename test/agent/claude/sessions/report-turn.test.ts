@@ -180,13 +180,11 @@ test("a report turn after a restart renders into the one reply that is the last 
   const texts = h.replies().map(plain);
   assert.equal(texts.length, 2, texts.join("\n---\n"));
   // The reply rested while the agent worked, and the report that ended it is in its message (the
-  // memory chat has no separate ending). A daemon that never saw the agent start cannot tell
+  // memory chat has no separate ending); the agent's card is the row where it ended, with no end
+  // text. A daemon that never saw the agent start cannot tell
   // it from a new task in the background (a resumed task keeps its id, and nothing else says
-  // so): the continuing call writes its launch line.
-  assert.deepEqual(texts, [
-    '**SendMessage**(Test background agent)\n⎿ Running in background\n\nSENT\n\n✓ sleep 20\n✓ Agent "Test background agent" finished · 35s\nREPORTED\nPINEAPPLE',
-    "KIWI",
-  ]);
+  // so): the continuing call's line becomes the task's, a line the memory chat leaves out.
+  assert.deepEqual(texts, ["SENT\n\n✓ sleep 20\nREPORTED\nPINEAPPLE", "KIWI"]);
 });
 
 test("a report turn in the daemon that saw the first call opens its own reply below the waiting one", async (t) => {
@@ -196,9 +194,8 @@ test("a report turn in the daemon that saw the first call opens its own reply be
   const texts = h.replies().map(plain);
   assert.equal(texts.length, 4, texts.join("\n---\n"));
   assert.deepEqual(texts, [
-    // The agent's launch line, then what the turn that started it said, the waiting reply's
-    // ending included.
-    '**Agent**(Test background agent)\n⎿ Running in background\n\nSTARTED\n\n✓ Agent "Test background agent" finished · 5s\nNOTED',
+    // What the turn that started the agent said, the waiting reply's ending included.
+    "STARTED\nNOTED",
     // The call that continues the agent draws no card; the terminal writes `Resuming agent` instead.
     "⎿ Resuming agent a0d6cae\n\nSENT",
     '✓ Agent "Test background agent" finished · 35s\nREPORTED\nPINEAPPLE',
@@ -206,7 +203,7 @@ test("a report turn in the daemon that saw the first call opens its own reply be
   ]);
 });
 
-test("an agent that ended inside its own turn and is continued later gets no second launch line", async (t) => {
+test("an agent that ended inside its own turn and is continued later gets no second line", async (t) => {
   // The recording with the agent's end moved into the turn that started it, before that turn's
   // result: the reply never records the agent as one that outlived its turn. Claude Code's
   // report of it follows; then the owner has it continued with `SendMessage`, and its task starts
@@ -223,6 +220,6 @@ test("an agent that ended inside its own turn and is continued later gets no sec
   await h.until(() => session.idle);
   await (await session.submit("continue the agent")).done.wait();
   const all = h.replies().join("\n---\n");
-  assert.equal(all.split("⎿ Running in background").length - 1, 1, all);
-  assert.ok(!all.includes("**SendMessage**("), all);
+  assert.equal(all.split("Agent: Test background agent").length - 1, 1, all);
+  assert.ok(!/\] SendMessage/.test(all), all);
 });
