@@ -1,6 +1,6 @@
 // The main window (step-6 plan, screen 3.1; decisions in actions' app window design): the sidebar of channels,
 // the channel as a conversation with its Sessions tab, and the thread panel. Text an agent wrote is drawn
-// as written but for its code spans (`CodeSpans`, #73); nothing else is read as markup (AD 4.4). Colours, radii and the gap come from the design system's tokens.
+// read as Markdown as it arrives (`MarkdownBlocks`, #73), into pieces the app draws itself: nothing in it runs or loads (AD 4.4). Colours, radii and the gap come from the design system's tokens.
 import Conversation
 import DesignSystem
 import SwiftUI
