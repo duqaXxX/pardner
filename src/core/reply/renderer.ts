@@ -14,7 +14,7 @@ import { monotonicClock } from "../../clock.ts";
 import { blank } from "../../text.ts";
 import { formatTokens } from "../footer.ts";
 import * as texts from "../texts.ts";
-import { answered, type Launch, type Previews, resuming } from "./previews.ts";
+import { answered, type Previews, resuming } from "./previews.ts";
 import { BACKGROUND, oneLine, quoted, STOPPED, splitLines, TITLE_LIMIT } from "./words.ts";
 
 export const OUTPUT_LIMIT = 200;
@@ -44,6 +44,7 @@ function line(
     name: "",
     task: false,
     message: false,
+    agent: null,
     calls: 0,
     preview: null,
     folded: null,
@@ -179,32 +180,20 @@ export class TurnRenderer {
   readonly #closedCalls = new Set<string>();
   /** Calls of a tool that starts agents, kept from the sink until their task says how it runs. */
   readonly #undecided = new Set<string>();
-  // Calls whose agent runs in the background, and lines of tasks in the background no call of
-  // this reply started: no card. What the agent does under such a call writes nothing, as in
-  // the terminal.
+  // Calls whose line is a background task's, kept, and lines of tasks in the background no call of
+  // this reply started: none of their own. What an agent does under such a call counts in its
+  // line's `calls` and writes nothing more, as in the terminal.
   readonly #launched = new Set<string>();
-  // The tasks started in the background whose launch line is not written yet. The terminal
-  // writes one line for the agents of one message, so they wait for the message to end and for
-  // every held call of it to say how its agent runs; the cards of the message's calls come
-  // before them, and anything else the reply writes after them.
-  #launches: (Launch & { readonly callId: string })[] = [];
-  // The calls whose agent launched in the background and whose result has not come: it names
-  // the model the agent runs on, so their launch line waits for it. `close` and the notes that
-  // follow a launch write the line without it when the result never comes.
-  readonly #awaiting = new Set<string>();
   /** Tasks whose call has not ended: in the foreground, as far as the reply knows. */
   readonly #waited = new Set<string>();
-  /** A message of the agent's is being written, at the top level. */
-  #messageOpen = false;
   /** A line of the daemon's was written into the reply. */
   #wroteLine = false;
   /** What kind of task each one is, as it said when it started. */
   readonly #kinds = new Map<string, TaskStarted["kind"]>();
-  // Tasks in the background under a call that stays a call, counted in its run like any other
-  // (captured on Claude Code 2.1.296, 2026-10-14): no card of their own. Each shows by its launch
-  // line, in the list of what still runs and by its end line.
+  // Commands in the background no call of this reply holds (a subagent's, one left from before a
+  // restart): no line of their own. Each shows in the list of what still runs and by its end line.
   readonly #quiet = new Set<string>();
-  // A line of the daemon's inside the reply (an agent's launch, a task's end) is the last thing
+  // A line of the daemon's inside the reply (a task's end) is the last thing
   // written. It ends with no break of its own, since a card that follows needs none and a chat
   // may draw the empty lines; text that follows is set a paragraph apart.
   #breakOwed = false;
@@ -288,15 +277,8 @@ export class TurnRenderer {
         await this.#text(broken ? `\n\n${event.text}` : event.text, { piece: true });
         break;
       }
-      case "message_started":
-        if (event.parentCallId === null) this.#messageOpen = true;
-        break;
       case "message_ended":
-        if (event.parentCallId === null) {
-          await this.#handOver();
-          this.#messageOpen = false;
-          await this.#settleLaunches();
-        }
+        if (event.parentCallId === null) await this.#handOver();
         break;
       case "text":
         // Text that came whole is a command's own output (`Goal set: …` before a goal's first
@@ -313,13 +295,11 @@ export class TurnRenderer {
       case "peer_message":
         // Markdown another session's agent wrote, drawn as the agent's own text is: its
         // formatting lives, and the chat keeps any mention in a reply from notifying.
-        await this.#writeLaunches();
         await this.#line(texts.fill(texts.PEER_MESSAGE, { text: quoted(event.text) }));
         break;
       case "subagent_message":
         // A line in the reply already open. The text is quoted, so that markup it opens (a code
         // fence) cannot swallow the lines after it; the chat keeps any mention from notifying.
-        await this.#writeLaunches();
         await this.#line(
           texts.fill(texts.SUBAGENT_MESSAGE, { name: event.from, text: quoted(event.text) }),
         );
@@ -336,9 +316,12 @@ export class TurnRenderer {
       case "task_progress": {
         // A task with no line of its own writes nothing: its call's line, if it had one, is
         // an ended call's.
-        const entry = this.lineless(event.taskId)
-          ? undefined
-          : this.#lines.get(this.#lineOfTask.get(event.taskId) ?? "");
+        const lineId = this.#lineOfTask.get(event.taskId) ?? "";
+        // A background agent's steps are not shown while it works: its line keeps its details.
+        const entry =
+          this.lineless(event.taskId) || this.#launched.has(lineId)
+            ? undefined
+            : this.#lines.get(lineId);
         // A timed call's details are its command line, which its run's card lists: never replaced
         // by progress (no recording has a progress for a foreground command, `sdk.d.ts` 0.3.310
         // names one only for agents and MCP tasks).
@@ -370,7 +353,6 @@ export class TurnRenderer {
       case "stop_hooks_ran":
         // A line of the reply as a launch line is, not an aside: an aside is drawn on one line
         // with no markdown, and these are several lines with a bold count.
-        await this.#writeLaunches();
         await this.#line(stopHookLines(event, this.#asWritten));
         break;
       case "turn_ended":
@@ -416,12 +398,18 @@ export class TurnRenderer {
     );
   }
 
+  /** Whether this reply shows that task as work in the background, on a line or with none. */
+  inBackground(taskId: string): boolean {
+    return this.#quiet.has(taskId) || this.#launched.has(this.#lineOfTask.get(taskId) ?? "");
+  }
+
   /**
-   * Whether this reply shows that task with no line of its own (an agent or a command in the
-   * background): nothing here says its end, which is said in words.
+   * Whether this reply shows that task with no line of its own (a task in the background no
+   * call of this reply holds): nothing here says its end, which is said in words.
    */
   lineless(taskId: string): boolean {
-    return this.#quiet.has(taskId) || this.#launched.has(this.#lineOfTask.get(taskId) ?? "");
+    const id = this.#lineOfTask.get(taskId) ?? "";
+    return this.#quiet.has(taskId) || (this.#launched.has(id) && !this.#lines.has(id));
   }
 
   /**
@@ -482,7 +470,6 @@ export class TurnRenderer {
     const interrupted =
       this.#callsStopped || (this.result !== null && this.result.ending === "interrupted");
     await this.#handOver();
-    await this.#writeLaunches();
     if (
       !this.#wroteText &&
       !this.#wroteLine &&
@@ -557,7 +544,6 @@ export class TurnRenderer {
    * it reports): a blank line still separates it from what is there, as a paragraph break would.
    */
   async feedNotice(text: string, aside = false): Promise<void> {
-    await this.#writeLaunches();
     const prefix = this.#wroteText || this.#lines.size > 0 || this.#breakOwed ? "\n\n" : "";
     this.#afterText = false;
     this.#breakOwed = false;
@@ -580,17 +566,16 @@ export class TurnRenderer {
    * A paragraph apart from what is before it, and from the text that follows.
    */
   async feedLine(text: string): Promise<void> {
-    await this.#writeLaunches();
     await this.#line(text, true);
   }
 
   /**
    * A card of the daemon's, closed with `title` and open with `body`: what a subagent said back,
-   * under its end line, as the terminal's `ctrl+o` opens it. A task's card, which a chat does not
-   * fold among the calls; `id` keeps it one card through the reply's rewrites.
+   * as the terminal's `ctrl+o` opens it. A task's card, which a chat does not fold among the
+   * calls; `id` keeps it one card through the reply's rewrites, and `agent` is the task the
+   * agent was given.
    */
-  async feedCard(id: string, title: string, body: string): Promise<void> {
-    await this.#writeLaunches();
+  async feedCard(id: string, title: string, body: string, agent: string | null): Promise<void> {
     await this.#set({
       id,
       title,
@@ -600,6 +585,7 @@ export class TurnRenderer {
       name: "",
       task: true,
       message: true,
+      agent,
       calls: 0,
       preview: null,
       folded: null,
@@ -620,22 +606,6 @@ export class TurnRenderer {
     });
     this.#breakOwed = true;
     this.#wroteLine = true;
-  }
-
-  /** Write the launch lines that wait, once nothing more can join them. */
-  async #settleLaunches(): Promise<void> {
-    if (!this.#messageOpen && this.#undecided.size === 0 && this.#awaiting.size === 0) {
-      await this.#writeLaunches();
-    }
-  }
-
-  /** The launch line of the agents that wait for one: their own, or one for them all. */
-  async #writeLaunches(): Promise<void> {
-    if (this.#launches.length === 0) return;
-    const launches = this.#launches;
-    this.#launches = [];
-    this.#awaiting.clear(); // written as it stands: a result that comes later changes nothing
-    await this.#line(this.#previews.launchedTogether(launches));
   }
 
   /** The running tasks that have a line of their own, each with its line's id. */
@@ -686,7 +656,6 @@ export class TurnRenderer {
           });
     const parts = [quoted(`${texts.REFUSED_MARK}${said}`)];
     if (event.retracted) parts.push(quoted(texts.fill(texts.REFUSED_RETRACTED, { model })));
-    await this.#writeLaunches();
     await this.#line(parts.join("\n>\n"));
   }
 
@@ -739,10 +708,15 @@ export class TurnRenderer {
       // question's record, once answered), or a card that says why it failed. An approval has a
       // message of its own. A call that starts an agent is kept until its task starts
       // (`#taskStarted`).
-      if (this.#previews.launches(event.toolName)) this.#undecided.add(event.callId);
+      const launcher = this.#previews.launches(event.toolName);
+      if (launcher) this.#undecided.add(event.callId);
+      // A launcher's line keeps its start: it is the work's, once its task runs.
       this.#lines.set(
         event.callId,
-        line(event.callId, title, "in_progress", { name: event.toolName }),
+        line(event.callId, title, "in_progress", {
+          name: event.toolName,
+          startedAt: launcher ? this.#now() : null,
+        }),
       );
       this.#afterText = false;
     } else {
@@ -809,11 +783,6 @@ export class TurnRenderer {
   async #callEnded(event: EventOf<"call_ended">): Promise<void> {
     await this.#outlived(event.callId);
     const model = event.model === null ? null : this.#modelName(event.model);
-    if (this.#awaiting.delete(event.callId)) {
-      this.#launches = this.#launches.map((launch) =>
-        launch.callId === event.callId ? { ...launch, model } : launch,
-      );
-    }
     const entry = this.#lines.get(event.callId);
     if (entry === undefined) {
       const resumed = this.#resumed.get(event.callId);
@@ -821,32 +790,44 @@ export class TurnRenderer {
         // The words were drawn; a call that failed says why on a card, as any failed call does.
         await this.#set({ ...resumed, status: "error", output: this.#said(event) });
       }
-      await this.#settleLaunches();
       return;
     }
     this.#undecided.delete(event.callId); // no task came: the call shows as any other
     // The call waits for no task any more: one still running is in the background from here.
-    for (const [taskId, lineId] of this.#running)
-      if (lineId === entry.id) this.#waited.delete(taskId);
+    const waited = new Set<string>();
+    for (const [taskId, lineId] of this.#running) {
+      if (lineId === entry.id && this.#waited.delete(taskId)) waited.add(taskId);
+    }
     let outliving = this.#carded()
       .filter(([, lineId]) => lineId === entry.id)
       .map(([taskId]) => taskId);
-    if (outliving.length > 0 && outliving.every((id) => this.#kinds.get(id) === "command")) {
-      // A command left running in the background: its call has ended like any other, and is
-      // counted so. The command goes on with no line of its own.
+    if (
+      outliving.length > 0 &&
+      outliving.every((id) => waited.has(id) && this.#kinds.get(id) === "command")
+    ) {
+      // A command the call waited for, left running in the background: its call has ended like
+      // any other, and is counted so. The command goes on with no line of its own.
       for (const taskId of outliving) this.#quiet.add(taskId);
       outliving = [];
     }
     if (outliving.length > 0) {
       // The call only launched a task, which is still running: it outlives the call, so its
-      // line becomes a task's line and stays open. A task that ends before its call's result
-      // (a long command in the foreground) never gets here.
+      // line becomes a task's line and stays open. The call's result is no output of the work
+      // (it names a path of the bot's machine): the line keeps none, unless the owner's stop cut
+      // the call. A task that ends before its call's result (a long command in the foreground)
+      // never gets here.
+      const cut = event.isError && this.#stopAsked;
       await this.#set({
         ...entry,
+        // The terminal names a subagent's model on its call line.
+        title:
+          model === null || !this.#previews.launches(entry.name)
+            ? entry.title
+            : `${entry.title} · ${model}`,
         details: BACKGROUND,
         task: true,
-        status: event.isError && this.#stopAsked ? "error" : entry.status,
-        output: this.#said(event),
+        status: cut ? "error" : entry.status,
+        output: cut ? STOPPED : null,
       });
     } else if (entry.output === STOPPED) {
       // Its task already ended as stopped; the result that follows only reports the rejection
@@ -870,7 +851,6 @@ export class TurnRenderer {
         preview: shown,
       });
     }
-    await this.#settleLaunches();
   }
 
   /** What a call's line says of its end: the agent's words, but not its rejection of a call the owner's stop cut. */
@@ -902,9 +882,9 @@ export class TurnRenderer {
       return;
     }
     if (call !== null && this.#launched.has(call)) {
-      // The agent of a call already written as a line of text starts again, under that call
-      // (recorded: `subagent-nested-background.jsonl`, where the end of a command it left
-      // running wakes it): running once more, and no second line.
+      // The agent of a call whose line is kept starts again, under that call (recorded:
+      // `subagent-nested-background.jsonl`, where the end of a command it left running wakes
+      // it): running once more, and no second line.
       this.#bind(event.taskId, call);
       return;
     }
@@ -914,12 +894,14 @@ export class TurnRenderer {
     // resumed task keeps its id (SDK 0.3.300, `SDKTaskStartedMessage.run_id`).
     const known = this.#lineOfTask.has(event.taskId) || this.#startedBefore(event.taskId);
     const line = call === null ? undefined : this.#lines.get(call);
+    const agent = event.kind === "subagent" ? event.description : null;
     if (line !== undefined && event.background === true && !known) {
       await this.#launch(event, line, held !== undefined);
       return;
     }
-    // An agent the call waits for: its card, from here on.
-    if (held !== undefined) await this.#set(held);
+    // An agent the call waits for: its card, from here on, with no clock (only the work of a task
+    // in the background keeps its call's start).
+    if (held !== undefined) await this.#set({ ...held, agent, startedAt: null });
     if (call !== null && this.#lines.has(call)) {
       // A call's task: the agent starts one for a long command in the foreground too
       // (recorded: `interrupt.jsonl`, CLI 2.1.283). The line stays the call's until the call's
@@ -942,33 +924,24 @@ export class TurnRenderer {
   }
 
   /**
-   * A task a call of this reply started in the background, whatever its kind: its
-   * launch line, as text of the reply, and no card. A call held until its task said how it runs
-   * (one that starts an agent) is that line alone, as in the terminal; any other call stays a
-   * call, counted in its run. The task still runs for this reply, which the list of what still
-   * runs reads.
+   * A task a call of this reply started in the background, whatever its kind: the call's line
+   * stays and becomes the task's (`details` says it runs in the background), as the terminal
+   * writes one line under the call. A call held until its task said how it runs (one that
+   * starts an agent) is written now, with the task it was given. The task runs for this reply,
+   * which the list of what still runs reads.
    */
   async #launch(event: TaskStarted, line: TaskUpdate, held: boolean): Promise<void> {
     const call = line.id;
     this.#bind(event.taskId, call);
-    if (held) {
-      this.#lines.delete(call);
-      this.#launched.add(call);
-    } else {
-      this.#quiet.add(event.taskId);
-    }
-    // A line of the daemon's: it is not the turn's text, so a turn that says nothing else still
-    // gets its last text or its error from the turn's end.
-    this.#launches.push({
-      callId: call,
-      name: line.name,
-      agentType: event.agentType,
-      description: event.description,
-      model: null,
+    this.#launched.add(call);
+    if (!held) return;
+    await this.#set({
+      ...line,
+      status: "in_progress",
+      details: BACKGROUND,
+      task: true,
+      agent: event.kind === "subagent" ? event.description : null,
     });
-    // The result of the call carries the model, and comes after the task starts.
-    if (this.#previews.launches(line.name)) this.#awaiting.add(call);
-    await this.#settleLaunches();
   }
 
   /** The task runs for this reply, on that line or under that call. */
@@ -983,8 +956,8 @@ export class TurnRenderer {
     if (event.background === true) {
       // A task in the background whose call this reply does not hold: an agent that started
       // again once the reply of its call had ended (recorded:
-      // `subagent-nested-background-mid-turn.jsonl`), or a task a subagent started. No card, as
-      // for any task in the background, and no launch line, which belongs under its call.
+      // `subagent-nested-background-mid-turn.jsonl`), or a task a subagent started. No line of
+      // its own, which belongs to its call.
       this.#launched.add(lineId);
       return;
     }
@@ -997,7 +970,14 @@ export class TurnRenderer {
     if (event.callId === null) this.#commands.add(lineId);
     const title = oneLine(event.description, TITLE_LIMIT);
     const name = event.taskType ?? "task";
-    await this.#set(line(lineId, title, "in_progress", { name, task: true }));
+    await this.#set(
+      line(lineId, title, "in_progress", {
+        name,
+        task: true,
+        // A forked skill typed as a command is the command's line: no agent.
+        agent: event.kind === "subagent" && event.callId !== null ? event.description : null,
+      }),
+    );
   }
 
   /**
@@ -1032,8 +1012,8 @@ export class TurnRenderer {
     this.#running.delete(taskId);
     this.#waited.delete(taskId);
     const lineId = this.#lineOfTask.get(taskId) ?? `task-${taskId}`;
-    // No card: its end is the session's end line.
-    if (this.#launched.has(lineId) || this.#quiet.has(taskId)) return;
+    // A task with no line of its own: its end is the session's end line.
+    if (this.#quiet.has(taskId) || (!this.#lines.has(lineId) && this.#launched.has(lineId))) return;
     const entry =
       this.#lines.get(lineId) ??
       line(lineId, oneLine(summary || taskId, TITLE_LIMIT), "in_progress", {
@@ -1055,13 +1035,10 @@ export class TurnRenderer {
     const entry = this.#lines.get(root);
     if (entry === undefined) return;
     // A call that runs calls of its own (a subagent) keeps its line once it ends, whether it
-    // ran in the foreground or not: the nested calls are its work, not one more call.
-    await this.#noted(root, {
-      ...entry,
-      details: this.#under(root, said),
-      task: true,
-      calls: entry.calls + 1,
-    });
+    // ran in the foreground or not: the nested calls are its work, not one more call. A
+    // background agent's line only counts them: its steps are not shown while it works.
+    const details = this.#launched.has(root) ? entry.details : this.#under(root, said);
+    await this.#noted(root, { ...entry, details, task: true, calls: entry.calls + 1 });
   }
 
   /** A change to a card from under it: kept, not sent, while the card's call is still held. */
@@ -1077,7 +1054,7 @@ export class TurnRenderer {
   async #childNote(parent: string, words: string): Promise<void> {
     const root = this.#rootOf.get(parent) ?? parent;
     const entry = this.#lines.get(root);
-    if (entry === undefined || words === "") return;
+    if (entry === undefined || words === "" || this.#launched.has(root)) return;
     const details = this.#under(root, oneLine(words, 200));
     await this.#noted(root, { ...entry, details, task: true });
   }
@@ -1096,9 +1073,6 @@ export class TurnRenderer {
       this.#afterText = false;
     }
     this.#lines.set(update.id, update);
-    // The calls of the message that started a task keep their run whole: its launch line waits
-    // for the message to end, below them.
-    if (!this.#messageOpen) await this.#writeLaunches();
     // A card that changes where it sits (a command's call ending under its own launch line)
     // leaves the line of the daemon's last, and its break still owed.
     if (!this.#drawn.has(update.id)) this.#breakOwed = false;
@@ -1130,7 +1104,6 @@ export class TurnRenderer {
   ): Promise<void> {
     if (markdown === "") return;
     const { notice = false, ending = false, piece = false, answers = [] } = options;
-    await this.#writeLaunches();
     if (this.#breakOwed && !markdown.startsWith("\n")) markdown = `\n\n${markdown}`;
     this.#breakOwed = false;
     this.#wroteText = true;

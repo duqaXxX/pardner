@@ -10,12 +10,16 @@ import XCTest
 @MainActor
 final class ThreadScrollTests: XCTestCase {
     /// A thread of ten questions with long answers, the last one still running; `tag` makes its names differ from another thread's.
-    private func longThread(_ s: inout ScrollFixture, tag: UInt8 = 0) -> MessageRef {
+    /// With `task`, an agent's line that stays open sits under the first question.
+    private func longThread(_ s: inout ScrollFixture, tag: UInt8 = 0, task: Bool = false) -> MessageRef {
         let root = s.put(2, s.alice, ["text": "start the work \(tag)"], to: s.bot)
         s.put(3, s.bot, [:], re: root)
         for i in 0..<10 {
             let prompt = s.put(2, s.alice, ["text": "question \(i): please explain more about the thing", "thread": root.hex], to: s.bot)
             s.put(3, s.bot, [:], re: prompt)
+            if task, i == 0 {
+                s.put(1, s.bot, ["thread": root.hex, "say": "task", "task": ["title": "Agent(look)", "status": "in_progress", "task": true, "agent": "look at the tests"] as [String: Any]], re: prompt)
+            }
             s.put(5, s.bot, ["thread": root.hex, "markdown": ScrollFixture.markdown(i)], re: prompt, name: Data(repeating: UInt8(0xA0 + i), count: 16))
         }
         let running = MessageRef(device: s.bot, name: Data(repeating: 0xEE &- tag, count: 16))
@@ -118,5 +122,22 @@ final class ThreadScrollTests: XCTestCase {
         hosting.rootView = panel(s, b)
         ScrollHost.spin(1.0)
         try assertAtEnd(hosting, "the other thread")
+    }
+
+    /// The id a click on a task of the list gives the scroll position (C2 3.3) is the id of that line's row, early in a long thread. The click
+    /// itself is not driven (a popover of an offscreen window takes no event here); the position's reaction to a later change of `scrolledID` was
+    /// measured once with a delayed assignment (the view went from the end to the top of a 10,750-point thread).
+    func testTheIdOfATasksLineNamesItsRowInTheLazyStack() throws {
+        var s = ScrollFixture()
+        let root = longThread(&s, task: true)
+        let thread = s.model.channels[s.channel]!.threads[root.hex]!
+        let open = try XCTUnwrap(thread.openLines.first)
+        XCTAssertEqual(open.fields.title, "Agent(look)")
+        let rows = ThreadRows.build(thread)
+        let index = try XCTUnwrap(rows.firstIndex { $0.id == ThreadRows.id(of: open) })
+        guard case .line(let drawn) = rows[index].content else { return XCTFail("the row is the line's") }
+        XCTAssertEqual(drawn.ref, open.ref)
+        XCTAssertLessThan(index, 5, "early in the thread: the first question's line")
+        XCTAssertEqual(Set(rows.map(\.id)).count, rows.count, "one row each")
     }
 }

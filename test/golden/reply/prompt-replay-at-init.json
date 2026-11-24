@@ -6,6 +6,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ sleep 20",
       "folded": null,
@@ -21,37 +22,48 @@
      }
     },
     {
-     "call": "text",
-     "ending": false,
-     "markdown": "\n\n**Bash**(Sleep for 20 seconds in background)\n⎿ Running in background",
-     "notice": true
-    },
-    {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
-      "details": "$ sleep 20",
+      "details": "Running in background",
       "folded": null,
       "id": "toolu_01GAH7jrvjETWMqw9bvMyEgL",
       "message": false,
       "name": "Bash",
-      "output": "Command running in background with ID: bsfqtqmxq. Output is being written to: /private/tmp/claude-502/-home-dev-project-u3rxkt/c24e1570-95f7-4324-bfce-ef5b6381c678/tasks/bsfqtqmxq.output. You will be…",
+      "output": null,
       "preview": null,
       "startedAt": 0,
-      "status": "complete",
-      "task": false,
+      "status": "in_progress",
+      "task": true,
       "title": "Sleep for 20 seconds in background"
      }
     },
     {
      "call": "text",
      "ending": false,
-     "markdown": "\n\nSTARTED",
+     "markdown": "STARTED",
      "notice": false
     },
     {
      "call": "finish",
-     "closing": []
+     "closing": [
+      {
+       "agent": null,
+       "calls": 0,
+       "details": "Running in background",
+       "folded": null,
+       "id": "toolu_01GAH7jrvjETWMqw9bvMyEgL",
+       "message": false,
+       "name": "Bash",
+       "output": null,
+       "preview": null,
+       "startedAt": 0,
+       "status": "in_progress",
+       "task": true,
+       "title": "Sleep for 20 seconds in background"
+      }
+     ]
     },
     {
      "call": "close_out"
@@ -67,6 +79,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -84,6 +97,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -1893,6 +1907,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ sleep 20",
      "folded": null,
@@ -1908,33 +1923,64 @@
     }
    },
    {
-    "call": "text",
-    "ending": false,
-    "markdown": "\n\n**Bash**(Sleep for 20 seconds in background)\n⎿ Running in background",
-    "notice": true
-   },
-   {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
-     "details": "$ sleep 20",
+     "details": "Running in background",
      "folded": null,
      "id": "toolu_01GAH7jrvjETWMqw9bvMyEgL",
      "message": false,
      "name": "Bash",
-     "output": "Command running in background with ID: bsfqtqmxq. Output is being written to: /private/tmp/claude-502/-home-dev-project-u3rxkt/c24e1570-95f7-4324-bfce-ef5b6381c678/tasks/bsfqtqmxq.output. You will be…",
+     "output": null,
      "preview": null,
      "startedAt": 0,
-     "status": "complete",
-     "task": false,
+     "status": "in_progress",
+     "task": true,
      "title": "Sleep for 20 seconds in background"
     }
    },
    {
     "call": "text",
     "ending": false,
-    "markdown": "\n\nSTARTED",
+    "markdown": "STARTED",
     "notice": false
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01GAH7jrvjETWMqw9bvMyEgL",
+     "message": false,
+     "name": "Bash",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Sleep for 20 seconds in background"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01GAH7jrvjETWMqw9bvMyEgL",
+     "message": false,
+     "name": "Bash",
+     "output": "Background command \"Sleep for 20 seconds in background\" completed (exit code 0)",
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Sleep for 20 seconds in background"
+    }
    },
    {
     "call": "text",

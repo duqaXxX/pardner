@@ -89,7 +89,12 @@ struct ThreadPanel: View {
             .defaultScrollAnchor(.bottom)
             .defaultScrollAnchor(.top, for: .alignment)
             if let composer {
-                if let bot = thread.bot { ActivityRow(model: model, icons: icons, bot: bot, state: thread.state, composer: composer) }
+                if let bot = thread.bot {
+                    // A click on a task of the list brings its line into view through the scroll position, which stops following the end.
+                    ActivityRow(model: model, icons: icons, bot: bot, state: thread.state, tasks: thread.openLines.filter(\.fields.task), composer: composer) {
+                        scrolledID = ThreadRows.id(of: $0)
+                    }
+                }
                 ComposerView(model: composer)
             }
         }
@@ -211,26 +216,75 @@ struct StopButton: View {
     }
 }
 
-/// The session's activity above the composer while it runs or waits: the bot, what it does (the word pulses) and Stop.
+/// The session's activity above the composer while it runs or waits: the bot, what it does (the word pulses; a click on it lists the tasks that
+/// run) and Stop.
 struct ActivityRow: View {
     let model: ReadingModel
     let icons: [Data: NSImage]
     let bot: Data
     let state: SessionState
+    /// The open lines that are tasks, oldest first.
+    let tasks: [WorkLine]
     let composer: ComposerModel
+    /// Brings a task's line into view.
+    let show: (WorkLine) -> Void
+    @State private var listed = false
 
     var body: some View {
-        if let words = state.activityWords {
+        if let words = Naming.activityWords(state, tasks: tasks.count) {
             let name = Naming.sender(bot, in: model)
             HStack(spacing: PardnerMetrics.gap) {
                 Avatar(name: name, isBot: true, icon: icons[bot], size: 20).accessibilityHidden(true)
                 Text(verbatim: name).font(PardnerFont.ui(size: 13, weight: .semibold)).lineLimit(1)
-                Text(verbatim: words).font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.muted).pulses(true)
+                if tasks.isEmpty {
+                    Text(verbatim: words).font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.muted).pulses(true)
+                } else {
+                    Button { listed.toggle() } label: {
+                        Text(verbatim: words).font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.muted).pulses(true)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).pointerStyle(.link)
+                    .popover(isPresented: $listed) {
+                        TaskList(tasks: tasks) { line in
+                            listed = false
+                            show(line)
+                        }
+                    }
+                }
                 StopButton(composer: composer, blinks: false)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16).padding(.vertical, 4)
+            // The button that carries the popover goes with the last task: a popover left open would show again with the next one.
+            .onChange(of: tasks.isEmpty) { listed = false }
         }
+    }
+}
+
+/// The tasks that run, oldest first: what each does and the time it has run; a click on one brings its line into view.
+struct TaskList: View {
+    let tasks: [WorkLine]
+    let choose: (WorkLine) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(tasks, id: \.ref) { line in
+                    Button { choose(line) } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(verbatim: Naming.taskName(line.fields)).font(PardnerFont.ui(size: 13, weight: .semibold)).lineLimit(2)
+                            TimelineView(.periodic(from: .now, by: 1)) { context in
+                                Text(verbatim: Naming.runningWords(since: line.fields.startedAt, now: context.date))
+                            }
+                            .font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.agentText)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 8).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).pointerStyle(.link)
+                }
+            }
+        }
+        .frame(width: 320).frame(maxHeight: 320).fixedSize(horizontal: false, vertical: true)
     }
 }
 

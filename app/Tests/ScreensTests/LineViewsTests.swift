@@ -146,24 +146,68 @@ final class LineViewsTests: XCTestCase {
         XCTAssertLessThan(LineRow.bounded(String(repeating: "x", count: 100_000)).count, 10_000)
     }
 
-    func testAMessageBodyIsDrawnWholeInRowsOf200Lines() throws {
-        let output = (1...450).map { "m\($0)" }.joined(separator: "\n")
-        var s = Session()
-        s.put(1, s.bot, ["thread": s.prompt.hex, "say": "task", "task": ["title": "Agent replied", "status": "complete", "details": NSNull(), "output": output, "task": false,
-                                                                         "message": true, "calls": 0, "preview": NSNull(), "startedAt": NSNull()] as [String: Any]], re: s.prompt)
-        guard case .line(let line) = s.thread.items[0] else { return XCTFail() }
-        let rows = LineRow.messageRows(of: line.fields)
-        XCTAssertEqual(rows.count, 3)
-        XCTAssertEqual(rows.joined(separator: "\n"), output, "every line reaches a row")
-        s.put(1, s.bot, ["thread": s.prompt.hex, "say": "task", "task": ["title": "Run", "status": "error", "details": NSNull(), "output": "x", "task": false,
-                                                                         "message": false, "calls": 0, "preview": NSNull(), "startedAt": NSNull()] as [String: Any]], re: s.prompt)
-        guard case .line(let call) = s.thread.items[1] else { return XCTFail() }
-        XCTAssertEqual(LineRow.messageRows(of: call.fields), [], "a call's output is no message body")
-    }
-
     func testAFinalLineEndIsNoHiddenLine() {
         let forty = (1...LineRow.outputLines).map { "e\($0)" }.joined(separator: "\n")
         XCTAssertEqual(LineRow.bounded(forty + "\n"), forty)
         XCTAssertTrue(LineRow.bounded(forty + "\nmore\n").hasSuffix("… +1 lines"))
+    }
+
+    private func fields(agent: String? = nil, message: Bool = false, status: String = "complete", calls: Int = 0, output: String? = nil, details: String? = nil) -> LineFields {
+        var s = Session()
+        s.put(1, s.bot, ["thread": s.prompt.hex, "say": "task", "task": ["title": "Agent(look)", "status": status, "details": details as Any? ?? NSNull(), "output": output as Any? ?? NSNull(), "task": true,
+                                                                         "message": message, "calls": calls, "preview": NSNull(), "startedAt": NSNull(),
+                                                                         "agent": agent as Any? ?? NSNull()] as [String: Any]], re: s.prompt)
+        guard case .line(let line) = s.thread.items[0] else { fatalError("a line") }
+        return line.fields
+    }
+
+    func testTheFormOfALineIsChosenByItsFields() {
+        XCTAssertEqual(LineForm(fields()), .call)
+        XCTAssertEqual(LineForm(fields(agent: "look")), .agentAsked)
+        XCTAssertEqual(LineForm(fields(agent: "look", message: true)), .agentReplied)
+        XCTAssertEqual(LineForm(fields(message: true)), .message)
+    }
+
+    func testTheWordsOfAnAgentRowAreTheAppsOwn() {
+        XCTAssertEqual(LineForm.agentAsked.words, "Asked an agent")
+        XCTAssertEqual(LineForm.agentReplied.words, "Agent replied")
+        XCTAssertNil(LineForm.call.words)
+        XCTAssertNil(LineForm.message.words)
+    }
+
+    func testTheCallsOfAnAgentAreCountedOnceItIsClosed() {
+        XCTAssertEqual(Naming.calls(1), "1 call")
+        XCTAssertEqual(Naming.calls(4), "4 calls")
+        XCTAssertEqual(LineRow.callCount(of: fields(agent: "look", status: "complete", calls: 3)), "3 calls")
+        XCTAssertEqual(LineRow.callCount(of: fields(agent: "look", status: "error", calls: 1)), "1 call")
+        XCTAssertNil(LineRow.callCount(of: fields(agent: "look", status: "in_progress", calls: 3)), "an open agent shows no count")
+        XCTAssertNil(LineRow.callCount(of: fields(agent: "look", status: "complete", calls: 0)))
+        XCTAssertNil(LineRow.callCount(of: fields(status: "complete", calls: 3)), "a call that is no agent")
+    }
+
+    func testTheReplyRowShowsTheFirstLineThatSaysSomething() {
+        XCTAssertEqual(LineRow.firstSaid("\n  \n\n# Result\nmore"), "# Result")
+        XCTAssertEqual(LineRow.firstSaid("---\n```\nThe tests pass."), "The tests pass.")
+        XCTAssertEqual(LineRow.firstSaid("one line"), "one line")
+        XCTAssertNil(LineRow.firstSaid(" \n\n"))
+        XCTAssertNil(LineRow.firstSaid(nil))
+    }
+
+    func testTheReplyWindowHoldsTheWholeOutputAndItsTitle() {
+        let output = "# Result\n" + String(repeating: "line\n", count: 400)
+        let agent = ReplyContent(fields(agent: "look", message: true, output: output))
+        XCTAssertEqual(agent?.title, "Agent replied")
+        XCTAssertEqual(agent?.output, output, "Copy and the window take the output whole")
+        XCTAssertEqual(ReplyContent(fields(message: true, output: "x"))?.title, "Agent(look)")
+        XCTAssertNil(ReplyContent(fields(output: "x")), "a call opens no window")
+        XCTAssertNil(ReplyContent(fields(agent: "look", message: true)), "no output, no window")
+    }
+
+    func testAnAgentsTaskIsItsHeadAndItsDetailsStandApart() {
+        let f = fields(agent: "Run ls", details: "Bash: ls -la\nRead: a.txt")
+        XCTAssertEqual(LineRow.headWords(f, .agentAsked), "Run ls", "the child call lines never join the task")
+        XCTAssertEqual(LineRow.agentDetails(f, .agentAsked), "Bash: ls -la\nRead: a.txt")
+        XCTAssertNil(LineRow.agentDetails(f, .call), "a call draws its details in its head")
+        XCTAssertNil(LineRow.agentDetails(fields(agent: "Run ls"), .agentAsked))
     }
 }

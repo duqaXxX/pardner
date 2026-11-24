@@ -9,6 +9,8 @@ import SwiftUI
 public enum WindowID {
     public static let settings = "settings"
     public static let form = "form"
+    /// One window per reply opened, by value (`ReplyContent`).
+    public static let reply = "reply"
 }
 
 /// What every window root shares (app windows design 4, 7.2): it dismisses itself when its model holds nothing (the Window menu is

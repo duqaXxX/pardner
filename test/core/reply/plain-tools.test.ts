@@ -259,3 +259,46 @@ test("a task the process's end closes (`stopRunning`) reads as complete, not as 
     "Stopped",
   ]);
 });
+
+test("the core sets `agent` from the task's kind, for an agent that is not Claude", async () => {
+  const lines: TaskUpdate[] = [];
+  const sink: Sink = {
+    text: async () => undefined,
+    task: async (update) => {
+      lines.push(update);
+    },
+    finish: async () => undefined,
+    closeOut: async () => true,
+    waitLanded: async () => true,
+    settle: async () => true,
+  };
+  const renderer = new TurnRenderer(sink, MEMORY_NAMES, PREVIEWS);
+  const started = (kind: "subagent" | "command", callId: string, taskId: string) =>
+    ({
+      type: "task_started",
+      taskId,
+      kind,
+      taskType: null,
+      description: `${kind} work`,
+      callId,
+      agentType: null,
+      background: true,
+      parentTaskId: null,
+    }) as const;
+  for (const [tool, kind, id] of [
+    ["delegate", "subagent", "c1"],
+    ["run", "command", "c2"],
+  ] as const) {
+    await renderer.feed({
+      type: "call_started",
+      callId: id,
+      toolName: tool,
+      input: { command: "x", task: "y" },
+      parentCallId: null,
+    });
+    await renderer.feed(started(kind, id, `t-${id}`));
+  }
+  const last = (id: string) => lines.filter((line) => line.id === id).at(-1);
+  assert.deepEqual([last("c1")?.agent, last("c1")?.task], ["subagent work", true]);
+  assert.equal(last("c2")?.agent, null);
+});

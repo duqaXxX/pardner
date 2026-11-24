@@ -6,6 +6,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -23,6 +24,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -40,6 +42,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -55,32 +58,27 @@
      }
     },
     {
-     "call": "text",
-     "ending": false,
-     "markdown": "\n\n**SendMessage**(Run sleep 5 in background and wait for completion)\n⎿ Running in background",
-     "notice": true
-    },
-    {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
-      "details": null,
+      "details": "Running in background",
       "folded": null,
       "id": "toolu_01WkGwHEw38zhqwH5z9i74kE",
       "message": false,
       "name": "SendMessage",
-      "output": "{\"success\":true,\"message\":\"Resuming agent af22137\",\"resumedAgentId\":\"af22137d3f2cf9aa4\",\"pin\":{\"id\":\"af22137d3f2cf9aa4\",\"name\":\"af22137d3f2cf9aa4\",\"ref\":\"ee327c\"}}",
+      "output": null,
       "preview": null,
       "startedAt": null,
-      "status": "complete",
-      "task": false,
+      "status": "in_progress",
+      "task": true,
       "title": "SendMessage: af22137d3f2cf9aa4"
      }
     },
     {
      "call": "text",
      "ending": false,
-     "markdown": "\n\nMessage",
+     "markdown": "Message",
      "notice": false
     },
     {
@@ -103,7 +101,23 @@
     },
     {
      "call": "finish",
-     "closing": []
+     "closing": [
+      {
+       "agent": null,
+       "calls": 0,
+       "details": "Running in background",
+       "folded": null,
+       "id": "toolu_01WkGwHEw38zhqwH5z9i74kE",
+       "message": false,
+       "name": "SendMessage",
+       "output": null,
+       "preview": null,
+       "startedAt": null,
+       "status": "in_progress",
+       "task": true,
+       "title": "SendMessage: af22137d3f2cf9aa4"
+      }
+     ]
     },
     {
      "call": "close_out"
@@ -119,6 +133,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ sleep 5",
       "folded": null,
@@ -134,31 +149,27 @@
      }
     },
     {
-     "call": "text",
-     "ending": false,
-     "markdown": "\n\n**Bash**(Sleep for 5 seconds in the background)\n⎿ Running in background",
-     "notice": true
-    },
-    {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
-      "details": "$ sleep 5",
+      "details": "Running in background",
       "folded": null,
       "id": "toolu_012CKNu57KhBcSoxaTiGrCsj",
       "message": false,
       "name": "Bash",
-      "output": "Command running in background with ID: bu05w70lu. Output is being written to: /tmp/claude-1000/-home-dev-project/tasks/bu05w70lu.output. You will be notified when it completes. To check interim outpu…",
+      "output": null,
       "preview": null,
       "startedAt": 0,
-      "status": "complete",
-      "task": false,
+      "status": "in_progress",
+      "task": true,
       "title": "Sleep for 5 seconds in the background"
      }
     },
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -176,6 +187,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -210,7 +222,23 @@
     },
     {
      "call": "finish",
-     "closing": []
+     "closing": [
+      {
+       "agent": null,
+       "calls": 0,
+       "details": "Running in background",
+       "folded": null,
+       "id": "toolu_012CKNu57KhBcSoxaTiGrCsj",
+       "message": false,
+       "name": "Bash",
+       "output": null,
+       "preview": null,
+       "startedAt": 0,
+       "status": "in_progress",
+       "task": true,
+       "title": "Sleep for 5 seconds in the background"
+      }
+     ]
     },
     {
      "call": "close_out"
@@ -226,6 +254,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -243,6 +272,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -299,6 +329,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -316,6 +347,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -333,6 +365,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -348,32 +381,27 @@
     }
    },
    {
-    "call": "text",
-    "ending": false,
-    "markdown": "\n\n**SendMessage**(Run sleep 5 in background and wait for completion)\n⎿ Running in background",
-    "notice": true
-   },
-   {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
-     "details": null,
+     "details": "Running in background",
      "folded": null,
      "id": "toolu_01WkGwHEw38zhqwH5z9i74kE",
      "message": false,
      "name": "SendMessage",
-     "output": "{\"success\":true,\"message\":\"Resuming agent af22137\",\"resumedAgentId\":\"af22137d3f2cf9aa4\",\"pin\":{\"id\":\"af22137d3f2cf9aa4\",\"name\":\"af22137d3f2cf9aa4\",\"ref\":\"ee327c\"}}",
+     "output": null,
      "preview": null,
      "startedAt": null,
-     "status": "complete",
-     "task": false,
+     "status": "in_progress",
+     "task": true,
      "title": "SendMessage: af22137d3f2cf9aa4"
     }
    },
    {
     "call": "text",
     "ending": false,
-    "markdown": "\n\nMessage",
+    "markdown": "Message",
     "notice": false
    },
    {
@@ -397,6 +425,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ sleep 5",
      "folded": null,
@@ -412,32 +441,63 @@
     }
    },
    {
-    "call": "text",
-    "ending": false,
-    "markdown": "\n\n**Bash**(Sleep for 5 seconds in the background)\n⎿ Running in background",
-    "notice": true
-   },
-   {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
-     "details": "$ sleep 5",
+     "details": "Running in background",
      "folded": null,
      "id": "toolu_012CKNu57KhBcSoxaTiGrCsj",
      "message": false,
      "name": "Bash",
-     "output": "Command running in background with ID: bu05w70lu. Output is being written to: /tmp/claude-1000/-home-dev-project/tasks/bu05w70lu.output. You will be notified when it completes. To check interim outpu…",
+     "output": null,
      "preview": null,
      "startedAt": 0,
-     "status": "complete",
-     "task": false,
+     "status": "in_progress",
+     "task": true,
      "title": "Sleep for 5 seconds in the background"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01WkGwHEw38zhqwH5z9i74kE",
+     "message": false,
+     "name": "SendMessage",
+     "output": null,
+     "preview": null,
+     "startedAt": null,
+     "status": "complete",
+     "task": true,
+     "title": "SendMessage: af22137d3f2cf9aa4"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01WkGwHEw38zhqwH5z9i74kE",
+     "message": false,
+     "name": "SendMessage",
+     "output": "Waiting for the sleep command to complete...",
+     "preview": null,
+     "startedAt": null,
+     "status": "complete",
+     "task": true,
+     "title": "SendMessage: af22137d3f2cf9aa4"
     }
    },
    {
     "call": "text",
     "ending": false,
-    "markdown": "\n\nStill",
+    "markdown": "Still",
     "notice": false
    },
    {
@@ -451,6 +511,78 @@
     "ending": false,
     "markdown": " command to complete.",
     "notice": false
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_012CKNu57KhBcSoxaTiGrCsj",
+     "message": false,
+     "name": "Bash",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Sleep for 5 seconds in the background"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_012CKNu57KhBcSoxaTiGrCsj",
+     "message": false,
+     "name": "Bash",
+     "output": "Background command \"Sleep for 5 seconds in the background\" completed (exit code 0)",
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Sleep for 5 seconds in the background"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01WkGwHEw38zhqwH5z9i74kE",
+     "message": false,
+     "name": "SendMessage",
+     "output": null,
+     "preview": null,
+     "startedAt": null,
+     "status": "complete",
+     "task": true,
+     "title": "SendMessage: af22137d3f2cf9aa4"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01WkGwHEw38zhqwH5z9i74kE",
+     "message": false,
+     "name": "SendMessage",
+     "output": "done2",
+     "preview": null,
+     "startedAt": null,
+     "status": "complete",
+     "task": true,
+     "title": "SendMessage: af22137d3f2cf9aa4"
+    }
    },
    {
     "call": "text",

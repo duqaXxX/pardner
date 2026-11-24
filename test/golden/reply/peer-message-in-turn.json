@@ -6,6 +6,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ python3 -c 'import time; time.sleep(40)'",
       "folded": null,
@@ -23,6 +24,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ python3 -c 'import time; time.sleep(40)'",
       "folded": null,
@@ -40,6 +42,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ python3 -c 'import time; time.sleep(40)'",
       "folded": null,
@@ -102,6 +105,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ python3 -c 'import time; time.sleep(40)'",
      "folded": null,
@@ -119,6 +123,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ python3 -c 'import time; time.sleep(40)'",
      "folded": null,
@@ -136,6 +141,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ python3 -c 'import time; time.sleep(40)'",
      "folded": null,

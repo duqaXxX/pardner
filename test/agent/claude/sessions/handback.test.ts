@@ -119,8 +119,9 @@ test("a hand-back is reported in the reply that started the subagent, and the tu
   noExtraMessage(h);
   assert.deepEqual(notified(h), []); // the shell still runs: the work has not ended
   const body = h.bodies()[0] ?? "";
-  assert.ok(body.indexOf(AGENT_ENDED) < body.indexOf(HANDED_BACK) && body.includes(AGENT_ENDED));
-  assert.ok(body.includes(`[complete] ${MESSAGE_FROM}`));
+  // The agent's line closes where it started and its card is the row where it ended: no end text.
+  assert.ok(!body.includes(AGENT_ENDED), body);
+  assert.ok(body.indexOf(`[complete] ${MESSAGE_FROM}`) < body.indexOf(HANDED_BACK));
   h.clients[0]?.inject(shell);
   await h.until(() => h.bodies().join("\n").includes(SHELL_REPORTED));
   await settle(h);

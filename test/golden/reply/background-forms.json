@@ -6,6 +6,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -23,6 +24,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -40,6 +42,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -57,23 +60,25 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
-      "details": null,
+      "details": "Running in background",
       "folded": null,
       "id": "toolu_01XXQ3GYnkrxCQQvi4Zk9BYe",
       "message": false,
       "name": "Monitor",
-      "output": "Monitor started (task b2p882lpn, expires in 11m unless the source ends first; you get one notice at expiry — re-arm if you still need the watch). You will be notified on each event. Keep working — do…",
+      "output": null,
       "preview": null,
       "startedAt": null,
-      "status": "complete",
-      "task": false,
+      "status": "in_progress",
+      "task": true,
       "title": "Monitor: echo tick one; sleep 6; echo tick two; sleep 600"
      }
     },
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ sleep 12; echo done",
       "folded": null,
@@ -91,30 +96,79 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
-      "details": "$ sleep 12; echo done",
+      "details": "Running in background",
       "folded": null,
       "id": "toolu_01HZa1LoQkDD69cxv5di4PfR",
       "message": false,
       "name": "Bash",
-      "output": "Command running in background with ID: bhrffi78m. Output is being written to: /tmp/claude-1000/-home-dev-project/tasks/bhrffi78m.output. You will be notified when it completes. To check interim outpu…",
+      "output": null,
       "preview": null,
       "startedAt": 0,
-      "status": "complete",
-      "task": false,
+      "status": "in_progress",
+      "task": true,
       "title": "Sleep 12 seconds then print done"
+     }
+    },
+    {
+     "call": "task",
+     "update": {
+      "agent": "Run sleep 20 and reply ok",
+      "calls": 0,
+      "details": "Running in background",
+      "folded": null,
+      "id": "toolu_01Y2Qzy4bFPXtDW3bAewcepx",
+      "message": false,
+      "name": "Agent",
+      "output": null,
+      "preview": null,
+      "startedAt": 0,
+      "status": "in_progress",
+      "task": true,
+      "title": "Agent: Run sleep 20 and reply ok"
+     }
+    },
+    {
+     "call": "task",
+     "update": {
+      "agent": "Run sleep 20 and reply ok",
+      "calls": 0,
+      "details": "Running in background",
+      "folded": null,
+      "id": "toolu_01Y2Qzy4bFPXtDW3bAewcepx",
+      "message": false,
+      "name": "Agent",
+      "output": null,
+      "preview": null,
+      "startedAt": 0,
+      "status": "in_progress",
+      "task": true,
+      "title": "Agent: Run sleep 20 and reply ok"
+     }
+    },
+    {
+     "call": "task",
+     "update": {
+      "agent": "Run sleep 20 and reply ok",
+      "calls": 1,
+      "details": "Running in background",
+      "folded": null,
+      "id": "toolu_01Y2Qzy4bFPXtDW3bAewcepx",
+      "message": false,
+      "name": "Agent",
+      "output": null,
+      "preview": null,
+      "startedAt": 0,
+      "status": "in_progress",
+      "task": true,
+      "title": "Agent: Run sleep 20 and reply ok"
      }
     },
     {
      "call": "text",
      "ending": false,
-     "markdown": "\n\n**3 background tasks launched**\n├ ticks\n├ Sleep 12 seconds then print done\n└ Run sleep 20 and reply ok",
-     "notice": true
-    },
-    {
-     "call": "text",
-     "ending": false,
-     "markdown": "\n\nThe",
+     "markdown": "The",
      "notice": false
     },
     {
@@ -161,7 +215,53 @@
     },
     {
      "call": "finish",
-     "closing": []
+     "closing": [
+      {
+       "agent": null,
+       "calls": 0,
+       "details": "Running in background",
+       "folded": null,
+       "id": "toolu_01XXQ3GYnkrxCQQvi4Zk9BYe",
+       "message": false,
+       "name": "Monitor",
+       "output": null,
+       "preview": null,
+       "startedAt": null,
+       "status": "in_progress",
+       "task": true,
+       "title": "Monitor: echo tick one; sleep 6; echo tick two; sleep 600"
+      },
+      {
+       "agent": null,
+       "calls": 0,
+       "details": "Running in background",
+       "folded": null,
+       "id": "toolu_01HZa1LoQkDD69cxv5di4PfR",
+       "message": false,
+       "name": "Bash",
+       "output": null,
+       "preview": null,
+       "startedAt": 0,
+       "status": "in_progress",
+       "task": true,
+       "title": "Sleep 12 seconds then print done"
+      },
+      {
+       "agent": "Run sleep 20 and reply ok",
+       "calls": 1,
+       "details": "Running in background",
+       "folded": null,
+       "id": "toolu_01Y2Qzy4bFPXtDW3bAewcepx",
+       "message": false,
+       "name": "Agent",
+       "output": null,
+       "preview": null,
+       "startedAt": 0,
+       "status": "in_progress",
+       "task": true,
+       "title": "Agent: Run sleep 20 and reply ok"
+      }
+     ]
     },
     {
      "call": "close_out"
@@ -179,6 +279,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -196,6 +297,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -213,6 +315,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -230,6 +333,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -298,6 +402,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -315,6 +420,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -375,6 +481,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -392,6 +499,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -409,6 +517,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -483,6 +592,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -500,6 +610,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -517,6 +628,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -534,23 +646,25 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
-     "details": null,
+     "details": "Running in background",
      "folded": null,
      "id": "toolu_01XXQ3GYnkrxCQQvi4Zk9BYe",
      "message": false,
      "name": "Monitor",
-     "output": "Monitor started (task b2p882lpn, expires in 11m unless the source ends first; you get one notice at expiry — re-arm if you still need the watch). You will be notified on each event. Keep working — do…",
+     "output": null,
      "preview": null,
      "startedAt": null,
-     "status": "complete",
-     "task": false,
+     "status": "in_progress",
+     "task": true,
      "title": "Monitor: echo tick one; sleep 6; echo tick two; sleep 600"
     }
    },
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ sleep 12; echo done",
      "folded": null,
@@ -568,30 +682,79 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
-     "details": "$ sleep 12; echo done",
+     "details": "Running in background",
      "folded": null,
      "id": "toolu_01HZa1LoQkDD69cxv5di4PfR",
      "message": false,
      "name": "Bash",
-     "output": "Command running in background with ID: bhrffi78m. Output is being written to: /tmp/claude-1000/-home-dev-project/tasks/bhrffi78m.output. You will be notified when it completes. To check interim outpu…",
+     "output": null,
      "preview": null,
      "startedAt": 0,
-     "status": "complete",
-     "task": false,
+     "status": "in_progress",
+     "task": true,
      "title": "Sleep 12 seconds then print done"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Run sleep 20 and reply ok",
+     "calls": 0,
+     "details": "Running in background",
+     "folded": null,
+     "id": "toolu_01Y2Qzy4bFPXtDW3bAewcepx",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": true,
+     "title": "Agent: Run sleep 20 and reply ok"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Run sleep 20 and reply ok",
+     "calls": 0,
+     "details": "Running in background",
+     "folded": null,
+     "id": "toolu_01Y2Qzy4bFPXtDW3bAewcepx",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": true,
+     "title": "Agent: Run sleep 20 and reply ok"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Run sleep 20 and reply ok",
+     "calls": 1,
+     "details": "Running in background",
+     "folded": null,
+     "id": "toolu_01Y2Qzy4bFPXtDW3bAewcepx",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": true,
+     "title": "Agent: Run sleep 20 and reply ok"
     }
    },
    {
     "call": "text",
     "ending": false,
-    "markdown": "\n\n**3 background tasks launched**\n├ ticks\n├ Sleep 12 seconds then print done\n└ Run sleep 20 and reply ok",
-    "notice": true
-   },
-   {
-    "call": "text",
-    "ending": false,
-    "markdown": "\n\nThe",
+    "markdown": "The",
     "notice": false
    },
    {
@@ -639,6 +802,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -656,6 +820,43 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01XXQ3GYnkrxCQQvi4Zk9BYe",
+     "message": false,
+     "name": "Monitor",
+     "output": "Stopped",
+     "preview": null,
+     "startedAt": null,
+     "status": "complete",
+     "task": true,
+     "title": "Monitor: echo tick one; sleep 6; echo tick two; sleep 600"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01XXQ3GYnkrxCQQvi4Zk9BYe",
+     "message": false,
+     "name": "Monitor",
+     "output": "Stopped",
+     "preview": null,
+     "startedAt": null,
+     "status": "complete",
+     "task": true,
+     "title": "Monitor: echo tick one; sleep 6; echo tick two; sleep 600"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -707,6 +908,42 @@
     "notice": false
    },
    {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01HZa1LoQkDD69cxv5di4PfR",
+     "message": false,
+     "name": "Bash",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Sleep 12 seconds then print done"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01HZa1LoQkDD69cxv5di4PfR",
+     "message": false,
+     "name": "Bash",
+     "output": "Background command \"Sleep 12 seconds then print done\" completed (exit code 0)",
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Sleep 12 seconds then print done"
+    }
+   },
+   {
     "call": "text",
     "ending": false,
     "markdown": "\n\nI was told the background `",
@@ -735,6 +972,42 @@
     "ending": false,
     "markdown": " exit code 0.",
     "notice": false
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Run sleep 20 and reply ok",
+     "calls": 1,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01Y2Qzy4bFPXtDW3bAewcepx",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Agent: Run sleep 20 and reply ok"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Run sleep 20 and reply ok",
+     "calls": 1,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01Y2Qzy4bFPXtDW3bAewcepx",
+     "message": false,
+     "name": "Agent",
+     "output": "ok",
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Agent: Run sleep 20 and reply ok"
+    }
    },
    {
     "call": "text",

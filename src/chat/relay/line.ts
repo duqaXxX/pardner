@@ -5,6 +5,9 @@
 
 import type { TaskUpdate } from "../seam.ts";
 
+/** What a request's body may hold: the frame (1 MiB, PD 6.7) less room for the header, the signature and the seal. */
+export const REQUEST_ROOM = 1_048_576 - 4096;
+
 /** The line as written: `startedAt` in wall-clock milliseconds, and no id, tool name or fold. */
 export type Line = Omit<TaskUpdate, "id" | "name" | "folded" | "startedAt"> & {
   readonly startedAt: number | null;

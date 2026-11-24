@@ -6,6 +6,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ sleep 15",
       "folded": null,
@@ -21,38 +22,81 @@
      }
     },
     {
-     "call": "text",
-     "ending": false,
-     "markdown": "\n\n**Agent**(Run echo subagent-ok)\n⎿ Running in background",
-     "notice": true
-    },
-    {
-     "call": "text",
-     "ending": false,
-     "markdown": "\n\n**Bash**(Wait 15 seconds)\n⎿ Running in background",
-     "notice": true
+     "call": "task",
+     "update": {
+      "agent": "Run echo subagent-ok",
+      "calls": 0,
+      "details": "Running in background",
+      "folded": null,
+      "id": "toolu_01DfXaFraaJ6RoMx2AsQa2b5",
+      "message": false,
+      "name": "Agent",
+      "output": null,
+      "preview": null,
+      "startedAt": 0,
+      "status": "in_progress",
+      "task": true,
+      "title": "Agent: Run echo subagent-ok"
+     }
     },
     {
      "call": "task",
      "update": {
+      "agent": "Run echo subagent-ok",
       "calls": 0,
-      "details": "$ sleep 15",
+      "details": "Running in background",
+      "folded": null,
+      "id": "toolu_01DfXaFraaJ6RoMx2AsQa2b5",
+      "message": false,
+      "name": "Agent",
+      "output": null,
+      "preview": null,
+      "startedAt": 0,
+      "status": "in_progress",
+      "task": true,
+      "title": "Agent: Run echo subagent-ok"
+     }
+    },
+    {
+     "call": "task",
+     "update": {
+      "agent": null,
+      "calls": 0,
+      "details": "Running in background",
       "folded": null,
       "id": "toolu_01Y54HD6jqz3tmBKBzz4V8tR",
       "message": false,
       "name": "Bash",
-      "output": "Command running in background with ID: btmuz8js3. Output is being written to: /tmp/claude-1000/-home-dev-project/tasks/btmuz8js3.output. You will be notified when it completes. To check interim outpu…",
+      "output": null,
       "preview": null,
       "startedAt": 0,
-      "status": "complete",
-      "task": false,
+      "status": "in_progress",
+      "task": true,
       "title": "Wait 15 seconds"
+     }
+    },
+    {
+     "call": "task",
+     "update": {
+      "agent": "Run echo subagent-ok",
+      "calls": 1,
+      "details": "Running in background",
+      "folded": null,
+      "id": "toolu_01DfXaFraaJ6RoMx2AsQa2b5",
+      "message": false,
+      "name": "Agent",
+      "output": null,
+      "preview": null,
+      "startedAt": 0,
+      "status": "in_progress",
+      "task": true,
+      "title": "Agent: Run echo subagent-ok"
      }
     },
     {
      "call": "text",
      "ending": false,
-     "markdown": "\n\nBoth ",
+     "markdown": "Both ",
      "notice": false
     },
     {
@@ -219,7 +263,38 @@
     },
     {
      "call": "finish",
-     "closing": []
+     "closing": [
+      {
+       "agent": "Run echo subagent-ok",
+       "calls": 1,
+       "details": "Running in background",
+       "folded": null,
+       "id": "toolu_01DfXaFraaJ6RoMx2AsQa2b5",
+       "message": false,
+       "name": "Agent",
+       "output": null,
+       "preview": null,
+       "startedAt": 0,
+       "status": "in_progress",
+       "task": true,
+       "title": "Agent: Run echo subagent-ok"
+      },
+      {
+       "agent": null,
+       "calls": 0,
+       "details": "Running in background",
+       "folded": null,
+       "id": "toolu_01Y54HD6jqz3tmBKBzz4V8tR",
+       "message": false,
+       "name": "Bash",
+       "output": null,
+       "preview": null,
+       "startedAt": 0,
+       "status": "in_progress",
+       "task": true,
+       "title": "Wait 15 seconds"
+      }
+     ]
     },
     {
      "call": "close_out"
@@ -236,6 +311,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -253,6 +329,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -270,6 +347,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -287,6 +365,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -426,6 +505,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -443,6 +523,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -528,6 +609,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ sleep 15",
      "folded": null,
@@ -543,38 +625,81 @@
     }
    },
    {
-    "call": "text",
-    "ending": false,
-    "markdown": "\n\n**Agent**(Run echo subagent-ok)\n⎿ Running in background",
-    "notice": true
-   },
-   {
-    "call": "text",
-    "ending": false,
-    "markdown": "\n\n**Bash**(Wait 15 seconds)\n⎿ Running in background",
-    "notice": true
+    "call": "task",
+    "update": {
+     "agent": "Run echo subagent-ok",
+     "calls": 0,
+     "details": "Running in background",
+     "folded": null,
+     "id": "toolu_01DfXaFraaJ6RoMx2AsQa2b5",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": true,
+     "title": "Agent: Run echo subagent-ok"
+    }
    },
    {
     "call": "task",
     "update": {
+     "agent": "Run echo subagent-ok",
      "calls": 0,
-     "details": "$ sleep 15",
+     "details": "Running in background",
+     "folded": null,
+     "id": "toolu_01DfXaFraaJ6RoMx2AsQa2b5",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": true,
+     "title": "Agent: Run echo subagent-ok"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": "Running in background",
      "folded": null,
      "id": "toolu_01Y54HD6jqz3tmBKBzz4V8tR",
      "message": false,
      "name": "Bash",
-     "output": "Command running in background with ID: btmuz8js3. Output is being written to: /tmp/claude-1000/-home-dev-project/tasks/btmuz8js3.output. You will be notified when it completes. To check interim outpu…",
+     "output": null,
      "preview": null,
      "startedAt": 0,
-     "status": "complete",
-     "task": false,
+     "status": "in_progress",
+     "task": true,
      "title": "Wait 15 seconds"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Run echo subagent-ok",
+     "calls": 1,
+     "details": "Running in background",
+     "folded": null,
+     "id": "toolu_01DfXaFraaJ6RoMx2AsQa2b5",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": true,
+     "title": "Agent: Run echo subagent-ok"
     }
    },
    {
     "call": "text",
     "ending": false,
-    "markdown": "\n\nBoth ",
+    "markdown": "Both ",
     "notice": false
    },
    {
@@ -740,6 +865,60 @@
     "notice": false
    },
    {
+    "call": "task",
+    "update": {
+     "agent": "Run echo subagent-ok",
+     "calls": 2,
+     "details": "Running in background",
+     "folded": null,
+     "id": "toolu_01DfXaFraaJ6RoMx2AsQa2b5",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "in_progress",
+     "task": true,
+     "title": "Agent: Run echo subagent-ok"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Run echo subagent-ok",
+     "calls": 2,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01DfXaFraaJ6RoMx2AsQa2b5",
+     "message": false,
+     "name": "Agent",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Agent: Run echo subagent-ok"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": "Run echo subagent-ok",
+     "calls": 2,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01DfXaFraaJ6RoMx2AsQa2b5",
+     "message": false,
+     "name": "Agent",
+     "output": "This agent's report was delivered to you as a message from \"a2212140c7c7bb15e\" (its SubagentHandback call). Read it there; it is not repeated here.",
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Agent: Run echo subagent-ok"
+    }
+   },
+   {
     "call": "text",
     "ending": false,
     "markdown": "\n\nThe sub",
@@ -828,6 +1007,42 @@
     "ending": false,
     "markdown": "unning.",
     "notice": false
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01Y54HD6jqz3tmBKBzz4V8tR",
+     "message": false,
+     "name": "Bash",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Wait 15 seconds"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01Y54HD6jqz3tmBKBzz4V8tR",
+     "message": false,
+     "name": "Bash",
+     "output": "Background command \"Wait 15 seconds\" completed (exit code 0)",
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Wait 15 seconds"
+    }
    },
    {
     "call": "text",

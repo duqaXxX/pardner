@@ -185,20 +185,29 @@ public struct MessageThread: Sendable, Equatable {
         (segments[segment.ref] ?? []).compactMap { if case .answer(let a) = items[$0] { a.markdown } else { nil } }.joined()
     }
 
-    /// How `line` stands: open while its newest status is not an end and its prompt runs.
+    /// How `line` stands: open while its newest status is not an end and its prompt runs or was answered, or it names none (a task outlives
+    /// its prompt's answer; C2 3.2).
     public func state(of line: WorkLine) -> LineState {
         guard line.fields.status == .pending || line.fields.status == .inProgress else { return .written }
-        switch line.prompt.flatMap({ prompts[$0] }) {
-        case .running: return line.fields.status == .pending ? .waiting : .running(since: line.fields.startedAt)
-        case .answered: return .written
-        default: return .interrupted
+        if let prompt = line.prompt, prompts[prompt] != .running, prompts[prompt] != .answered { return .interrupted }
+        return line.fields.status == .pending ? .waiting : .running(since: line.fields.startedAt)
+    }
+
+    private func isOpen(at index: Int) -> WorkLine? {
+        guard case .line(let l) = items[index] else { return nil }
+        switch state(of: l) {
+        case .running, .waiting: return l
+        case .written, .interrupted: return nil
         }
     }
 
-    /// Waiting for the owner while a request is open; running while a prompt runs; idle otherwise.
+    /// The lines still open, oldest first.
+    public var openLines: [WorkLine] { lineIndex.values.sorted().compactMap(isOpen(at:)) }
+
+    /// Waiting for the owner while a request is open; running while a prompt runs or a line is open; idle otherwise.
     public var state: SessionState {
         if requests.values.contains(.open) { return .waiting }
-        if prompts.values.contains(.running) { return .running }
+        if prompts.values.contains(.running) || lineIndex.values.contains(where: { isOpen(at: $0) != nil }) { return .running }
         return .idle
     }
 

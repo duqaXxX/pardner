@@ -85,6 +85,21 @@ final class LinesTests: XCTestCase {
         XCTAssertNil(fields.preview)
     }
 
+    func testAnAgentIsReadWhenItIsAStringAndNilOtherwise() throws {
+        var turn = Turn()
+        var given = update("Agent(look)", task: true)
+        given["agent"] = "look at the tests"
+        turn.line(given)
+        turn.line(update("Agent(older bot)", task: true)) // an older bot never sends the field
+        var wrong = update("Agent(wrong)", task: true)
+        wrong["agent"] = 3
+        turn.line(wrong)
+        var null = update("Agent(null)", task: true)
+        null["agent"] = NSNull()
+        turn.line(null)
+        XCTAssertEqual(turn.lines.map(\.fields.agent), ["look at the tests", nil, nil, nil])
+    }
+
     func testATaskUpdateThatDoesNotReadIsAnUnreadableMessage() throws {
         var turn = Turn()
         turn.line(["title": "no status"])
@@ -94,7 +109,7 @@ final class LinesTests: XCTestCase {
         XCTAssertEqual(count, 2)
     }
 
-    func testALineIsOpenOnlyWhileItsPromptRuns() throws {
+    func testALineStaysOpenPastItsPromptsAnswer() throws {
         var turn = Turn()
         let started = Date(timeIntervalSince1970: 1_700_000_100)
         turn.line(update("a", startedAt: 1_700_000_100_000))
@@ -108,9 +123,51 @@ final class LinesTests: XCTestCase {
         XCTAssertEqual(turn.t.state(of: l[3]), .written)
         turn.answer("Done.")
         let answered = turn.lines
-        XCTAssertEqual(turn.t.state(of: answered[0]), .written, "closed by finish as running in background: as written, no timer")
-        XCTAssertEqual(turn.t.state(of: answered[2]), .written)
+        XCTAssertEqual(turn.t.state(of: answered[0]), .running(since: started), "a task that outlives the answer still runs, with its time")
+        XCTAssertEqual(turn.t.state(of: answered[1]), .running(since: nil))
+        XCTAssertEqual(turn.t.state(of: answered[2]), .waiting, "pending keeps no word and its card")
         XCTAssertEqual(turn.t.state(of: answered[3]), .written)
+    }
+
+    func testALineWithNoPromptReadsAsOneOfAnAnsweredPrompt() throws {
+        var turn = Turn()
+        let started = Date(timeIntervalSince1970: 1_700_000_100)
+        turn.w.deliver(kind: 1, from: turn.w.bot, json: ["thread": turn.thread, "say": "task", "task": update("a", startedAt: 1_700_000_100_000)])
+        turn.w.deliver(kind: 1, from: turn.w.bot, json: ["thread": turn.thread, "say": "task", "task": update("b", status: "pending")])
+        XCTAssertNil(turn.lines[0].prompt)
+        XCTAssertEqual(turn.t.state(of: turn.lines[0]), .running(since: started))
+        XCTAssertEqual(turn.t.state(of: turn.lines[1]), .waiting)
+    }
+
+    func testAThreadWithAnOpenLineRunsAfterItsPromptIsAnswered() throws {
+        var turn = Turn()
+        let task = turn.line(update("Agent(look)", startedAt: 1_700_000_100_000, task: true))
+        turn.line(update("Read(a.ts)"))
+        turn.answer("Done.")
+        XCTAssertEqual(turn.t.state, .running, "the prompt is answered, two lines are open")
+        XCTAssertEqual(turn.t.openLines.map(\.fields.title), ["Agent(look)", "Read(a.ts)"], "oldest first")
+        turn.edit(task, update("Agent(look)", status: "complete", task: true))
+        XCTAssertEqual(turn.t.state, .running, "one line is still open")
+        XCTAssertEqual(turn.t.openLines.map(\.fields.title), ["Read(a.ts)"])
+    }
+
+    func testAThreadIsIdleOnceItsLinesAreClosedAndAWaitingRequestStillWins() throws {
+        var closed = Turn()
+        let ref = closed.line(update("Run: make", task: true))
+        closed.answer("Done.")
+        XCTAssertEqual(closed.t.state, .running)
+        closed.edit(ref, update("Run: make", status: "complete", task: true))
+        XCTAssertEqual(closed.t.state, .idle)
+        XCTAssertTrue(closed.t.openLines.isEmpty)
+        var cut = Turn()
+        cut.line(update("a", task: true))
+        cut.w.deliver(kind: 6, from: cut.w.bot, json: [:], re: cut.prompt)
+        XCTAssertEqual(cut.t.state, .idle, "an interrupted line is not open")
+        var asking = Turn()
+        asking.line(update("Agent(x)", task: true))
+        asking.answer("Done.")
+        asking.w.deliver(kind: 9, from: asking.w.bot, json: ["thread": asking.thread, "title": "Allow Edit?", "request": ["type": "permission"]], re: asking.prompt)
+        XCTAssertEqual(asking.t.state, .waiting)
     }
 
     func testALineOfACutOrUnreadPromptIsInterrupted() throws {

@@ -31,6 +31,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ ls -la && git rev-parse --is-inside-work-tree 2>&1; git branch --show-current 2>&1; find . -maxdepth 3 -iname '*migrat*' -not -path '*/node_modules/*' 2>/dev/null | head -50",
       "folded": null,
@@ -48,6 +49,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ ls -la && git rev-parse --is-inside-work-tree 2>&1; git branch --show-current 2>&1; find . -maxdepth 3 -iname '*migrat*' -not -path '*/node_modules/*' 2>/dev/null | head -50",
       "folded": null,
@@ -65,6 +67,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -82,6 +85,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -99,6 +103,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -116,6 +121,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -406,6 +412,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ ls -la && git rev-parse --is-inside-work-tree 2>&1; git branch --show-current 2>&1; find . -maxdepth 3 -iname '*migrat*' -not -path '*/node_modules/*' 2>/dev/null | head -50",
      "folded": null,
@@ -423,6 +430,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ ls -la && git rev-parse --is-inside-work-tree 2>&1; git branch --show-current 2>&1; find . -maxdepth 3 -iname '*migrat*' -not -path '*/node_modules/*' 2>/dev/null | head -50",
      "folded": null,
@@ -440,6 +448,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -457,6 +466,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -474,6 +484,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,
@@ -491,6 +502,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": null,
      "folded": null,

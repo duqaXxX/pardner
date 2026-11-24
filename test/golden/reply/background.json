@@ -6,6 +6,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": "$ sleep 5; echo done",
       "folded": null,
@@ -21,37 +22,48 @@
      }
     },
     {
-     "call": "text",
-     "ending": false,
-     "markdown": "\n\n**Bash**(Sleep for 5 seconds then print done)\n⎿ Running in background",
-     "notice": true
-    },
-    {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
-      "details": "$ sleep 5; echo done",
+      "details": "Running in background",
       "folded": null,
       "id": "toolu_01LiZwhcy5g12fYSVLgAq5TS",
       "message": false,
       "name": "Bash",
-      "output": "Command running in background with ID: bny2rux7d. Output is being written to: /private/tmp/claude-502/-home-dev-project/93f0c865-cbfb-4117-963b-cbcd8c9be267/tasks/bny2rux7d.output. You will be notifi…",
+      "output": null,
       "preview": null,
       "startedAt": 0,
-      "status": "complete",
-      "task": false,
+      "status": "in_progress",
+      "task": true,
       "title": "Sleep for 5 seconds then print done"
      }
     },
     {
      "call": "text",
      "ending": false,
-     "markdown": "\n\nstarted",
+     "markdown": "started",
      "notice": false
     },
     {
      "call": "finish",
-     "closing": []
+     "closing": [
+      {
+       "agent": null,
+       "calls": 0,
+       "details": "Running in background",
+       "folded": null,
+       "id": "toolu_01LiZwhcy5g12fYSVLgAq5TS",
+       "message": false,
+       "name": "Bash",
+       "output": null,
+       "preview": null,
+       "startedAt": 0,
+       "status": "in_progress",
+       "task": true,
+       "title": "Sleep for 5 seconds then print done"
+      }
+     ]
     },
     {
      "call": "close_out"
@@ -67,6 +79,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -84,6 +97,7 @@
     {
      "call": "task",
      "update": {
+      "agent": null,
       "calls": 0,
       "details": null,
       "folded": null,
@@ -259,6 +273,7 @@
    {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
      "details": "$ sleep 5; echo done",
      "folded": null,
@@ -274,33 +289,64 @@
     }
    },
    {
-    "call": "text",
-    "ending": false,
-    "markdown": "\n\n**Bash**(Sleep for 5 seconds then print done)\n⎿ Running in background",
-    "notice": true
-   },
-   {
     "call": "task",
     "update": {
+     "agent": null,
      "calls": 0,
-     "details": "$ sleep 5; echo done",
+     "details": "Running in background",
      "folded": null,
      "id": "toolu_01LiZwhcy5g12fYSVLgAq5TS",
      "message": false,
      "name": "Bash",
-     "output": "Command running in background with ID: bny2rux7d. Output is being written to: /private/tmp/claude-502/-home-dev-project/93f0c865-cbfb-4117-963b-cbcd8c9be267/tasks/bny2rux7d.output. You will be notifi…",
+     "output": null,
      "preview": null,
      "startedAt": 0,
-     "status": "complete",
-     "task": false,
+     "status": "in_progress",
+     "task": true,
      "title": "Sleep for 5 seconds then print done"
     }
    },
    {
     "call": "text",
     "ending": false,
-    "markdown": "\n\nstarted",
+    "markdown": "started",
     "notice": false
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01LiZwhcy5g12fYSVLgAq5TS",
+     "message": false,
+     "name": "Bash",
+     "output": null,
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Sleep for 5 seconds then print done"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01LiZwhcy5g12fYSVLgAq5TS",
+     "message": false,
+     "name": "Bash",
+     "output": "Background command \"Sleep for 5 seconds then print done\" completed (exit code 0)",
+     "preview": null,
+     "startedAt": 0,
+     "status": "complete",
+     "task": true,
+     "title": "Sleep for 5 seconds then print done"
+    }
    },
    {
     "call": "text",

@@ -635,7 +635,7 @@ test("a run's background task reports on the card, with no message of its own", 
   await h.idle();
   assert.equal(messageCount(h), replies + 1, "the report rewrites the card");
   assert.ok(card(h).includes("run 1"), "under the run it belongs to");
-  assert.ok(!card(h).includes("Running in background"), "the run's launch line is gone");
+  assert.ok(!card(h).includes("Running in background"), "the run's card carries no launch text");
   assert.equal(
     h.replies().filter((text) => text.includes("THE REPORT")).length,
     1,

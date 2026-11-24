@@ -341,11 +341,6 @@ export interface ToolVocabulary {
    * more of. A failure of any other tool keeps a card that says why.
    */
   readonly failsCounted: readonly string[];
-  /**
-   * The task type the terminal does not name in a launch line, which then reads the name of the
-   * call that started the task; null when every type is named.
-   */
-  readonly plainAgentType: string | null;
   /** The tools whose running call is titled by one input, by its key: a command's description. */
   readonly described: Readonly<Record<string, string>>;
   /** The tools whose running call lists one input under its title, by its key: the command. */
@@ -375,7 +370,6 @@ export const NO_TOOL_WORDS: ToolVocabulary = Object.freeze({
   askers: Object.freeze([]),
   launchers: Object.freeze([]),
   failsCounted: Object.freeze([]),
-  plainAgentType: null,
   described: Object.freeze({}),
   commanded: Object.freeze({}),
   continuers: Object.freeze({}),

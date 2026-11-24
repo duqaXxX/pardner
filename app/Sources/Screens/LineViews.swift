@@ -23,6 +23,9 @@ struct ThreadRow: Identifiable {
 }
 
 enum ThreadRows {
+    /// The id of the row a line's head is drawn in: what the thread's scroll position names to bring it into view.
+    static func id(of line: WorkLine) -> String { "l\(line.position)" }
+
     /// The rows of `thread`, in order: a line with a diff or a body of code is its head then its body rows.
     static func build(_ thread: MessageThread) -> [ThreadRow] {
         var rows: [ThreadRow] = []
@@ -33,7 +36,7 @@ enum ThreadRows {
             case .item(.message(let m)): rows.append(ThreadRow(id: "m\(m.position)", content: .message(m), time: m.time))
             case .item(.answer(let a)): rows.append(ThreadRow(id: "a\(a.position)", content: .segment(a), time: a.time))
             case .item(.line(let l)):
-                rows.append(ThreadRow(id: "l\(l.position)", content: .line(l), time: l.time))
+                rows.append(ThreadRow(id: id(of: l), content: .line(l), time: l.time))
                 if let preview = l.fields.preview, !preview.record {
                     for index in preview.rows.indices { rows.append(ThreadRow(id: "l\(l.position).\(index)", content: .body(l, index: index), time: nil)) }
                 }
@@ -77,14 +80,35 @@ extension Naming {
     }
 }
 
-/// The head of a line: its words by the three forms, and the state the app owns.
+/// Which of the forms a line's fields draw (turn work design 2.6, and C1 3.4 for an agent's).
+enum LineForm: Equatable {
+    case call, message, agentAsked, agentReplied
+
+    init(_ f: LineFields) { self = f.agent != nil ? (f.message ? .agentReplied : .agentAsked) : (f.message ? .message : .call) }
+
+    /// The words the app writes in place of the line's title.
+    var words: String? {
+        switch self {
+        case .agentAsked: "Asked an agent"
+        case .agentReplied: "Agent replied"
+        case .call, .message: nil
+        }
+    }
+}
+
+extension Naming {
+    /// The count of an agent's calls.
+    static func calls(_ count: Int) -> String { count == 1 ? "1 call" : "\(count) calls" }
+}
+
+/// The head of a line: its words by the forms, and the state the app owns.
 struct LineRow: View {
     let line: WorkLine
     /// How the line stands, worked out by the caller so that a change to the thread elsewhere does not draw every row again.
     let state: LineState
     /// What the row is indented by to line up with a bot's text.
     var indent: CGFloat = MessageRow.Mark.thread.size + MessageRow.Mark.thread.gap
-    @State private var opened = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         let f = line.fields
@@ -92,26 +116,22 @@ struct LineRow: View {
             if let preview = f.preview, preview.record {
                 Text(verbatim: preview.body).font(PardnerFont.ui(size: 13, weight: .regular))
             } else {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    if f.status == .error { Image(systemName: "exclamationmark.triangle").font(.system(size: 12)).foregroundStyle(PardnerColor.delText).accessibilityLabel("Failed") }
-                    Text(verbatim: f.preview?.title ?? f.title).font(PardnerFont.ui(size: 13, weight: .semibold))
-                    if let words = f.preview?.summary ?? f.details { Text(verbatim: words).font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.muted) }
-                    stateWords
+                let form = LineForm(f)
+                if form == .agentReplied, let reply = ReplyContent(f) {
+                    Button { openWindow(id: WindowID.reply, value: reply) } label: { head(f, form) }
+                        .buttonStyle(.plain).pointerStyle(.link)
+                } else {
+                    head(f, form)
+                }
+                if let details = Self.agentDetails(f, form) {
+                    Text(verbatim: details).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
                 }
                 if f.preview == nil {
-                    if f.message, let output = f.output {
-                        Button { opened.toggle() } label: {
-                            Label(opened ? "Hide" : "Show", systemImage: opened ? "chevron.down" : "chevron.right").font(PardnerFont.ui(size: 12, weight: .medium))
+                    if form == .message, let reply = ReplyContent(f) {
+                        Button { openWindow(id: WindowID.reply, value: reply) } label: {
+                            Label("Show", systemImage: "chevron.right").font(PardnerFont.ui(size: 12, weight: .medium))
                         }
                         .buttonStyle(.plain).pointerStyle(.link).foregroundStyle(PardnerColor.muted)
-                        if opened {
-                            // Whole, in rows of at most 200 lines so that a long reply builds what is on screen (a selection stops at a row's end).
-                            LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(Array(Self.messageRows(of: f).enumerated()), id: \.offset) { _, row in
-                                    Text(verbatim: row).font(PardnerFont.ui(size: 13, weight: .regular)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-                        }
                     } else if f.status == .error, let output = f.output {
                         Text(verbatim: Self.bounded(output)).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
                     }
@@ -120,6 +140,39 @@ struct LineRow: View {
         }
         .padding(.leading, indent)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func head(_ f: LineFields, _ form: LineForm) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if f.status == .error { Image(systemName: "exclamationmark.triangle").font(.system(size: 12)).foregroundStyle(PardnerColor.delText).accessibilityLabel("Failed") }
+            Text(verbatim: form.words ?? f.preview?.title ?? f.title).font(PardnerFont.ui(size: 13, weight: .semibold))
+            if let words = Self.headWords(f, form) { Text(verbatim: words).font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.muted) }
+            stateWords
+            if let count = Self.callCount(of: f) { Text(verbatim: count).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted) }
+        }
+    }
+
+    /// What follows the title: an agent's task, or the first line of its reply; else the preview's summary or the details.
+    nonisolated static func headWords(_ f: LineFields, _ form: LineForm) -> String? {
+        switch form {
+        case .agentAsked: f.agent
+        case .agentReplied: firstSaid(f.output)
+        case .call, .message: f.preview?.summary ?? f.details
+        }
+    }
+
+    /// An agent's details (its calls, one to a line) on rows of their own under the head: a call's stay in its head.
+    nonisolated static func agentDetails(_ f: LineFields, _ form: LineForm) -> String? { form == .agentAsked ? f.details : nil }
+
+    /// The count of an agent's calls once its line is closed; nil while it works, with no call, or on a line that is no agent's.
+    nonisolated static func callCount(of f: LineFields) -> String? {
+        guard f.agent != nil, !f.message, f.status != .pending, f.status != .inProgress, f.calls > 0 else { return nil }
+        return Naming.calls(f.calls)
+    }
+
+    /// The first line of `output` with a letter or a digit in it, which is what a reply's row says of it.
+    nonisolated static func firstSaid(_ output: String?) -> String? {
+        output?.split(whereSeparator: \.isNewline).first { $0.contains { $0.isLetter || $0.isNumber } }.map(String.init)
     }
 
     /// The most lines of an output the row shows.
@@ -133,11 +186,6 @@ struct LineRow: View {
         var shown = lines.prefix(outputLines).joined(separator: "\n")
         if shown.count > outputCharacters { shown = String(shown.prefix(outputCharacters)) + "…" }
         return lines.count > outputLines ? shown + "\n… +\(lines.count - outputLines) lines" : shown
-    }
-
-    /// A message line's body in rows of at most 200 lines, as a preview's is: the subagent's whole reply, with no cut. A call's output is no body.
-    static func messageRows(of fields: LineFields) -> [String] {
-        fields.message ? LinePreview.rows(of: fields.output ?? "") : []
     }
 
     @ViewBuilder private var stateWords: some View {

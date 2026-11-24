@@ -465,9 +465,37 @@ final class RequestCardTests: XCTestCase {
     // MARK: The session's activity row
 
     func testTheActivityRowSaysWorkingWhileRunningAndWaitingForYouWhileWaitingAndNothingIdle() {
-        XCTAssertEqual(SessionState.running.activityWords, "Working…")
-        XCTAssertEqual(SessionState.waiting.activityWords, "Waiting for you")
-        XCTAssertNil(SessionState.idle.activityWords)
+        XCTAssertEqual(Naming.activityWords(.running, tasks: 0), "Working…")
+        XCTAssertEqual(Naming.activityWords(.waiting, tasks: 0), "Waiting for you")
+        XCTAssertNil(Naming.activityWords(.idle, tasks: 0))
+    }
+
+    func testTheActivityRowCountsTheTasksThatRunAndWaitingForYouWinsOverTheCount() {
+        XCTAssertEqual(Naming.activityWords(.running, tasks: 1), "Working · 1 task running")
+        XCTAssertEqual(Naming.activityWords(.running, tasks: 3), "Working · 3 tasks running")
+        XCTAssertEqual(Naming.activityWords(.waiting, tasks: 3), "Waiting for you")
+    }
+
+    @MainActor
+    func testTheListOfTasksNamesEachByItsAgentTaskElseItsTitleOldestFirstAndDrawsOneRowEach() throws {
+        let s = session(permission)
+        func task(_ title: String, agent: String?, at: Int) {
+            var body: [String: Any] = ["title": title, "status": "in_progress", "task": true, "startedAt": 1_700_000_000_000]
+            body["agent"] = agent
+            deliver(1, mini, ["thread": s.thread, "say": "task", "task": body], at: at, re: s.root)
+        }
+        task("Agent(look)", agent: "look at the tests", at: 4)
+        task("Run: make test", agent: nil, at: 5)
+        let thread = try XCTUnwrap(conversation.reading.channels[channel]?.sessions.first { $0.key == s.thread })
+        let tasks = thread.openLines.filter(\.fields.task)
+        XCTAssertEqual(tasks.map { Naming.taskName($0.fields) }, ["look at the tests", "Run: make test"])
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        XCTAssertEqual(Naming.runningWords(since: tasks[0].fields.startedAt, now: start.addingTimeInterval(65)), "Running · 1m 05s")
+        XCTAssertEqual(Naming.runningWords(since: nil, now: start), "Running")
+        let one = ImageRenderer(content: TaskList(tasks: Array(tasks.prefix(1))) { _ in }).nsImage?.size.height ?? 0
+        let two = ImageRenderer(content: TaskList(tasks: tasks) { _ in }).nsImage?.size.height ?? 0
+        XCTAssertGreaterThan(one, 20)
+        XCTAssertGreaterThan(two, one * 1.5, "one row each")
     }
 
     @MainActor
@@ -476,7 +504,7 @@ final class RequestCardTests: XCTestCase {
         let thread = try XCTUnwrap(conversation.reading.channels[channel]?.sessions.first { $0.key == s.thread })
         XCTAssertEqual(thread.state, .waiting, "an open request makes the session wait")
         func height(_ state: SessionState) throws -> CGFloat {
-            let row = ActivityRow(model: conversation.reading, icons: [:], bot: mini, state: state, composer: composer(s.thread))
+            let row = ActivityRow(model: conversation.reading, icons: [:], bot: mini, state: state, tasks: [], composer: composer(s.thread)) { _ in }
             return ImageRenderer(content: row).nsImage?.size.height ?? 0
         }
         XCTAssertGreaterThan(try height(.running), 20)
