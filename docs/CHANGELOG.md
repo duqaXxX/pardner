@@ -272,6 +272,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The thread panel no longer shows nothing after a message is sent in a long thread. The panel is a lazy stack, and rows added at its end moved the view over rows that were never built, so it drew nothing until the next part or answer arrived. The panel now keeps its scroll position on an end row (`scrollPosition(id:anchor:)` with `scrollTargetLayout()`), so the view follows the end of the thread while it is there and stays where the owner reads when he has scrolled up. `ThreadScrollTests` and `ChannelScrollTests` draw a long thread and a long conversation in a window and check that the visible area holds drawn rows after a message is added; the conversation list did not need the change.
 - In the app, an `@` typed over the text a failed send gave back opens the bot list, as in an empty field; before, the list stayed closed and the message went to the channel as text (#107).
 - Dragging the divider between the conversation and the thread panel resizes the panel. The columns took the window's size from their own widths, so the drag shrank the window and the panel kept its width (#98).
 - A word typed at the top of a channel (`/bind demo`, `/stop`, `/bypass on`) or a prompt the bot refused before its session opened is no
