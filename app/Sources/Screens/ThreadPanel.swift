@@ -133,8 +133,8 @@ struct AnswerRow: View {
                     }
                     .designLines()
                 }
-                // Spans are read once the answer has landed; while parts come it is drawn as written (#73, section 7).
-                Text(answer.done ? CodeSpans.styled(answer.shown) : AttributedString(answer.shown)).designLines().textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                // Read at each part that reaches it: a structure half written is drawn half written until a later part (#73, 2.1).
+                MarkdownView(text: answer.shown, copy: { Clipboard.copy(whole) }).designLines()
                 if writing && answer.continues {
                     Text("Writing…").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
                 }

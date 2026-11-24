@@ -157,7 +157,7 @@ struct LineRow: View {
     }
 }
 
-/// One row of a preview's body, in the monospace font.
+/// One row of a preview's body, in the monospace font, invisible code points written as their numbers (#73, 2.5).
 struct LineBodyRow: View {
     let line: WorkLine
     let index: Int
@@ -165,7 +165,7 @@ struct LineBodyRow: View {
 
     var body: some View {
         if let preview = line.fields.preview, preview.rows.indices.contains(index) {
-            Text(DiffTint.text(preview.rows[index], diff: preview.language == "diff"))
+            Text(DiffTint.text(CodeMarks.shown(preview.rows[index]), diff: preview.language == "diff"))
                 .font(PardnerFont.mono(size: 12, weight: .regular)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 .padding(.leading, indent).frame(maxWidth: .infinity, alignment: .leading)
         }

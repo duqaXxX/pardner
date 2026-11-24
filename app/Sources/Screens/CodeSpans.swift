@@ -22,7 +22,7 @@ enum CodeSpans {
     /// runs of text spans are looked for in, a backslash before a punctuation character makes it text (2.4), and in a run of text a
     /// string of backticks opens a span that the next string of the same length closes (6.1), counted by code point. Inside a span a
     /// line ending becomes a space, one space is dropped at each end when both ends have one and the inside is not only spaces, and an
-    /// invisible code point is shown as its number.
+    /// invisible or control code point is shown as its number (`CodeMarks`).
     static func pieces(_ text: String) -> [Piece] {
         var pieces: [Piece] = []
         func add(_ piece: Piece) {
@@ -168,26 +168,11 @@ enum CodeSpans {
             }
             if !plain.isEmpty { pieces.append(.plain(String(plain))) }
             plain = String.UnicodeScalarView()
-            pieces.append(.code(shown(inside)))
+            pieces.append(.code(CodeMarks.shown(String(inside))))
             i = close + length
         }
         if !plain.isEmpty { pieces.append(.plain(String(plain))) }
         return pieces
-    }
-
-    /// `code` with every code point Unicode marks as default ignorable (direction controls, zero-width marks, soft hyphen, variation
-    /// selectors, tags, fillers) written as `[U+XXXX]`: monospace reads as an exact command, so what is drawn must be what a selection
-    /// copies (#73, section 7).
-    private static func shown(_ code: String.UnicodeScalarView) -> String {
-        var out = ""
-        for scalar in code {
-            if scalar.properties.isDefaultIgnorableCodePoint || scalar.value == 0x3164 || scalar.value == 0xFFA0 {
-                out += String(format: "[U+%04X]", scalar.value)
-            } else {
-                out.unicodeScalars.append(scalar)
-            }
-        }
-        return out
     }
 
     /// `text` with its code spans in JetBrains Mono on the `raised` colour, as the design draws them; a text over `most` as written.

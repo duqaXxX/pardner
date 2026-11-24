@@ -303,8 +303,8 @@ struct MessageRow: View {
                         }
                         .foregroundStyle(PardnerColor.muted)
                     } else if isBot {
-                        // A bot's text shows its code spans in the monospace font; a person's stays exactly as typed (#73, 5.2).
-                        Text(CodeSpans.styled(message.shown))
+                        // A bot's text is read as Markdown, any other body of a bot keeps its code spans only; a person's stays exactly as typed (#73, 5.2).
+                        if MarkdownView.reads(message.body) { MarkdownView(text: message.shown, copy: { Clipboard.copy(message.shown) }) } else { Text(CodeSpans.styled(message.shown)) }
                     } else {
                         mentioned(Naming.mention(of: message, in: model), message.shown)
                     }
@@ -336,8 +336,8 @@ struct Answered: View {
                 case .line(let line): LineRow(line: line, state: thread.state(of: line), indent: 0)
                 case .body(let line, let index): LineBodyRow(line: line, index: index, indent: 0)
                 case .segment(let answer):
-                    // Spans are read once the answer has landed; while parts come it is drawn as written (#73, section 7).
-                    Text(answer.done ? CodeSpans.styled(answer.shown) : AttributedString(answer.shown)).designLines().textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    // Read at each part that reaches it: a structure half written is drawn half written until a later part (#73, 2.1).
+                    MarkdownView(text: answer.shown, copy: { Clipboard.copy(thread.text(of: answer)) }).designLines()
                         .contextMenu { Button("Copy") { Clipboard.copy(thread.text(of: answer)) } }
                 }
             }
