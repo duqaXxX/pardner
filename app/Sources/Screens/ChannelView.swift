@@ -81,6 +81,7 @@ struct ChannelView: View {
             // bottom. The Sessions tab starts at the top.
             .defaultScrollAnchor(tab == .conversation ? .bottom : .top)
             .defaultScrollAnchor(.top, for: .alignment)
+            .focusedScrollbar(.conversation)
             if tab == .conversation, let composers {
                 ComposerView(model: composers.composer(channel: channel.id))
             }
@@ -309,7 +310,9 @@ struct MessageRow: View {
                         FileRow(title: title, message: message, place: place, opener: opener)
                     } else if isBot {
                         // A bot's text is read as Markdown, any other body of a bot keeps its code spans only; a person's stays exactly as typed (#73, 5.2).
-                        if MarkdownView.reads(message.body) { MarkdownView(text: message.shown, copy: { Clipboard.copy(message.shown) }) } else { Text(CodeSpans.styled(message.shown)) }
+                        if MarkdownView.reads(message.body) {
+                            MarkdownView(text: message.shown, copy: { Clipboard.copy(message.shown) }).frame(maxWidth: PardnerMetrics.answerWidth, alignment: .leading)
+                        } else { Text(CodeSpans.styled(message.shown)) }
                     } else {
                         mentioned(Naming.mention(of: message, in: model), message.shown)
                     }
@@ -348,10 +351,11 @@ struct Answered: View {
                 case .message(let line): MessageRow(model: model, icons: icons, message: line, place: place)
                 case .unreadable(let count, let first): UnreadableRow(model: model, icons: icons, message: first, count: count, mark: .conversation)
                 case .line(let line): LineRow(line: line, state: thread.state(of: line), indent: 0, place: place, images: thread.images[line.ref] ?? [])
-                case .body(let line, let index): LineBodyRow(line: line, index: index, indent: 0)
+                case .body(let line, let index): LineBodyRow(line: line, index: index, indent: 0, firstTop: LineBodyRow.top(underStackOf: PardnerMetrics.gap))
                 case .segment(let answer):
                     // Read at each part that reaches it: a structure half written is drawn half written until a later part (#73, 2.1).
                     MarkdownView(text: answer.shown, copy: { Clipboard.copy(thread.text(of: answer)) }).designLines()
+                        .frame(maxWidth: PardnerMetrics.answerWidth, alignment: .leading)
                         .contextMenu { Button("Copy") { Clipboard.copy(thread.text(of: answer)) } }
                 }
             }

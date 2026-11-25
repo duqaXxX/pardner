@@ -123,16 +123,14 @@ struct LineRow: View {
             } else {
                 let form = LineForm(f)
                 if form == .agentReplied, let reply = ReplyContent(f) {
-                    Button { openWindow(id: WindowID.reply, value: reply) } label: { head(f, form) }
-                        .buttonStyle(.plain).pointerStyle(.link)
+                    head(f, form, link: .words { openWindow(id: WindowID.reply, value: reply) })
                 } else if let opener, let place, let path = opener.link(for: line) {
                     // The call's file: a click opens its content in a window of its own (file-content design, 3.7).
-                    Button {
+                    head(f, form, path: path, link: .title {
                         let content = FileWindowContent(channel: place.channel, thread: place.thread, bot: line.ref.device, source: .path(path))
                         opener.open(content, lineEnd: line.ended)
                         openWindow(id: WindowID.file, value: content)
-                    } label: { head(f, form) }
-                    .buttonStyle(.plain).pointerStyle(.link).help(path)
+                    })
                 } else {
                     head(f, form)
                 }
@@ -158,14 +156,45 @@ struct LineRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func head(_ f: LineFields, _ form: LineForm) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            if f.status == .error { Image(systemName: "exclamationmark.triangle").font(.system(size: 12)).foregroundStyle(PardnerColor.delText).accessibilityLabel("Failed") }
-            Text(verbatim: form.words ?? f.preview?.title ?? f.title).font(PardnerFont.ui(size: 13, weight: .semibold))
-            if let words = Self.headWords(f, form) { Text(verbatim: words).font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.muted) }
-            stateWords
-            if let count = Self.callCount(of: f) { Text(verbatim: count).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted) }
+    /// What of a head is a link: nothing, its title alone (a file), or its title and details (a reply). The blank part of the row is never one.
+    private enum HeadLink {
+        case none
+        case title(() -> Void)
+        case words(() -> Void)
+    }
+
+    /// A call's head on one line (step F design FB, 3.1): the title cut in the middle, the details cut at the end, the state words whole on the right.
+    private func head(_ f: LineFields, _ form: LineForm, path: String? = nil, link: HeadLink = .none) -> some View {
+        let title = Text(verbatim: form.words ?? f.preview?.title ?? f.title).font(PardnerFont.ui(size: 13, weight: .semibold))
+            .lineLimit(1).truncationMode(.middle)
+        let words = Self.headWords(f, form).map {
+            Text(verbatim: $0).font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.muted).lineLimit(1).truncationMode(.tail)
         }
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            // The words take the room the state leaves, so that the details run up to it before they are cut; the title is cut first.
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if f.status == .error { Image(systemName: "exclamationmark.triangle").font(.system(size: 12)).foregroundStyle(PardnerColor.delText).accessibilityLabel("Failed") }
+                switch link {
+                case .none:
+                    title.layoutPriority(1)
+                    words
+                case .title(let open):
+                    Button(action: open) { title }.buttonStyle(.plain).pointerStyle(.link).layoutPriority(1)
+                    words
+                case .words(let open):
+                    Button(action: open) { HStack(spacing: 8) { title.layoutPriority(1); words } }.buttonStyle(.plain).pointerStyle(.link)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            stateWords.fixedSize()
+            if let count = Self.callCount(of: f) { Text(verbatim: count).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted).fixedSize() }
+        }
+        .help(Self.tooltip(f, form, path: path))
+    }
+
+    /// What a head's tooltip says, so that what is cut is not lost: its title (a file's path when the head links to it), then its details, a line each.
+    nonisolated static func tooltip(_ f: LineFields, _ form: LineForm, path: String?) -> String {
+        [path ?? form.words ?? f.preview?.title ?? f.title, headWords(f, form)].compactMap { $0 }.joined(separator: "\n")
     }
 
     /// What follows the title: an agent's task, or the first line of its reply; else the preview's summary or the details.
@@ -209,7 +238,7 @@ struct LineRow: View {
         case .running(let since):
             if let since {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(verbatim: "Running · " + Naming.elapsed(context.date.timeIntervalSince(since)))
+                    Text(verbatim: "Running · " + Naming.elapsed(context.date.timeIntervalSince(since))).monospacedDigit()
                 }
                 .font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.agentText)
             } else {
@@ -226,11 +255,20 @@ struct LineBodyRow: View {
     let line: WorkLine
     let index: Int
     var indent: CGFloat = MessageRow.Mark.thread.size + MessageRow.Mark.thread.gap
+    /// The offset of the first row, which the caller works out from its stack's spacing (`top(underStackOf:)`); the rows after it keep the spacing.
+    var firstTop: CGFloat = 0
+
+    /// How far under its head the first row of a body stands.
+    static let headGap: CGFloat = 2
+
+    /// The first row's offset in a stack of `spacing`, so that it stands `headGap` under the head above it.
+    static func top(underStackOf spacing: CGFloat) -> CGFloat { headGap - spacing }
 
     var body: some View {
         if let preview = line.fields.preview, preview.rows.indices.contains(index) {
             Text(DiffTint.text(CodeMarks.shown(preview.rows[index]), diff: preview.language == "diff"))
                 .font(PardnerFont.mono(size: 12, weight: .regular)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                .padding(.top, index == 0 ? firstTop : 0)
                 .padding(.leading, indent).frame(maxWidth: .infinity, alignment: .leading)
         }
     }

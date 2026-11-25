@@ -159,6 +159,16 @@ final class ComposerTextView: NSTextView {
     }
 }
 
+/// The grey text in an empty field: the bot's suggestion on up to the field's two lines (step F design FB, 3.2), the placeholder on one.
+struct ComposerHint: View {
+    let suggestion: String?
+    let placeholder: String
+
+    var body: some View {
+        Text(suggestion ?? placeholder).foregroundStyle(PardnerColor.muted).lineLimit(suggestion == nil ? 1 : 2).allowsHitTesting(false)
+    }
+}
+
 struct ComposerView: View {
     let model: ComposerModel
     @State private var height: CGFloat = 34
@@ -185,7 +195,7 @@ struct ComposerView: View {
                     }
                     ZStack(alignment: .topLeading) {
                         if model.text.isEmpty {
-                            Text(model.suggestion ?? model.placeholder).foregroundStyle(PardnerColor.muted).lineLimit(1).allowsHitTesting(false)
+                            ComposerHint(suggestion: model.suggestion, placeholder: model.placeholder)
                         }
                         ComposerField(model: model, height: $height).id("\(model.channel.base64EncodedString())/\(model.thread ?? "")").frame(height: height)
                     }

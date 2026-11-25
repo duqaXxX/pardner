@@ -152,16 +152,178 @@ final class MarkdownViewTests: XCTestCase {
         XCTAssertEqual(code.runs.first?.font, PardnerFont.mono(size: 12.5, weight: .regular))
     }
 
-    func testTheTableHeaderRowIsDrawnHeavierThanABodyRow() {
+    func testTheTableHeaderRowIsDrawnHeavierThanABodyRow() throws {
         PardnerFonts.register()
-        func width(_ table: String) -> CGFloat {
-            let hosting = NSHostingView(rootView: MarkdownView(text: table))
-            hosting.layoutSubtreeIfNeeded()
-            return hosting.fittingSize.width
-        }
         let word = "Medio Oriente Medio Oriente"
-        let headed = width("| \(word) |\n| --- |\n| x |")
-        let bodied = width("| x |\n| --- |\n| \(word) |")
-        XCTAssertGreaterThan(headed, bodied + 2)
+        // A column at its natural width wraps when the table is a little narrower than its widest cell: the header's semibold words are the
+        // wider, so at a width between the two only the header wraps.
+        let plain = fit(Text(try styled(word))), strong = fit(Text(try styled(word, weight: .semibold)))
+        XCTAssertGreaterThan(strong, plain + 2)
+        func height(_ table: String) -> CGFloat {
+            let hosting = NSHostingView(rootView: MarkdownView(text: table).frame(width: ((plain + strong) / 2).rounded()))
+            hosting.layoutSubtreeIfNeeded()
+            return hosting.fittingSize.height
+        }
+        XCTAssertGreaterThan(height("| \(word) |\n| --- |\n| x |"), height("| x |\n| --- |\n| \(word) |") + 10)
+    }
+
+    // MARK: the gaps between an answer's blocks (#73, step F, design FA 3.4)
+
+    private func piece(_ body: MarkdownBlocks.Body = .paragraph(AttributedString("p")), depth: Int = 0, bars: Int = 0, marker: String? = nil) -> MarkdownBlocks.Piece {
+        MarkdownBlocks.Piece(depth: depth, bars: bars, marker: marker, body: body)
+    }
+
+    private var heading: MarkdownBlocks.Body { .heading(level: 2, AttributedString("h")) }
+    private var code: MarkdownBlocks.Body { .code(language: nil, text: "x") }
+    private var table: MarkdownBlocks.Body { .table(MarkdownBlocks.Table(columns: 1, rows: [[AttributedString("a")], [AttributedString("b")]])) }
+
+    func testTheGapBeforeAHeadingIs20AndTheOneAfterIt8() {
+        XCTAssertEqual(MarkdownView.gap(from: piece(), to: piece(heading)), 20)
+        XCTAssertEqual(MarkdownView.gap(from: piece(heading), to: piece(heading)), 20, "a heading after a heading: the first rule wins")
+        XCTAssertEqual(MarkdownView.gap(from: piece(heading), to: piece()), 8)
+        XCTAssertEqual(MarkdownView.gap(from: piece(heading), to: piece(depth: 1, marker: "•")), 8, "a list under a heading")
+    }
+
+    func testListItemsStand4ApartAndEveryOtherPairOfPieces12() {
+        let item = piece(depth: 1, marker: "•")
+        XCTAssertEqual(MarkdownView.gap(from: item, to: piece(depth: 1, marker: "•")), 4)
+        XCTAssertEqual(MarkdownView.gap(from: item, to: piece(depth: 2, marker: "•")), 4, "a nested item")
+        XCTAssertEqual(MarkdownView.gap(from: piece(depth: 2, marker: "•"), to: piece(depth: 1, marker: "•")), 4)
+        XCTAssertEqual(MarkdownView.gap(from: piece(), to: piece()), 12)
+        XCTAssertEqual(MarkdownView.gap(from: piece(), to: item), 12, "a list after a paragraph")
+        XCTAssertEqual(MarkdownView.gap(from: item, to: piece()), 12, "a paragraph after a list")
+        XCTAssertEqual(MarkdownView.gap(from: item, to: piece(depth: 1)), 12, "the second paragraph of an item has no marker")
+        XCTAssertEqual(MarkdownView.gap(from: piece(), to: piece(.rule)), 12)
+        XCTAssertEqual(MarkdownView.gap(from: piece(.rule), to: piece()), 12)
+    }
+
+    func testACodeBlockOrATableInAnItemStands12FromItsNeighbours() {
+        let item = piece(depth: 1, marker: "•")
+        XCTAssertEqual(MarkdownView.gap(from: item, to: piece(code, depth: 1, marker: "•")), 12, "an item that starts with a code block")
+        XCTAssertEqual(MarkdownView.gap(from: item, to: piece(table, depth: 1)), 12)
+        XCTAssertEqual(MarkdownView.gap(from: piece(code, depth: 1, marker: "•"), to: piece(depth: 1, marker: "•")), 12, "the next item after a code block")
+        XCTAssertEqual(MarkdownView.gap(from: piece(table, depth: 1, marker: "•"), to: piece(depth: 1, marker: "•")), 12)
+    }
+
+    func testAQuotesParagraphsAreTwelveApartAndItsBarRunsThroughTheGap() {
+        let quoted = piece(depth: 1, bars: 1)
+        XCTAssertEqual(MarkdownView.gap(from: quoted, to: quoted), 12)
+        let shared = MarkdownView.gaps(from: quoted, to: quoted)
+        XCTAssertEqual(shared.content, 12)
+        XCTAssertEqual(shared.bars, [0], "the bar both pieces have is not pushed down: it runs through the gap")
+        let item = piece(depth: 2, bars: 1, marker: "•")
+        XCTAssertEqual(MarkdownView.gap(from: item, to: piece(depth: 2, bars: 1, marker: "•")), 4, "a list inside a quote")
+    }
+
+    func testAQuoteThatStartsAfterAParagraphLeavesItsBarAtTheTopOfItsText() {
+        let started = MarkdownView.gaps(from: piece(), to: piece(depth: 1, bars: 1))
+        XCTAssertEqual(started.content, 12)
+        XCTAssertEqual(started.bars, [12], "the bar starts where the quote's text does")
+        let deeper = MarkdownView.gaps(from: piece(depth: 1, bars: 1), to: piece(depth: 2, bars: 2))
+        XCTAssertEqual(deeper.bars, [0, 12], "the outer bar runs on, the new inner one starts at the text")
+        let first = MarkdownView.gaps(from: nil, to: piece(depth: 1, bars: 1))
+        XCTAssertEqual(first.content, 0, "the first piece has no gap")
+        XCTAssertEqual(first.bars, [0])
+    }
+
+    // MARK: a table takes the column's width, or scrolls (design FA 3.3)
+
+    func testBoundsAFractionNarrowerThanTheNaturalWidthsKeepThem() {
+        XCTAssertEqual(TableFit.widths(natural: [100, 80], floors: [90, 80], in: 195.6), [100, 80], "0.4 point under the natural sum and the gap")
+        XCTAssertNotEqual(TableFit.widths(natural: [100, 80], floors: [90, 80], in: 190), [100, 80], "5 points under it is shared")
+    }
+
+    func testAColumnKeepsItsNaturalWidthWhenTheTableFits() {
+        XCTAssertEqual(TableFit.widths(natural: [100, 80], floors: [90, 80], in: 300), [100, 80])
+        XCTAssertEqual(TableFit.widths(natural: [100, 80], floors: [90, 80], in: 196), [100, 80], "exactly the natural widths and the gap")
+    }
+
+    func testTheIdealWidthIsTheFloors() {
+        XCTAssertEqual(TableFit.widths(natural: [300, 50], floors: [90, 50], in: nil), [90, 50])
+        XCTAssertEqual(TableFit.extent(of: [90, 50]), 156, "the floors and one gap of 16")
+    }
+
+    func testNarrowerColumnsShareTheWidthByTheirNaturalWidth() {
+        XCTAssertEqual(TableFit.widths(natural: [200, 200], floors: [90, 90], in: 316), [150, 150])
+        let uneven = TableFit.widths(natural: [300, 100], floors: [90, 90], in: 316)
+        XCTAssertEqual(uneven, [210, 90], "100 of 400 of the 300 left is 75, under its floor of 90: held there, the first takes the rest")
+    }
+
+    func testAColumnThatWouldFallUnderItsFloorIsHeldThereAndTheRestSharedAgain() {
+        // 368 left: shared by 300:100:100 gives 220.8, 73.6, 73.6; the two small ones are held at 90, the first takes the 188 left.
+        XCTAssertEqual(TableFit.widths(natural: [300, 100, 100], floors: [90, 90, 90], in: 400), [188, 90, 90])
+        // A floor is never above the natural width: a column of 40 is held at 40, not 90.
+        XCTAssertEqual(TableFit.widths(natural: [40, 400], floors: [40, 90], in: 316), [40, 260])
+    }
+
+    func testTheFloorsThatDoNotFitNeverGiveANegativeWidth() {
+        for width in [CGFloat(0), 40, 100] {
+            for column in TableFit.widths(natural: [300, 300, 300], floors: [90, 90, 90], in: width) { XCTAssertGreaterThanOrEqual(column, 0) }
+        }
+    }
+
+    /// The height of `text` laid out `width` wide.
+    private func height(of text: String, width: CGFloat) -> CGFloat {
+        let hosting = NSHostingView(rootView: MarkdownView(text: text).frame(width: width))
+        hosting.layoutSubtreeIfNeeded()
+        return hosting.fittingSize.height
+    }
+
+    private func grid(columns: Int, cell: String, rows: Int = 3) -> String {
+        func row(_ cells: [String]) -> String { "| " + cells.joined(separator: " | ") + " |" }
+        let header = row((0..<columns).map { "h\($0)" })
+        let rule = row(Array(repeating: "---", count: columns))
+        let body = (0..<rows - 1).map { _ in row(Array(repeating: cell, count: columns)) }
+        return ([header, rule] + body).joined(separator: "\n")
+    }
+
+    func testATableThatNeedsToWrapIsFittedToTheColumn() {
+        PardnerFonts.register()
+        let wide = grid(columns: 3, cell: "the quick brown fox jumps over the lazy dog")
+        let oneLine = height(of: wide, width: 4000)
+        let fitted = height(of: wide, width: 400)
+        XCTAssertGreaterThan(fitted, oneLine + 20, "its cells wrap in the 400 points")
+    }
+
+    func testATableWhoseColumnsWouldBeUnderTheirFloorsScrollsSideways() {
+        PardnerFonts.register()
+        // 20 characters is more than the 90 point floor: a table that stayed fitted would wrap them.
+        let wide = grid(columns: 20, cell: "abcdefghijklmnopqrst")
+        XCTAssertEqual(height(of: wide, width: 400), height(of: wide, width: 4000), accuracy: 0.5, "no cell wraps: the table scrolls")
+    }
+
+    // MARK: a code block
+
+    func testALongCodeLineWrapsInsideTheBox() {
+        PardnerFonts.register()
+        let text = "```\n" + String(repeating: "abcdefghij", count: 20) + "\n```"
+        XCTAssertGreaterThan(height(of: text, width: 300), height(of: text, width: 900) + 20, "200 characters do not fit one line in 300 points")
+    }
+
+    func testTheCopyButtonCopiesTheCodeAsDrawn() throws {
+        let text = "```ts\na\u{200B}b\n```"
+        guard case .read(let pieces, _) = MarkdownBlocks.read(text), case .code(let language, let code) = pieces[0].body
+        else { return XCTFail("a code block") }
+        XCTAssertEqual(language, "ts")
+        XCTAssertTrue(code.contains("[U+200B]"), "what is drawn names the invisible character")
+        var copied: [String] = []
+        CodeBlock(language: language, code: code, copy: { copied.append($0) }).copyCode()
+        XCTAssertEqual(copied, ["a[U+200B]b"], "the copy is the text as drawn, as a selection of it")
+    }
+
+    // MARK: the answer's width
+
+    func testABotsAnswerIsNeverWiderThan680() {
+        PardnerFonts.register()
+        let text = (0..<60).map { "word\($0)" }.joined(separator: " ")
+        func height(_ width: CGFloat) -> CGFloat {
+            var segment = AnswerGroup(ref: MessageRef(device: Data([3]), name: Data([4])), position: 1, time: Date(), markdown: text, done: true)
+            segment.last = false
+            let hosting = NSHostingView(rootView: AnswerRow(model: ReadingModel(), icons: [:], answer: segment, whole: text).frame(width: width))
+            hosting.layoutSubtreeIfNeeded()
+            return hosting.fittingSize.height
+        }
+        XCTAssertGreaterThan(height(500), height(800), "narrower than the cap: the text wraps at the column")
+        XCTAssertEqual(height(800), height(1400), "wider than the cap: the text keeps its 680")
     }
 }

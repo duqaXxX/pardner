@@ -1,9 +1,11 @@
 // A scheduled run's line and the bot's guess at the next prompt in the thread (step E1 design 3.1 and 3.2): the row, the clearing rule of the
 // hint, its stale-guess rule, and who it is read from. Over views shaped as the link delivers them; synthetic content.
 import Conversation
+import DesignSystem
 import Foundation
 import ProtocolHost
 @testable import Screens
+import SwiftUI
 import XCTest
 
 private let bot = Data(repeating: 3, count: 32)
@@ -186,5 +188,30 @@ final class RunAndHintTests: XCTestCase {
         // The bot's line that answers the opening prompt itself (no `thread`, `re` the root): an item like any other.
         s.put(1, bot, ["markdown": "A word for the prompt"], re: s.prompt)
         XCTAssertNil(s.thread.hint)
+    }
+
+    // MARK: the hint on two lines (step F design FB, 3.2)
+
+    @MainActor
+    private func hintHeight(_ suggestion: String?, placeholder: String = "Reply to the bot") -> CGFloat {
+        _ = NSApplication.shared
+        _ = PardnerFonts.register()
+        let hosting = NSHostingView(rootView: ComposerHint(suggestion: suggestion, placeholder: placeholder).font(PardnerFont.ui(size: 14, weight: .regular)).frame(width: 200))
+        hosting.layoutSubtreeIfNeeded()
+        return hosting.fittingSize.height
+    }
+
+    @MainActor
+    func testASuggestionWrapsOnTheFieldsTwoLinesAndEndsWithADotsOnlyPastThem() {
+        let one = hintHeight("run it")
+        let words = "run the tests again and then look at the failing one in the thread"
+        XCTAssertEqual(hintHeight(words), 2 * one, accuracy: 2, "a guess that does not fit one line takes the second")
+        XCTAssertEqual(hintHeight(String(repeating: words + " ", count: 4)), 2 * one, accuracy: 2, "and no third")
+    }
+
+    @MainActor
+    func testThePlaceholderKeepsOneLine() {
+        let one = hintHeight(nil, placeholder: "Reply")
+        XCTAssertEqual(hintHeight(nil, placeholder: String(repeating: "Message a channel with a very long name ", count: 4)), one, accuracy: 1)
     }
 }
