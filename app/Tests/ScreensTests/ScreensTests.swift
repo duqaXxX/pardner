@@ -92,10 +92,13 @@ final class ScreensTests: XCTestCase {
         XCTAssertTrue(FirstLaunch(defaults: defaults).panelPending, "the two moments are marked apart")
         first.panelDone()
         XCTAssertFalse(FirstLaunch(defaults: defaults).panelPending)
+        XCTAssertTrue(FirstLaunch(defaults: defaults).panelMovePending, "the move to the new default has a flag of its own")
+        first.panelMoveDone()
+        XCTAssertFalse(FirstLaunch(defaults: defaults).panelMovePending)
     }
 
     func testThePanelsDefaultDividerLeavesItsDefaultWidth() {
-        XCTAssertEqual(Columns.panelDividerPosition(width: 1280, thickness: 1, sidebarWidth: 248), 899)
+        XCTAssertEqual(Columns.panelDividerPosition(width: 1280, thickness: 1, sidebarWidth: 248), 719)
         XCTAssertEqual(Columns.panelDividerPosition(width: 1000, thickness: 1, sidebarWidth: 250), 671, "the conversation keeps 420 beside the sidebar")
     }
 
@@ -178,7 +181,7 @@ final class ScreensTests: XCTestCase {
     private func withRealWindow(_ body: (_ window: NSWindow, _ split: ColumnSplitView, _ settle: () -> Void) throws -> Void) throws {
         _ = NSApplication.shared
         _ = PardnerFonts.register()
-        let saved = ["NSSplitView Subview Frames MainWindow.columns", FirstLaunch.sidebarKey, FirstLaunch.panelKey]
+        let saved = ["NSSplitView Subview Frames MainWindow.columns", FirstLaunch.sidebarKey, FirstLaunch.panelKey, FirstLaunch.panelMoveKey]
         for key in saved { UserDefaults.standard.removeObject(forKey: key) }
         let sample = Samples.model()
         let window = UnconstrainedWindow(contentViewController: NSHostingController(rootView: MainWindow(model: sample.model, channel: sample.channel, thread: sample.thread)))
@@ -234,7 +237,95 @@ final class ScreensTests: XCTestCase {
         withLaunches { name, defaults in
             let launch = Launch(name: name, defaults: defaults, width: 1400, thread: true)
             XCTAssertEqual(launch.widths[0], 248)
-            XCTAssertEqual(launch.widths[2], 380)
+            XCTAssertEqual(launch.widths[2], 560)
+            XCTAssertFalse(FirstLaunch(defaults: defaults).panelMovePending, "a new install has nothing to move")
+        }
+    }
+
+    /// A launch of an install made before the panel opened at 560: both first-launch moments done, the move not made.
+    private func olderInstall() -> MemoryDefaults {
+        let defaults = MemoryDefaults()
+        FirstLaunch(defaults: defaults).sidebarDone()
+        FirstLaunch(defaults: defaults).panelDone()
+        return defaults
+    }
+
+    /// The width the old default left in the split's autosave: a divider moved by code, as the first launch moved it, never by a mouse.
+    @MainActor
+    private func keepPanel(width: CGFloat, name: String) {
+        let kept = Launch(name: name, defaults: olderInstall(), width: 1400, thread: true)
+        kept.controller.splitView.setPosition(kept.controller.splitView.bounds.width - width - 1, ofDividerAt: 1)
+        kept.settle()
+        XCTAssertEqual(CGFloat(kept.widths[2]), width, accuracy: 1)
+        kept.show(thread: false)
+        kept.window.close()
+    }
+
+    @MainActor
+    func testAPanelKeptAtTheOldDefaultOpensOnceAtTheNewOne() {
+        withLaunches { name, _ in
+            keepPanel(width: 380, name: name)
+            let install = olderInstall()
+            let second = Launch(name: name, defaults: install, width: 1400, thread: false)
+            XCTAssertTrue(FirstLaunch(defaults: install).panelMovePending, "no panel open: nothing moved yet")
+            second.show(thread: true)
+            XCTAssertEqual(second.widths[2], 560, "a kept 380 opens at 560")
+            XCTAssertFalse(FirstLaunch(defaults: install).panelMovePending)
+            // The person brings it back to 380 by code (not by a drag): the move is made once.
+            second.controller.splitView.setPosition(second.controller.splitView.bounds.width - 380 - 1, ofDividerAt: 1)
+            second.settle()
+            second.show(thread: false)
+            second.window.close()
+            let third = Launch(name: name, defaults: install, width: 1400, thread: false)
+            third.show(thread: true)
+            XCTAssertEqual(third.widths[2], 380, "the move is never made twice")
+        }
+    }
+
+    /// A panel opened narrower than the old default (a narrow window can clamp it) is not a width the person chose: the move stays pending.
+    @MainActor
+    func testAPanelOpenedUnder380LeavesTheMovePendingUntilItIsAt380() {
+        withLaunches { name, _ in
+            keepPanel(width: 380, name: name)
+            let install = olderInstall()
+            let narrow = Launch(name: name, defaults: install, width: 960, thread: false)
+            narrow.show(thread: true)
+            XCTAssertGreaterThanOrEqual(narrow.widths[2], 320)
+            XCTAssertLessThan(narrow.widths[2], 380, "the window cannot hold the kept width")
+            XCTAssertTrue(FirstLaunch(defaults: install).panelMovePending, "a clamped panel is not a width the person chose")
+            narrow.window.setContentSize(NSSize(width: 1400, height: 800))
+            narrow.settle()
+            XCTAssertTrue(FirstLaunch(defaults: install).panelMovePending, "and widening the window does not settle it")
+            // The panel back at 380 (here by code), and the next layout: the move is made.
+            narrow.controller.splitView.setPosition(narrow.controller.splitView.bounds.width - 380 - 1, ofDividerAt: 1)
+            narrow.controller.applyFirstLaunch()
+            narrow.settle()
+            XCTAssertEqual(narrow.widths[2], 560)
+            XCTAssertFalse(FirstLaunch(defaults: install).panelMovePending)
+        }
+    }
+
+    @MainActor
+    func testAPanelKeptAtADraggedWidthStaysWhenTheMoveIsMade() {
+        withLaunches { name, _ in
+            keepPanel(width: 400, name: name)
+            let install = olderInstall()
+            let second = Launch(name: name, defaults: install, width: 1400, thread: false)
+            second.show(thread: true)
+            XCTAssertEqual(second.widths[2], 400, "a width the person chose stays")
+            XCTAssertFalse(FirstLaunch(defaults: install).panelMovePending, "and the move is not tried again")
+        }
+    }
+
+    @MainActor
+    func testAPanelResetByItsDividerGetsTheNewDefault() {
+        withLaunches { name, defaults in
+            let launch = Launch(name: name, defaults: defaults, width: 1400, thread: true)
+            launch.drag(divider: 1, to: launch.controller.splitView.bounds.width - 700 - 1)
+            XCTAssertEqual(launch.widths[2], 700)
+            (launch.controller.splitView as? ColumnSplitView)?.resetDivider(1)
+            launch.settle()
+            XCTAssertEqual(launch.widths[2], 560)
         }
     }
 
@@ -339,6 +430,243 @@ final class ScreensTests: XCTestCase {
             let second = Launch(name: name, defaults: defaults, width: 1000, thread: false)
             second.show(thread: true)
             XCTAssertEqual(second.widths[2], 340, "the next launch keeps the width the person dragged")
+            XCTAssertFalse(FirstLaunch(defaults: defaults).panelMovePending, "a drag is the person's width: the move leaves it alone")
+        }
+    }
+
+    // MARK: the pane that has the focus (step F design FB, 3.3)
+
+    /// A click of the left button at `point` (the window's coordinates), sent the way the app is: through `NSApp.sendEvent`, which runs the local
+    /// monitors; `window.sendEvent` never reaches one (measured, 2026-11-25).
+    @MainActor
+    private func click(_ window: NSWindow, at point: NSPoint) {
+        func event(_ type: NSEvent.EventType) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        NSApp.sendEvent(event(.leftMouseDown))
+        NSApp.sendEvent(event(.leftMouseUp))
+    }
+
+    /// The middle of column `index`, in its window's coordinates.
+    @MainActor
+    private func middle(of launch: Launch, _ index: Int) -> NSPoint {
+        let split = launch.controller.splitView
+        let frame = split.arrangedSubviews[index].frame
+        return split.convert(NSPoint(x: frame.midX, y: frame.midY), to: nil)
+    }
+
+    /// The view of column `index`'s hosting controller, which the split wraps in a view of its own.
+    @MainActor
+    private func hostView(of launch: Launch, _ index: Int) -> NSView { launch.controller.splitView.arrangedSubviews[index].subviews[0] }
+
+    @MainActor
+    func testThePaneFocusFollowsAClickInAPane() {
+        withLaunches { name, defaults in
+            let launch = Launch(name: name, defaults: defaults, width: 1400, thread: true)
+            defer { launch.window.close() }
+            let focus = launch.controller.focus
+            XCTAssertNil(focus.pane, "nothing acted in yet")
+            click(launch.window, at: middle(of: launch, 2))
+            XCTAssertEqual(focus.pane, .panel)
+            click(launch.window, at: middle(of: launch, 1))
+            XCTAssertEqual(focus.pane, .conversation)
+            click(launch.window, at: middle(of: launch, 0))
+            XCTAssertEqual(focus.pane, .sidebar)
+        }
+    }
+
+    @MainActor
+    func testAClosedPanelHasNoFrameForAClickToFallIn() {
+        withLaunches { name, defaults in
+            let launch = Launch(name: name, defaults: defaults, width: 1400, thread: false)
+            defer { launch.window.close() }
+            let frames = launch.controller.paneFrames()
+            XCTAssertEqual(frames.count, 3)
+            XCTAssertEqual(frames[2], .zero)
+            click(launch.window, at: NSPoint(x: 1390, y: 400))
+            XCTAssertEqual(launch.controller.focus.pane, .conversation, "the conversation fills the room the panel left")
+        }
+    }
+
+    @MainActor
+    func testThePaneFocusIgnoresADividerAnotherWindowAndARightClick() {
+        withLaunches { name, defaults in
+            let launch = Launch(name: name, defaults: defaults, width: 1400, thread: true)
+            let other = UnconstrainedWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 800), styleMask: [.titled], backing: .buffered, defer: false)
+            other.isReleasedWhenClosed = false
+            other.orderFront(nil)
+            defer { other.close(); launch.window.close() }
+            let focus = launch.controller.focus
+            click(launch.window, at: middle(of: launch, 1))
+            // A click in another window of the app, at a point that is in the panel of this one.
+            click(other, at: middle(of: launch, 2))
+            XCTAssertEqual(focus.pane, .conversation, "a click in another window is not read")
+            let split = launch.controller.splitView
+            let divider = split.convert(NSPoint(x: split.arrangedSubviews[1].frame.maxX + split.dividerThickness / 2, y: 100), to: nil)
+            XCTAssertNil(PaneFocus.pane(at: divider, in: launch.controller.paneFrames()), "the divider is in no pane")
+            let right = NSEvent.mouseEvent(with: .rightMouseDown, location: middle(of: launch, 2), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: launch.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            NSApp.sendEvent(right)
+            NSApp.sendEvent(NSEvent.mouseEvent(with: .rightMouseUp, location: middle(of: launch, 2), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: launch.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
+            XCTAssertEqual(focus.pane, .conversation, "a right-click does not move the focus")
+        }
+    }
+
+    @MainActor
+    func testThePaneFocusFollowsTheFirstResponder() {
+        withLaunches { name, defaults in
+            let launch = Launch(name: name, defaults: defaults, width: 1400, thread: true)
+            defer { launch.window.close() }
+            let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
+            hostView(of: launch, 2).addSubview(field)
+            let side = NSTextField(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
+            hostView(of: launch, 0).addSubview(side)
+            XCTAssertTrue(launch.window.makeFirstResponder(field))
+            XCTAssertEqual(launch.controller.focus.pane, .panel, "typing in the thread's composer gives the thread the focus")
+            XCTAssertTrue(launch.window.makeFirstResponder(side))
+            XCTAssertEqual(launch.controller.focus.pane, .sidebar)
+            // A first responder in no pane (the window, once a text view is removed) leaves the pane as it was.
+            XCTAssertTrue(launch.window.makeFirstResponder(nil))
+            XCTAssertEqual(launch.controller.focus.pane, .sidebar)
+        }
+    }
+
+    @MainActor
+    func testThePaneFocusReadsTheCaretThatWasThereWhenTheWindowAppeared() {
+        withLaunches { name, defaults in
+            let launch = Launch(name: name, defaults: defaults, width: 1400, thread: true)
+            defer { launch.window.close() }
+            let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
+            hostView(of: launch, 1).addSubview(field)
+            // Out of the screen the controller observes nothing: the caret moves with no one looking.
+            launch.window.orderOut(nil)
+            launch.settle()
+            XCTAssertTrue(launch.window.makeFirstResponder(field))
+            XCTAssertNil(launch.controller.focus.pane, "not observed while the window is out")
+            launch.window.orderFront(nil)
+            launch.settle()
+            XCTAssertEqual(launch.controller.focus.pane, .conversation, "the first read of the observation takes the caret that is already there")
+        }
+    }
+
+    @MainActor
+    func testThePaneFocusKnowsWhenTheWindowStopsBeingKeyAndStartsAgain() {
+        withLaunches { name, defaults in
+            let launch = Launch(name: name, defaults: defaults, width: 1400, thread: true)
+            defer { launch.window.close() }
+            let focus = launch.controller.focus
+            // A test process is not active, so the window cannot be made key: the object is set directly, and the notifications drive it.
+            focus.key = true
+            NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: launch.window)
+            XCTAssertFalse(focus.key)
+            NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: launch.window)
+            XCTAssertTrue(focus.key)
+            NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: NSWindow())
+            XCTAssertTrue(focus.key, "another window's resignation is not this window's")
+        }
+    }
+
+    /// The monitor, the first responder's observation and the key notifications are installed in `viewDidAppear` and removed in `viewWillDisappear`.
+    @MainActor
+    func testThePaneFocusObservesOnlyWhileTheWindowIsOnScreen() {
+        withLaunches { name, defaults in
+            let launch = Launch(name: name, defaults: defaults, width: 1400, thread: true)
+            defer { launch.window.close() }
+            let focus = launch.controller.focus
+            launch.window.orderOut(nil)
+            launch.settle()
+            focus.key = true
+            NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: launch.window)
+            XCTAssertTrue(focus.key, "the key notifications are not observed while the window is out")
+            click(launch.window, at: middle(of: launch, 2))
+            XCTAssertNil(focus.pane, "the mouse monitor is out too")
+            launch.window.orderFront(nil)
+            launch.settle()
+            click(launch.window, at: middle(of: launch, 2))
+            XCTAssertEqual(focus.pane, .panel, "and back when it appears again, once, not twice")
+            launch.window.close()
+            click(launch.window, at: middle(of: launch, 1))
+            XCTAssertEqual(focus.pane, .panel, "a closed window observes nothing")
+        }
+    }
+
+    @MainActor
+    func testThePaneFocusReachesEveryHostThroughUpdate() {
+        final class Seen { var focus: [PaneFocus?] = [nil, nil, nil] }
+        struct Reader: View {
+            let index: Int
+            let seen: Seen
+            @Environment(PaneFocus.self) private var focus: PaneFocus?
+            var body: some View {
+                seen.focus[index] = focus
+                return Color.clear
+            }
+        }
+        withLaunches { name, defaults in
+            let seen = Seen()
+            let controller = ColumnsController(defaults: defaults, autosaveName: name)
+            _ = controller.view
+            controller.update(sidebar: AnyView(Reader(index: 0, seen: seen)), conversation: AnyView(Reader(index: 1, seen: seen)), panel: AnyView(Reader(index: 2, seen: seen)), threadOpen: true)
+            let window = UnconstrainedWindow(contentViewController: controller)
+            window.setContentSize(NSSize(width: 1400, height: 800))
+            window.orderFront(nil)
+            defer { window.close() }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+            XCTAssertTrue(seen.focus.allSatisfy { $0 === controller.focus }, "each pane reads the controller's own focus")
+        }
+    }
+    @MainActor
+    func testThePaneFocusGoesToTheConversationWhenThePanelCloses() {
+        withLaunches { name, defaults in
+            let launch = Launch(name: name, defaults: defaults, width: 1400, thread: true)
+            defer { launch.window.close() }
+            let focus = launch.controller.focus
+            click(launch.window, at: middle(of: launch, 2))
+            XCTAssertEqual(focus.pane, .panel)
+            launch.show(thread: false)
+            XCTAssertEqual(focus.pane, .conversation, "the pane that had the focus is gone: the channel takes it")
+            launch.show(thread: true)
+            XCTAssertEqual(focus.pane, .conversation, "opening a thread asks nothing of the focus")
+            click(launch.window, at: middle(of: launch, 0))
+            launch.show(thread: false)
+            XCTAssertEqual(focus.pane, .sidebar, "only a focus on the panel moves")
+        }
+    }
+
+    @MainActor
+    func testTypingGivesTheFocusToThePaneOfTheFirstResponder() {
+        withLaunches { name, defaults in
+            let launch = Launch(name: name, defaults: defaults, width: 1400, thread: true)
+            defer { launch.window.close() }
+            let focus = launch.controller.focus
+            let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
+            hostView(of: launch, 2).addSubview(field)
+            XCTAssertTrue(launch.window.makeFirstResponder(field))
+            // A click in the channel leaves the caret where it was, in the thread's composer.
+            click(launch.window, at: middle(of: launch, 1))
+            XCTAssertEqual(focus.pane, .conversation)
+            let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: launch.window.windowNumber,
+                                       context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0)!
+            NSApp.sendEvent(key)
+            XCTAssertEqual(focus.pane, .panel, "the keys go to the thread's composer: the thread is where the person acts")
+        }
+    }
+
+    @MainActor
+    func testAKeyInAnotherWindowIsNotRead() {
+        withLaunches { name, defaults in
+            let launch = Launch(name: name, defaults: defaults, width: 1400, thread: true)
+            let other = UnconstrainedWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+            other.isReleasedWhenClosed = false
+            other.orderFront(nil)
+            defer { other.close(); launch.window.close() }
+            let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
+            hostView(of: launch, 2).addSubview(field)
+            XCTAssertTrue(launch.window.makeFirstResponder(field))
+            click(launch.window, at: middle(of: launch, 1))
+            let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: other.windowNumber,
+                                       context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0)!
+            NSApp.sendEvent(key)
+            XCTAssertEqual(launch.controller.focus.pane, .conversation)
         }
     }
 }

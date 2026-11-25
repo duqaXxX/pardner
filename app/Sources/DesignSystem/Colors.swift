@@ -128,7 +128,7 @@ public enum PardnerColor {
     public static let badgeInk = Tokens.color("badge-ink")
 }
 
-/// The radii and the base gap (first-screens decision 5), from the same `tokens.json`.
+/// The radii, the base gap and the answer's width (first-screens decision 5), from the same `tokens.json`.
 public enum PardnerMetrics {
     private static var file: Tokens.File { Tokens.file }
 
@@ -143,4 +143,6 @@ public enum PardnerMetrics {
     public static let containerRadius = value(file.radii, "container")
     /// The one base gap; other gaps are multiples or halves of it.
     public static let gap = value(file.spacing, "gap")
+    /// The widest a bot's text is read at: its column is capped here, and left-aligned in a panel wider than this.
+    public static let answerWidth = value(file.spacing, "answer-width")
 }

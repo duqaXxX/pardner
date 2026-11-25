@@ -1,9 +1,11 @@
 // A turn's lines as the thread panel draws them (turn work design 2.6, 2.7 and 2.9): the rows of its lazy stack, the diff's tint,
 // the words the app owns. Over views shaped as the link delivers them; synthetic content.
 import Conversation
+import DesignSystem
 import Foundation
 import ProtocolHost
 @testable import Screens
+import SwiftUI
 import XCTest
 
 private struct Session {
@@ -209,5 +211,131 @@ final class LineViewsTests: XCTestCase {
         XCTAssertEqual(LineRow.agentDetails(f, .agentAsked), "Bash: ls -la\nRead: a.txt")
         XCTAssertNil(LineRow.agentDetails(f, .call), "a call draws its details in its head")
         XCTAssertNil(LineRow.agentDetails(fields(agent: "Run ls"), .agentAsked))
+    }
+    // MARK: a call's head on one line (step F design FB, 3.1)
+
+    private func workLine(_ title: String, details: String? = nil, status: String = "complete", path: String? = nil, preview: [String: Any]? = nil) -> WorkLine {
+        var s = Session()
+        var task: [String: Any] = ["title": title, "status": status, "details": details as Any? ?? NSNull(), "output": NSNull(), "task": false, "message": false, "calls": 0,
+                                   "preview": preview as Any? ?? NSNull(), "startedAt": NSNull()]
+        if let path { task["path"] = path }
+        s.put(1, s.bot, ["thread": s.prompt.hex, "say": "task", "task": task], re: s.prompt)
+        guard case .line(let line) = s.thread.items[0] else { fatalError("a line") }
+        return line
+    }
+
+    @MainActor
+    private func headHeight(_ line: WorkLine, state: LineState, width: CGFloat) -> CGFloat {
+        _ = NSApplication.shared
+        _ = PardnerFonts.register()
+        let hosting = NSHostingView(rootView: LineRow(line: line, state: state, indent: 0).frame(width: width))
+        hosting.layoutSubtreeIfNeeded()
+        return hosting.fittingSize.height
+    }
+
+    @MainActor
+    func testALongHeadStaysOnOneLineAt380() {
+        let path = "/srv/example/project/app/Sources/Screens/AVeryLongFileNameForTheTest.swift"
+        let line = workLine("Update(\(path))", details: "Added 12 lines, removed 3 lines in the middle of the file and some more words after them")
+        let one = headHeight(workLine("Read", details: "a.txt"), state: .waiting, width: 380)
+        XCTAssertLessThan(one, 20, "a short head is one line of 13 points")
+        let running = headHeight(line, state: .running(since: Date(timeIntervalSinceNow: -193)), width: 380)
+        XCTAssertEqual(running, one, accuracy: 1, "a head with a long title, long details and `Running · 3m 13s` is as high as a short one")
+        XCTAssertEqual(headHeight(line, state: .waiting, width: 380), one, accuracy: 1)
+        XCTAssertEqual(headHeight(line, state: .running(since: nil), width: 560), one, accuracy: 1)
+    }
+
+    @MainActor
+    func testAFailedCallsHeadStaysOnOneLineToo() {
+        let line = workLine("Bash", details: String(repeating: "word ", count: 60), status: "error")
+        let one = headHeight(workLine("Read", details: "a.txt"), state: .waiting, width: 380)
+        XCTAssertEqual(headHeight(line, state: .waiting, width: 380), one, accuracy: 2, "the warning sign adds no line")
+    }
+
+    func testEveryHeadsTooltipHoldsItsTitleAndItsDetailsInFull() {
+        let f = workLine("Bash", details: "ls -la /srv/example/project && cat a.txt").fields
+        XCTAssertEqual(LineRow.tooltip(f, .call, path: nil), "Bash\nls -la /srv/example/project && cat a.txt")
+        XCTAssertEqual(LineRow.tooltip(workLine("Run: ls").fields, .call, path: nil), "Run: ls", "a head with no details has its title alone")
+        XCTAssertEqual(LineRow.tooltip(f, .call, path: "/a/b/c.swift"), "/a/b/c.swift\nls -la /srv/example/project && cat a.txt", "a file link's tooltip is the path, then the details")
+        let agent = fields(agent: "look at the tests")
+        XCTAssertEqual(LineRow.tooltip(agent, .agentAsked, path: nil), "Asked an agent\nlook at the tests")
+        let preview: [String: Any] = ["title": "Update(a.txt)", "summary": "Added 2 lines", "body": "+a\n+b", "language": "diff", "plain": false, "record": false]
+        XCTAssertEqual(LineRow.tooltip(workLine("Edit", preview: preview).fields, .call, path: nil), "Update(a.txt)\nAdded 2 lines")
+    }
+
+    // MARK: the first row of a diff (step F design FB, 3.1)
+
+    @MainActor
+    private func stackHeight(spacing: CGFloat, line: WorkLine, index: Int, offset: CGFloat?) -> CGFloat {
+        _ = NSApplication.shared
+        _ = PardnerFonts.register()
+        let row = LineBodyRow(line: line, index: index, indent: 0, firstTop: offset ?? 0)
+        let view = offset == nil ? AnyView(row) : AnyView(VStack(alignment: .leading, spacing: spacing) { Color.clear.frame(height: 10); row })
+        let hosting = NSHostingView(rootView: view.frame(width: 400))
+        hosting.layoutSubtreeIfNeeded()
+        return hosting.fittingSize.height
+    }
+
+    @MainActor
+    func testTheFirstRowOfADiffStandsTwoPointsUnderItsHeadInEveryStack() {
+        let body = (1...250).map { "+line \($0)" }.joined(separator: "\n")
+        let preview: [String: Any] = ["title": "Update(a.txt)", "summary": "Added 250 lines", "body": body, "language": "diff", "plain": false, "record": false]
+        let line = workLine("Edit", preview: preview)
+        for spacing in [ThreadPanel.rowSpacing, PardnerMetrics.gap] {
+            let top = LineBodyRow.top(underStackOf: spacing)
+            XCTAssertEqual(top, 2 - spacing)
+            let alone = stackHeight(spacing: spacing, line: line, index: 0, offset: nil)
+            XCTAssertEqual(stackHeight(spacing: spacing, line: line, index: 0, offset: top) - alone, 10 + 2, accuracy: 0.5, "a head 10 points high, then 2 points, then the row (stack of \(spacing))")
+            let second = stackHeight(spacing: spacing, line: line, index: 1, offset: nil)
+            XCTAssertEqual(stackHeight(spacing: spacing, line: line, index: 1, offset: top) - second, 10 + spacing, accuracy: 0.5, "the rows after the first keep the stack's spacing")
+        }
+    }
+
+    @MainActor
+    func testTheThreadsRowsAre16PointsApart() {
+        XCTAssertEqual(ThreadPanel.rowSpacing, 16)
+        XCTAssertEqual(PardnerMetrics.gap, 8)
+    }
+
+    /// The widest gap between two inked columns of a rendered head, in points, and the width it was drawn at.
+    @MainActor
+    private func widestGap(_ line: WorkLine, state: LineState, width: CGFloat) -> CGFloat {
+        _ = NSApplication.shared
+        _ = PardnerFonts.register()
+        let hosting = NSHostingView(rootView: LineRow(line: line, state: state, indent: 0).frame(width: width, height: 20, alignment: .topLeading))
+        hosting.frame = NSRect(x: 0, y: 0, width: width, height: 20)
+        hosting.layoutSubtreeIfNeeded()
+        guard let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else { return .infinity }
+        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / width
+        var inked = [Bool](repeating: false, count: rep.pixelsWide)
+        for x in 0..<rep.pixelsWide { for y in 0..<rep.pixelsHigh where (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.1 { inked[x] = true; break } }
+        var widest = 0, run = 0, seen = false
+        for column in inked {
+            if column { widest = seen ? max(widest, run) : 0; run = 0; seen = true } else { run += 1 }
+        }
+        return CGFloat(widest) / scale
+    }
+
+    @MainActor
+    func testTheDetailsTakeTheRoomUpToTheStateWords() {
+        let details = String(repeating: "a long run of details that more than fills the room ", count: 4)
+        let line = workLine("Bash", details: details)
+        let gap = widestGap(line, state: .interrupted, width: 380)
+        XCTAssertGreaterThan(gap, 0)
+        XCTAssertLessThanOrEqual(gap, 10, "the cut details end 8 points from the state words, the spacer keeping no more")
+    }
+
+    @MainActor
+    func testTheRunningTimeKeepsItsWidthWhateverItsDigits() {
+        _ = NSApplication.shared
+        _ = PardnerFonts.register()
+        func width(_ seconds: TimeInterval) -> CGFloat {
+            let hosting = NSHostingView(rootView: LineRow(line: workLine("Bash"), state: .running(since: Date(timeIntervalSinceNow: -seconds)), indent: 0).fixedSize())
+            hosting.layoutSubtreeIfNeeded()
+            return hosting.fittingSize.width
+        }
+        // 1m 11s and 8m 08s: the same count of characters, the digits one and eight.
+        XCTAssertEqual(width(71.5), width(488.5), accuracy: 0.01, "the time's digits are the same width, so the cut text does not move each second")
     }
 }

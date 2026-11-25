@@ -95,4 +95,8 @@ final class MetricsTests: XCTestCase {
         XCTAssertEqual(PardnerMetrics.containerRadius, 12)
         XCTAssertEqual(PardnerMetrics.gap, 8)
     }
+
+    func testABotsAnswerIsReadAtMost680Wide() {
+        XCTAssertEqual(PardnerMetrics.answerWidth, 680)
+    }
 }

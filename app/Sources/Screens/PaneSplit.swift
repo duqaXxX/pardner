@@ -9,7 +9,9 @@ enum Columns {
     static let sidebarLeast: CGFloat = 200, sidebarMost: CGFloat = 360, sidebarDefault: CGFloat = 248
     static let conversationLeast: CGFloat = 420
     /// The panel has no fixed most width: it grows until the conversation is at its least (`ColumnsController.boundPanel`).
-    static let panelLeast: CGFloat = 320, panelDefault: CGFloat = 380
+    static let panelLeast: CGFloat = 320, panelDefault: CGFloat = 560
+    /// The width the panel opened at before `panelDefault`: an install that kept it is moved to `panelDefault` once (`ColumnsController.applyFirstLaunch`).
+    static let panelOldDefault: CGFloat = 380
     /// The window's least height.
     static let leastHeight: CGFloat = 560
     /// The system's thin divider.
@@ -27,15 +29,18 @@ enum Columns {
     }
 }
 
-/// The two first-launch moments, each done once. The flags are ours: AppKit's own autosave key is not documented.
+/// The two first-launch moments, each done once, and the one-time move of a panel kept at the old default. The flags are ours:
+/// AppKit's own autosave key is not documented.
 struct FirstLaunch {
-    static let sidebarKey = "columns.sidebarWidthSet", panelKey = "columns.panelWidthSet"
+    static let sidebarKey = "columns.sidebarWidthSet", panelKey = "columns.panelWidthSet", panelMoveKey = "columns.panelMovedTo560"
     let defaults: UserDefaults
 
     var sidebarPending: Bool { !defaults.bool(forKey: Self.sidebarKey) }
     var panelPending: Bool { !defaults.bool(forKey: Self.panelKey) }
+    var panelMovePending: Bool { !defaults.bool(forKey: Self.panelMoveKey) }
     func sidebarDone() { defaults.set(true, forKey: Self.sidebarKey) }
     func panelDone() { defaults.set(true, forKey: Self.panelKey) }
+    func panelMoveDone() { defaults.set(true, forKey: Self.panelMoveKey) }
 }
 
 /// A vertical split view whose dividers go back to their default width on a double click.
@@ -73,6 +78,11 @@ final class ColumnsController: NSSplitViewController {
     private let autosaveName: String
     private var threadOpen = false
     private var applying = false
+    /// The pane the person last acted in, read by the panes' scroll views (step F design FB, 3.3).
+    let focus = PaneFocus()
+    private var mouseMonitor: Any?
+    private var responderObservation: NSKeyValueObservation?
+    private var keyObservers: [NSObjectProtocol] = []
     private var panel: NSSplitViewItem { splitViewItems[2] }
 
     /// A controller whose first-launch flags live in `defaults`; `autosaveName` is the window's, and tests pass their own.
@@ -82,7 +92,7 @@ final class ColumnsController: NSSplitViewController {
         super.init(nibName: nil, bundle: nil)
         let split = ColumnSplitView()
         let first = firstLaunch
-        split.tookOver = { index in if index == 0 { first.sidebarDone() } else { first.panelDone() } }
+        split.tookOver = { index in if index == 0 { first.sidebarDone() } else { first.panelDone(); first.panelMoveDone() } }
         splitView = split
         splitView.isVertical = true // the subclass starts as a horizontal stack otherwise
         splitView.dividerStyle = .thin
@@ -107,6 +117,72 @@ final class ColumnsController: NSSplitViewController {
         panel.holdingPriority = NSLayoutConstraint.Priority(260)
         for item in [sidebar, conversation, panel] { addSplitViewItem(item) }
         super.viewDidLoad()
+    }
+
+    // The monitor, the first responder's observation and the key notifications are installed and removed together: `viewDidAppear` and
+    // `viewWillDisappear` come in pairs at an order-out, a miniaturize and a close (measured, 2026-11-25).
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        observeFocus()
+    }
+
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        stopObservingFocus()
+    }
+
+    private func observeFocus() {
+        stopObservingFocus()
+        guard let window = view.window else { return }
+        focus.key = window.isKeyWindow
+        let center = NotificationCenter.default
+        keyObservers = [
+            center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.focus.key = true }
+            },
+            center.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.focus.key = false }
+            },
+        ]
+        // `.initial`: a caret already in a composer when the window appears gives its pane the focus.
+        responderObservation = window.observe(\.firstResponder, options: [.initial, .new]) { [weak self] window, _ in
+            MainActor.assumeIsolated { self?.focus.acted(in: self?.pane(holding: window.firstResponder)) }
+        }
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown]) { [weak self] event in
+            MainActor.assumeIsolated { self?.acted(on: event) }
+            return event
+        }
+    }
+
+    /// A click acts in the pane under it, a key in the pane that holds the first responder (the caret may be in a pane that was not clicked).
+    private func acted(on event: NSEvent) {
+        // Another window of the app (a file, the settings) has its own events.
+        guard let window = view.window, event.window === window else { return }
+        if event.type == .keyDown {
+            focus.acted(in: pane(holding: window.firstResponder))
+        } else {
+            focus.acted(in: PaneFocus.pane(at: event.locationInWindow, in: paneFrames()))
+        }
+    }
+
+    private func stopObservingFocus() {
+        if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
+        mouseMonitor = nil
+        responderObservation = nil
+        keyObservers.forEach(NotificationCenter.default.removeObserver)
+        keyObservers = []
+    }
+
+    /// The sidebar's, the conversation's and the panel's frames in the window's coordinates; a collapsed panel has none.
+    func paneFrames() -> [CGRect] {
+        hosts.map { $0.view.isHiddenOrHasHiddenAncestor ? .zero : $0.view.convert($0.view.bounds, to: nil) }
+    }
+
+    /// The pane the responder is in, nil for one in none (the window itself, a view of no pane).
+    private func pane(holding responder: NSResponder?) -> PaneFocus.Pane? {
+        guard let view = responder as? NSView else { return nil }
+        let panes: [PaneFocus.Pane] = [.sidebar, .conversation, .panel]
+        return zip(hosts, panes).first { view.isDescendant(of: $0.0.view) }?.1
     }
 
     /// The panel's most width is the room the split has: all of it but the sidebar as it stands, the conversation's least and the
@@ -137,9 +213,12 @@ final class ColumnsController: NSSplitViewController {
     func update(sidebar: AnyView, conversation: AnyView, panel content: AnyView, threadOpen: Bool) {
         loadViewIfNeeded() // SwiftUI may update before the view is loaded
         self.threadOpen = threadOpen
-        hosts[0].rootView = sidebar
-        hosts[1].rootView = conversation
-        hosts[2].rootView = content
+        // The environment crosses the nested hosting controllers (measured, 2026-11-25).
+        hosts[0].rootView = AnyView(sidebar.environment(focus))
+        hosts[1].rootView = AnyView(conversation.environment(focus))
+        hosts[2].rootView = AnyView(content.environment(focus))
+        // The panel that had the focus is going away: the channel takes it, so that its bar does not wait for a click.
+        if !threadOpen, focus.pane == .panel { focus.acted(in: .conversation) }
         if panel.isCollapsed == threadOpen {
             boundPanel() // before the panel comes back at the width it had
             panel.isCollapsed = !threadOpen
@@ -149,7 +228,8 @@ final class ColumnsController: NSSplitViewController {
 
     /// With nothing saved the items start at their least: the sidebar gets its default width when the split first has a width, the panel
     /// when it first opens. A flag is set only once the frame holds the width, so a call the split ignored is made again; the renderer calls
-    /// this after its layout.
+    /// this after its layout. A third moment, once per install: a panel kept at the old default width (380) opens at the new one
+    /// (`panelMovePending`, its own flag), a narrower or wider kept width waiting or staying as it is.
     func applyFirstLaunch() {
         // A split with no height is the early pass at the least size, before the window gives it its own.
         guard splitView.bounds.width > 0, splitView.bounds.height > 0, !applying else { return }
@@ -164,7 +244,24 @@ final class ColumnsController: NSSplitViewController {
             let position = Columns.panelDividerPosition(width: splitView.bounds.width, thickness: splitView.dividerThickness, sidebarWidth: splitView.arrangedSubviews[0].frame.width)
             splitView.setPosition(position, ofDividerAt: 1)
             splitView.layoutSubtreeIfNeeded()
-            if abs(splitView.arrangedSubviews[1].frame.maxX - position) < 1 { firstLaunch.panelDone() }
+            if abs(splitView.arrangedSubviews[1].frame.maxX - position) < 1 {
+                firstLaunch.panelDone()
+                firstLaunch.panelMoveDone() // a new install has nothing to move
+            }
+        } else if !panel.isCollapsed, firstLaunch.panelMovePending {
+            // An install that kept the old default (the autosave brings it back, even to a person who never dragged the divider) opens at the
+            // new one, once; a width the person chose stays. Judged on the restored width: a frame not yet laid out, or a panel narrower than
+            // the old default (a narrow window clamps it), waits for a later call.
+            splitView.layoutSubtreeIfNeeded()
+            let kept = splitView.arrangedSubviews[2].frame.width
+            if abs(kept - Columns.panelOldDefault) < 1 {
+                let position = Columns.panelDividerPosition(width: splitView.bounds.width, thickness: splitView.dividerThickness, sidebarWidth: splitView.arrangedSubviews[0].frame.width)
+                splitView.setPosition(position, ofDividerAt: 1)
+                splitView.layoutSubtreeIfNeeded()
+                if abs(splitView.arrangedSubviews[1].frame.maxX - position) < 1 { firstLaunch.panelMoveDone() }
+            } else if kept > Columns.panelOldDefault {
+                firstLaunch.panelMoveDone()
+            }
         }
     }
 }

@@ -6,6 +6,8 @@ import AppKit
 import SwiftUI
 
 struct ThreadPanel: View {
+    /// The space between the thread's rows.
+    static let rowSpacing = PardnerMetrics.gap * 2
     let model: ReadingModel
     let icons: [Data: NSImage]
     let thread: MessageThread
@@ -54,7 +56,7 @@ struct ThreadPanel: View {
             Divider().overlay(PardnerColor.line)
             ScrollView {
                 // Lazy, as the conversation is: a turn of hundreds of lines and a diff of thousands build the rows on screen alone.
-                LazyVStack(alignment: .leading, spacing: PardnerMetrics.gap * 2) {
+                LazyVStack(alignment: .leading, spacing: Self.rowSpacing) {
                     if let day = days[0] { DaySeparator(label: day) }
                     if let root = thread.root {
                         MessageRow(model: model, icons: icons, message: root, queued: queued.contains(root.ref), mark: .thread)
@@ -77,7 +79,7 @@ struct ThreadPanel: View {
                         case .unreadable(let count, let first): UnreadableRow(model: model, icons: icons, message: first, count: count)
                         case .segment(let a): AnswerRow(model: model, icons: icons, answer: a, whole: thread.text(of: a))
                         case .line(let l): LineRow(line: l, state: thread.state(of: l), place: place, images: thread.images[l.ref] ?? [])
-                        case .body(let l, let i): LineBodyRow(line: l, index: i)
+                        case .body(let l, let i): LineBodyRow(line: l, index: i, firstTop: LineBodyRow.top(underStackOf: Self.rowSpacing))
                         }
                     }
                     if let composer { PendingRows(model: composer, mark: .thread) }
@@ -95,6 +97,7 @@ struct ThreadPanel: View {
             // The newest entry in view, and a short thread starting under its header.
             .defaultScrollAnchor(.bottom)
             .defaultScrollAnchor(.top, for: .alignment)
+            .focusedScrollbar(.panel)
             if let composer {
                 if let bot = thread.bot {
                     // A click on a task of the list brings its line into view through the scroll position, which stops following the end.
@@ -163,6 +166,7 @@ struct AnswerRow: View {
                 }
                 // Read at each part that reaches it: a structure half written is drawn half written until a later part (#73, 2.1).
                 MarkdownView(text: answer.shown, copy: { Clipboard.copy(whole) }).designLines()
+                    .frame(maxWidth: PardnerMetrics.answerWidth, alignment: .leading)
                 if writing && answer.continues {
                     Text("Writing…").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
                 }
