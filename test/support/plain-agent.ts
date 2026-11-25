@@ -88,6 +88,7 @@ export const PLAIN_TOOLS: ToolVocabulary = Object.freeze({
   failsCounted: Object.freeze(["run"]),
   described: Object.freeze({ run: "summary" }),
   commanded: Object.freeze({ run: "line" }),
+  files: Object.freeze({ look: "target", change: "target" }),
   plan: Object.freeze({
     tool: "propose",
     keys: Object.freeze(["steps", "scratch"]),
@@ -1173,6 +1174,7 @@ export class PlainAgent implements AgentBackend {
   sessionHolders?: (session: string) => Promise<readonly SessionHolder[] | null>;
   turnsAfter?: (folder: string, session: string, after: SavedMessage) => Promise<ForeignTurns>;
   lastTurn?: (folder: string, session: string) => Promise<ForeignTurn | null>;
+  touched?: (folder: string, session: string, path: string) => Promise<boolean>;
   prompts?: (folder: string, session: string) => Promise<readonly RewindPoint[]>;
   /** What each live session answers to `loaded`, with `loadedContext`. */
   readonly loaded: LoadedContext | null;

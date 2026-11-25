@@ -8,6 +8,7 @@ import { InFlight } from "./in-flight.ts";
 import { Inbound } from "./inbound.ts";
 import { lists } from "./lists.ts";
 import { messages } from "./messages.ts";
+import { openFile } from "./open.ts";
 import { rewindFlow } from "./rewind.ts";
 import { type FlowDeps, Talk } from "./talk.ts";
 import { updating } from "./update.ts";
@@ -71,6 +72,7 @@ export function buildFlows(deps: FlowDeps): Built {
       unbound: (channel) => talk.unbound(channel),
       rootGone: rootGone(deps, talk),
       stop: inboundStop(deps, talk, inFlight),
+      openFile: openFile(deps),
     }),
   };
 }

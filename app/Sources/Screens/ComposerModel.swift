@@ -405,9 +405,10 @@ public final class ComposerModel {
     }
 
     /// The body's JSON as the relay chat module reads it: a prompt is `{text, thread?}`, a text `{markdown, thread?}` (its design 3.7 and 3.8).
-    static func body(prompt: Bool, text: String, thread: String?, control: Bool = false) -> String {
+    static func body(prompt: Bool, text: String, thread: String?, control: Bool = false, open: Bool = false) -> String {
         var fields: [String: Any] = [prompt ? "text" : "markdown": text]
         if control { fields["control"] = true }
+        if open { fields["open"] = true }
         if let thread { fields["thread"] = thread }
         let json = try? JSONSerialization.data(withJSONObject: fields, options: [.withoutEscapingSlashes, .sortedKeys])
         return String(decoding: json ?? Data(), as: UTF8.self)
@@ -489,6 +490,12 @@ public final class ComposerModel {
 
     private static func ref(_ re: MessageReference) -> MessageRef { MessageRef(device: re.device, name: re.name) }
 
+    /// Whether a prompt's content is a click on a call's path (`"open": true`, a JSON boolean): the file window answers for it, so it is never a row.
+    private static func isOpenClick(_ content: String) -> Bool {
+        guard let flag = (try? JSONSerialization.jsonObject(with: Data(content.utf8)) as? [String: Any])?["open"] as? NSNumber else { return false }
+        return CFGetTypeID(flag) == CFBooleanGetTypeID() && flag.boolValue
+    }
+
     private static func isControl(_ content: String) -> Bool {
         ControlPrompt.holds((try? JSONSerialization.jsonObject(with: Data(content.utf8))) as? [String: Any])
     }
@@ -502,6 +509,7 @@ public final class ComposerModel {
     /// the reading has not read yet (a restart) is claimed too: the one that reads it back drops it, and only a card of its thread draws it.
     private func isMine(_ item: OutboxItemRow) -> Bool {
         guard !dismissed.contains(item.name) else { return false }
+        if item.kind == 2, Self.isOpenClick(item.content) { return false }
         if item.kind == 10, let re = item.re, let thread {
             let ref = MessageRef(device: re.device, name: re.name)
             let threads = conversation.reading.channels[channel]?.threads

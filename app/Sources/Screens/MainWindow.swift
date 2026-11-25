@@ -154,7 +154,7 @@ public struct MainWindow: View {
             }, underTitleBar: shown != nil),
             panel: pane(Group {
                 if let c = shown, let key = thread, let t = openThread {
-                    ThreadPanel(model: model, icons: icons, thread: t, close: { thread = nil }, composer: composers?.composer(channel: c.id, thread: key))
+                    ThreadPanel(model: model, icons: icons, thread: t, close: { thread = nil }, composer: composers?.composer(channel: c.id, thread: key), channel: c.id)
                 }
             }))
         .frame(minWidth: Self.leastWidth(threadOpen: threadOpen))

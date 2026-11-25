@@ -106,14 +106,26 @@ export class Connection {
     return this.#ask((now) => this.#link.giveSeal(seal, sig, now));
   }
 
-  #ask(send: (now: number) => ReturnType<Link["submit"]>): Promise<number | undefined> {
+  /**
+   * Puts the blob `id` (the sealed `bytes` of a file) and gives the relay's code (0 accepted, 8 too
+   * large, 1 refused), or `undefined` when the connection ended for good. A drop before the answer
+   * puts it again on the next connection, so the call may wait through several.
+   */
+  putBlob(id: Bytes, bytes: Bytes): Promise<number | undefined> {
+    return this.#ask((now) => this.#link.putBlob(id, bytes, now));
+  }
+
+  #ask(
+    send: (now: number) => ReturnType<Link["submit"]> | "bad-input",
+  ): Promise<number | undefined> {
     return new Promise((resolve, reject) => {
       this.#push((now) => {
         try {
           const sent = send(now);
-          if (sent === "busy") resolve(undefined);
+          // A blob id the link cannot cut is no state of the connection: it reads as refused.
+          if (typeof sent === "string") resolve(sent === "bad-input" ? 1 : undefined);
           else this.#pending.set(sent.request, resolve);
-          return sent === "busy" ? [] : sent.effects;
+          return typeof sent === "string" ? [] : sent.effects;
         } catch (error) {
           reject(error);
           return [];
@@ -206,9 +218,15 @@ export class Connection {
         this.#conn = fx.conn;
         this.#dial(fx.conn, fx.purpose);
         break;
-      case "send":
-        this.#sockets.get(fx.conn)?.write(fx.bytes);
+      case "send": {
+        // A chunk of a put is reported once written out: the link sends the next one then.
+        const { conn } = fx;
+        const reported = fx.paced
+          ? () => this.#push((now) => this.#link.written(conn, now))
+          : undefined;
+        this.#sockets.get(conn)?.write(fx.bytes, reported);
         break;
+      }
       case "close":
         if (fx.why) this.#o.log(`relay: ${fx.why}`);
         this.#sockets.get(fx.conn)?.destroy();

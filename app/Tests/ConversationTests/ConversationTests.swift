@@ -18,7 +18,7 @@ struct World {
     /// One message delivered; `json` nil for a body that did not open.
     @discardableResult
     mutating func deliver(kind: Int, from sender: Data, json: [String: Any]?, to: Data? = nil, re: MessageRef? = nil, again: Bool = false,
-                          at place: Int? = nil, name given: Data? = nil, time: Double? = nil) -> MessageRef {
+                          at place: Int? = nil, name given: Data? = nil, time: Double? = nil, files: [HostValue] = []) -> MessageRef {
         let at = place ?? position
         if place == nil { position += 1 }
         let name = given ?? Data(repeating: UInt8(at % 256), count: 16)
@@ -30,7 +30,7 @@ struct World {
             "files": .null, "text": .null,
         ]
         if let json {
-            view["files"] = .array([])
+            view["files"] = .array(files)
             view["text"] = .string(String(decoding: try! JSONSerialization.data(withJSONObject: json), as: UTF8.self))
         }
         conversation.take(view: .object(view))

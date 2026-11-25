@@ -115,3 +115,23 @@ test("the plan is read from the input key the agent declares", () => {
   // An input holding a key beyond the measured ones is shown whole.
   assert.equal(PLAIN.plan("propose", { steps: "x", hidden: "y" }), null);
 });
+
+test("a call of a tool that names a file carries the path as the agent wrote it, on a held call too", async () => {
+  const sink = await drawn([
+    started("c1", "look", { target: "./src/../a.txt" }),
+    started("c2", "change", { target: "/work/notes/a.txt" }),
+    ended("c2", CHANGE),
+  ]);
+  assert.equal(sink.tasks.find((task) => task.id === "c1")?.path, "./src/../a.txt");
+  assert.equal(sink.tasks.filter((task) => task.id === "c2").at(-1)?.path, "/work/notes/a.txt");
+});
+
+test("a call of another tool, or with no text under the declared key, carries no path", async () => {
+  const sink = await drawn([
+    started("c1", "run", { summary: "Build", target: "/x" }),
+    started("c2", "look", { target: 4 }),
+    started("c3", "look", { other: "/x" }),
+  ]);
+  assert.equal(sink.tasks.length > 0, true);
+  for (const task of sink.tasks) assert.equal("path" in task, false, task.id);
+});

@@ -5,6 +5,8 @@
  * out of counters (SD 5.4, 5.7). The run and its counters live in memory alone: a new start is a new
  * run, so no sender key and counter is used twice (crypto.md 1). A reply's parts are split at 64 KiB by the provider (3.8).
  */
+import { join } from "node:path";
+import { fill, texts } from "../../core/port.ts";
 import { bytesEqual } from "../../protocol/bytes.ts";
 import { buildEpoch, type HistorySeal, tickEpoch } from "../../protocol/epochs.ts";
 import { deviceId, signedId } from "../../protocol/ids.ts";
@@ -12,17 +14,22 @@ import { makeSeal, sealKey, seals, startOf } from "../../protocol/keeper.ts";
 import { encodeMemberEntry, spaceNonce } from "../../protocol/member-log.ts";
 import { KIND_PROFILE, messageChecker } from "../../protocol/messages.ts";
 import {
+  append,
   build,
   type Draft,
   dropStarts,
   type OutboxItem,
+  putAccepted,
+  putAgain,
   queue,
   type Run,
   readBack,
   rebuild,
+  toPut,
 } from "../../protocol/outbox.ts";
 import type { Bytes, Platform } from "../../protocol/platform.ts";
 import type { Out, Reading } from "../../protocol/reading.ts";
+import { BlobFiles } from "./blob-files.ts";
 import { toHex } from "./hex.ts";
 import { type Pairing, SIGN } from "./pairing.ts";
 import type { Store } from "./store.ts";
@@ -31,6 +38,42 @@ const MEMBER = 2; // the item kinds of a `submit` frame
 const MESSAGE = 4;
 const EPOCH = 3;
 const BUILT = "relay: a message could not be built, nothing is sent until the next read";
+const MISSING = 7; // the relay's result for a message that names a blob it lacks
+const EMPTY = new Uint8Array(0); // the `blob` of a file in the outbox: its bytes are a blob file
+
+/** What `queueFile` says: the message is in the outbox, or why the file did not get there (design G 3.5). */
+export type FileSent = "queued" | "too-large" | "refused" | "not-queued";
+
+const lostText = (name: string) => fill(texts.FILE_LOST, { name });
+/** Why the relay did not take a file, as the owner reads it in `SHARE_REFUSED`. */
+export const TOO_LARGE_FOR_RELAY = "it is too large for the relay";
+export const NOT_TAKEN_BY_RELAY = "the relay did not take it";
+/** The bot's own failure: the copy could not be kept or the store did not write. */
+export const NOT_SENT = "the bot could not send it";
+export const refusedText = (name: string, code: number | undefined) =>
+  fill(texts.SHARE_REFUSED, {
+    path: name,
+    error: code === 8 ? TOO_LARGE_FOR_RELAY : code === undefined ? NOT_SENT : NOT_TAKEN_BY_RELAY,
+  });
+
+/**
+ * `item` as the owner gets it when its file cannot be sent (design G 3.5): the same message under its
+ * name, with no file and `text` in `markdown`; a file row (`say: "file"`) is said as a `tell`.
+ */
+function withoutFile(item: OutboxItem, text: string): OutboxItem {
+  let body: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(item.content);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed))
+      body = parsed as Record<string, unknown>;
+  } catch {} // a body that is no JSON object is replaced by the text alone
+  const content = JSON.stringify({
+    ...body,
+    ...(body.say === "file" ? { say: "tell" } : {}),
+    markdown: text,
+  });
+  return { ...item, files: [], content, built: undefined };
+}
 
 export interface OutboxOptions {
   platform: Platform;
@@ -41,6 +84,10 @@ export interface OutboxOptions {
   submit: (kind: 2 | 3 | 4, signed: Bytes, sig: Bytes) => Promise<number | undefined>;
   /** `Connection.giveSeal`: the relay's result code, or `undefined` when none came. */
   giveSeal: (seal: HistorySeal, sig: Bytes) => Promise<number | undefined>;
+  /** `Connection.putBlob`: the relay's result code, or `undefined` when none came. */
+  put: (id: Bytes, bytes: Bytes) => Promise<number | undefined>;
+  /** The blob files; the store's `blobs/` folder by default. */
+  blobs?: BlobFiles;
   log: (line: string) => void;
   /** The run of the bot, shared with its `BotReader`: a start read back is of this run (SD 5.8). */
   run: Run;
@@ -66,33 +113,159 @@ export class Outbox {
   #spaceAsked = false; // the person's space was asked for in this run, and the relay answered
   #again = false; // a rest came while seals were given
   #released = false;
+  #reput = new Set<string>(); // names put again after a missing since the last rest: a second one waits for the next
   #dropped = new Set<string>(); // names that left the outbox without being read back: refused, too large or unwanted
   #landing = new Set<{ names: Bytes[]; done: (landed: boolean) => void }>();
+  #blobs: BlobFiles;
 
   constructor(options: OutboxOptions) {
     this.#o = options;
+    this.#blobs = options.blobs ?? new BlobFiles(join(options.store.directory, "blobs"));
     const { platform, pairing, store } = options;
     this.#self = deviceId(platform, pairing.device.signing, pairing.device.receiving);
     this.#dropStarts(); // a start belongs to the run that wrote it (SD 5.8)
     this.#dropProfiles();
+    this.#reconcileBlobs();
   }
 
-  /** Puts a message in the outbox of `channel`, stored before it is built; false for a draft the package refuses. */
+  /**
+   * Puts a message in the outbox of `channel`, stored before it is built; false for a draft the
+   * package refuses. A draft with files resolves once its blobs are put and it is appended, which
+   * waits through reconnects; false then also means the relay refused a blob or found it too large.
+   */
   async queue(
     channel: Bytes,
     draft: Draft,
     also?: (saved: Store["saved"]) => void,
   ): Promise<boolean> {
     const key = toHex(channel);
-    if (draft.files?.length) return false; // files come with step 6 (SD 5.12)
+    if (draft.files?.length) return (await this.queueFile(channel, draft, also)) === "queued";
     const next = queue(this.#o.platform, this.#o.store.saved.outboxes.get(key) ?? [], draft);
     if (!next.ok) return false;
-    await this.#o.store.change((s) => {
-      s.outboxes.set(key, next.value);
-      also?.(s); // in the same write as the message
-    });
+    try {
+      await this.#o.store.change((s) => {
+        s.outboxes.set(key, next.value);
+        also?.(s); // in the same write as the message
+      });
+    } catch (error) {
+      // A write that failed may have left the change in memory, and the next good write stores it: the
+      // message is then queued, as in `queueFile`.
+      const name = next.value.at(-1)?.name as Bytes;
+      const inMemory = (this.#o.store.saved.outboxes.get(key) ?? []).some((i) =>
+        bytesEqual(i.name, name),
+      );
+      if (!inMemory) throw error;
+      this.#o.log(`relay: the store did not write: ${(error as Error).message}`);
+    }
     this.pump();
     return true;
+  }
+
+  /**
+   * Sends a message with files (design G 3.5): sealed once, its blob files kept, its blobs put, and
+   * only then appended to the channel's outbox as it stands, in one write with `also`. The upload
+   * waits for no other line of the channel, and the call resolves once the message is appended.
+   */
+  async queueFile(
+    channel: Bytes,
+    draft: Draft,
+    also?: (saved: Store["saved"]) => void,
+  ): Promise<FileSent> {
+    const { store, put } = this.#o;
+    const key = toHex(channel);
+    const made = queue(this.#o.platform, store.saved.outboxes.get(key) ?? [], draft);
+    if (!made.ok) return "not-queued";
+    const item = made.value.at(-1) as OutboxItem; // the message `queue` made, kept aside
+    let sent: FileSent = "queued";
+    try {
+      for (const f of item.files) this.#blobs.write(f.id, f.blob); // before the store names it
+    } catch (error) {
+      this.#o.log(`relay: a file copy could not be kept: ${(error as Error).message}`);
+      sent = "not-queued";
+    }
+    if (sent === "queued") {
+      try {
+        for (const f of item.files) {
+          const code = await put(f.id, f.blob);
+          if (code === 0) continue;
+          sent = code === 8 ? "too-large" : code === undefined ? "not-queued" : "refused";
+          break;
+        }
+      } catch (error) {
+        this.#o.log(`relay: a file could not be put: ${(error as Error).message}`);
+        sent = "not-queued";
+      }
+    }
+    if (sent !== "queued") {
+      this.#unfile(item.files);
+      return sent;
+    }
+    const accepted = item.files.reduce((it, f) => putAccepted(it, f.id), item);
+    const held = { ...accepted, files: accepted.files.map((f) => ({ ...f, blob: EMPTY })) };
+    try {
+      await store.change((s) => {
+        s.outboxes.set(key, append(s.outboxes.get(key) ?? [], held));
+        also?.(s);
+      });
+    } catch (error) {
+      this.#o.log(`relay: the store did not write: ${(error as Error).message}`);
+      // A write that failed may have left the change in memory, and the next good write stores it:
+      // the message is then queued, and its blob files stay.
+      const inMemory = (store.saved.outboxes.get(key) ?? []).some((i) =>
+        bytesEqual(i.name, item.name),
+      );
+      if (!inMemory) {
+        this.#unfile(item.files);
+        return "not-queued";
+      }
+    }
+    this.pump();
+    return "queued";
+  }
+
+  #unfile(files: readonly { id: Bytes }[]): void {
+    for (const { id } of files) {
+      try {
+        this.#blobs.remove(id);
+      } catch (error) {
+        this.#o.log(`relay: a file copy was not removed: ${(error as Error).message}`);
+      }
+    }
+  }
+
+  /**
+   * At a start (design G 3.5): a message whose blob file is gone goes without its file and says so,
+   * and a blob file no message names is removed.
+   */
+  #reconcileBlobs(): void {
+    const items = [...this.#o.store.saved.outboxes.values()].flat();
+    const lost = new Map<string, string>(); // message name -> its first file that is gone
+    for (const i of items) {
+      const gone = i.files.find((f) => !this.#blobs.has(f.id));
+      if (gone) lost.set(toHex(i.name), gone.name);
+    }
+    if (lost.size > 0)
+      this.#save((s) => {
+        for (const [key, list] of s.outboxes)
+          s.outboxes.set(
+            key,
+            list.map((i) =>
+              lost.has(toHex(i.name))
+                ? withoutFile(i, lostText(lost.get(toHex(i.name)) as string))
+                : i,
+            ),
+          );
+      });
+    const kept = new Set(
+      [...this.#o.store.saved.outboxes.values()]
+        .flat()
+        .flatMap((i) => i.files.map((f) => toHex(f.id))),
+    );
+    try {
+      this.#blobs.sweep(kept);
+    } catch (error) {
+      this.#o.log(`relay: the blob files were not swept: ${(error as Error).message}`);
+    }
   }
 
   /** Told of each `Out` of the connection: a message of the bot's own read back, a new incarnation, a rest. */
@@ -107,8 +280,12 @@ export class Outbox {
       const held = this.#o.store.saved.outboxes.get(key) ?? [];
       const rest = readBack(held, this.#self, out.message.header);
       if (rest.length !== held.length)
-        void this.#save((s) => s.outboxes.set(key, rest)).then(() => this.#land());
+        void this.#save((s) => s.outboxes.set(key, rest)).then((written) => {
+          if (written) for (const i of held) if (!rest.includes(i)) this.#unfile(i.files);
+          this.#land();
+        });
     } else if (out.do === "rest") {
+      this.#reput.clear();
       this.#sent.clear(); // what the pass did not read back is sent again, as the same bytes
       this.#waiting.clear();
       this.#spaceAtRest();
@@ -237,10 +414,15 @@ export class Outbox {
     });
   }
 
-  #save(edit: (s: Store["saved"]) => void): Promise<void> {
-    return this.#o.store
-      .change(edit)
-      .catch((e: Error) => this.#o.log(`relay: the store did not write: ${e.message}`));
+  /** Whether the store wrote the change; a write that failed is logged. */
+  #save(edit: (s: Store["saved"]) => void): Promise<boolean> {
+    return this.#o.store.change(edit).then(
+      () => true,
+      (e: Error) => {
+        this.#o.log(`relay: the store did not write: ${e.message}`);
+        return false;
+      },
+    );
   }
 
   /** `item` replaced by `next` in its channel's outbox, or removed when `next` is `undefined`; rejects when the write fails. */
@@ -256,7 +438,36 @@ export class Outbox {
           ),
         ),
       )
-      .then(() => this.#land());
+      .then(() => {
+        // What the item no longer holds goes with it: its message was read back or dropped, or lost its file.
+        for (const f of item.files)
+          if (!next?.files.some((n) => bytesEqual(n.id, f.id))) this.#unfile([f]);
+        this.#land();
+      });
+  }
+
+  /** Puts the first blob of `item` the relay has not accepted in this run; true when the next step may follow at once. */
+  async #putFile(
+    key: string,
+    item: OutboxItem,
+    file: OutboxItem["files"][number],
+  ): Promise<boolean> {
+    const bytes = this.#blobs.read(file.id);
+    if (!bytes) {
+      await this.#put(key, item, withoutFile(item, lostText(file.name))); // gone since the start
+      return true;
+    }
+    const code = await this.#o.put(file.id, bytes);
+    if (code === undefined) return false;
+    // Read back while the blob was put: nothing is left to act on.
+    if (!(this.#o.store.saved.outboxes.get(key) ?? []).some((i) => bytesEqual(i.name, item.name)))
+      return true;
+    if (code === 0) await this.#put(key, item, putAccepted(item, file.id));
+    else {
+      this.#o.log(`relay: the relay did not take a file (${code}), its message goes without it`);
+      await this.#put(key, item, withoutFile(item, refusedText(file.name, code)));
+    }
+    return true;
   }
 
   async #drain(channel: Bytes, key: string): Promise<void> {
@@ -291,6 +502,9 @@ export class Outbox {
     const sent = this.#sent.get(key) ?? new Set<string>();
     const item = (store.saved.outboxes.get(key) ?? []).find((i) => !sent.has(toHex(i.name)));
     if (!item) return false;
+    // An item loaded at a start, or answered missing, puts its blobs before it is submitted (design G 3.5).
+    const unput = toPut(item)[0];
+    if (unput) return this.#putFile(key, item, unput);
     const last = view.epochs.at(-1);
     const at = {
       channel,
@@ -326,6 +540,12 @@ export class Outbox {
       code = await submit(MESSAGE, built.signed, built.signature);
     } catch {
       code = 8; // a frame the protocol cannot encode: it is too large, whatever the relay would say
+    }
+    if (code === MISSING && ready.files.length > 0) {
+      if (this.#reput.has(name)) return false; // a relay that says it again waits for the next rest
+      this.#reput.add(name);
+      await this.#put(key, item, putAgain(ready)); // the relay dropped an unnamed blob: put again, then submit
+      return true;
     }
     switch (code) {
       case undefined:

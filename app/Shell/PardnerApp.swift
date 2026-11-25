@@ -80,6 +80,7 @@ struct PardnerApp: App {
             // The pairing screens until this Mac is paired; then the main window over what the link delivered.
             PairingRoot(model: delegate.pairing) { LiveMainWindow(conversation: delegate.pairing.conversation, devices: delegate.pairing.devices, settings: delegate.pairing.settings, channels: delegate.pairing.channels, sections: delegate.pairing.sections, composers: delegate.pairing.composers) }
                 .frame(minHeight: MainWindow.leastHeight)
+                .environment(delegate.pairing.files)
                 .task { delegate.pairing.start() }
                 .background(WindowReader { delegate.mainWindow = $0 })
                 .onAppear {
@@ -134,6 +135,11 @@ struct PardnerApp: App {
             ReplyWindow(content: content)
         }
         .defaultSize(width: 640, height: 520).restorationBehavior(.disabled).commandsRemoved()
+        // A file read whole (file-content design, 3.7): one window per path and thread, closed by the window's controls.
+        WindowGroup("File", id: WindowID.file, for: FileWindowContent.self) { $content in
+            FileWindow(content: content, opener: delegate.pairing.files)
+        }
+        .defaultSize(width: 760, height: 600).restorationBehavior(.disabled).commandsRemoved()
     }
 }
 

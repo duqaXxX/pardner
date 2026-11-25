@@ -730,6 +730,8 @@ export class TurnRenderer {
       taskTitle(event.toolName, event.input);
     const parent = event.parentCallId;
     const root = parent === null ? null : (this.#rootOf.get(parent) ?? parent);
+    const file = this.#previews.file(event.toolName, event.input);
+    const path = file === null ? {} : { path: file };
     if (root !== null && (this.#lines.has(root) || this.#launched.has(root))) {
       this.#rootOf.set(event.callId, root);
       await this.#child(root, title);
@@ -756,6 +758,7 @@ export class TurnRenderer {
         line(event.callId, title, "in_progress", {
           name: event.toolName,
           startedAt: launcher ? this.#now() : null,
+          ...path,
         }),
       );
       this.#afterText = false;
@@ -764,9 +767,11 @@ export class TurnRenderer {
       if (timed.startedAt !== undefined) this.#clocked.add(event.callId);
       // A call that asks the owner first waits: no timer until it runs (`release`).
       if (this.#asked(event.callId)) {
-        await this.#set(line(event.callId, title, "pending", { ...timed, startedAt: null }));
+        await this.#set(
+          line(event.callId, title, "pending", { ...timed, ...path, startedAt: null }),
+        );
       } else {
-        await this.#set(line(event.callId, title, "in_progress", timed));
+        await this.#set(line(event.callId, title, "in_progress", { ...timed, ...path }));
       }
     }
   }

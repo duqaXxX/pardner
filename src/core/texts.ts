@@ -146,6 +146,9 @@ export const NOT_A_SESSION =
   "`/resume` to continue an earlier one.";
 export const OPEN_TOP_LEVEL =
   "Opening a file belongs to one session: send `/open` inside its thread.";
+export const OPEN_NEEDS_PATH = "Send `/open` with the path of a file, as in `/open src/app.ts`.";
+export const OPEN_NOT_OPENABLE =
+  "`{path}` is not a file this session read, created or changed, or inside its folder.";
 // Shown only by a chat that cannot share a file into a thread.
 export const OPEN_UNAVAILABLE = naming("{chat} cannot show a file here, so `/open` does nothing.");
 // What the model reads when it asks the daemon to share a file into the thread. `{path}` is the
@@ -157,6 +160,7 @@ export const SHARE_TOO_LARGE =
 export const SHARE_EMPTY = "`{path}` is empty: there is nothing to share.";
 export const SHARE_STOPPED = "The session was stopped before `{path}` was shared.";
 export const SHARE_REFUSED = "`{path}` could not be shared: {error}.";
+export const FILE_LOST = "`{name}` could not be sent: the bot lost its copy when it stopped.";
 export const TAG_TOP_LEVEL =
   "A tag belongs to one session: send `/tag <name>` or `/untag` inside its thread.";
 // Shown only by a chat that cannot tag a thread.
@@ -1009,6 +1013,13 @@ export const GUIDE_FILES = naming(
 );
 // `{size}` is the chat's `fileLimit`, as `1 MB` or `300 bytes`.
 export const GUIDE_FILES_LIMIT = "A file over {size} is not opened.";
+// For a chat that shares a file but has no picker: `/open <path>` alone. `{size}` is the chat's `fileLimit`.
+export const GUIDE_FILES_TYPED = naming(
+  "**Files**\n" +
+    "`/open <path>`, sent inside a session's thread, sends that file into the thread when a call of " +
+    "the session read, created or changed it, or when it is inside the session's folder.",
+);
+export const GUIDE_FILES_TYPED_LIMIT = "A file over {size} is not sent.";
 export const GUIDE_DIFF = naming(
   "**Changes**\n" +
     "`/diff`, sent inside a session's thread, lists the files that differ from HEAD in its git " +

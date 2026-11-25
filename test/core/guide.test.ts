@@ -230,6 +230,14 @@ test("without fileUpload the Files section is gone", () => {
   assert.deepEqual(added, []);
 });
 
+test("a chat that shares a file with no picker gets the typed `/open <path>` text and no search", () => {
+  const { removed, added } = difference(linesOf({ filePicker: false }));
+  assert.deepEqual(removed, FILES.slice(1));
+  assert.deepEqual(added, [
+    "`/open <path>`, sent inside a session's thread, sends that file into the thread when a call of the session read, created or changed it, or when it is inside the session's folder. A file over 1 MB is not sent.",
+  ]);
+});
+
 test("without diff the Changes section is gone", () => {
   const { removed, added } = difference(linesOf({ diff: false }));
   assert.deepEqual(removed, CHANGES);

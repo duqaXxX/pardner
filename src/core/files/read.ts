@@ -79,7 +79,7 @@ export async function realpathLoose(path: string, links = 0): Promise<string> {
  * before it, as Python's `os.path.realpath` does; the path is joined as text, never normalized
  * first, since `path.join` would drop `link/..` lexically.
  */
-async function locate(
+export async function locate(
   real: string,
   relative: string,
 ): Promise<{ target: string; found: BigIntStats }> {
@@ -118,11 +118,13 @@ export function titleOf(relative: string): string {
  * O_NONBLOCK | O_NOFOLLOW`: a file that became a link in between is refused, a FIFO is never
  * waited on). The handle's `stat` says it is a regular file under the limit, its `read` takes the
  * bytes at the current position, up to `limit` + 1 into a buffer sized from the `stat`, and its `close` ends it.
+ * `onStat` is handed that `stat`, so what it says is the file that was read.
  */
 export async function readOnce(
   target: string,
   limit: number,
   opener: (path: string) => Promise<Opened> = (path) => open(path, OPEN_FLAGS),
+  onStat?: (found: Stats) => void,
 ): Promise<Buffer> {
   let handle: Opened;
   try {
@@ -136,6 +138,7 @@ export async function readOnce(
     const found = await handle.stat();
     if (!found.isFile()) throw new NotAFile();
     if (found.size > limit) throw new TooLarge();
+    onStat?.(found);
     // The size `fstat` gave and one byte more, so that the end of the file shows as a read of 0;
     // a file that grows meanwhile takes a larger buffer below, never more than `limit` + 1.
     content = Buffer.allocUnsafe(Math.min(found.size + 1, limit + 1));

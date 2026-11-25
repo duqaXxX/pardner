@@ -200,6 +200,7 @@ function botOn(
     run: new Run(held),
     submit: over.submit?.(real) ?? real,
     giveSeal: over.giveSeal?.(realSeal) ?? realSeal,
+    put: (id, bytes) => connection.putBlob(id, bytes),
     log: (l) => lines.push(l),
   });
   const until = async (done: () => boolean | Promise<boolean>) => {
@@ -754,33 +755,22 @@ test(
   },
 );
 
-test(
-  "a draft over the frame limit is not delivered, and a draft with a file is refused",
-  DARWIN,
-  async () => {
-    const r = await rig();
-    const b = botOn(r);
-    try {
-      b.connection.start();
-      await b.rested();
-      assert.equal(
-        await b.outbox.queue(r.channel, {
-          ...text,
-          files: [{ bytes: new Uint8Array(1), type: "x", name: "f" }],
-        }),
-        false,
-      );
-      await b.outbox.queue(r.channel, { kind: 1, content: "x".repeat(2_000_000) });
-      await b.outbox.queue(r.channel, text);
-      await b.until(() => b.queued().length === 0);
-      assert.equal((await r.held()).messages.length, 1);
-      assert.ok(b.lines.includes("relay: a message was too large, not delivered"));
-    } finally {
-      await b.stop();
-      await r.stop();
-    }
-  },
-);
+test("a draft over the frame limit is not delivered", DARWIN, async () => {
+  const r = await rig();
+  const b = botOn(r);
+  try {
+    b.connection.start();
+    await b.rested();
+    await b.outbox.queue(r.channel, { kind: 1, content: "x".repeat(2_000_000) });
+    await b.outbox.queue(r.channel, text);
+    await b.until(() => b.queued().length === 0);
+    assert.equal((await r.held()).messages.length, 1);
+    assert.ok(b.lines.includes("relay: a message was too large, not delivered"));
+  } finally {
+    await b.stop();
+    await r.stop();
+  }
+});
 
 test(
   "result 1 on a rule of the draft alone (`re`) is not delivered and no fault",

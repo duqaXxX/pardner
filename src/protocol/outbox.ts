@@ -21,6 +21,8 @@ export interface OutboxFile extends SealedBlob {
   size: number;
   type: string;
   name: string;
+  /** The relay accepted this blob in this process: memory alone, so an item loaded at a start puts it again (design G 3.5). */
+  put?: true;
 }
 
 /** The signed bytes of a message built once: sent again, they are the same bytes, whatever epoch is open. */
@@ -110,6 +112,27 @@ export function queue(
   const { kind, to, re, content } = d;
   return ok([...outbox, { name: d.name ?? platform.random(16), kind, to, re, content, files }]);
 }
+
+/** The outbox with an item `queue` made and its caller kept aside while its blobs were put: the same item, sealed once, never encrypted again. */
+export const append = (outbox: readonly OutboxItem[], item: OutboxItem): OutboxItem[] => [
+  ...outbox,
+  item,
+];
+
+/** The files of `item` the relay has not accepted in this process: what is put before the message is submitted. */
+export const toPut = (item: OutboxItem): OutboxFile[] => item.files.filter((f) => !f.put);
+
+/** `item` with the blob `id` marked accepted by the relay; the other files are as they were. */
+export const putAccepted = (item: OutboxItem, id: Bytes): OutboxItem => ({
+  ...item,
+  files: item.files.map((f) => (bytesEqual(f.id, id) ? { ...f, put: true } : f)),
+});
+
+/** `item` with no file marked accepted, after the relay answered that it lacks a blob (`missing`): each is put again. */
+export const putAgain = (item: OutboxItem): OutboxItem => ({
+  ...item,
+  files: item.files.map(({ put: _, ...f }) => f),
+});
 
 /**
  * The item built under `at` and signed with the key `signer`: its counter is the run's next in the

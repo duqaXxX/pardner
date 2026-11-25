@@ -327,6 +327,7 @@ test("/guide describes only what this agent and this chat can serve", async (t) 
       loadedContext: false,
       forks: true,
       fileUpload: false,
+      filePicker: false,
       diff: false,
       rewind: false,
       next: false,

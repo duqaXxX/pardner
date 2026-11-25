@@ -44,6 +44,7 @@ test("personal space, review K9: at a rest every stored fault on a channel of th
     run: new Run(held),
     submit: async () => undefined,
     giveSeal: async () => undefined,
+    put: async () => undefined,
     log: () => {},
   });
   outbox.take({ do: "rest", first: true });

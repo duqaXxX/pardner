@@ -214,6 +214,7 @@ enum Event: Sendable {
     case send(channel: Data, draft: OutboxDraft, CheckedContinuation<SendOutcome, Error>)
     case setName(kind: Int, target: Data?, text: String, setup: Bool, CheckedContinuation<SendOutcome, Error>)
     case arrange(SectionAct, CheckedContinuation<SendOutcome, Error>)
+    case fetch(channel: Data, blob: Data, CheckedContinuation<FetchOutcome, Never>)
     case stop
 }
 
@@ -330,6 +331,7 @@ public final class RelayConnection: @unchecked Sendable {
     private var label = ""
     private var sockets: [Int: Socket] = [:]
     private var pending: [Int: CheckedContinuation<SubmitOutcome, Error>] = [:]
+    private let fetches = Fetches()
     private var timer: Task<Void, Never>?
     private var armed: Double?
     private var last = 0.0 // the time the link was last given: it is never given an earlier one
@@ -467,6 +469,13 @@ public final class RelayConnection: @unchecked Sendable {
         }
     }
 
+    /// Fetches the file a message of `channel` names by `blob`, whole and opened: its frames cross the bridge one copy each way (file-content design, 3.6).
+    public func fetch(channel: Data, blob: Data) async -> FetchOutcome {
+        await withCheckedContinuation { continuation in
+            if case .terminated = feed.yield(.fetch(channel: channel, blob: blob, continuation)) { continuation.resume(returning: .ended) }
+        }
+    }
+
     /// Ends the connection and the dialing; returns when the task has ended. Before `start()` it ends the connection for good.
     public func stop() async {
         let task = lifecycle.withLock { state -> Task<Void, Never>? in
@@ -590,6 +599,20 @@ public final class RelayConnection: @unchecked Sendable {
                 throw error
             }
             continuation.resume(returning: outcome)
+        case .fetch(let channel, let blob, let continuation):
+            let answer: HostValue
+            do { answer = try await call("getBlob", [.bytes(channel), .bytes(blob)]) } catch {
+                continuation.resume(returning: .ended)
+                throw error
+            }
+            // A blob no opened body names (a launch before its history is read, a rewind) or a link that is final is retried later; a blob id of
+            // another shape is a file that cannot be read.
+            guard let request = answer["request"]?.numberValue, let effects = answer["effects"]?.arrayValue else {
+                continuation.resume(returning: answer.stringValue == "bad-input" ? .gone : .ended)
+                return
+            }
+            fetches.add(Int(request), Fetches.Get(channel: channel, blob: blob, continuation))
+            try await perform(effects)
         case .networkUp: try await perform(try await call("networkUp"))
         case .timer(let at):
             guard armed == at else { return } // a timer that is no longer the armed one does nothing
@@ -758,13 +781,36 @@ public final class RelayConnection: @unchecked Sendable {
                     log.error("the link's store write failed: \(String(describing: error), privacy: .public)")
                 }
                 try await perform(try await call("persisted", [.bool(written)]))
+            case "blob":
+                if let request = fx["request"]?.numberValue, let offset = fx["offset"]?.numberValue, let chunk = fx["chunk"]?.bytesValue {
+                    fetches.take(request: Int(request), offset: Int(offset), chunk: chunk)
+                }
             case "answer":
                 guard let request = fx["request"]?.numberValue else { break }
+                if let get = fetches.end(Int(request)) {
+                    let outcome: FetchOutcome
+                    do { outcome = try await opened(get, code: fx["code"]) } catch {
+                        get.continuation.resume(returning: .ended) // a host fault ends the run: the caller is not left waiting
+                        throw error
+                    }
+                    get.continuation.resume(returning: outcome)
+                    break
+                }
                 let outcome = fx["code"]?.numberValue.map { SubmitOutcome.code(Int($0)) } ?? .unanswered
                 pending.removeValue(forKey: Int(request))?.resume(returning: outcome)
             default: throw HostError.faulted("the link answered an effect this driver does not know")
             }
         }
+    }
+
+    /// What a get came to: its gathered bytes opened by the package when the relay gave the blob (code 0), else the file is gone, or the link ended.
+    private func opened(_ get: Fetches.Get, code: HostValue?) async throws -> FetchOutcome {
+        guard let number = code?.numberValue else { return .ended } // "unanswered": the link is final
+        guard number == 0 else { return .gone }
+        let opened = try await host.call(link!, "openFile", [.bytes(get.channel), .bytes(get.blob), .bytes(get.gathered.data)])
+        if opened["ok"] == .bool(true) { return opened["value"]?.bytesValue.map(FetchOutcome.file) ?? .gone }
+        // A key the package no longer holds (the relay's incarnation changed during the download) is not a file that is lost: the history is read again.
+        return opened.stringValue == "unknown" || opened["error"]?.stringValue == "unknown" ? .ended : .gone
     }
 
     /// The store's claim given back once, whichever end comes first: a second release would free a later connection's.
@@ -843,6 +889,7 @@ public final class RelayConnection: @unchecked Sendable {
         sockets.removeAll()
         for continuation in pending.values { continuation.resume(returning: .ended) }
         pending.removeAll()
+        fetches.endAll()
         await finish()
     }
 
@@ -863,6 +910,7 @@ public final class RelayConnection: @unchecked Sendable {
             case .send(_, _, let continuation): continuation.resume(returning: .ended)
             case .setName(_, _, _, _, let continuation): continuation.resume(returning: .ended)
             case .arrange(_, let continuation): continuation.resume(returning: .ended)
+            case .fetch(_, _, let continuation): continuation.resume(returning: .ended)
             default: break
             }
         }

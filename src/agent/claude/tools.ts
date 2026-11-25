@@ -76,6 +76,14 @@ export const TOOLS: ToolVocabulary = Object.freeze({
   // A command's running line reads its description (`Sleeping 20 seconds then printing
   // marker`), with the command itself under it.
   described: Object.freeze({ Bash: "description" }),
+  // The input key that names a file; the transcript records it absolute (measured on SDK 0.3.330,
+  // 2026-11-24). NotebookEdit is deferred, so a ToolSearch call precedes it.
+  files: Object.freeze({
+    Read: "file_path",
+    Edit: "file_path",
+    Write: "file_path",
+    NotebookEdit: "notebook_path",
+  }),
   // A running command's line in the terminal reads `$ <command> (5s)` (captured on Claude Code
   // 2.1.301, 2026-10-16).
   commanded: Object.freeze({ Bash: "command" }),

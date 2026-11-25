@@ -98,10 +98,13 @@ public final class ChannelsModel {
 
     /// The composers learn each channel's outbox from the same state (they keep the rows a later state no longer lists).
     @ObservationIgnored weak var composers: Composers?
+    /// The file windows learn which clicks the relay refused from the same state.
+    @ObservationIgnored weak var files: FileOpener?
 
     func apply(_ next: ChannelsState) {
         state = next
         composers?.take(next)
+        files?.take(undelivered: next.undelivered)
         // The composers hold what was refused now: the controller need not keep it.
         guard let controller else { return }
         for (channel, rows) in next.undelivered { Task { await controller.acknowledgeUndelivered(channel: channel, names: Set(rows.map(\.name))) } }

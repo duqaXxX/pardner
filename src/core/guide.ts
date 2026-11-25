@@ -29,6 +29,8 @@ export interface GuideOffer {
   readonly loadedContext: boolean;
   /** The chat shows a file (`fileUpload`). */
   readonly fileUpload: boolean;
+  /** The chat has a picker and a search for `/open` (a provider `openFile`); without it only `/open <path>` is offered. */
+  readonly filePicker: boolean;
   /** With `fileUpload`: the most bytes a shared file holds (`fileLimit`). */
   readonly fileLimit?: number;
   /** The chat shows lists and files in a thread, and the agent keeps a record of trust (`/diff`). */
@@ -101,7 +103,7 @@ export function guideText(names: Names, offered: GuideOffer): string {
     ...(offered.commands ? [commands] : []),
     `${offered.questions ? texts.GUIDE_APPROVALS_AND_QUESTIONS : texts.GUIDE_APPROVALS}\n${approvals.join(" ")}`,
     sessions,
-    ...(offered.fileUpload ? [say(texts.GUIDE_FILES) + fileLimitLine(offered.fileLimit)] : []),
+    ...(offered.fileUpload ? [filesSection(offered, say)] : []),
     ...(offered.diff ? [say(texts.GUIDE_DIFF)] : []),
     ...(offered.rewind ? [say(texts.GUIDE_REWIND)] : []),
     ...(offered.next ? [say(texts.GUIDE_NEXT)] : []),
@@ -116,6 +118,17 @@ export function guideText(names: Names, offered: GuideOffer): string {
     texts.GUIDE_END,
   ];
   return sections.join("\n\n");
+}
+
+/** The Files section: the picker's text when the chat has one, else the typed `/open <path>` alone. */
+function filesSection(offered: GuideOffer, say: (text: string | Named) => string): string {
+  const { fileLimit } = offered;
+  if (offered.filePicker) return say(texts.GUIDE_FILES) + fileLimitLine(fileLimit);
+  const limit =
+    fileLimit === undefined
+      ? ""
+      : ` ${fill(texts.GUIDE_FILES_TYPED_LIMIT, { size: sizeText(fileLimit) })}`;
+  return say(texts.GUIDE_FILES_TYPED) + limit;
 }
 
 /** The guide's sentence on the largest file, with a space before it; empty with no limit. */

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { BlobFiles } from "../../../src/chat/relay/blob-files.ts";
 import { type Clock, Connection } from "../../../src/chat/relay/connection.ts";
 import { Inbound } from "../../../src/chat/relay/inbound.ts";
 import { Outbox } from "../../../src/chat/relay/outbox.ts";
@@ -42,6 +43,7 @@ import { tempDirSync } from "../../support/temp.ts";
 
 export const hex = (b: Bytes) => Buffer.from(b).toString("hex");
 export type Submit = (kind: 2 | 3 | 4, signed: Bytes, sig: Bytes) => Promise<number | undefined>;
+export type Put = (id: Bytes, bytes: Bytes) => Promise<number | undefined>;
 
 export let counter = 0;
 export let sent = 0;
@@ -221,6 +223,10 @@ export function botOn(
   r: Awaited<ReturnType<typeof rig>>,
   over: {
     submit?: (real: Submit) => Submit;
+    /** `Connection.putBlob`, wrapped. */
+    put?: (real: Put) => Put;
+    /** The blob files, to watch the order of their writes. */
+    blobs?: BlobFiles;
     now?: () => number;
     port?: number;
     clock?: Clock;
@@ -256,6 +262,7 @@ export function botOn(
   });
   const run = new Run(held);
   const real: Submit = (k, s, g) => connection.submit(k, s, g);
+  const realPut: Put = (id, bytes) => connection.putBlob(id, bytes);
   const outbox: Outbox = new Outbox({
     platform: over.now ? { ...held, now: over.now } : held,
     pairing,
@@ -264,6 +271,8 @@ export function botOn(
     run,
     submit: over.submit?.(real) ?? real,
     giveSeal: (seal, sig) => connection.giveSeal(seal, sig),
+    put: over.put?.(realPut) ?? realPut,
+    ...(over.blobs ? { blobs: over.blobs } : {}),
     log: (l) => lines.push(l),
   });
   const inbound = new Inbound({

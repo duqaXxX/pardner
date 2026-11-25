@@ -6,6 +6,9 @@ import { fail, type Result } from "./result.ts";
 /** A file key encrypts one file once, so the nonce is fixed (SD 5.12). */
 const NONCE = new Uint8Array(12);
 
+/** What sealing adds to a file: the GCM tag, so a blob is its file's size and this. */
+export const SEAL_OVERHEAD = 16;
+
 /** A sealed file (design 6.5): its fresh key, the blob, and the blob's id, the SHA-256 of the blob. */
 export interface SealedBlob {
   key: Bytes;

@@ -348,3 +348,33 @@ test("a line the three fields cannot save is not written", async () => {
   await reply.task(update({ title: "x".repeat(ROOM) }));
   assert.deepEqual(queued, []);
 });
+
+test("a call's path is written in its line, kept whole, and dropped when it is longer than a path can be", async () => {
+  const { reply, queued, body } = setup();
+  await reply.task(
+    update({ title: "Read(a.ts)", name: "Read", path: "/work/src/a.ts", startedAt: 48 }),
+  );
+  assert.equal(body(queued[0]).task.path, "/work/src/a.ts");
+  const long = `/${"d".repeat(5000)}`;
+  const kept = JSON.parse(fitLine({ thread: "t" }, { ...lineOf("x"), path: long }, ROOM) ?? "null");
+  assert.equal(kept.task.path, undefined, "a cut path names another file: it is dropped");
+  assert.equal(kept.task.title, "t");
+  const noisy = JSON.parse(
+    fitLine({ thread: "t" }, { ...lineOf("y".repeat(2_000_000)), path: "/a/b" }, ROOM) ?? "null",
+  );
+  assert.equal(noisy.task.path, "/a/b", "a path stays when the output is cut");
+});
+
+test("a line too large with its path goes without it, and a path is measured escaped", () => {
+  const path = `/${'"'.repeat(3000)}`; // 3001 bytes raw, 6001 escaped
+  const line = { ...lineOf("x"), path };
+  const room = JSON.stringify({ thread: "t", task: { ...line, path: undefined } }).length + 100;
+  const json = fitLine({ thread: "t" }, line, room);
+  assert.ok(json !== undefined, "the line is written without the path, not lost");
+  assert.equal(JSON.parse(json).task.path, undefined);
+  const wide = `/${'"'.repeat(2500)}`; // 2501 bytes raw, under PATH_ROOM; 5001 escaped, over it
+  assert.equal(
+    JSON.parse(fitLine({ thread: "t" }, { ...lineOf("x"), path: wide }, ROOM) ?? "null").task.path,
+    undefined,
+  );
+});

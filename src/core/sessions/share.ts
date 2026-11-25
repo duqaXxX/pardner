@@ -1,14 +1,14 @@
 /**
  * The model's request to share a file of the session's folder into its thread (`DaemonActions.share`):
- * the same rule as `/open`, answered as a line for the model instead of a message to the owner.
+ * read inside the bound folder alone, answered as a line for the model instead of a message to the owner.
  */
 
-import { basename, isAbsolute, sep } from "node:path";
+import { basename } from "node:path";
 import { ChatError, type ThreadChat } from "../../chat/seam.ts";
 import { getLogger } from "../../log.ts";
 import { errorName } from "../../values.ts";
-import { relativeTo } from "../files/paths.ts";
-import { NotAFile, readOpenable, realpathLoose, TooLarge, titleOf } from "../files/read.ts";
+import { type OpenedPath, openPath, titleIn } from "../files/openable.ts";
+import { NotAFile, TooLarge } from "../files/read.ts";
 import { sizeText } from "../guide.ts";
 import {
   fill,
@@ -31,7 +31,8 @@ const logger = getLogger("pardner.core.sessions.share");
 /**
  * Shares `path` (untrusted: the model wrote it; absolute, or relative to `working`, the folder the
  * session works in) into `thread`, up to `limit` bytes. Containment is checked against `folder`,
- * the bound one, so a working folder outside it shares nothing. Resolves with the line for the model, a refusal included; rejects only for a failure
+ * the bound one, so a working folder outside it shares nothing; `touched`, which only typed `/open`
+ * passes, lets a file the session's calls named through (`openPath`). Resolves with the line for the model, a refusal included; rejects only for a failure
  * that is no refusal. The signal is checked before the upload: the chat has no abort for a call
  * in flight.
  */
@@ -42,27 +43,25 @@ export async function shareFile(
   limit: number,
   path: string,
   signal: AbortSignal,
+  touched?: (path: string) => Promise<boolean>,
+  refusal = SHARE_NOT_A_FILE,
 ): Promise<string> {
   const stopped = fill(SHARE_STOPPED, { path });
   if (signal.aborted) return stopped;
-  if (path === "") return fill(SHARE_NOT_A_FILE, { path });
-  // Joined as text, as `readOpenable` joins: `path.join` would drop `link/..` lexically.
-  const target = isAbsolute(path) ? path : `${working}${sep}${path}`;
-  let content: Buffer;
+  if (path === "") return fill(refusal, { path });
+  let opened: OpenedPath;
   try {
-    content = await readOpenable(folder, target, limit);
+    opened = await openPath(folder, working, path, limit, touched);
   } catch (error) {
-    if (error instanceof NotAFile) return fill(SHARE_NOT_A_FILE, { path });
+    if (error instanceof NotAFile) return fill(refusal, { path });
     if (error instanceof TooLarge) return fill(SHARE_TOO_LARGE, { path, size: sizeText(limit) });
     throw error;
   }
+  const { content } = opened;
   // Refused here, not left to whatever the chat answers to an upload of length 0.
   if (content.length === 0) return fill(SHARE_EMPTY, { path });
   if (signal.aborted) return stopped;
-  // From the real folder, never the absolute path the model may have sent; with `/` on every
-  // system, as `/open` titles it.
-  const inside = relativeTo(await realpathLoose(folder), await realpathLoose(target));
-  const title = titleOf(inside === null ? path : inside.split(sep).join("/"));
+  const title = await titleIn(folder, opened.target, path);
   try {
     await thread.share({ name: basename(title), title, content });
   } catch (error) {

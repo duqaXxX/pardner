@@ -9,6 +9,7 @@ import { bytesEqual, isBytes, toHex } from "./bytes.ts";
 import { buildAdd, buildRemove, type SignedEntry } from "./device-builders.ts";
 import { type DeviceKeys, foldLog, idKey, type LoggedEntry, namedDevices } from "./device-log.ts";
 import { buildEpoch, type EpochClock, tickEpoch } from "./epochs.ts";
+import { openBlob, SEAL_OVERHEAD } from "./files.ts";
 import { encodeFrame } from "./frames.ts";
 import { deviceId, recoveryKeyId, relayKeyId, signedId } from "./ids.ts";
 import { makeSeal, sealKey, seals, soleHolders, startOf, starts } from "./keeper.ts";
@@ -48,7 +49,7 @@ import {
 } from "./profile.ts";
 import type { Identity, Kept, Out } from "./reading.ts";
 import type { RecoverOptions } from "./recover.ts";
-import type { PlatformError, Result } from "./result.ts";
+import { fail, type PlatformError, type Result } from "./result.ts";
 import { plausibleRange } from "./time-range.ts";
 
 // The first device's entry 0 (design 3.5): the app calls it through `ProtocolHost.callExported`, before any `AppLink` exists.
@@ -282,6 +283,8 @@ export class AppLink {
   #held: AppPersist | undefined;
   // Delivered unopened, by channel and epoch, in position order: no key of their epoch yet (4.2).
   #waiting = new Map<string, { message: Message; position: number }[]>();
+  // The key and size of each file of a body this run opened, by channel and blob: memory alone, rebuilt as the history is read at each launch, and never across the bridge (crypto.md 8).
+  #fileKeys = new Map<string, { key: Bytes; size: number }>();
   #profiles = new Profiles();
   #shown = new Map<string, { bot: Bytes; profile: Profile }>(); // the profile last told to Swift
   #touched = new Map<string, Bytes>(); // the bots whose profile a message of this call may have changed
@@ -525,6 +528,23 @@ export class AppLink {
   }
 
   /**
+   * Fetches the blob of a file a body of `channel` this run opened named (G 3.6): the size the link bounds the get by is the sealed one, taken from the key map and never from the
+   * caller. `unknown` for a blob no opened body names; the rest is `Link.getBlob`'s. The `blob` effects come in order, then the `answer`; `openFile` takes the whole.
+   */
+  getBlob(
+    channel: Bytes,
+    blob: Bytes,
+    now: number,
+  ): { request: number; effects: AppEffect[] } | "busy" | "bad-input" | "unknown" {
+    const held = this.#fileKeys.get(`${idKey(channel)} ${idKey(blob)}`);
+    if (!held) return "unknown";
+    const sent = this.#link.getBlob(blob, held.size + SEAL_OVERHEAD, now);
+    return typeof sent === "string"
+      ? sent
+      : { request: sent.request, effects: this.#view(sent.effects, now) };
+  }
+
+  /**
    * The enrolment secret again, after an `enrol-refused` effect: the next connection sends it with entry 0 (design 3.5).
    * A value that cannot be framed is `bad-input` and changes nothing.
    */
@@ -629,6 +649,22 @@ export class AppLink {
     return buildRemove(this.#platform, SIGN, this.#link.reading.devices, this.#self, target);
   }
 
+  /**
+   * The file of a blob the relay gave, for a body of `channel` this run opened: the length is the size its body declares plus the tag and the hash is checked before the key is tried. `open-failed`
+   * for another length, a hash or a key that fails: the file can no longer be read, which is no fault. `unknown` for a blob no opened body names (a launch
+   * that has not read the history, or a key map an incarnation change cleared): the app may try again.
+   */
+  openFile(
+    channel: Bytes,
+    id: Bytes,
+    blob: Bytes,
+  ): Result<Bytes> | { readonly ok: false; readonly error: "unknown" } {
+    const held = this.#fileKeys.get(`${idKey(channel)} ${idKey(id)}`);
+    if (!held) return { ok: false, error: "unknown" };
+    if (blob.length !== held.size + SEAL_OVERHEAD) return fail("open-failed");
+    return openBlob(this.#platform, id, held.key, blob);
+  }
+
   /** The label the connection's exporter is taken under. */
   exporterLabel(): string {
     return EXPORTER_LABEL;
@@ -679,6 +715,7 @@ export class AppLink {
       // The Reading rewinds and every position comes again (design 4.2, 5). A bot shown before is checked
       // again once the pass reaches rest, and told `null` only if the new sequence names it nowhere.
       this.#waiting.clear();
+      this.#fileKeys.clear(); // the history is read again and opens each body once more
       this.#starting.clear(); // a start sent under the old incarnation is not pending under the new
       this.#spaceAsked = false; // a relay gone back may lack the space it placed
       this.#profiles = new Profiles();
@@ -779,6 +816,12 @@ export class AppLink {
     if (!body.ok && message.header.kind === KIND_ARRANGEMENT)
       this.#names.take(position, message.header, undefined);
     if (again && !body.ok) return [];
+    if (body.ok)
+      for (const f of body.value.files) {
+        // The first body to name a blob in a channel keeps it: a later body cannot swap the key under a file shown.
+        const at = `${idKey(message.header.channel)} ${idKey(f.blob)}`;
+        if (!this.#fileKeys.has(at)) this.#fileKeys.set(at, { key: f.fileKey, size: f.size });
+      }
     const view = this.#message(message, position, body.ok ? body.value : undefined, again);
     const h = message.header;
     const r = this.#link.reading;

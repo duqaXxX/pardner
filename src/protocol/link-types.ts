@@ -19,7 +19,7 @@ export type RecoveryOutcome =
 /** What the driver performs, in the order returned: a `wake` replaces the timer, a `persist` is finished first. */
 export type Effect =
   | { do: "dial"; conn: number; purpose: "active" | "upload" | "recover" }
-  | { do: "send"; conn: number; bytes: Bytes }
+  | { do: "send"; conn: number; bytes: Bytes; paced?: true } // `paced`: a chunk of a put, whose write the driver reports with `written`
   | { do: "close"; conn: number; why?: string } // `why`: the error or the deadline that made the link close it
   | { do: "wake"; at: number } // the one timer: it replaces any earlier wake
   | { do: "persist"; what: Persist }
@@ -28,6 +28,7 @@ export type Effect =
   | { do: "enrol-refused" } // refusal 2 on a connection that carried `enrol`: the link dropped it, `enrol` hands it a retyped one
   | { do: "recovery"; outcome: RecoveryOutcome } // a recovery connection ended with an answer; the link then stops (the log of a reading, a refusal 2 or 3, a fault), marks put-back (6), or tries `prove-active` again (a reset's result, or a refusal 5 after `ask`)
   | { do: "recovered" } // the first `served` of a link given a `recover` reset: the reset is in the log, the link is an ordinary one
+  | { do: "blob"; request: number; size: number; offset: number; chunk: Bytes } // a frame of a get, in order; the get's `answer` (code 0) follows its last
   | { do: "answer"; request: number; code: number | "unanswered" };
 
 /** Where the connection is, `unstarted` before `start`; the three steps of an upload connection all show as `uploading`. */

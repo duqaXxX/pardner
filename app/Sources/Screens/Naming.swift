@@ -78,6 +78,7 @@ extension Message {
         case .edit(let withdrawn, let answered, let markdown): withdrawn ? "Withdrawn" : answered ? "Answered" : markdown ?? ""
         case .unreadable: Naming.unreadable(1)
         case .line(let line), .lineEdit(let line): line.title
+        case .file(let title): title
         case .start, .cut, .notRead, .state, .build, .profile: ""
         }
     }

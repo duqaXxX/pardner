@@ -23,6 +23,9 @@ const CUTS: readonly [(l: Line) => string | null, (l: Line, v: string) => Line][
   [(l) => l.output, (l, v) => ({ ...l, output: v })],
 ];
 
+/** The longest path a line keeps, in bytes of UTF-8 (the usual `PATH_MAX`), as escaped in JSON: a longer one is dropped, never cut, since a cut path names another file. */
+const PATH_ROOM = 4096;
+
 /** The bytes `text` takes inside a JSON string, quotes left out. */
 const escaped = (text: string) => Buffer.byteLength(JSON.stringify(text)) - 2;
 
@@ -77,6 +80,17 @@ function cutText(text: string, room: number): string {
  * shortest form is not enough the next longest is cut too.
  */
 export function fitLine(frame: object, line: Line, room: number): string | undefined {
+  // The path is no field to cut (a cut one opens another file): when it is over `PATH_ROOM`, or the line does
+  // not fit with it, the line goes without it.
+  const { path, ...rest } = line;
+  if (path !== undefined && escaped(path) <= PATH_ROOM) {
+    const fitted = fitFields(frame, line, room);
+    if (fitted !== undefined) return fitted;
+  }
+  return fitFields(frame, rest, room);
+}
+
+function fitFields(frame: object, line: Line, room: number): string | undefined {
   const body = (l: Line) => JSON.stringify({ ...frame, task: l });
   let current = line;
   const open = CUTS.filter(([get]) => (get(line) ?? "") !== "").sort(

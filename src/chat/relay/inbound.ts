@@ -5,6 +5,7 @@
  * not read) are queued in the outbox, and its decisions are stored before anything is handed on.
  */
 
+import { texts } from "../../core/port.ts";
 import { BotReader, type Notice, type Prompt } from "../../protocol/bot-reader.ts";
 import { bytesEqual } from "../../protocol/bytes.ts";
 import { refKey } from "../../protocol/device-reader.ts";
@@ -15,13 +16,14 @@ import type { Out } from "../../protocol/reading.ts";
 import type {
   ChatInbound,
   InboundMessage,
+  OpenedFile,
   OwnerAnswer,
   SetupSelection,
   ThreadRef,
 } from "../seam.ts";
 import { referenceOf, toHex } from "./hex.ts";
 import { fitLine, type Line, REQUEST_ROOM } from "./line.ts";
-import type { Outbox } from "./outbox.ts";
+import { type FileSent, type Outbox, refusedText } from "./outbox.ts";
 import type { Store } from "./store.ts";
 
 /** A request the bot wrote and waits on: the core's id for it, its thread and the type its answer must have. */
@@ -51,6 +53,9 @@ export interface InboundOptions {
   run: Run;
   log: (line: string) => void;
 }
+
+/** What the app writes before the path in the text of a click (design G 3.3). */
+const OPEN_WORD = "/open ";
 
 /** What the app reads on a line the bot closed after its own restart. */
 const STOPPED = "Stopped: the bot restarted";
@@ -359,6 +364,11 @@ export class Inbound {
       return;
     }
     const text = body.text;
+    if (body.open === true) {
+      // Beside the chain and never awaited in it: a 30 MB read and put holds no later prompt or `/stop` (G 3.3).
+      void this.#openFile(run, channel, text, thread);
+      return;
+    }
     this.#latest.set(`${toHex(channel)}/${thread ?? id}`, run.ref);
     const message: InboundMessage = {
       ref: { channel: toHex(channel), thread: thread ?? id },
@@ -386,9 +396,40 @@ export class Inbound {
   }
 
   /**
+   * A click on a call's line (design G 3.3): a prompt with `open`, answered with the file, or with the sentence
+   * that says why not. It sets no `#latest` and reaches no session or turn: the core reads the file from its state.
+   */
+  async #openFile(run: Prompt, channel: Bytes, text: string, thread: string | undefined) {
+    const id = toHex(run.ref.device) + toHex(run.ref.name);
+    if (thread === undefined) {
+      await this.#finish(run, channel, id, texts.OPEN_TOP_LEVEL, undefined, false);
+      return;
+    }
+    const target = this.#target;
+    let opened: Awaited<ReturnType<NonNullable<ChatInbound["openFile"]>>> | undefined;
+    if (target?.openFile && text.startsWith(OPEN_WORD)) {
+      try {
+        const ref = { channel: toHex(channel), thread };
+        opened = await target.openFile(ref, text.slice(OPEN_WORD.length));
+      } catch {
+        this.#o.log("relay: the core did not open a file");
+      }
+    }
+    if (opened === undefined) {
+      await this.#finish(run, channel, thread, "The bot did not run this prompt.");
+    } else if ("refusal" in opened) {
+      await this.#finish(run, channel, thread, opened.refusal);
+    } else {
+      await this.#finish(run, channel, thread, "", undefined, true, opened);
+    }
+  }
+
+  /**
    * The answer of a message the bot handed on (kind 5, `re` it): once queued, the message is done.
    * `session`: false writes `"session": false`, for a top-level prompt whose thread holds no session
    * (a word, a refusal, a prompt the bot did not run), which the app draws as a message.
+   * `file`: the click's answer carries it as its one blob and its `modified`, and a relay that refuses it
+   * answers with `SHARE_REFUSED` instead (design G 3.3). It names no answer, so no name is in the outbox twice.
    */
   async #finish(
     run: Prompt,
@@ -397,30 +438,56 @@ export class Inbound {
     markdown: string,
     name?: Bytes,
     session = true,
+    file?: OpenedFile,
   ): Promise<void> {
     // One answer per prompt (3.8): the first of the core's done, a refusal and a failure wins.
     const key = refKey(run.ref);
     if (this.#answered.has(key)) return;
     this.#answered.add(key);
     // The answer and the decision are one write: a crash between them would leave an answered prompt undecided.
-    const queued = await this.#o.outbox
-      .queue(
-        channel,
-        {
-          kind: 5,
-          re: run.ref,
-          name,
-          content: JSON.stringify({ thread, markdown, ...(session ? {} : { session: false }) }),
-        },
-        (saved) => {
-          this.#reader.answered(run.ref);
-          saved.decided = new Map(this.#reader.decided);
-        },
-      )
-      .catch((e: Error) => {
-        this.#stored(e);
-        return false;
-      });
+    const also = (saved: Store["saved"]) => {
+      this.#reader.answered(run.ref);
+      saved.decided = new Map(this.#reader.decided);
+    };
+    const answer = (text: string, extra: object = {}, files?: Draft["files"]): Draft => ({
+      kind: 5,
+      re: run.ref,
+      name,
+      content: JSON.stringify({
+        thread,
+        markdown: text,
+        ...extra,
+        ...(session ? {} : { session: false }),
+      }),
+      files,
+    });
+    const failed = (e: Error) => {
+      this.#stored(e);
+      return false;
+    };
+    let sent: FileSent = "not-queued";
+    if (file) {
+      const draft = answer("", { modified: file.modified }, [
+        { bytes: file.content, type: "application/octet-stream", name: file.name },
+      ]);
+      sent = await this.#o.outbox
+        .queueFile(channel, draft, also)
+        .catch((e: Error) => (failed(e), "not-queued" as const));
+      if (sent !== "queued") {
+        const text = refusedText(
+          file.title,
+          sent === "too-large" ? 8 : sent === "refused" ? 0 : undefined,
+        );
+        sent = (await this.#o.outbox.queue(channel, answer(text), also).catch(failed))
+          ? "queued"
+          : "not-queued";
+      }
+    } else {
+      sent = (await this.#o.outbox.queue(channel, answer(markdown), also).catch(failed))
+        ? "queued"
+        : "not-queued";
+    }
+    const queued = sent === "queued";
     if (!queued) {
       this.#answered.delete(key); // nothing is claimed of an answer that was not queued
       this.#o.log("relay: a message was not queued");

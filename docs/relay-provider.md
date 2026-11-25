@@ -51,6 +51,19 @@ the core then waits in the background with `waitLanded`, as the seam splits them
 (it never landed), when their `AbortSignal` aborts, and once the provider is stopped. A wait made
 after the stop ends false at once, and `settle` is a last look that answers at once whether the reply has landed, so closing the sessions never waits for a read-back that cannot come.
 
+## A file
+
+The chat declares `fileUpload` and a `fileLimit` of 31,457,280 bytes (30 MB), and has no provider `openFile`.
+A line carries `path` when the core's `TaskUpdate` has one; a path over 4096 bytes is left out, never cut.
+A prompt whose content has `open: true` and a thread is a click on a line: it goes through the reader as any
+prompt, sets no latest prompt, and is handed to `ChatInbound.openFile` beside the inbound's chain, so a slow read
+holds no later prompt or `/stop`; it never reaches `message`. Its answer is the prompt's kind 5,
+`{thread, markdown: "", modified}`, with the file as its one blob, queued by `Outbox.queueFile` and decided in the
+same store write; a refusal is the sentence in `markdown` with no file. With no thread the answer is
+`OPEN_TOP_LEVEL`, and a relay that refuses the blob (too large, or any other answer) gives `SHARE_REFUSED`.
+`ThreadChat.share` writes a kind 1 `{thread, say: "file", title}` with the file as its blob and resolves once the
+message is appended; a refusal rejects with a `ChatError` whose name is the sentence the owner reads.
+
 ## One answer per prompt
 
 Every prompt the bot started must get exactly one answer (kind 5, `re` the prompt, the whole text of

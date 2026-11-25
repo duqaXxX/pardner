@@ -53,6 +53,9 @@ public struct LinePreview: Sendable, Equatable {
 
 public enum LineStatus: String, Sendable, Equatable {
     case pending, inProgress = "in_progress", complete, error
+
+    /// The call has ended, well or not.
+    var isClosed: Bool { self == .complete || self == .error }
 }
 
 /// A `TaskUpdate` as the bot writes it into a line's body: without `id`, `name` and `folded`, `startedAt` as wall-clock milliseconds.
@@ -70,6 +73,8 @@ public struct LineFields: Sendable, Equatable {
     public let startedAt: Date?
     /// The task an agent was given, on that agent's line and on its reply; nil on any other line, and from a bot that predates the field.
     public let agent: String?
+    /// The file the call named, as the agent wrote it (file-content design, 3.1); nil for a call with no file or one past 4096 bytes.
+    public let path: String?
 
     init?(_ o: [String: Any]) {
         guard let title = o["title"] as? String, let word = o["status"] as? String, let status = LineStatus(rawValue: word) else { return nil }
@@ -81,6 +86,7 @@ public struct LineFields: Sendable, Equatable {
         calls = (o["calls"] as? NSNumber)?.intValue ?? 0
         preview = LinePreview(o["preview"])
         agent = o["agent"] as? String
+        path = o["path"] as? String
         startedAt = (o["startedAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) }
     }
 }
@@ -129,6 +135,8 @@ public enum Body: Sendable, Equatable {
     case reply(type: String?, json: String)
     /// Kind 11: the request named by `re` withdrawn, answered elsewhere, or rewritten as `markdown`.
     case edit(withdrawn: Bool, answered: Bool, markdown: String?)
+    /// Kind 1 with `say` "file": the bot sent a file, which is the message's one blob (`Message.files`); `title` is its name.
+    case file(title: String)
     /// Kind 1 with `say` "task": a line of the turn, a tool call or a task, as its first sight (turn work design 2.2).
     case line(LineFields)
     /// Kind 11 whose body holds a `task`: the line named by `re`, as it stands now.
@@ -179,6 +187,10 @@ public struct Message: Sendable, Equatable {
     /// A kind 2 whose content says `"control": true` with one of the words the app's controls send (`ControlPrompt`). Whether it is the owner's
     /// is the reading's to decide (`Channel.fold`): the prompt is never drawn.
     public let control: Bool
+    /// A kind 2 whose content says `"open": true`: a click on a call's path, which the bot answers with the file (file-content design, 3.3). It is never drawn.
+    public let open: Bool
+    /// A kind 5 that names the time the file it carries was last changed, on the bot's clock.
+    public let modified: Date?
 
     public var ref: MessageRef { MessageRef(device: sender, name: name) }
 
@@ -204,8 +216,16 @@ public struct Message: Sendable, Equatable {
         bind = kind == 1 ? Bind(fields?["bind"]) : nil
         sessionText = kind == 1 ? fields.flatMap { o in (o["markdown"] as? String).flatMap { SessionText(o, markdown: $0) } } : nil
         control = kind == 2 && ControlPrompt.holds(fields)
+        open = kind == 2 && Self.flag(fields?["open"])
+        modified = kind == 5 ? (fields?["modified"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) } : nil
         noSession = kind == 5 && fields?["session"] as? Bool == false
         body = fields.map { Self.body(kind: Int(kind), $0, text: view["text"]?.stringValue ?? "") } ?? .unreadable
+    }
+
+    /// A JSON boolean: `1` is not one.
+    private static func flag(_ value: Any?) -> Bool {
+        guard let flag = value as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else { return false }
+        return flag.boolValue
     }
 
     private static func object(_ text: String) -> [String: Any]? {
@@ -216,6 +236,7 @@ public struct Message: Sendable, Equatable {
         let markdown = o["markdown"] as? String
         switch kind {
         case 1:
+            if o["say"] as? String == "file" { return (o["title"] as? String).map { .file(title: $0) } ?? .unreadable }
             if o["say"] as? String == "task" { return (o["task"] as? [String: Any]).flatMap(LineFields.init).map { .line($0) } ?? .unreadable }
             return markdown.map { .text(markdown: $0, say: o["say"] as? String) } ?? .unreadable
         case 2: return (o["text"] as? String).map { .prompt(text: $0) } ?? .unreadable

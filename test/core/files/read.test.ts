@@ -279,3 +279,13 @@ test("a loop of links ends the walk instead of following it for ever", POSIX, as
   symlinkSync(join(dir, "a"), join(dir, "b"));
   assert.match(await realpathLoose(join(dir, "a")), /[/\\][ab]$/);
 });
+
+test("readOnce reports the change time of the descriptor it read, not of the path", async () => {
+  const path = write(app(), "stamped.txt", "hello");
+  utimesSync(path, 1_700_000_000, 1_700_000_000);
+  let seen: number | null = null;
+  await readOnce(path, CAP, undefined, (found) => {
+    seen = Math.trunc(found.mtimeMs);
+  });
+  assert.equal(seen, 1_700_000_000_000);
+});
