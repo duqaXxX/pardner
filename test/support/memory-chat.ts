@@ -83,6 +83,14 @@ export interface MemoryChatOptions {
   /** `threadOpen` and `loopCard` are declared unless false: the relay declares neither. */
   readonly threadOpen?: boolean;
   readonly loopCard?: boolean;
+  /**
+   * The provider declares `scheduledRunLine`, which writes a line of its own, or `nextPromptHint`,
+   * which records the call `suggestNext`, as the relay does: both off unless asked for.
+   */
+  readonly scheduledRunLine?: boolean;
+  readonly nextPromptHint?: boolean;
+  /** The provider declares `lineImages`, whose reply records the call `image`, as the relay does: off unless asked for. */
+  readonly lineImages?: boolean;
   /** The provider declares `channelLists` unless false: the relay does not. */
   readonly channelLists?: boolean;
   /** The provider declares `lookups` unless false: the relay does not. */
@@ -199,6 +207,9 @@ export function memoryChat(options: MemoryChatOptions = {}): MemoryChat {
       activityRefused: options.activityRefused,
       threadOpen: options.threadOpen,
       loopCard: options.loopCard,
+      scheduledRunLine: options.scheduledRunLine,
+      nextPromptHint: options.nextPromptHint,
+      lineImages: options.lineImages,
       channelLists: options.channelLists,
       lookups: options.lookups,
       index: options.index,

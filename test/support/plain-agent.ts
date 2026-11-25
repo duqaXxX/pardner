@@ -34,6 +34,7 @@ import type {
   AgentInfo,
   AgentSession,
   AgentWords,
+  CallImage,
   Capabilities,
   ClosedReport,
   CommandInfo,
@@ -182,6 +183,8 @@ export interface CallOptions {
   readonly unnamed?: boolean;
   /** What the call did to a file, as the end of a call reports it; none when absent. */
   readonly fileChange?: FileChange;
+  /** The images the call's result holds, as the end of a call reports them; none when absent. */
+  readonly images?: readonly CallImage[];
 }
 
 export type PlainStep =
@@ -200,6 +203,7 @@ export type PlainStep =
   | { readonly saved: SavedMessage }
   | { readonly jobs: readonly ScheduledJob[] }
   | { readonly suggest: string }
+  | { readonly scheduledRun: true }
   | { readonly share: string }
   | { readonly hold: true }
   | { readonly die: true };
@@ -290,6 +294,15 @@ export function scheduledJobs(jobs: readonly ScheduledJob[]): PlainStep {
  */
 export function suggest(text: string): PlainStep {
   return { suggest: text };
+}
+
+/**
+ * The agent says a turn it starts on a schedule of its own begins (`scheduled_run_started`), as an
+ * agent that declares `scheduledJobs` does before such a turn's first event. The plain agent
+ * starts a turn only for a prompt, so the step stands first in a turn the test calls the run.
+ */
+export function scheduledRun(): PlainStep {
+  return { scheduledRun: true };
 }
 
 /**
@@ -930,6 +943,8 @@ export class PlainSession implements AgentSession {
         this.#push({ type: "scheduled_jobs", jobs: step.jobs });
       } else if ("suggest" in step) {
         turn.suggestion = step.suggest;
+      } else if ("scheduledRun" in step) {
+        this.#push({ type: "scheduled_run_started" });
       } else if ("share" in step) {
         const share = this.#context.actions?.share;
         this.shared.push(
@@ -1002,6 +1017,7 @@ export class PlainSession implements AgentSession {
       callId,
       isError: !allowed || options.isError === true,
       output: allowed ? (options.output ?? "done") : message,
+      images: options.images ?? [],
       fileChange: options.fileChange ?? null,
       model: null,
       parentCallId: null,
@@ -1043,6 +1059,7 @@ export class PlainSession implements AgentSession {
       callId,
       isError: !answer.answered,
       output: answer.answered ? JSON.stringify(answer.answers) : answer.message,
+      images: [],
       fileChange: null,
       model: null,
       parentCallId: null,
@@ -1097,6 +1114,8 @@ export interface PlainAgentOptions {
   readonly daemonActions?: true;
   /** The agent declares `nextPrompts`; a turn's `suggest` step then reaches the core. */
   readonly suggestions?: true;
+  /** The agent declares `scheduledJobs`; a turn's `scheduledRun` step then reaches the core. */
+  readonly scheduledJobs?: true;
   /** What each live session has loaded (`loadedContext`), as `/memory` and `/skills` list it. */
   readonly loaded?: LoadedContext;
   /** The agent lists these models (`models`, even an empty list), which a session takes with `setModel`. */
@@ -1238,6 +1257,9 @@ export class PlainAgent implements AgentBackend {
     }
     if (options.suggestions) {
       this.capabilities = Object.freeze({ ...this.capabilities, nextPrompts: true });
+    }
+    if (options.scheduledJobs) {
+      this.capabilities = Object.freeze({ ...this.capabilities, scheduledJobs: true });
     }
     if (options.terminal) {
       this.capabilities = Object.freeze({

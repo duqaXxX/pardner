@@ -652,11 +652,14 @@ export function chatConformance(
           "channelLists",
           "commandSuggestions",
           "fileUpload",
+          "lineImages",
           "lookups",
           "loopCard",
           "messageFold",
           "nativeStreaming",
+          "nextPromptHint",
           "rootStatus",
+          "scheduledRunLine",
           "threadDelete",
           "threadLists",
           "threadOpen",
@@ -696,7 +699,14 @@ export function chatConformance(
         all(present("acknowledge"), capabilities.acknowledgement, "acknowledgement");
         all(present("showActivity", "activityRefused"), capabilities.activityLine, "activityLine");
         all(present("showLoop", "loopCardLast", "endLoop"), capabilities.loopCard, "loopCard");
+        all(present("scheduledRun"), capabilities.scheduledRunLine, "scheduledRunLine");
+        all(present("suggestNext"), capabilities.nextPromptHint, "nextPromptHint");
         all(present("fold"), capabilities.messageFold, "messageFold");
+        assert.equal(
+          thread.openReply(() => {}).image !== undefined,
+          capabilities.lineImages,
+          "lineImages",
+        );
         all(present("offer"), capabilities.threadLists, "threadLists");
       });
 
@@ -988,6 +998,21 @@ export function chatConformance(
     });
 
     describe("a reply", () => {
+      gated(
+        "a call's images are taken, and handing them over never rejects",
+        "lineImages",
+        async ({ rig, provider, ref }) => {
+          const reply = provider.thread(ref).openReply(() => {});
+          assert.ok(reply.image);
+          await reply.task(line("call-1", "Read shot.png", "complete"));
+          const images = [{ mediaType: "image/png", data: Uint8Array.of(1, 2, 3) }];
+          await reply.image("call-1", images);
+          await reply.image("call-unknown", images);
+          rig.refuseWrites();
+          await assert.doesNotReject(reply.image("call-1", images));
+        },
+      );
+
       check("writes nothing until it is given something to show", async (s) => {
         const before = s.rig.read(s.ref).length;
         const reply = s.provider.thread(s.ref).openReply(() => {});
@@ -1361,6 +1386,35 @@ export function chatConformance(
         thread.showActivity({ kind: "restart-wait", counts: "1 shell · 2 agents", single: false });
         thread.showActivity(null);
       });
+    });
+
+    describe("the scheduled run's line and the next prompt hint", () => {
+      gated(
+        "a run's line is a message of the thread, and writing it never rejects",
+        "scheduledRunLine",
+        async ({ rig, provider, ref }) => {
+          const thread = provider.thread(ref);
+          assert.ok(thread.scheduledRun);
+          const before = rig.read(ref).length;
+          await thread.scheduledRun(AT);
+          await rig.settle();
+          assert.equal(rig.read(ref).length, before + 1);
+          rig.refuseWrites();
+          await assert.doesNotReject(thread.scheduledRun(AT));
+        },
+      );
+
+      gated(
+        "a guess is taken, and offering it never rejects",
+        "nextPromptHint",
+        async ({ rig, provider, ref }) => {
+          const thread = provider.thread(ref);
+          assert.ok(thread.suggestNext);
+          await thread.suggestNext("run the tests");
+          rig.refuseWrites();
+          await assert.doesNotReject(thread.suggestNext("run the tests"));
+        },
+      );
     });
 
     describe("the loop card", () => {

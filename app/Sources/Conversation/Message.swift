@@ -137,6 +137,9 @@ public enum Body: Sendable, Equatable {
     case edit(withdrawn: Bool, answered: Bool, markdown: String?)
     /// Kind 1 with `say` "file": the bot sent a file, which is the message's one blob (`Message.files`); `title` is its name.
     case file(title: String)
+    /// Kind 1 with `say` "image" and a `line` of 16 bytes in hex: the images a call's result held, which are the message's files; `line` is the
+    /// name of the line they belong to (step E2 design 3.1).
+    case image(line: Data)
     /// Kind 1 with `say` "task": a line of the turn, a tool call or a task, as its first sight (turn work design 2.2).
     case line(LineFields)
     /// Kind 11 whose body holds a `task`: the line named by `re`, as it stands now.
@@ -181,8 +184,8 @@ public struct Message: Sendable, Equatable {
     public let noSession: Bool
     /// A kind 1 that carries a bind field (the bot's answer to `/bind`).
     public let bind: Bind?
-    /// A kind 1 whose `say` is `footer` or `title`: what the session's bot says around its turn (step D2). It is still a `.text` body, drawn so
-    /// when it comes from anyone but the session's bot.
+    /// A kind 1 whose `say` is `footer`, `title`, `run` or `next`: what the session's bot says around its turn (steps D2 and E1). It is still a
+    /// `.text` body (a guess has none: `.unreadable`), drawn so when it comes from anyone but the session's bot.
     public let sessionText: SessionText?
     /// A kind 2 whose content says `"control": true` with one of the words the app's controls send (`ControlPrompt`). Whether it is the owner's
     /// is the reading's to decide (`Channel.fold`): the prompt is never drawn.
@@ -193,6 +196,14 @@ public struct Message: Sendable, Equatable {
     public let modified: Date?
 
     public var ref: MessageRef { MessageRef(device: sender, name: name) }
+
+    /// Whether a thread's hint stands when this message of the session's bot comes after it: a work's end and a title.
+    var leavesHint: Bool {
+        switch sessionText {
+        case .footer?, .title?: true
+        default: false
+        }
+    }
 
     /// A view the link delivered (`{do: "message", ...}`), or nil when it is not one.
     public init?(view: HostValue) {
@@ -214,7 +225,7 @@ public struct Message: Sendable, Equatable {
         let fields = view["text"]?.stringValue.flatMap(Self.object)
         thread = fields?["thread"] as? String
         bind = kind == 1 ? Bind(fields?["bind"]) : nil
-        sessionText = kind == 1 ? fields.flatMap { o in (o["markdown"] as? String).flatMap { SessionText(o, markdown: $0) } } : nil
+        sessionText = kind == 1 ? fields.flatMap { SessionText($0) } : nil
         control = kind == 2 && ControlPrompt.holds(fields)
         open = kind == 2 && Self.flag(fields?["open"])
         modified = kind == 5 ? (fields?["modified"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) } : nil
@@ -237,6 +248,7 @@ public struct Message: Sendable, Equatable {
         switch kind {
         case 1:
             if o["say"] as? String == "file" { return (o["title"] as? String).map { .file(title: $0) } ?? .unreadable }
+            if o["say"] as? String == "image" { return (o["line"] as? String).flatMap { Data(hex: $0) }.flatMap { $0.count == 16 ? $0 : nil }.map { .image(line: $0) } ?? .unreadable }
             if o["say"] as? String == "task" { return (o["task"] as? [String: Any]).flatMap(LineFields.init).map { .line($0) } ?? .unreadable }
             return markdown.map { .text(markdown: $0, say: o["say"] as? String) } ?? .unreadable
         case 2: return (o["text"] as? String).map { .prompt(text: $0) } ?? .unreadable
@@ -264,4 +276,25 @@ public struct Message: Sendable, Equatable {
 
 extension Data {
     var hexString: String { map { String(format: "%02x", $0) }.joined() }
+
+    /// The bytes `hex` writes, two lowercase or uppercase digits each; nil for an odd length or any other character.
+    init?(hex: String) {
+        guard hex.utf8.count.isMultiple(of: 2) else { return nil }
+        var bytes: [UInt8] = []
+        var pair = hex.utf8.makeIterator()
+        while let high = pair.next(), let low = pair.next() {
+            guard let h = Self.digit(high), let l = Self.digit(low) else { return nil }
+            bytes.append(h << 4 | l)
+        }
+        self.init(bytes)
+    }
+
+    private static func digit(_ c: UInt8) -> UInt8? {
+        switch c {
+        case 48...57: c - 48
+        case 97...102: c - 87
+        case 65...70: c - 55
+        default: nil
+        }
+    }
 }

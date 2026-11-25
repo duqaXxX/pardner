@@ -747,4 +747,74 @@ final class ComposerModelTests: XCTestCase {
         c.startMention()
         XCTAssertEqual(c.text, "")
     }
+
+    // MARK: the bot's guess at the next prompt (step E1 design 3.2)
+
+    /// The conversation with `guess` landed in the person's session thread (`mini`'s), in another person's (`bobsBot`'s) and in the removed bot's.
+    private func hinted(_ guess: String = "run the tests") -> ReadingModel {
+        var (m, mine, removed, bobs, _) = reading()
+        for (thread, bot, at) in [(mine, mini, 20), (bobs, bobsBot, 21), (removed, gone, 22)] {
+            _ = put(&m, 1, bot, ["thread": thread, "say": "next", "next": guess], at: at)
+        }
+        return m
+    }
+
+    func testTheGuessStandsInTheEmptyFieldOfTheOwnersSessionThread() {
+        let r = hinted()
+        let c = composer(thread: reading().mine, reading: r)
+        XCTAssertEqual(c.suggestion, "run the tests")
+        XCTAssertEqual(c.placeholder, "Reply to \(c.name(of: mini))", "the placeholder is the field's own, the view draws the guess in its place")
+    }
+
+    func testATypedCharacterReplacesTheGuessAndEmptyingTheFieldBringsItBack() {
+        let c = composer(thread: reading().mine, reading: hinted())
+        type(c, "r")
+        XCTAssertNil(c.suggestion)
+        type(c, "")
+        XCTAssertEqual(c.suggestion, "run the tests")
+    }
+
+    func testTabOrTheRightArrowPutsTheGuessInTheFieldAsOrdinaryText() async throws {
+        let c = composer(thread: reading().mine, reading: hinted())
+        XCTAssertTrue(c.takeSuggestion())
+        XCTAssertEqual(c.text, "run the tests")
+        XCTAssertNil(c.suggestion, "the field holds text now")
+        XCTAssertFalse(c.takeSuggestion(), "nothing to take twice")
+        await c.submit()?.value
+        let (_, draft) = try XCTUnwrap(sent.first)
+        XCTAssertEqual(draft.kind, 2)
+        XCTAssertEqual(draft.to, mini)
+        XCTAssertEqual(read(draft)?.body, .prompt(text: "run the tests"))
+    }
+
+    func testReturnOnTheEmptyFieldSendsNothing() {
+        let c = composer(thread: reading().mine, reading: hinted())
+        XCTAssertTrue(c.returnPressed(shift: false, marked: false))
+        XCTAssertTrue(sent.isEmpty)
+        XCTAssertEqual(c.text, "")
+        XCTAssertEqual(c.suggestion, "run the tests")
+    }
+
+    func testAnotherMembersAppNeverShowsTheGuess() {
+        let r = reading()
+        let hintedReading = hinted()
+        XCTAssertNil(composer(thread: r.bobs, reading: hintedReading).suggestion, "the thread's bot is not one of this person's")
+        XCTAssertNil(composer(thread: r.removed, reading: hintedReading).suggestion, "a removed bot's thread takes no text")
+        XCTAssertNil(composer(thread: r.people, reading: hintedReading).suggestion)
+        XCTAssertNil(composer(reading: hintedReading).suggestion, "the channel's composer has none")
+    }
+
+    func testTheGuessIsNotDrawnWhileThisDeviceHoldsAPromptTheRelayDidNotEcho() async {
+        let c = composer(thread: reading().mine, reading: hinted())
+        await send(c, "something else")
+        XCTAssertEqual(c.rows().count, 1)
+        XCTAssertNil(c.suggestion, "the field is empty again, and the guess does not come back before the echo")
+    }
+
+    func testALaterMessageInTheThreadTakesTheGuessAway() {
+        var r = hinted()
+        let mine = reading().mine
+        _ = put(&r, 2, alice, ["thread": mine, "text": "never mind"], at: 30, to: mini)
+        XCTAssertNil(composer(thread: mine, reading: r).suggestion)
+    }
 }

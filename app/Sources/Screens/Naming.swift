@@ -30,6 +30,15 @@ enum Naming {
     /// The date and the time of a message, for the tooltip of its time.
     static func dateTime(_ date: Date) -> String { date.formatted(date: .abbreviated, time: .shortened) }
 
+    /// A scheduled run's line as the terminal writes it, `Running scheduled task (Nov 24 10:49pm)`, from the bot's clock in epoch milliseconds
+    /// (step E1 design 3.1): the Mac's zone, the month in English whatever the Mac's language, `am` and `pm` in lower case.
+    static func runLine(at milliseconds: Double, timeZone: TimeZone = .autoupdatingCurrent) -> String {
+        let format = DateFormatter()
+        (format.locale, format.timeZone, format.dateFormat) = (Locale(identifier: "en_US_POSIX"), timeZone, "MMM d h:mma")
+        let time = format.string(from: Date(timeIntervalSince1970: milliseconds / 1000))
+        return "Running scheduled task (\(time.dropLast(2) + time.suffix(2).lowercased()))"
+    }
+
     /// A day's word for a separator: Today, Yesterday, else the date. `now` and `calendar` are given so that a test fixes them.
     static func day(_ date: Date, now: Date, calendar: Calendar) -> String {
         if calendar.isDate(date, inSameDayAs: now) { return "Today" }
@@ -79,7 +88,7 @@ extension Message {
         case .unreadable: Naming.unreadable(1)
         case .line(let line), .lineEdit(let line): line.title
         case .file(let title): title
-        case .start, .cut, .notRead, .state, .build, .profile: ""
+        case .start, .cut, .notRead, .state, .build, .profile, .image: ""
         }
     }
 }
@@ -93,7 +102,7 @@ extension MessageThread {
         var answers = Set<MessageRef>()
         return entries.reduce(0) { count, entry in
             switch entry {
-            case .item(.message(let m)) where isFooter(m): count // the line under a reply, no reply of its own
+            case .item(.message(let m)) where isFooter(m) || isRunLine(m): count // the line under a reply and the line of a scheduled run, no reply of their own
             case .unreadable, .item(.message): count + 1 // a run that cannot be read is the one row the panel draws
             case .item(.answer(let a)): answers.insert(a.ref).inserted ? count + 1 : count
             case .item(.line): count

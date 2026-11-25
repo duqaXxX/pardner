@@ -14,6 +14,7 @@
  */
 import type {
   AgentAccount,
+  CallImage,
   ListedSession,
   ModelInfo,
   PermissionRequest,
@@ -180,6 +181,12 @@ export interface ReplySink {
   ): Promise<void>;
   task(update: TaskUpdate): Promise<void>;
   /**
+   * The images the call of line `id` returned, once, after its end: the chat shows them with that
+   * line. Resolves once the chat holds them, never on their delivery; never rejects. Present with
+   * `lineImages`; the core never reads the bytes.
+   */
+  image?(id: string, images: readonly CallImage[]): Promise<void>;
+  /**
    * The turn's own part has ended; `closing` are the lines still open, closed. The reply stays
    * open: `rest` or `closeOut` follows.
    */
@@ -247,6 +254,15 @@ export interface ChatCapabilities {
   readonly commandSuggestions: boolean;
   /** `ThreadChat.showLoop`, `loopCardLast` and `endLoop`: without it a scheduled run is an ordinary reply. */
   readonly loopCard: boolean;
+  /**
+   * `ThreadChat.scheduledRun`: a line before a scheduled run's reply. A chat declares it or `loopCard`,
+   * which shows the run on its card.
+   */
+  readonly scheduledRunLine: boolean;
+  /** `ThreadChat.suggestNext`. */
+  readonly nextPromptHint: boolean;
+  /** `ReplySink.image`: the images a call's result holds, shown with the call's line. */
+  readonly lineImages: boolean;
 }
 
 /**
@@ -552,6 +568,18 @@ export interface ThreadChat {
    * and the card is let go, so a later `showLoop` posts a card anew. Never rejects.
    */
   endLoop?(line: string): Promise<void>;
+  /**
+   * A scheduled run of the agent begins at `at` (epoch milliseconds): the chat draws a line saying
+   * so, in its own words and clock format, before the run's reply. Calls take effect in the order
+   * made. Never rejects. Present with `scheduledRunLine`.
+   */
+  scheduledRun?(at: number): Promise<void>;
+  /**
+   * The agent's guess at the owner's next prompt after the work that just ended: the chat offers it
+   * where the owner writes, and lets it go when anything else is said in the thread. Never rejects.
+   * Present with `nextPromptHint`.
+   */
+  suggestNext?(text: string): Promise<void>;
   /** The session closed: the activity line is cleared, and nothing is left running. */
   close(): Promise<void>;
 }

@@ -16,6 +16,7 @@ import { strip } from "../../text.ts";
 import { isRecord, records } from "../../values.ts";
 import type {
   AgentState,
+  CallImage,
   DiffHunk,
   FileChange,
   ModelTokens,
@@ -190,6 +191,25 @@ function resultText(content: unknown): string | null {
   return null;
 }
 
+/**
+ * The images of a tool result: each part of a list with `type: "image"` and a base64 source of an
+ * `image/` type (recorded: `read-image.jsonl`, SDK 0.3.330). Any other source (a URL, a file id) gives
+ * nothing. `tool_use_result` is not read: the block is the same for every tool.
+ */
+function resultImages(content: unknown): CallImage[] {
+  if (!Array.isArray(content)) return [];
+  const images: CallImage[] = [];
+  for (const part of records(content)) {
+    const source = isRecord(part.source) ? part.source : null;
+    if (part.type !== "image" || source === null || source.type !== "base64") continue;
+    const mediaType = string(source.media_type);
+    const data = string(source.data);
+    if (mediaType === null || data === null || !mediaType.startsWith("image/")) continue;
+    images.push({ mediaType, data: Uint8Array.from(Buffer.from(data, "base64")) });
+  }
+  return images;
+}
+
 function callEnded(
   block: WireRecord,
   parentCallId: string | null,
@@ -205,6 +225,7 @@ function callEnded(
       callId,
       isError,
       output: resultText(block.content),
+      images: resultImages(block.content),
       fileChange: change,
       model,
       parentCallId,
@@ -696,25 +717,27 @@ function costOf(record: WireRecord): number | null {
  * Each command Claude Code starts says whether it is a wakeup it ran by itself: a scheduled
  * task's run carries `wakeup_source` (`schedule_wakeup` for a CronCreate job), a prompt none
  * (recorded 2026-11-13, Claude Code 2.1.322, `scheduled-run.jsonl`; the record is in no
- * declaration of `sdk.d.ts`, whose declared markers of a scheduled run never arrive). Every start
- * overwrites what the last one said, and the wakeup's own end forgets it: not its result, which
- * may come after the start of the next command. It gives no event: the kind stays in
- * `UNREAD_KINDS`.
+ * declaration of `sdk.d.ts`, whose declared markers of a scheduled run never arrive). A wakeup's
+ * start says so as an event, before the run's first record. Every start overwrites what the last
+ * one said, and the wakeup's own end forgets it: not its result, which may come after the start
+ * of the next command. The other states give no event.
  */
-function commandLifecycle(memory: Memory, record: WireRecord): void {
+function commandLifecycle(memory: Memory, record: WireRecord): SessionEvent[] {
   const id = string(record.command_uuid);
   if (record.state === "started") {
-    memory.woken = (string(record.wakeup_source) ?? "") !== "" ? id : null;
-  } else if (
-    (record.state === "completed" || record.state === "cancelled") &&
-    id === memory.woken
-  ) {
+    const woken = (string(record.wakeup_source) ?? "") !== "";
+    memory.woken = woken ? id : null;
+    return woken ? [{ type: "scheduled_run_started" }] : [];
+  }
+  if ((record.state === "completed" || record.state === "cancelled") && id === memory.woken) {
     memory.woken = null;
   }
+  return [];
 }
 
 const HANDLERS = {
   assistant,
+  command_lifecycle: commandLifecycle,
   prompt_suggestion: promptSuggestion,
   rate_limit_event: rateLimit,
   result,
@@ -739,15 +762,11 @@ const HANDLERS = {
 export const TRANSLATED_KINDS: readonly string[] = Object.keys(HANDLERS);
 
 /**
- * The recorded kinds that give no event: nothing in the reply depends on them, and only
- * `command_lifecycle` is read, for the memory of the result that follows. A kind in neither list
- * is new, and `test/agent/claude/translate.test.ts` fails on the
+ * The recorded kinds that give no event: nothing in the reply depends on them. A kind in neither
+ * list is new, and `test/agent/claude/translate.test.ts` fails on the
  * recording that carries it.
  */
 export const UNREAD_KINDS: readonly string[] = [
-  // The queue of a prompt sent while a turn runs; absent from the SDK's union of messages. No
-  // event: its start only tells the result that follows whose it is (`commandLifecycle`).
-  "command_lifecycle",
   // `/clear`: the new session id comes with the `init` that follows.
   "conversation_reset",
   // The end of a content block and a message's stop reason: neither shows anything.
@@ -765,6 +784,8 @@ export const UNREAD_KINDS: readonly string[] = [
   // A hook starting (`SessionStart:resume`, recorded 2026-10-29): its output reaches the model, and
   // nothing of it is for the owner.
   "system:hook_started",
+  // A hook's answer (`SessionStart:startup`, recorded 2026-11-24, `read-image.jsonl`): the same.
+  "system:hook_response",
   "system:thinking_tokens",
   // A subagent's heartbeat while its call runs.
   "tool_progress",
@@ -805,9 +826,6 @@ export class Translator {
    * daemon does not read, or of none it knows, gives none.
    */
   translate(record: unknown): SessionEvent[] {
-    if (isRecord(record) && kindOf(record) === "command_lifecycle") {
-      commandLifecycle(this.#memory, record);
-    }
     const handler = handlerOf(kindOf(record));
     const events = handler !== null && isRecord(record) ? handler(this.#memory, record) : [];
     for (const event of events) {

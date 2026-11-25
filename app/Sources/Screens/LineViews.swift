@@ -110,6 +110,8 @@ struct LineRow: View {
     var indent: CGFloat = MessageRow.Mark.thread.size + MessageRow.Mark.thread.gap
     /// The thread the line is in, where a click on its path opens the file; nil where the window has no pairing.
     var place: FilePlace?
+    /// The files of the images the line's call returned (step E2 design 3.1), drawn as thumbnails under its head.
+    var images: [FileInfo] = []
     @Environment(\.openWindow) private var openWindow
     @Environment(FileOpener.self) private var opener: FileOpener?
 
@@ -146,6 +148,9 @@ struct LineRow: View {
                     } else if f.status == .error, let output = f.output {
                         Text(verbatim: Self.bounded(output)).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
                     }
+                }
+                if !images.isEmpty, let opener, let place {
+                    ThumbnailRow(files: images, place: place, opener: opener, bot: line.ref.device, at: line.ended ?? line.time)
                 }
             }
         }

@@ -329,7 +329,11 @@ a release with no notice, so it is the first place to look when a release misbeh
 | `SDKAssistantMessage.message.content[]` | `tool_use_id` | key | translate.ts: callEnded | measured | none |
 | `SDKAssistantMessage.message.content[]` | `type` | key | translate.ts: assistant, wordsOf | measured | none |
 | `SDKAssistantMessage.message.content[].content` | `text` | key | translate.ts: resultText | measured | none |
-| `SDKAssistantMessage.message.content[].content` | `type` | key | translate.ts: resultText | measured | none |
+| `SDKAssistantMessage.message.content[].content` | `source` | key | translate.ts: resultImages | measured | none |
+| `SDKAssistantMessage.message.content[].content` | `type` | key | translate.ts: resultText, resultImages | measured | none |
+| `SDKAssistantMessage.message.content[].content.source` | `data` | key | translate.ts: resultImages | measured | none |
+| `SDKAssistantMessage.message.content[].content.source` | `media_type` | key | translate.ts: resultImages | measured | none |
+| `SDKAssistantMessage.message.content[].content.source` | `type` | key | translate.ts: resultImages | measured | none |
 | `SDKPartialAssistantMessage.event` | `content_block` | key | translate.ts: contentBlockStart | measured | none |
 | `SDKPartialAssistantMessage.event` | `delta` | key | translate.ts: contentBlockDelta | measured | none |
 | `SDKPartialAssistantMessage.event` | `message` | key | translate.ts: messageStart | measured | none |
@@ -347,7 +351,11 @@ a release with no notice, so it is the first place to look when a release misbeh
 | `SDKUserMessage.message.content[]` | `tool_use_id` | key | translate.ts: callEnded | measured | none |
 | `SDKUserMessage.message.content[]` | `type` | key | translate.ts: user | measured | none |
 | `SDKUserMessage.message.content[].content` | `text` | key | translate.ts: resultText | measured | none |
-| `SDKUserMessage.message.content[].content` | `type` | key | translate.ts: resultText | measured | none |
+| `SDKUserMessage.message.content[].content` | `source` | key | translate.ts: resultImages | measured | none |
+| `SDKUserMessage.message.content[].content` | `type` | key | translate.ts: resultText, resultImages | measured | none |
+| `SDKUserMessage.message.content[].content.source` | `data` | key | translate.ts: resultImages | measured | none |
+| `SDKUserMessage.message.content[].content.source` | `media_type` | key | translate.ts: resultImages | measured | none |
+| `SDKUserMessage.message.content[].content.source` | `type` | key | translate.ts: resultImages | measured | none |
 | `SDKUserMessage.tool_use_result` | `content` | key | translate.ts: fileChange | measured | none |
 | `SDKUserMessage.tool_use_result` | `filePath` | key | translate.ts: fileChange | measured | none |
 | `SDKUserMessage.tool_use_result` | `resolvedModel` | key | translate.ts: agentModel | measured | none |
@@ -486,12 +494,12 @@ union, none of which any recording carries.
 
 ### Recorded and left unread
 
-- `command_lifecycle`: in no declaration of `sdk.d.ts`; the queue of a prompt sent while a turn runs (it gives no event; the translator's `commandLifecycle` reads a `started` and its `wakeup_source`, which marks a scheduled task's run, measured 2026-11-13; `ClaudeSession.#readCommand` reads it to end the hidden model command and the rename, rows above)
 - `conversation_reset`: `SDKConversationResetMessage`
 - `stream_event:content_block_stop`: a stream event of the Claude API, below `SDKPartialAssistantMessage.event`
 - `stream_event:message_delta`: a stream event of the Claude API, below `SDKPartialAssistantMessage.event`
 - `system:api_retry`: `SDKAPIRetryMessage`
 - `system:background_tasks_changed`: `SDKBackgroundTasksChangedMessage`
+- `system:hook_response`: `SDKHookResponseMessage`
 - `system:hook_started`: `SDKHookStartedMessage`
 - `system:notification`: `SDKNotificationMessage`
 - `system:session_writes_lost`: `SDKSessionWritesLostMessage`
@@ -506,7 +514,6 @@ union, none of which any recording carries.
 - `SDKElicitationCompleteMessage`
 - `SDKFilesPersistedEvent`
 - `SDKHookProgressMessage`
-- `SDKHookResponseMessage`
 - `SDKInformationalMessage`
 - `SDKLocalCommandOutputMessage`
 - `SDKMemoryRecallMessage`
@@ -527,6 +534,7 @@ no check covers them here.
   `sdk.d.ts` 0.3.296: of the 23 kinds they hold, `command_lifecycle` is in no declaration and 10
   others carry fields that the declaration of their type lacks (`thinking_display` on three stream
   events, `user_message_uuids` on `status`, `logical_parent_uuid` on `compact_boundary`, and more).
+- `command_lifecycle` is in no declaration of `sdk.d.ts`: the queue of a prompt sent while a turn runs. The translator's `commandLifecycle` reads a `started` and its `wakeup_source`, which marks a scheduled task's run (measured 2026-11-13), and gives `scheduled_run_started` for it; its other states give no event. `ClaudeSession.#readCommand` reads it to end the hidden model command and the rename (rows above)
 - The state `"cancelled"` is named only in comments of `sdk.d.ts` 0.3.301, never in a declaration and in no recording, so its row is `measured` only in the sense that no declaration names it. The comment of `cancel_queued` says each uuid-stamped command it cancels "is closed with a terminal 'cancelled' lifecycle", and the same comment mentions "a command_lifecycle 'cancelled' frame"; `ClaudeSession.#readCommand` ends the hidden model command on the one that names its uuid
 - `ClaudeSession` names a process that ended by the start of the message of the plain `Error`
   the SDK throws, from its stream, its start or a request: `Claude Code process exited with code `,

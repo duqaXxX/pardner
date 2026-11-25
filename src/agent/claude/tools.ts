@@ -6,7 +6,7 @@ import type { ToolVocabulary } from "../seam.ts";
 
 /**
  * The tools Claude Code offers, by name: the built-in ones its `init` records list in
- * `test/fixtures/sdk/` (Claude Code 2.1.286 to 2.1.312), the ones a session offers only in some
+ * `test/fixtures/sdk/` (Claude Code 2.1.286 to 2.1.330), the ones a session offers only in some
  * modes (`Agent`, `AskUserQuestion`, `ExitPlanMode`, `TodoWrite`), the names the core's
  * renderer test banned before the vocabulary left the core, and the names of earlier releases
  * (`Grep`, `Glob`, `LS`, `MultiEdit`, `BashOutput`, `KillShell`, `NotebookRead`), so that none
@@ -23,6 +23,7 @@ export const TOOL_NAMES: readonly string[] = Object.freeze([
   "CronList",
   "DesignSync",
   "Edit",
+  "EnterPlanMode",
   "EnterWorktree",
   "ExitPlanMode",
   "ExitWorktree",
@@ -31,16 +32,22 @@ export const TOOL_NAMES: readonly string[] = Object.freeze([
   "KillShell",
   "LS",
   "ListAgents",
+  "ListMcpResourcesTool",
+  "LSP",
   "Monitor",
   "MultiEdit",
   "NotebookEdit",
   "NotebookRead",
   "PushNotification",
   "Read",
+  "ReadMcpResourceDirTool",
+  "ReadMcpResourceTool",
   "RemoteTrigger",
   "ReportFindings",
   "ScheduleWakeup",
   "SendMessage",
+  "SendToProject",
+  "SendToProjectContext",
   "Skill",
   "Task",
   "TaskCreate",

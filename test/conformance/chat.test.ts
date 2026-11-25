@@ -79,7 +79,13 @@ function ordering() {
 
 async function memoryRig(
   threadIds: "own" | "opening" = "own",
-  without: { channelLists?: false; lookups?: false } = {},
+  without: {
+    channelLists?: false;
+    lookups?: false;
+    scheduledRunLine?: true;
+    nextPromptHint?: true;
+    lineImages?: true;
+  } = {},
 ): Promise<ChatRig> {
   const chat = memoryChat({ suggestions: true, threadIds, lists: true, folds: true, ...without });
   const provider = await chat.build({
@@ -129,3 +135,9 @@ chatConformance("the memory chat, threads named by their opening message", () =>
 chatConformance("the memory chat without channel lists and lookups", () =>
   memoryRig("own", { channelLists: false, lookups: false }),
 );
+// The relay's lines of a scheduled run and of a guess at the next prompt (the memory chat keeps its loop card).
+chatConformance("the memory chat with a run line and a next prompt hint", () =>
+  memoryRig("own", { scheduledRunLine: true, nextPromptHint: true }),
+);
+// The relay's images of a call, shown with its line.
+chatConformance("the memory chat with line images", () => memoryRig("own", { lineImages: true }));

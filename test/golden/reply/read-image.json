@@ -1,0 +1,313 @@
+{
+ "recording": "read-image",
+ "turns": [
+  {
+   "calls": [
+    {
+     "call": "task",
+     "update": {
+      "agent": null,
+      "calls": 0,
+      "details": null,
+      "folded": null,
+      "id": "toolu_01SyntheticImageRead",
+      "message": false,
+      "name": "Read",
+      "output": null,
+      "path": "/home/dev/project/flag.png",
+      "preview": null,
+      "startedAt": null,
+      "status": "in_progress",
+      "task": false,
+      "title": "Read: /home/dev/project/flag.png"
+     }
+    },
+    {
+     "call": "task",
+     "update": {
+      "agent": null,
+      "calls": 0,
+      "details": null,
+      "folded": null,
+      "id": "toolu_01SyntheticImageRead",
+      "message": false,
+      "name": "Read",
+      "output": null,
+      "path": "/home/dev/project/flag.png",
+      "preview": null,
+      "startedAt": null,
+      "status": "complete",
+      "task": false,
+      "title": "Read: /home/dev/project/flag.png"
+     }
+    },
+    {
+     "call": "text",
+     "ending": false,
+     "markdown": "The",
+     "notice": false
+    },
+    {
+     "call": "text",
+     "ending": false,
+     "markdown": " two",
+     "notice": false
+    },
+    {
+     "call": "text",
+     "ending": false,
+     "markdown": " colours in",
+     "notice": false
+    },
+    {
+     "call": "text",
+     "ending": false,
+     "markdown": " flag.png are red and bl",
+     "notice": false
+    },
+    {
+     "call": "text",
+     "ending": false,
+     "markdown": "ue.",
+     "notice": false
+    },
+    {
+     "call": "finish",
+     "closing": []
+    },
+    {
+     "call": "close_out"
+    }
+   ],
+   "result_set": true,
+   "running_tasks": []
+  },
+  {
+   "calls": [
+    {
+     "call": "text",
+     "ending": false,
+     "markdown": "927 ordered",
+     "notice": false
+    },
+    {
+     "call": "text",
+     "ending": false,
+     "markdown": " sums of 1s, ",
+     "notice": false
+    },
+    {
+     "call": "text",
+     "ending": false,
+     "markdown": "2s and 3s make ",
+     "notice": false
+    },
+    {
+     "call": "text",
+     "ending": false,
+     "markdown": "12 (from T",
+     "notice": false
+    },
+    {
+     "call": "text",
+     "ending": false,
+     "markdown": "(n)",
+     "notice": false
+    },
+    {
+     "call": "text",
+     "ending": false,
+     "markdown": " = T(n−1)",
+     "notice": false
+    },
+    {
+     "call": "text",
+     "ending": false,
+     "markdown": " + T(n−2) +",
+     "notice": false
+    },
+    {
+     "call": "text",
+     "ending": false,
+     "markdown": " T(n−3), with T",
+     "notice": false
+    },
+    {
+     "call": "text",
+     "ending": false,
+     "markdown": "(0) = 1).",
+     "notice": false
+    },
+    {
+     "call": "finish",
+     "closing": []
+    },
+    {
+     "call": "close_out"
+    }
+   ],
+   "result_set": true,
+   "running_tasks": []
+  },
+  {
+   "calls": [
+    {
+     "call": "text",
+     "ending": false,
+     "markdown": "done",
+     "notice": false
+    },
+    {
+     "call": "finish",
+     "closing": []
+    },
+    {
+     "call": "close_out"
+    }
+   ],
+   "result_set": true,
+   "running_tasks": []
+  }
+ ],
+ "whole": {
+  "calls": [
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01SyntheticImageRead",
+     "message": false,
+     "name": "Read",
+     "output": null,
+     "path": "/home/dev/project/flag.png",
+     "preview": null,
+     "startedAt": null,
+     "status": "in_progress",
+     "task": false,
+     "title": "Read: /home/dev/project/flag.png"
+    }
+   },
+   {
+    "call": "task",
+    "update": {
+     "agent": null,
+     "calls": 0,
+     "details": null,
+     "folded": null,
+     "id": "toolu_01SyntheticImageRead",
+     "message": false,
+     "name": "Read",
+     "output": null,
+     "path": "/home/dev/project/flag.png",
+     "preview": null,
+     "startedAt": null,
+     "status": "complete",
+     "task": false,
+     "title": "Read: /home/dev/project/flag.png"
+    }
+   },
+   {
+    "call": "text",
+    "ending": false,
+    "markdown": "The",
+    "notice": false
+   },
+   {
+    "call": "text",
+    "ending": false,
+    "markdown": " two",
+    "notice": false
+   },
+   {
+    "call": "text",
+    "ending": false,
+    "markdown": " colours in",
+    "notice": false
+   },
+   {
+    "call": "text",
+    "ending": false,
+    "markdown": " flag.png are red and bl",
+    "notice": false
+   },
+   {
+    "call": "text",
+    "ending": false,
+    "markdown": "ue.",
+    "notice": false
+   },
+   {
+    "call": "text",
+    "ending": false,
+    "markdown": "\n\n927 ordered",
+    "notice": false
+   },
+   {
+    "call": "text",
+    "ending": false,
+    "markdown": " sums of 1s, ",
+    "notice": false
+   },
+   {
+    "call": "text",
+    "ending": false,
+    "markdown": "2s and 3s make ",
+    "notice": false
+   },
+   {
+    "call": "text",
+    "ending": false,
+    "markdown": "12 (from T",
+    "notice": false
+   },
+   {
+    "call": "text",
+    "ending": false,
+    "markdown": "(n)",
+    "notice": false
+   },
+   {
+    "call": "text",
+    "ending": false,
+    "markdown": " = T(n−1)",
+    "notice": false
+   },
+   {
+    "call": "text",
+    "ending": false,
+    "markdown": " + T(n−2) +",
+    "notice": false
+   },
+   {
+    "call": "text",
+    "ending": false,
+    "markdown": " T(n−3), with T",
+    "notice": false
+   },
+   {
+    "call": "text",
+    "ending": false,
+    "markdown": "(0) = 1).",
+    "notice": false
+   },
+   {
+    "call": "text",
+    "ending": false,
+    "markdown": "\n\ndone",
+    "notice": false
+   },
+   {
+    "call": "finish",
+    "closing": []
+   },
+   {
+    "call": "close_out"
+   }
+  ],
+  "result_set": true,
+  "running_tasks": []
+ }
+}

@@ -46,7 +46,10 @@ struct ComposerField: NSViewRepresentable {
         context.coordinator.parent = self
         view.isEditable = model.availability == .ready
         if view.string != model.text, !view.hasMarkedText() {
+            let wasEmpty = view.string.isEmpty
             view.string = model.text
+            // The text took the empty field (the guess, a restore): the caret is after it.
+            if wasEmpty { view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0)) }
             // The model replaced the text (a send, a pick, a restore): what was typed before is no longer what an undo would undo.
             view.undoManager?.removeAllActions(withTarget: view)
             view.undoManager?.removeAllActions()
@@ -96,6 +99,9 @@ struct ComposerField: NSViewRepresentable {
                 return true
             case #selector(NSResponder.insertTab(_:)) where model.picking:
                 return model.pickHighlighted()
+            // The bot's guess at the next prompt takes the empty field, which has no caret to move.
+            case #selector(NSResponder.insertTab(_:)), #selector(NSResponder.moveRight(_:)):
+                return model.takeSuggestion()
             case #selector(NSResponder.cancelOperation(_:)) where model.picking:
                 model.closePicker()
                 return true
@@ -179,7 +185,7 @@ struct ComposerView: View {
                     }
                     ZStack(alignment: .topLeading) {
                         if model.text.isEmpty {
-                            Text(model.placeholder).foregroundStyle(PardnerColor.muted).lineLimit(1).allowsHitTesting(false)
+                            Text(model.suggestion ?? model.placeholder).foregroundStyle(PardnerColor.muted).lineLimit(1).allowsHitTesting(false)
                         }
                         ComposerField(model: model, height: $height).id("\(model.channel.base64EncodedString())/\(model.thread ?? "")").frame(height: height)
                     }

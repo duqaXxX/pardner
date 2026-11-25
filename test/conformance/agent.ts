@@ -310,6 +310,10 @@ function assertWellFormed(events: readonly SessionEvent[]): void {
         assert.ok(started.has(event.callId), "a call ends after it started");
         assert.ok(!finished.has(event.callId), "a call ends once");
         finished.add(event.callId);
+        for (const image of event.images) {
+          assert.match(image.mediaType, /^image\//, "an image names an image type");
+          assert.ok(image.data instanceof Uint8Array, "an image's bytes are a Uint8Array");
+        }
         break;
       default:
     }
@@ -359,7 +363,10 @@ function assertDeclared(events: readonly SessionEvent[], caps: Capabilities): vo
       assert.ok(open <= closed, "an idle comes after the end of the turn it follows");
     }
     if (!caps.goals) assert.notEqual(event.type, "goal_changed");
-    if (!caps.scheduledJobs) assert.notEqual(event.type, "scheduled_jobs");
+    if (!caps.scheduledJobs) {
+      assert.notEqual(event.type, "scheduled_jobs");
+      assert.notEqual(event.type, "scheduled_run_started");
+    }
     if (
       (event.type === "effort_observed" || event.type === "effort_changed") &&
       event.level !== null

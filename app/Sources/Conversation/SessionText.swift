@@ -1,4 +1,5 @@
-// The texts of the session's bot that carry no words of their own: a work's end and the session's title (step D2 design, 3.1 and 3.2).
+// The texts of the session's bot that carry no words of their own: a work's end, the session's title (step D2 design, 3.1 and 3.2), a scheduled
+// run's line and the guess at the next prompt (step E1 design, 3.1 and 3.2).
 import Foundation
 
 /// A JSON number as a `Double`; nil for anything else, a boolean included (Foundation bridges `true` to 1).
@@ -63,17 +64,32 @@ public struct SessionUsage: Sendable, Equatable {
     public var hasWindow: Bool { session != nil || week != nil }
 }
 
-/// What the app takes from a kind 1 of the session's bot with `say` `footer` or `title`; whether it counts is the thread's to decide.
+/// What the app takes from a kind 1 of the session's bot with `say` `footer`, `title`, `run` or `next`; whether it counts is the thread's to decide.
 public enum SessionText: Sendable, Equatable {
     /// A work's end: its length (nil when none is known), the session's line and the usage, each nil when absent or not of its shape.
     case footer(duration: String?, session: String?, usage: SessionUsage?)
     /// The session's title; nil when empty.
     case title(String?)
+    /// A scheduled run's start, on the bot's clock (epoch milliseconds). The line's words are the app's own.
+    case run(at: Double)
+    /// The bot's guess at the owner's next prompt, which has no `markdown`.
+    case next(String)
 
-    init?(_ o: [String: Any], markdown: String) {
+    init?(_ o: [String: Any]) {
+        let markdown = o["markdown"] as? String
         switch o["say"] as? String {
-        case "footer": self = .footer(duration: markdown.isEmpty ? nil : markdown, session: o["session"] as? String, usage: SessionUsage(o["usage"]))
-        case "title": self = .title(markdown.isEmpty ? nil : markdown)
+        case "footer"?:
+            guard let markdown else { return nil }
+            self = .footer(duration: markdown.isEmpty ? nil : markdown, session: o["session"] as? String, usage: SessionUsage(o["usage"]))
+        case "title"?:
+            guard let markdown else { return nil }
+            self = .title(markdown.isEmpty ? nil : markdown)
+        case "run"?:
+            guard let at = number(o["at"]), UsageWindow.moments.contains(at) else { return nil }
+            self = .run(at: at)
+        case "next"?:
+            guard let guess = o["next"] as? String, !guess.isEmpty else { return nil }
+            self = .next(guess)
         default: return nil
         }
     }
