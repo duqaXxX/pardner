@@ -201,6 +201,10 @@ public struct MessageThread: Sendable, Equatable {
     /// The newest `usage` (by `usage.at`) among this thread's own works' ends that carries a window, and the newest that carries a cost; `ReadingModel.windows` is the bot's across channels.
     public internal(set) var windowUsage: SessionUsage?
     public internal(set) var costUsage: SessionUsage?
+    /// The bot's guess at the owner's next prompt, while nothing has come after it (step E1 design 3.2): the composer of its owner offers it.
+    public internal(set) var hint: String?
+    /// The files of the images each line's call returned, by the line (step E2 design 3.1): the texts that carry them are no item of the thread.
+    public internal(set) var images: [MessageRef: [FileInfo]] = [:]
     // The devices whose prompts the bot started here: its owner's, the only ones whose reply it takes (SD 5.8).
     var owners: Set<Data> = []
     // The person's own devices (the Devices list): their replies count whether or not they prompted in this thread.
@@ -389,6 +393,14 @@ extension MessageThread {
     // other bots of a channel act on nothing here); a reply only from a device whose prompt the bot started.
     mutating func take(_ m: Message) {
         let fromBot = bot != nil && m.sender == bot
+        // Any later item of the thread lets the hint go, but a work's end or a title of the bot (the guess may land before either).
+        let before = items.count
+        defer { if items.count > before, !(fromBot && m.leavesHint) { hint = nil } }
+        if fromBot, case .next(let guess)? = m.sessionText {
+            // A guess made before a prompt already in the thread is stale: the newest item before it, the bot's own lines aside, is not the person's.
+            hint = lastItemIsPrompt() ? nil : guess
+            return
+        }
         // The first sign decides what the opening prompt was (a prompt's start is no sign).
         if fromBot, settlement == nil {
             switch m.body {
@@ -472,11 +484,18 @@ extension MessageThread {
             if fields.status.isClosed, !line.fields.status.isClosed { line.ended = m.time }
             line.fields = fields
             items[i] = .line(line)
+        case .image(let line) where fromBot:
+            // No item, no later message, no reply: an image comes under its line whenever it lands, and a line this thread lacks is drawn by none.
+            if !m.files.isEmpty { images[MessageRef(device: m.sender, name: line)] = m.files }
+            return
         case .text where fromBot && m.sessionText != nil:
             switch m.sessionText {
             case .title(let title)?:
                 if let title { sessionTitle = title }
                 return // a title is no reply
+            case .run?:
+                items.append(.message(m))
+            case .next?, nil: break
             case .footer(let duration, let line, let newest)?:
                 if duration != nil { items.append(.message(m)) }
                 if let line { session = line }
@@ -484,7 +503,6 @@ extension MessageThread {
                     if newest.hasWindow, newest.at > windowUsage?.at ?? -.infinity { windowUsage = newest }
                     if newest.cost != nil, newest.at > costUsage?.at ?? -.infinity { costUsage = newest }
                 }
-            case nil: break
             }
         case .text, .file:
             if m.thread != nil { items.append(.message(m)) } // the opening message is the thread's root, not an item
@@ -502,6 +520,23 @@ extension MessageThread {
         return false
     }
 
+    /// Whether `m` is a scheduled run's line of the session's bot: one line of its own, which is no reply.
+    public func isRunLine(_ m: Message) -> Bool {
+        if case .run? = m.sessionText { return bot != nil && m.sender == bot }
+        return false
+    }
+
+    /// Whether the newest item, the bot's work's ends and run lines aside, is a message of a person.
+    private func lastItemIsPrompt() -> Bool {
+        for item in items.reversed() {
+            guard case .message(let m) = item else { return false }
+            if isFooter(m) || isRunLine(m) { continue }
+            if case .prompt = m.body { return true }
+            return false
+        }
+        return false
+    }
+
     /// Whether `m`, a text with no thread, is the line of the session's bot that answers the opening prompt.
     func answers(line m: Message) -> Bool {
         bot != nil && m.sender == bot && m.re != nil && m.re == root?.ref
@@ -511,6 +546,7 @@ extension MessageThread {
     mutating func take(line m: Message) {
         if settlement == nil { settlement = .noSession }
         items.append(.message(m))
+        hint = nil
         lastReply = max(lastReply ?? .distantPast, m.time)
     }
 

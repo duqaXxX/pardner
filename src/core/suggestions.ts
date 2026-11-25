@@ -15,10 +15,11 @@ export class Suggestions {
   /** Set by the flows: whether a prompt of the owner's is on its way in a thread. */
   promptOnItsWay: (ref: ThreadRef) => boolean = () => false;
 
-  /** Holds `text` under a fresh id, unless a prompt is on its way: that guess belongs to the turn before. */
-  hold(ref: ThreadRef, text: string): void {
-    if (this.promptOnItsWay(ref)) return;
+  /** Holds `text` under a fresh id, unless a prompt is on its way: that guess belongs to the turn before. Whether it was held. */
+  hold(ref: ThreadRef, text: string): boolean {
+    if (this.promptOnItsWay(ref)) return false;
     this.#held.set(keyOf(ref), { text, id: randomUUID() });
+    return true;
   }
 
   held(ref: ThreadRef): Suggestion | null {

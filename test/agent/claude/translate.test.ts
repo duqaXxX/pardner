@@ -209,6 +209,41 @@ test("a scheduled run's turn is the agent's, the turn that scheduled it the owne
   );
 });
 
+// A scheduled run says it began (E1 design 3.1): the `started` that carries `wakeup_source` gives
+// `scheduled_run_started`, before the run's first record; no other state or start does.
+test("a scheduled run's start gives scheduled_run_started before the run's first event", () => {
+  const wire = sdkRecords("scheduled-run");
+  const made = perRecord("scheduled-run");
+  const started = wire.findIndex((w) => w.type === "command_lifecycle" && w.wakeup_source);
+  assert.ok(started > 0);
+  assert.deepEqual(made[started], [{ type: "scheduled_run_started" }]);
+  wire.forEach((w, index) => {
+    if (w.type === "command_lifecycle" && index !== started) assert.deepEqual(made[index], []);
+  });
+  const next = made.findIndex((events, index) => index > started && events.length > 0);
+  assert.ok(next > started, "the run has events after its start");
+  assert.equal(
+    types(events("scheduled-run")).filter((t) => t === "scheduled_run_started").length,
+    1,
+  );
+});
+
+test("a start with no wakeup, or an empty one, gives no scheduled_run_started", () => {
+  const [started] = runRecords();
+  assert.ok(started);
+  const bare = { ...started };
+  delete bare.wakeup_source;
+  assert.deepEqual(new Translator().translate(bare), []);
+  assert.deepEqual(new Translator().translate({ ...started, wakeup_source: "" }), []);
+});
+
+test("no recording but the scheduled run says a run started", () => {
+  for (const name of sdkRecordings()) {
+    if (name === "scheduled-run") continue;
+    assert.ok(!types(events(name)).includes("scheduled_run_started"), name);
+  }
+});
+
 /** The records of the scheduled run alone, from its `started` to its `completed`. */
 function runRecords(): JsonObject[] {
   const all = sdkRecords("scheduled-run");
@@ -519,6 +554,7 @@ test("a call ends with its result's text", () => {
       callId: "toolu_01Xdzy1JrqnyQh4m9GkKaQvo",
       isError: false,
       output: "notes.txt",
+      images: [],
       fileChange: null,
       model: null,
       parentCallId: null,
@@ -531,6 +567,7 @@ test("a call ends with its result's text", () => {
       callId: "toolu_01LnSiTbh8GtkisVrbigeaKe",
       isError: false,
       output: "1\talpha\n2\tbeta\n3\t",
+      images: [],
       fileChange: null,
       model: null,
       parentCallId: null,
@@ -546,6 +583,7 @@ test("a failed call ends as an error with what the tool said", () => {
       callId: "toolu_01YYyHT3cAveY6vGoBUSEazb",
       isError: true,
       output: `File does not exist. Note: your current working directory is ${PROJECT}.`,
+      images: [],
       fileChange: null,
       model: null,
       parentCallId: null,
@@ -627,6 +665,7 @@ test("a server tool's call starts and ends like any other", () => {
       callId: "srvtoolu_01DhDTEACdzTetM9t8fazrgD",
       isError: false,
       output: "advisor_redacted_result",
+      images: [],
       fileChange: null,
       model: null,
       parentCallId: null,
@@ -1834,4 +1873,57 @@ test("a prompt suggestion with no text gives no event", () => {
   assert.ok(wire);
   assert.deepEqual(translated([{ ...wire, suggestion: "" }]), []);
   assert.deepEqual(translated([{ ...wire, suggestion: "  " }]), []);
+});
+
+// A Read of a PNG (`read-image.jsonl`, Claude Code 2.1.331 with the TypeScript SDK 0.3.330,
+// 2026-11-24, E2 design 3.1): the result's `content` is a list with one base64 image block, and the
+// call's `tool_use_result` is the Read tool's own shape, which is not read.
+test("a result's base64 image block gives the call's image, decoded", () => {
+  const ended = of(events("read-image"), "call_ended");
+  assert.equal(ended.length, 1);
+  const [call] = ended;
+  assert.ok(call);
+  assert.equal(call.callId, "toolu_01SyntheticImageRead");
+  assert.equal(call.images.length, 1);
+  const [image] = call.images;
+  assert.ok(image);
+  assert.equal(image.mediaType, "image/png");
+  assert.ok(image.data instanceof Uint8Array);
+  assert.equal(image.data.length, 113);
+  assert.deepEqual([...image.data.slice(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+});
+
+test("a call whose result holds no image has none", () => {
+  for (const name of sdkRecordings()) {
+    if (name === "read-image") continue;
+    for (const call of of(events(name), "call_ended")) assert.deepEqual(call.images, [], name);
+  }
+});
+
+function resultOf(content: unknown): SessionEvent[] {
+  return new Translator().translate({
+    type: "user",
+    message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t-1", content }] },
+    parent_tool_use_id: null,
+    uuid: "00000000-0000-4000-8000-000000000001",
+    session_id: "00000000-0000-4000-8000-000000000002",
+  });
+}
+
+test("only a base64 source of an image type is an image", () => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64");
+  const [event] = resultOf([
+    { type: "text", text: "shot" },
+    { type: "image", source: { type: "base64", media_type: "image/webp", data: png } },
+    { type: "image", source: { type: "url", url: "https://example.test/a.png" } },
+    { type: "image", source: { type: "base64", media_type: "application/pdf", data: png } },
+    { type: "image", source: { type: "base64", data: png } },
+    { type: "text", text: "after", source: { type: "base64", media_type: "image/png", data: png } },
+  ]);
+  assert.ok(event && event.type === "call_ended");
+  assert.equal(event.output, "shot\n\n\n\n\nafter");
+  assert.deepEqual(event.images, [
+    { mediaType: "image/webp", data: Uint8Array.from([0x89, 0x50, 0x4e, 0x47]) },
+  ]);
+  assert.deepEqual((resultOf("plain")[0] as EventOf<"call_ended">).images, []);
 });

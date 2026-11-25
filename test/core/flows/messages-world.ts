@@ -478,6 +478,15 @@ export interface WorldOptions {
   readonly diff?: boolean;
   /** The chat posts lists in a thread (`threadLists`): what `/next` offers its suggestion in. */
   readonly lists?: boolean;
+  /**
+   * The chat draws a scheduled run's line, as the relay does: `scheduledRunLine`, and no
+   * `loopCard`; `"with the card"` keeps the memory chat's loop card beside it.
+   */
+  readonly runLines?: boolean | "with the card";
+  /** The chat offers the suggested next prompt where the owner writes (`nextPromptHint`): `suggestNext` is recorded. */
+  readonly hints?: boolean;
+  /** The chat shows a call's images with its line (`lineImages`): the reply's `image` is recorded. */
+  readonly images?: boolean;
   /** The chat posts lists in a thread and folds a message into its title (`threadLists`, `messageFold`). */
   readonly rewind?: boolean;
   /** With `rewind`: the chat folds no message (`messageFold` false). */
@@ -634,6 +643,13 @@ export class MessagesWorld {
         ...(options.noUnshare === true && { unshare: false }),
         ...(options.noShare === true && { share: false }),
         ...(options.noChannelLists === true && { channelLists: false }),
+        ...(options.runLines !== undefined &&
+          options.runLines !== false && {
+            scheduledRunLine: true,
+            ...(options.runLines === true && { loopCard: false }),
+          }),
+        ...(options.hints === true && { nextPromptHint: true }),
+        ...(options.images === true && { lineImages: true }),
       });
     const provider = await chat.build({
       variables: {},

@@ -285,7 +285,7 @@ test("a suggestion that arrives while a prompt is owed is dropped", async (t) =>
   const real = store.hold.bind(store);
   store.hold = (ref, text) => {
     offered.push(text);
-    real(ref, text);
+    return real(ref, text);
   };
   agent.next(say("first answer"), hold(), suggest("too early"));
   const ref = await world.opened("first prompt");

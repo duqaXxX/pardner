@@ -58,15 +58,17 @@ export const refusedText = (name: string, code: number | undefined) =>
 
 /**
  * `item` as the owner gets it when its file cannot be sent (design G 3.5): the same message under its
- * name, with no file and `text` in `markdown`; a file row (`say: "file"`) is said as a `tell`.
+ * name, with no file and `text` in `markdown`; a file row (`say: "file"`) is said as a `tell`. An image
+ * text (`say: "image"`, step E2 3.1) is nothing without its images: it becomes nothing.
  */
-function withoutFile(item: OutboxItem, text: string): OutboxItem {
+function withoutFile(item: OutboxItem, text: string): OutboxItem | undefined {
   let body: Record<string, unknown> = {};
   try {
     const parsed: unknown = JSON.parse(item.content);
     if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed))
       body = parsed as Record<string, unknown>;
   } catch {} // a body that is no JSON object is replaced by the text alone
+  if (body.say === "image") return undefined;
   const content = JSON.stringify({
     ...body,
     ...(body.say === "file" ? { say: "tell" } : {}),
@@ -233,6 +235,13 @@ export class Outbox {
     }
   }
 
+  /** `withoutFile`, logging an image text it drops (no content: the file's count says enough). */
+  #without(item: OutboxItem, text: string): OutboxItem | undefined {
+    const next = withoutFile(item, text);
+    if (!next) this.#o.log("relay: an image was dropped, its file is lost or was refused");
+    return next;
+  }
+
   /**
    * At a start (design G 3.5): a message whose blob file is gone goes without its file and says so,
    * and a blob file no message names is removed.
@@ -249,11 +258,10 @@ export class Outbox {
         for (const [key, list] of s.outboxes)
           s.outboxes.set(
             key,
-            list.map((i) =>
-              lost.has(toHex(i.name))
-                ? withoutFile(i, lostText(lost.get(toHex(i.name)) as string))
-                : i,
-            ),
+            list.flatMap((i) => {
+              if (!lost.has(toHex(i.name))) return [i];
+              return this.#without(i, lostText(lost.get(toHex(i.name)) as string)) ?? [];
+            }),
           );
       });
     const kept = new Set(
@@ -454,7 +462,7 @@ export class Outbox {
   ): Promise<boolean> {
     const bytes = this.#blobs.read(file.id);
     if (!bytes) {
-      await this.#put(key, item, withoutFile(item, lostText(file.name))); // gone since the start
+      await this.#put(key, item, this.#without(item, lostText(file.name))); // gone since the start
       return true;
     }
     const code = await this.#o.put(file.id, bytes);
@@ -465,7 +473,7 @@ export class Outbox {
     if (code === 0) await this.#put(key, item, putAccepted(item, file.id));
     else {
       this.#o.log(`relay: the relay did not take a file (${code}), its message goes without it`);
-      await this.#put(key, item, withoutFile(item, refusedText(file.name, code)));
+      await this.#put(key, item, this.#without(item, refusedText(file.name, code)));
     }
     return true;
   }

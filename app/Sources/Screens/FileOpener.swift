@@ -134,7 +134,9 @@ public final class FileOpener {
     private let send: ComposerSender
     /// How long a fetch the connection could not make waits before it asks again.
     var retryAfter = Duration.seconds(3)
-    private let fetchFile: @Sendable (Data, Data) async -> FetchOutcome
+    let fetchFile: @Sendable (Data, Data) async -> FetchOutcome
+    /// The thumbnails of the images calls returned, by blob id (step E2 design 3.1); `Thumbnails.swift` is its reader.
+    let thumbnails = ThumbnailStore()
     private var sessions: [FileWindowContent: Session] = [:]
     private var counter = 0
     /// The names the relay refused while a click's send was in flight, by channel: an item may be refused before its send returns its name.

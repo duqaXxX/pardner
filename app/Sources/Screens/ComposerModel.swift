@@ -253,6 +253,22 @@ public final class ComposerModel {
         return "Reply to \(name(of: bot))"
     }
 
+    /// The bot's guess at the next prompt, drawn in the empty field's place (step E1 design 3.2): the thread's bot is one of the person's own, the field
+    /// is empty, nothing came after the guess in the thread, and this device holds no prompt of the thread that the relay did not echo yet.
+    public var suggestion: String? {
+        guard let thread, availability == .ready, sessionBot != nil, text.isEmpty,
+              let hint = reading.channels[channel]?.threads[thread]?.hint else { return nil }
+        let onItsWay = rows().contains { $0.to != nil && ($0.status == .sending || $0.status == .sent) }
+        return onItsWay ? nil : hint
+    }
+
+    /// Tab, or the right arrow in the empty field: the guess becomes the field's text, which Return then sends as any text. False when there is none.
+    public func takeSuggestion() -> Bool {
+        guard let suggestion else { return false }
+        edited(suggestion)
+        return true
+    }
+
     /// The mention button is on in a channel's composer that is ready, with a bot to choose, no bot named and nothing typed: the list opens from an `@` at the start.
     public var canMention: Bool { thread == nil && availability == .ready && label == nil && text.isEmpty && !choices().isEmpty }
 

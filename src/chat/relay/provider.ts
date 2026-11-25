@@ -8,8 +8,10 @@
  * running list draws nothing.
  */
 
+import { getLogger } from "../../log.ts";
 import { refKey } from "../../protocol/device-reader.ts";
 import type { Bytes, Platform } from "../../protocol/platform.ts";
+import { errorName } from "../../values.ts";
 import {
   type AgentAccount,
   type ChannelBind,
@@ -32,6 +34,8 @@ import { type Inbound, questionsOf } from "./inbound.ts";
 import { fitLine, type Line, REQUEST_ROOM } from "./line.ts";
 import { NOT_SENT, NOT_TAKEN_BY_RELAY, type Outbox, TOO_LARGE_FOR_RELAY } from "./outbox.ts";
 
+const logger = getLogger("pardner.chat.relay.provider");
+
 const CAPABILITIES: ChatCapabilities = {
   nativeStreaming: true,
   rootStatus: false,
@@ -50,6 +54,9 @@ const CAPABILITIES: ChatCapabilities = {
   threadOpen: false,
   commandSuggestions: false,
   loopCard: false,
+  scheduledRunLine: true,
+  nextPromptHint: true,
+  lineImages: true,
 };
 
 /** The request as the app needs it: the core's id and the agent's call id stay on the bot (store the minimum). */
@@ -59,6 +66,17 @@ const shown = (request: OwnerRequest) =>
 /** Text held in a reply goes out 5 seconds after its first character, or 1 second after its last call. */
 const FIRST_MS = 5000;
 const PAUSE_MS = 1000;
+
+/** A guess at the next prompt is cut to this many characters, whole code points (E1 3.2): the measured ones are three to five words. */
+const NEXT_LIMIT = 2000;
+
+/** The name's ending of an image file, by its media type (E2 3.1). */
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpeg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+};
 
 /** A part holds at most 64 KiB of text (3.8); a longer text becomes several, cut between characters. */
 const PART = 65_536;
@@ -168,6 +186,22 @@ export class RelayProvider implements ChatProvider {
   }
 
   /**
+   * A text the app reads by its `say` alone (a scheduled run's line, a guess at the next prompt; step E1
+   * 3.1, 3.2), after what the thread's open replies hold. A refusal is logged, never thrown: the run's
+   * reply goes on.
+   */
+  async #aside(ref: ThreadRef, content: { say: string } & Record<string, unknown>) {
+    try {
+      await this.#flushed(ref);
+      const text = JSON.stringify({ thread: ref.thread, ...content });
+      if (await this.#outbox.queue(fromHex(ref.channel), { kind: 1, content: text })) return;
+      logger.warning(`could not queue a ${content.say} text in ${ref.thread}`);
+    } catch (error) {
+      logger.warning(`could not queue a ${content.say} text in ${ref.thread}: ${errorName(error)}`);
+    }
+  }
+
+  /**
    * A request to the owner (3.8): its name is the message id, kept with the id, thread and type the
    * answer must have before anything is written, so that no reply can arrive first.
    */
@@ -223,6 +257,7 @@ export class RelayProvider implements ChatProvider {
     const steady = this.#steady;
     const clock = this.#clock;
     const owner = this.#owner;
+    const limit = this.fileLimit;
     const threadKey = `${ref.channel}/${ref.thread}`;
     const reference = prompt ? referenceOf(prompt) : undefined;
     const names: Bytes[] = [];
@@ -388,6 +423,42 @@ export class RelayProvider implements ChatProvider {
           finished = true;
         }),
       rest() {},
+      // The images of a call under its line (E2 3.1). Only the seal needs the chain; the blob files, the puts and the append
+      // run beside it and are never waited for here: a put the relay does not answer must hold no later write, `settle`
+      // or request. The item is no part of `names`, so an image never makes the reply unlanded.
+      image: (id, images) =>
+        enqueue(async () => {
+          const held = lines.get(id);
+          if (!held) {
+            logger.warning(`dropped the images of call ${id}: its line was not written`);
+            return;
+          }
+          const kept = images.filter((one) => {
+            if (one.data.length <= limit) return true;
+            logger.warning(
+              `dropped an image of call ${id}: ${one.data.length} bytes is over the limit`,
+            );
+            return false;
+          });
+          if (kept.length === 0) return;
+          const content = JSON.stringify({
+            thread: ref.thread,
+            say: "image",
+            line: toHex(held.name),
+          });
+          const files = kept.map((one, i) => ({
+            bytes: one.data,
+            type: one.mediaType,
+            name: `image-${i + 1}.${IMAGE_EXTENSIONS[one.mediaType] ?? "img"}`,
+          }));
+          // Called, not awaited: `queueFile` seals and keeps the blob files before its first wait.
+          void outbox.queueFile(fromHex(ref.channel), { kind: 1, content, files }).then(
+            (sent) => {
+              if (sent !== "queued") logger.warning(`dropped the images of call ${id}: ${sent}`);
+            },
+            (error) => logger.warning(`dropped the images of call ${id}: ${errorName(error)}`),
+          );
+        }),
       // A text of its own after what is still held; the flag keeps the first footer drawn (seam). A footer is no
       // part of `names`, so a refused one leaves the reply landed. A rejected queue keeps the flag: the draft is
       // held and the next pump sends it.
@@ -440,6 +511,10 @@ export class RelayProvider implements ChatProvider {
       showRunning() {},
       openReply: (_onOpen, prompt) => this.#reply(ref, prompt),
       written() {},
+      scheduledRun: (at) =>
+        this.#aside(ref, { say: "run", at, markdown: "Running scheduled task" }),
+      suggestNext: (next) =>
+        this.#aside(ref, { say: "next", next: Array.from(next).slice(0, NEXT_LIMIT).join("") }),
       notice: text("notice"),
       say: text("say"),
       tell: text("tell"),

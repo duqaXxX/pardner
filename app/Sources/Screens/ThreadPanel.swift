@@ -76,7 +76,7 @@ struct ThreadPanel: View {
                         case .message(let m): entry(m, queued: queued)
                         case .unreadable(let count, let first): UnreadableRow(model: model, icons: icons, message: first, count: count)
                         case .segment(let a): AnswerRow(model: model, icons: icons, answer: a, whole: thread.text(of: a))
-                        case .line(let l): LineRow(line: l, state: thread.state(of: l), place: place)
+                        case .line(let l): LineRow(line: l, state: thread.state(of: l), place: place, images: thread.images[l.ref] ?? [])
                         case .body(let l, let i): LineBodyRow(line: l, index: i)
                         }
                     }
@@ -116,6 +116,8 @@ struct ThreadPanel: View {
     private func entry(_ m: Message, queued: Set<MessageRef>) -> some View {
         if thread.isFooter(m), case .footer(let duration?, _, _)? = m.sessionText {
             Text(verbatim: duration).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+        } else if thread.isRunLine(m), case .run(let at)? = m.sessionText {
+            Text(verbatim: Naming.runLine(at: at)).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
         } else if case .request(let title, _, _) = m.body {
             if let composer {
                 RequestCardView(card: composer.card(for: m), focus: $focus)

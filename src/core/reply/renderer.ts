@@ -232,6 +232,8 @@ export class TurnRenderer {
   readonly #asWritten: (text: string) => string;
   /** Whether a request is open for the call: its line starts `pending`. */
   readonly #asked: (callId: string) => boolean;
+  /** The chat shows a call's images with its line (`lineImages`). */
+  readonly #lineImages: boolean;
   /** The calls the terminal times (their line carries `startedAt` when they run). */
   readonly #clocked = new Set<string>();
   // Calls that continue an agent that has ended: a line of words and no card, kept by id so that a
@@ -250,6 +252,7 @@ export class TurnRenderer {
     now: () => number = () => monotonicClock.time(),
     asWritten: (text: string) => string = (text) => text,
     asked: (callId: string) => boolean = () => false,
+    lineImages = false,
   ) {
     this.#sink = sink;
     this.#names = names;
@@ -262,6 +265,7 @@ export class TurnRenderer {
     this.#now = now;
     this.#asWritten = asWritten;
     this.#asked = asked;
+    this.#lineImages = lineImages;
   }
 
   /** One event of the session into the reply. An event that shows nothing is left out. */
@@ -896,6 +900,10 @@ export class TurnRenderer {
         preview: shown,
       });
     }
+    // The line's end is set: the images follow it, for a call of the turn's own (a subagent's calls fold into
+    // its line), to a chat that shows them (E2 3.1). The bytes are the chat's alone.
+    if (this.#lineImages && event.images.length > 0 && event.parentCallId === null)
+      await this.#sink.image?.(entry.id, event.images);
   }
 
   /** What a call's line says of its end: the agent's words, but not its rejection of a call the owner's stop cut. */

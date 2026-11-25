@@ -1,5 +1,5 @@
 // The texts of the session's bot around its turn (step D2 design, 3.1 and 3.2): every case of the fixture the bot's tests share, read from the repository.
-import Conversation
+@testable import Conversation
 import Foundation
 import ProtocolHost
 import XCTest
@@ -24,7 +24,7 @@ final class SessionTextContentTests: XCTestCase {
 
     func testEveryTextOfTheSharedFixtureReadsAsItSays() throws {
         let texts = try XCTUnwrap(file()["texts"] as? [[String: Any]])
-        XCTAssertGreaterThanOrEqual(texts.count, 8)
+        XCTAssertGreaterThanOrEqual(texts.count, 19)
         for t in texts {
             let name = t["name"] as? String ?? "?"
             let text = String(decoding: try JSONSerialization.data(withJSONObject: t["content"] as Any), as: UTF8.self)
@@ -44,6 +44,19 @@ final class SessionTextContentTests: XCTestCase {
             case "title":
                 guard case .title(let title)? = message.sessionText else { XCTFail("\(name): not a title"); continue }
                 XCTAssertEqual(title, reads["title"] as? String, name)
+            case "run":
+                guard case .run(let at)? = message.sessionText else { XCTFail("\(name): not a run line"); continue }
+                XCTAssertEqual(at, reads["at"] as? Double, name)
+            case "next":
+                guard case .next(let guess)? = message.sessionText else { XCTFail("\(name): not a guess"); continue }
+                XCTAssertEqual(guess, reads["next"] as? String, name)
+            case "image":
+                // The text's files, which the fixture does not hold, are the thread's to keep: here the body names the line.
+                guard case .image(let line) = message.body else { XCTFail("\(name): not an image text"); continue }
+                XCTAssertEqual(line.hexString, reads["line"] as? String, name)
+                XCTAssertNil(message.sessionText, name)
+            case "none":
+                XCTAssertNil(message.sessionText, name)
             default: XCTFail("\(name): unknown kind")
             }
         }

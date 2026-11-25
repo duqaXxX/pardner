@@ -50,6 +50,7 @@ function ended(callId: string, fileChange: FileChange | null = null): SessionEve
     callId,
     isError: false,
     output: "done",
+    images: [],
     fileChange,
     model: null,
     parentCallId: null,

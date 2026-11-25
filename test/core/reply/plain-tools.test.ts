@@ -135,6 +135,7 @@ const ENDED_IN_ERROR = (output: string, callId = "c1"): SessionEvent => ({
   callId,
   isError: true,
   output,
+  images: [],
   fileChange: null,
   model: null,
   parentCallId: null,

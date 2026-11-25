@@ -10,7 +10,7 @@
  */
 
 import { isDeepStrictEqual } from "node:util";
-import type { Question } from "../../../src/agent/seam.ts";
+import type { CallImage, Question } from "../../../src/agent/seam.ts";
 import {
   type Activity,
   type AgentAccount,
@@ -60,6 +60,9 @@ const CAPABILITIES: ChatCapabilities = {
   threadOpen: true,
   commandSuggestions: false,
   loopCard: true,
+  scheduledRunLine: false,
+  nextPromptHint: false,
+  lineImages: false,
 };
 
 /** The capabilities the memory chat declares only to record the calls made for them. */
@@ -73,6 +76,11 @@ export interface Recorded {
   /** The two the memory chat declares unless false, as the relay does not. */
   readonly threadOpen?: boolean;
   readonly loopCard?: boolean;
+  /** `scheduledRunLine` and `nextPromptHint`, which the memory chat declares only when true. */
+  readonly scheduledRunLine?: boolean;
+  readonly nextPromptHint?: boolean;
+  /** `lineImages`, which the memory chat declares only when true: `ReplySink.image` records the call. */
+  readonly lineImages?: boolean;
   /** The memory chat declares `channelLists` unless false, as the relay does not. */
   readonly channelLists?: boolean;
   /** The memory chat declares `lookups` unless false, as the relay does not. */
@@ -155,8 +163,22 @@ class MemoryReply implements Reply, Placed {
   /** Present with `messageFold`. */
   readonly posted?: () => readonly MessageId[];
 
-  constructor(room: Room, ref: ThreadRef, onOpen: OpenMessageChange, folds = false) {
+  /** Present with `lineImages`; the call is recorded and nothing is drawn. */
+  readonly image?: (id: string, images: readonly CallImage[]) => Promise<void>;
+
+  constructor(
+    room: Room,
+    ref: ThreadRef,
+    onOpen: OpenMessageChange,
+    folds = false,
+    images = false,
+  ) {
     if (folds) this.posted = () => (this.#message === null ? [] : [this.#message.id]);
+    if (images) {
+      this.image = async (id, held) => {
+        room.record(ref, "image", [id, held]);
+      };
+    }
     this.#room = room;
     this.#ref = ref;
     this.#onOpen = onOpen;
@@ -447,6 +469,10 @@ class MemoryThread implements ThreadChat {
   readonly clearStatus?: () => Promise<void>;
   /** Present with `rootStatus`. */
   readonly settleStatus?: () => Promise<void>;
+  /** Present with `scheduledRunLine`. */
+  readonly scheduledRun?: (at: number) => Promise<void>;
+  /** Present with `nextPromptHint`; the call is recorded and nothing is drawn. */
+  readonly suggestNext?: (text: string) => Promise<void>;
   /** Present with `acknowledgement`. */
   readonly acknowledge?: (message: MessageId) => Promise<void>;
   /** Present with `activityLine`. */
@@ -454,6 +480,7 @@ class MemoryThread implements ThreadChat {
   /** Present with `activityLine`; reading it is recorded. */
   readonly activityRefused?: boolean;
   readonly #folds: boolean;
+  readonly #images: boolean;
 
   constructor(
     room: Room,
@@ -467,6 +494,7 @@ class MemoryThread implements ThreadChat {
     this.#room = room;
     this.#ref = ref;
     this.#folds = folds;
+    this.#images = recorded.lineImages === true;
     if (recorded.rootStatus === true) {
       this.showStatus = async (status, options) => {
         room.record(ref, "showStatus", [status, options]);
@@ -478,6 +506,18 @@ class MemoryThread implements ThreadChat {
       };
       this.settleStatus = async () => {
         room.record(ref, "settleStatus", []);
+      };
+    }
+    if (recorded.scheduledRunLine === true) {
+      // The time as the memory chat draws any moment: fixed, in UTC, so that a test can read it.
+      this.scheduledRun = async (at) => {
+        const time = new Date(at).toISOString().slice(0, 16);
+        await this.#post(`Running scheduled task (${time} UTC)`, "notice").catch(() => {});
+      };
+    }
+    if (recorded.nextPromptHint === true) {
+      this.suggestNext = async (text) => {
+        room.record(ref, "suggestNext", [text]);
       };
     }
     if (recorded.acknowledgement === true) {
@@ -553,7 +593,7 @@ class MemoryThread implements ThreadChat {
   }
 
   openReply(onOpenMessage: OpenMessageChange): Reply {
-    return new MemoryReply(this.#room, this.#ref, onOpenMessage, this.#folds);
+    return new MemoryReply(this.#room, this.#ref, onOpenMessage, this.#folds, this.#images);
   }
 
   showRunning(list: RunningList | null): void {
@@ -794,6 +834,9 @@ export class MemoryProvider implements ChatProvider {
       activityLine: recorded.activityLine === true,
       threadOpen: recorded.threadOpen !== false,
       loopCard: recorded.loopCard !== false,
+      scheduledRunLine: recorded.scheduledRunLine === true,
+      nextPromptHint: recorded.nextPromptHint === true,
+      lineImages: recorded.lineImages === true,
     };
     if (recorded.lookups !== false) {
       this.channelState = async (channel) => {

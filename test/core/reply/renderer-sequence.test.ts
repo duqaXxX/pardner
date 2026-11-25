@@ -55,6 +55,7 @@ const end = (callId: string): SessionEvent => ({
   callId,
   isError: false,
   output: "(run completed with no output)",
+  images: [],
   fileChange: null,
   model: null,
   parentCallId: null,

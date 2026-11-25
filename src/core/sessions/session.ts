@@ -3098,6 +3098,7 @@ export class ThreadSession {
       case "goal_changed":
         return declared.goals ? null : "goals";
       case "scheduled_jobs":
+      case "scheduled_run_started":
         return declared.scheduledJobs ? null : "scheduledJobs";
       case "task_started": {
         const needs = event.kind === "subagent" ? "subagents" : "backgroundTasks";
@@ -3129,8 +3130,22 @@ export class ThreadSession {
         this.usage?.invalidate();
         return;
       case "next_prompt":
-        // Held only while no turn runs and no prompt is owed: else it belongs to a turn before.
-        if (!this.busy && !this.promptOwed()) this.suggestions.hold(this.ref, event.text);
+        // Held, and offered where the owner writes, only while no turn runs and no prompt is owed:
+        // else it belongs to a turn before.
+        if (this.busy || this.promptOwed()) return;
+        if (!this.suggestions.hold(this.ref, event.text)) return;
+        if (this.deps.chat.capabilities.nextPromptHint) await this.thread.suggestNext?.(event.text);
+        return;
+      case "scheduled_run_started":
+        // Said with no turn running, right before the run's first event: inside a running turn the
+        // line would land in that turn's reply. A chat with the loop card shows the run there.
+        if (
+          this.active === null &&
+          !this.deps.chat.capabilities.loopCard &&
+          this.deps.chat.capabilities.scheduledRunLine
+        ) {
+          await this.thread.scheduledRun?.(this.now());
+        }
         return;
       case "prompt_taken":
         // Known or not (a prompt a guess already settled is no longer sent): the turn it
@@ -4799,6 +4814,7 @@ export class ThreadSession {
       () => this.deps.clock.time(),
       (text) => this.deps.chat.escape(text, "reference"),
       (callId) => this.callsAsked.has(callId),
+      this.deps.chat.capabilities.lineImages,
     );
     this.replyOf.set(renderer, reply);
     return renderer;

@@ -584,6 +584,12 @@ export interface DiffHunk {
   readonly lines: readonly string[];
 }
 
+/** An image a call's result holds: its media type as the agent names it (`image/png`) and its bytes. */
+export interface CallImage {
+  readonly mediaType: string;
+  readonly data: Uint8Array;
+}
+
 /** What a call did to a file, when the agent reports it. */
 export interface FileChange {
   /** As the agent names it; an agent that reports an absolute path says so in its docs. */
@@ -703,6 +709,8 @@ export type SessionEvent =
       readonly isError: boolean;
       /** The result's text, as the agent wrote it; null when the result holds none. */
       readonly output: string | null;
+      /** The images the call's result holds, in order; empty when it holds none. */
+      readonly images: readonly CallImage[];
       readonly fileChange: FileChange | null;
       /**
        * The model the call's agent ran on, when it is not the one that made the call; null when
@@ -849,6 +857,11 @@ export type SessionEvent =
    * reports its list, not at the moment a job changes.
    */
   | { readonly type: "scheduled_jobs"; readonly jobs: readonly ScheduledJob[] }
+  /**
+   * A turn the agent starts on a schedule of its own (a job it was given or set itself) begins:
+   * said before that turn's first event. Gated by `scheduledJobs`.
+   */
+  | { readonly type: "scheduled_run_started" }
   /** The agent took a prompt the core sent: into the running turn, or as the next turn's. */
   | { readonly type: "prompt_taken"; readonly promptId: string }
   /**

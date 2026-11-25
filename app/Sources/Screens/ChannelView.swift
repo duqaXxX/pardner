@@ -341,9 +341,13 @@ struct Answered: View {
                     if case .footer(let duration?, _, _)? = line.sessionText {
                         Text(verbatim: duration).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
                     }
+                case .message(let line) where thread.isRunLine(line):
+                    if case .run(let at)? = line.sessionText {
+                        Text(verbatim: Naming.runLine(at: at)).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                    }
                 case .message(let line): MessageRow(model: model, icons: icons, message: line, place: place)
                 case .unreadable(let count, let first): UnreadableRow(model: model, icons: icons, message: first, count: count, mark: .conversation)
-                case .line(let line): LineRow(line: line, state: thread.state(of: line), indent: 0, place: place)
+                case .line(let line): LineRow(line: line, state: thread.state(of: line), indent: 0, place: place, images: thread.images[line.ref] ?? [])
                 case .body(let line, let index): LineBodyRow(line: line, index: index, indent: 0)
                 case .segment(let answer):
                     // Read at each part that reaches it: a structure half written is drawn half written until a later part (#73, 2.1).

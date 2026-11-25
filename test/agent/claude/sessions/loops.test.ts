@@ -15,7 +15,7 @@ import {
 } from "../../../../src/core/sessions/constants.ts";
 import { cadence, cadenceOf } from "../../../../src/core/sessions/loops.ts";
 import type { ThreadSession } from "../../../../src/core/sessions/session.ts";
-import { type JsonObject, sdkJson } from "../../../support/fixtures.ts";
+import { type JsonObject, sdkJson, sdkRecords } from "../../../support/fixtures.ts";
 import { CHANNEL, THREAD } from "../../../support/ids.ts";
 import type { MemoryChatOptions } from "../../../support/memory-chat.ts";
 import type { Harness } from "../../../support/sessions.ts";
@@ -223,6 +223,27 @@ test("runs that say they are wakeups share one card too", async (t) => {
   await h.until(() => loopMessages(h)[0]?.includes("run 2") === true);
   assert.equal(messageCount(h), replies + 1, "the next run edits the card");
   assert.ok(session.scheduledJobs.length === 1);
+});
+
+test("a recorded wakeup's start gives the run its line, before the run's words", async (t) => {
+  const h = memoryHarnessFor(
+    t,
+    {},
+    { scheduledRunLine: true },
+  )({ turns: [withStopHook(sdkMessages("tools"), WITH_JOB)] });
+  const session = h.session();
+  await (await session.submit("/loop 1m check the build")).done.wait();
+  const written = () => h.room.written(h.channel).map((message) => message.text);
+  const before = written().length;
+  // The recorded wakeup start itself: the harness's `sdkMessages` leaves `command_lifecycle` out.
+  const started = sdkRecords("scheduled-run").find(
+    (record) => record.type === "command_lifecycle" && typeof record.wakeup_source === "string",
+  ) as JsonObject;
+  h.clients[0]?.inject([{ record: started }, ...run([JOB])]);
+  await h.until(() => written().length > before + 1);
+  await h.idle();
+  assert.match(written()[before] ?? "", /^Running scheduled task \(/);
+  assert.equal(written().filter((text) => text.startsWith("Running scheduled task")).length, 1);
 });
 
 test("a message sent while a woken run goes gets its own reply", async (t) => {
