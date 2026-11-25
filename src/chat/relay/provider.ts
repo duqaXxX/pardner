@@ -30,14 +30,14 @@ import { footerContent, type Owner, ownerAlone } from "./footer.ts";
 import { fromHex, referenceOf, toHex } from "./hex.ts";
 import { type Inbound, questionsOf } from "./inbound.ts";
 import { fitLine, type Line, REQUEST_ROOM } from "./line.ts";
-import type { Outbox } from "./outbox.ts";
+import { NOT_SENT, NOT_TAKEN_BY_RELAY, type Outbox, TOO_LARGE_FOR_RELAY } from "./outbox.ts";
 
 const CAPABILITIES: ChatCapabilities = {
   nativeStreaming: true,
   rootStatus: false,
   acknowledgement: false,
   activityLine: false,
-  fileUpload: false,
+  fileUpload: true,
   threadLists: false,
   channelLists: false,
   lookups: false,
@@ -94,6 +94,8 @@ export interface Link {
 
 export class RelayProvider implements ChatProvider {
   readonly name = "relay";
+  /** The most one file holds (30 MB, design G 3.4). */
+  readonly fileLimit = 31_457_280;
   readonly identities: readonly string[];
   readonly capabilities = CAPABILITIES;
   #outbox: Outbox;
@@ -450,6 +452,23 @@ export class RelayProvider implements ChatProvider {
       rewrite: async (message, markdown) => {
         if (!(await this.#edit(ref, message, { markdown })))
           throw new ChatError("relay_not_queued", { failure: "failed" });
+      },
+      // The file row is written after the thread's open replies, and resolves once appended (design G 3.4).
+      // The error's name is the sentence the owner reads in `SHARE_REFUSED`.
+      share: async ({ name, title, content }) => {
+        await this.#flushed(ref);
+        const sent = await this.#outbox.queueFile(fromHex(ref.channel), {
+          kind: 1,
+          content: JSON.stringify({ thread: ref.thread, say: "file", title }),
+          files: [{ bytes: content, type: "application/octet-stream", name }],
+        });
+        if (sent === "queued") return null;
+        const reason = {
+          "too-large": TOO_LARGE_FOR_RELAY,
+          refused: NOT_TAKEN_BY_RELAY,
+          "not-queued": NOT_SENT,
+        }[sent];
+        throw new ChatError(reason, { failure: sent === "not-queued" ? "failed" : "refused" });
       },
       link: async () => null,
       endReply: async () => false,

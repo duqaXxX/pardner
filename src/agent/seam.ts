@@ -343,6 +343,8 @@ export interface ToolVocabulary {
   readonly failsCounted: readonly string[];
   /** The tools whose running call is titled by one input, by its key: a command's description. */
   readonly described: Readonly<Record<string, string>>;
+  /** The tools whose call names a file, by the input key that holds its path. */
+  readonly files: Readonly<Record<string, string>>;
   /** The tools whose running call lists one input under its title, by its key: the command. */
   readonly commanded: Readonly<Record<string, string>>;
   /**
@@ -371,6 +373,7 @@ export const NO_TOOL_WORDS: ToolVocabulary = Object.freeze({
   launchers: Object.freeze([]),
   failsCounted: Object.freeze([]),
   described: Object.freeze({}),
+  files: Object.freeze({}),
   commanded: Object.freeze({}),
   continuers: Object.freeze({}),
   plan: null,
@@ -1245,6 +1248,11 @@ export interface AgentBackend {
    * cannot read it. Present with `foreignTurns`.
    */
   lastTurn?(folder: string, session: string): Promise<ForeignTurn | null>;
+  /**
+   * Whether a call of the session `session` of `folder`, or of its subagents, named the file
+   * `path` and ended with no error; false with no record, rejects when it cannot be read.
+   */
+  touched?(folder: string, session: string, path: string): Promise<boolean>;
   /** How a shell command the owner sends runs and reaches a session. Present with `shellCommands`. */
   readonly shell?: ShellMode;
   /** Ends what the back end keeps running besides its sessions. Safe to call again. */

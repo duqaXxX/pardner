@@ -13,10 +13,12 @@ import { memoryText, skillsText } from "../loaded.ts";
 import { oneLine, TITLE_LIMIT } from "../reply/words.ts";
 import { BypassUnavailable, PlanUnavailable } from "../sessions/errors.ts";
 import type { ThreadSession } from "../sessions/session.ts";
+import { shareFile } from "../sessions/share.ts";
 import * as texts from "../texts.ts";
 import { fill, named } from "../texts.ts";
 import type { ForkFlow, NextFlow, OtherFlows } from "./contract.ts";
 import type { InFlight, Ticket } from "./in-flight.ts";
+import { touchedBy } from "./open.ts";
 import { channelStatus } from "./status.ts";
 import { type FlowDeps, logger, type Talk } from "./talk.ts";
 
@@ -189,6 +191,33 @@ export function wordFlow(
   const status = channelStatus(deps, talk);
   const stopThread = threadStop(deps, talk);
   const unserved = unservedWords(deps, others);
+
+  // `/open <path>` in a chat with no picker shares the file by the rule of a click on a call's line.
+  const shareTyped = async (ref: ThreadRef, session: ThreadSession, target: string) => {
+    const thread = chat.thread(ref);
+    const limit = chat.fileLimit;
+    if (thread.share === undefined || limit === undefined) {
+      await talk.tell(ref, named(texts.OPEN_UNAVAILABLE, names));
+    } else if (target === "") {
+      await talk.tell(ref, texts.OPEN_NEEDS_PATH);
+    } else {
+      const said = await shareFile(
+        session.directory,
+        session.workingDirectory ?? session.directory,
+        { share: thread.share.bind(thread), written: () => thread.written() },
+        limit,
+        target,
+        deps.stopped,
+        touchedBy(
+          deps,
+          session.directory,
+          state.thread(ref.channel, ref.thread)?.sessionId ?? null,
+        ),
+        texts.OPEN_NOT_OPENABLE,
+      );
+      await talk.tell(ref, said);
+    }
+  };
   const pardner = others.pardner;
 
   /**
@@ -268,6 +297,7 @@ export function wordFlow(
           loadedContext: have.loadedContext,
           forks: !unserved.has(WORD.fork),
           fileUpload: chat.capabilities.fileUpload,
+          filePicker: chat.openFile !== undefined,
           ...(chat.fileLimit !== undefined && { fileLimit: chat.fileLimit }),
           diff: !unserved.has(WORD.diff),
           rewind: !unserved.has(WORD.rewind),
@@ -429,8 +459,10 @@ export function wordFlow(
       case "open":
         if (session === null) {
           await talk.inChannel(channel, texts.OPEN_TOP_LEVEL, answers);
-        } else if (!chat.capabilities.fileUpload || chat.openFile === undefined) {
+        } else if (!chat.capabilities.fileUpload) {
           await talk.tell(ref, named(texts.OPEN_UNAVAILABLE, names));
+        } else if (chat.openFile === undefined) {
+          await shareTyped(ref, session, command.target);
         } else {
           await chat.openFile(ref, session.directory, command.target);
         }

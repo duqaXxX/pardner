@@ -108,7 +108,10 @@ struct LineRow: View {
     let state: LineState
     /// What the row is indented by to line up with a bot's text.
     var indent: CGFloat = MessageRow.Mark.thread.size + MessageRow.Mark.thread.gap
+    /// The thread the line is in, where a click on its path opens the file; nil where the window has no pairing.
+    var place: FilePlace?
     @Environment(\.openWindow) private var openWindow
+    @Environment(FileOpener.self) private var opener: FileOpener?
 
     var body: some View {
         let f = line.fields
@@ -120,6 +123,14 @@ struct LineRow: View {
                 if form == .agentReplied, let reply = ReplyContent(f) {
                     Button { openWindow(id: WindowID.reply, value: reply) } label: { head(f, form) }
                         .buttonStyle(.plain).pointerStyle(.link)
+                } else if let opener, let place, let path = opener.link(for: line) {
+                    // The call's file: a click opens its content in a window of its own (file-content design, 3.7).
+                    Button {
+                        let content = FileWindowContent(channel: place.channel, thread: place.thread, bot: line.ref.device, source: .path(path))
+                        opener.open(content, lineEnd: line.ended)
+                        openWindow(id: WindowID.file, value: content)
+                    } label: { head(f, form) }
+                    .buttonStyle(.plain).pointerStyle(.link).help(path)
                 } else {
                     head(f, form)
                 }

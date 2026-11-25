@@ -24,6 +24,7 @@ export interface Flows {
   readonly unbound?: (channel: string) => Promise<void>;
   readonly rootGone?: (ref: ThreadRef) => Promise<void>;
   readonly stop?: (ref: ThreadRef) => Promise<boolean>;
+  readonly openFile?: NonNullable<ChatInbound["openFile"]>;
 }
 
 export class Inbound implements ChatInbound {
@@ -60,6 +61,10 @@ export class Inbound implements ChatInbound {
 
   stop(ref: ThreadRef): Promise<boolean> {
     return this.#flow("stop")(ref);
+  }
+
+  openFile(ref: ThreadRef, path: string): ReturnType<NonNullable<ChatInbound["openFile"]>> {
+    return this.#flow("openFile")(ref, path);
   }
 
   #flow<Name extends keyof Flows>(name: Name): NonNullable<Flows[Name]> {

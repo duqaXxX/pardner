@@ -40,6 +40,7 @@ import { type RewindStart, rewindPoints, rewindStart } from "./rewind.ts";
 import { ClaudeSession, type QueryFunction, THREAD_SETTINGS_SOURCES } from "./session.ts";
 import { shellMode } from "./shell.ts";
 import { TOOLS } from "./tools.ts";
+import { touched } from "./touched.ts";
 import { Transcript } from "./transcript.ts";
 import { trustedRepository, untrustedRepository, workspaceTrusted } from "./trust.ts";
 import { type GetSessionMessages, lastTurn, turnsAfter } from "./turns.ts";
@@ -410,6 +411,11 @@ export class ClaudeBackend implements AgentBackend {
   /** The last turn of a session of `folder` (`turns.lastTurn`). */
   lastTurn(folder: string, session: string): Promise<ForeignTurn | null> {
     return lastTurn(folder, session, this.#getSessionMessages);
+  }
+
+  /** `touched.touched`. */
+  touched(folder: string, session: string, path: string): Promise<boolean> {
+    return touched(this.#projects, TOOLS.files, folder, session, path);
   }
 
   /** Stops the usage probe: its session is closed and no read starts another. */

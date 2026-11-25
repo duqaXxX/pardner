@@ -147,8 +147,8 @@ export class ProfileWriter {
       const draft = { kind: KIND_PROFILE, name, content: encodeProfile(want) };
       if (!(await outbox.queue(channel, draft))) this.#unqueued = true;
     } catch (error) {
-      // The store keeps the edit in memory when its write fails, so the profile still waits in the
-      // outbox and is sent once a write holds it. Never a rejection nobody handles.
+      // A rejection means the store applied nothing (a failed write held in memory resolves true):
+      // `#unqueued` stays unset, so the next tick queues the profile again. Never a rejection nobody handles.
       this.#o.log(`relay: the store did not write the bot's profile: ${(error as Error).message}`);
     } finally {
       this.#queuing.delete(key);

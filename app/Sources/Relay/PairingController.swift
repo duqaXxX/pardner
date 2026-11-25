@@ -34,6 +34,7 @@ public protocol RelayLinking: AnyObject, Sendable {
     func send(channel: Data, draft: OutboxDraft) async throws -> SendOutcome
     func setName(kind: Int, target: Data?, text: String, setup: Bool) async throws -> SendOutcome
     func arrange(_ act: SectionAct) async throws -> SendOutcome
+    func fetch(channel: Data, blob: Data) async -> FetchOutcome
     func holdRecovery(id: Data, receiving: String) async -> Bool
     func recoveryReading() async -> RecoveryReading?
 }
@@ -473,6 +474,12 @@ public actor PairingController {
     public func arrange(_ act: SectionAct) async throws -> SendOutcome {
         guard let link else { return .ended }
         return try await link.arrange(act)
+    }
+
+    /// Fetches the file of a message through the running connection (file-content design, 3.6).
+    public func fetchFile(channel: Data, blob: Data) async -> FetchOutcome {
+        guard let link else { return .ended }
+        return await link.fetch(channel: channel, blob: blob)
     }
 
     /// The screen took these refused items of `channel` (`ChannelsState.undelivered`): they are not kept any longer.

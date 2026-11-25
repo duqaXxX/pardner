@@ -12,6 +12,8 @@ struct ThreadPanel: View {
     let close: () -> Void
     /// This thread's composer; nil where the window has no pairing.
     var composer: ComposerModel?
+    /// The channel the thread is in, where its calls' paths and file rows open their files; nil where the window has no pairing.
+    var channel: Data?
     /// The card that has the keyboard, by its request's reference: only a click or Tab gives it, and a card that ends leaves it to no other.
     @FocusState private var focus: MessageRef?
     /// Only makes the view draw again when the day, the time zone or the clock changes; the day words are computed from the moment of drawing.
@@ -74,7 +76,7 @@ struct ThreadPanel: View {
                         case .message(let m): entry(m, queued: queued)
                         case .unreadable(let count, let first): UnreadableRow(model: model, icons: icons, message: first, count: count)
                         case .segment(let a): AnswerRow(model: model, icons: icons, answer: a, whole: thread.text(of: a))
-                        case .line(let l): LineRow(line: l, state: thread.state(of: l))
+                        case .line(let l): LineRow(line: l, state: thread.state(of: l), place: place)
                         case .body(let l, let i): LineBodyRow(line: l, index: i)
                         }
                     }
@@ -121,9 +123,11 @@ struct ThreadPanel: View {
                 RequestRow(title: title, status: thread.requests[m.ref] ?? .open)
             }
         } else {
-            MessageRow(model: model, icons: icons, message: m, queued: queued.contains(m.ref), mark: .thread)
+            MessageRow(model: model, icons: icons, message: m, queued: queued.contains(m.ref), mark: .thread, place: place)
         }
     }
+
+    private var place: FilePlace? { channel.map { FilePlace(channel: $0, thread: thread.key) } }
 }
 
 /// A bot's answer: drawn from its parts while it is written, whole once it lands.

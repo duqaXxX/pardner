@@ -19,10 +19,20 @@ export class Requests {
     return this.#last + 1;
   }
 
-  /** A new request added at `now`: its id, due `patience` later. */
-  add(now: number): number {
-    this.#open.set(++this.#last, now + this.#patience);
+  /** A new request added at `now`: its id, due `patience` later, or never until `due` sets it when `held`. */
+  add(now: number, held = false): number {
+    this.#open.set(++this.#last, held ? Infinity : now + this.#patience);
     return this.#last;
+  }
+
+  /** An id no request has or will have, for a caller that names a piece of work before it has a request. */
+  reserve(): number {
+    return ++this.#last;
+  }
+
+  /** The time a request in flight is due: a held one starts its clock here. */
+  due(id: number, at: number): void {
+    if (this.#open.has(id)) this.#open.set(id, at + this.#patience);
   }
 
   /** Whether `id` was in flight, which it no longer is; an unknown id is ignored. */

@@ -305,3 +305,39 @@ test("R9: an answer the bot had not sent yet survives its restart [model]", () =
     [5],
   );
 });
+
+test("G 3.5: an item queued once is appended later as it is, and a blob accepted in this process is not put again", () => {
+  const p = new Party(fill(3));
+  const queued = p.say({
+    kind: 2,
+    to: fill(4),
+    content: "b",
+    files: [
+      { bytes: Uint8Array.of(1, 2, 3), type: "image/png", name: "x.png" },
+      { bytes: Uint8Array.of(4, 5, 6), type: "image/png", name: "y.png" },
+    ],
+  });
+  const other = p.say({ kind: 1, content: "a" });
+  const kept = outbox.append([other], queued);
+  assert.equal(kept[1], queued, "the same item, sealed once");
+  assert.equal(outbox.toPut(queued).length, 2);
+  const [one, two] = queued.files;
+  assert.ok(one && two);
+  const first = outbox.putAccepted(queued, one.id);
+  assert.deepEqual(
+    outbox.toPut(first).map((f) => f.name),
+    ["y.png"],
+  );
+  assert.ok(
+    bytesEqual((first.files[0] as { blob: Uint8Array }).blob, one.blob),
+    "the blob is not sealed again",
+  );
+  assert.equal(outbox.toPut(outbox.putAccepted(first, two.id)).length, 0);
+  assert.equal(
+    outbox.toPut(outbox.putAgain(outbox.putAccepted(first, two.id))).length,
+    2,
+    "a `missing` puts both again",
+  );
+  assert.equal(outbox.toPut(rebuild(first)).length, 1, "a rebuilt item keeps what the relay holds");
+  assert.equal(outbox.toPut(queued).length, 2, "the item itself is not changed");
+});

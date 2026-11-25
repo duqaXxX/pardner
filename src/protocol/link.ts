@@ -4,7 +4,7 @@
  * the give-back on a connection of its own. Sans-I/O: the driver owns the socket, the timer and the
  * store, hands in each event with the time, and performs the returned effects in order.
  */
-import { bytesEqual } from "./bytes.ts";
+import { bytesEqual, isBytes } from "./bytes.ts";
 import type { DeviceKeys } from "./device-log.ts";
 import type { HistorySeal } from "./epochs.ts";
 import { decodeFrame, encodeFrame, type Frame, FrameCutter } from "./frames.ts";
@@ -59,6 +59,14 @@ const WAITS: Partial<Record<LinkState, string>> = { dialing: "hello", hello: "he
 type Then = (fx: Effect[], now: number) => void; // what runs with the time of a later call
 type Held = { what: Persist; next?: Then };
 
+/** A put or a get of the link: `handle` is what the driver knows it by, `wire` the request of the attempt in flight, `at` the bytes sent or received. */
+type Transfer = { handle: number; blob: Bytes; wire?: number | undefined; at: number };
+type Put = Transfer & { bytes: Bytes };
+type Get = Transfer & { size: number }; // the size the signed body declared: no frame may say another
+
+const CHUNK = 524_288; // the relay's own: a put-blob chunk and a blob frame (relay `blobs.ts`)
+const REFUSED = 1; // the relay's `refused` result code, for a get the link ends itself
+
 // What `kept` holds that a store write covers: ids are only appended, and a head is its `n` and chain
 // (a signature is never an identifier, crypto.md 4).
 const snap = (k: Kept) =>
@@ -92,6 +100,9 @@ export class Link {
   #delay: number;
   #slow = false; // the last refusal asks again every `ask`
   #reqs: Requests; // the requests in flight, each with its own deadline
+  #puts: Put[] = []; // one at a time on the wire (the relay refuses another while one is written): the first is the one sending
+  #gets: Get[] = [];
+  #paced = 0; // chunks sent on this connection whose write the driver has not reported
   #incarnation: Bytes | undefined; // what the driver's store holds
   #saved: string; // `snap` of the `kept` the driver's store holds
   // A rest was delivered in this run under the incarnation delivered last: the next is not `first`.
@@ -142,7 +153,7 @@ export class Link {
     if (this.#s !== "unstarted") return this.#finish(fx); // acts once, from the initial state
     const { state } = this.reading;
     if (state === "put-back" || state === "fault") {
-      this.#s = state;
+      [this.#s] = [state, this.#abandon(fx)]; // a put or a get queued before the start is never sent
       const out: Out = state === "fault" ? { do: state, why: "stored" } : { do: state };
       fx.push({ do: "deliver", out });
     } else this.#dial(this.#next, now, fx);
@@ -251,12 +262,65 @@ export class Link {
     return { request, effects: this.#finish(fx) };
   }
 
+  /**
+   * Puts a blob in chunks of 512 KiB, one at a time on the connection, and names the put by `request`: its `answer` is the relay's code, or
+   * `unanswered` once the link is final. The put is a request from its first chunk, so an early answer (a blob the relay holds, a refusal) ends
+   * it; the next chunk goes when the driver reports the last `paced` send written (`written`). A drop starts the put again on the next
+   * connection. `busy` once the link is final, `bad-input` for a blob id that is not 32 bytes.
+   */
+  putBlob(
+    blob: Bytes,
+    bytes: Bytes,
+    now: number,
+  ): { request: number; effects: Effect[] } | "busy" | "bad-input" {
+    const fx = this.#fx();
+    if (!isBytes(blob) || blob.length !== 32 || !isBytes(bytes)) return "bad-input"; // a frame that cannot be cut would throw at each rest
+    if (this.#final()) return "busy";
+    const request = this.#reqs.reserve();
+    this.#puts.push({ handle: request, blob, bytes, at: 0 });
+    this.#pump(now, fx);
+    return { request, effects: this.#finish(fx) };
+  }
+
+  /**
+   * Fetches a blob of `size` bytes (the sealed size the signed body declares) from offset 0: the relay streams it to its end and answers only a refusal, so the get is no request waiting for a
+   * `result`. Each frame is a `blob` effect in order; the `answer` (code 0) follows the last, or carries the refusal. A drop asks again
+   * from the last offset received on the next connection. A frame that says another size ends the get as `refused` and drops the connection. `busy` once the link is final, `bad-input` for a blob id that is not 32 bytes.
+   */
+  getBlob(
+    blob: Bytes,
+    size: number,
+    now: number,
+  ): { request: number; effects: Effect[] } | "busy" | "bad-input" {
+    const fx = this.#fx();
+    if (!isBytes(blob) || blob.length !== 32 || !Number.isSafeInteger(size) || size < 0)
+      return "bad-input";
+    if (this.#final()) return "busy";
+    const request = this.#reqs.reserve();
+    this.#gets.push({ handle: request, blob, at: 0, size });
+    this.#pump(now, fx);
+    return { request, effects: this.#finish(fx) };
+  }
+
+  /** The driver wrote out a `paced` send of connection `conn`: the put's next chunk goes once none is left unwritten, and its last starts the put's deadline. */
+  written(conn: number, now: number): Effect[] {
+    const fx = this.#fx();
+    if (this.#current(conn)) this.#paced = Math.max(0, this.#paced - 1);
+    if (this.#current(conn) && this.#paced === 0) {
+      const put = this.#puts[0];
+      if (put?.wire !== undefined && put.at < put.bytes.length) this.#chunk(put, fx);
+      else if (put?.wire !== undefined) this.#reqs.due(put.wire, now);
+    }
+    return this.#finish(fx);
+  }
+
   /** Ends the connection and the dialing for good. */
   stop(_now: number): Effect[] {
     if (this.#s === "stopped") return [];
     const fx: Effect[] = [];
     if (this.#conn) fx.push({ do: "close", conn: this.#conn });
     this.#teardown(fx);
+    this.#abandon(fx);
     if (this.reading.state !== "giving-back") this.reading.dropped();
     this.#s = "stopped";
     return this.#finish(fx);
@@ -344,10 +408,84 @@ export class Link {
     return undefined;
   }
 
-  #send(frame: Frame, fx: Effect[]): void {
+  #send(frame: Frame, fx: Effect[], paced = false): void {
     const bytes = encodeFrame(frame, this.#proven);
     if (frame.type.startsWith("prove-")) this.#proven = true;
-    fx.push({ do: "send", conn: this.#conn, bytes });
+    fx.push({ do: "send", conn: this.#conn, bytes, ...(paced && { paced }) });
+  }
+
+  #final = (): boolean => ["stopped", "put-back", "fault"].includes(this.#s);
+
+  /** Starts the first put and every get not in flight, once the reading is at rest. */
+  #pump(now: number, fx: Effect[]): void {
+    if (!this.#conn || !this.reading.sendable) return;
+    const put = this.#puts[0];
+    if (put && put.wire === undefined) {
+      put.wire = this.#reqs.add(now, true); // no deadline until its last chunk is written out
+      this.#chunk(put, fx);
+    }
+    for (const get of this.#gets) {
+      if (get.wire !== undefined) continue;
+      get.wire = this.#reqs.add(now, true); // a stream has no deadline, and its id is not given to another request
+      this.#send({ type: "get-blob", request: get.wire, blob: get.blob, offset: get.at }, fx);
+    }
+  }
+
+  #chunk(put: Put, fx: Effect[]): void {
+    const chunk = put.bytes.subarray(put.at, put.at + CHUNK);
+    const frame = {
+      type: "put-blob",
+      request: put.wire as number,
+      blob: put.blob,
+      size: put.bytes.length,
+      offset: put.at,
+      chunk,
+    } as const;
+    this.#send(frame, fx, true);
+    [put.at, this.#paced] = [put.at + chunk.length, this.#paced + 1];
+  }
+
+  /** A `result` or `blob` frame of a put or a get: whether it was one's, and what it ends. */
+  #transfer(f: Frame, now: number, fx: Effect[]): boolean {
+    if (f.type !== "result" && f.type !== "blob") return false;
+    const put = this.#puts[0];
+    if (put?.wire === f.request && f.type === "result") {
+      this.#puts.shift();
+      this.#reqs.answer(f.request);
+      fx.push({ do: "answer", request: put.handle, code: f.code });
+      this.#pump(now, fx); // the next put
+      return true;
+    }
+    const get = this.#gets.find((g) => g.wire === f.request);
+    if (!get) return false;
+    const end = (code: number) => {
+      this.#gets.splice(this.#gets.indexOf(get), 1);
+      this.#reqs.answer(f.request);
+      fx.push({ do: "answer", request: get.handle, code });
+    };
+    if (f.type === "result") {
+      end(f.code);
+      return true;
+    }
+    // In order, one size, and a frame that moves: what the relay never sends is a drop, and the get goes on from `at`.
+    const { size, offset, chunk } = f;
+    if (size !== get.size) {
+      end(REFUSED); // a relay that streams more than the body declared is not buffered
+      throw new Error("a blob frame of another size");
+    }
+    if (offset !== get.at || offset + chunk.length > size || (!chunk.length && offset < size))
+      throw new Error("a blob frame out of order");
+    get.at = offset + chunk.length;
+    fx.push({ do: "blob", request: get.handle, size, offset, chunk });
+    if (get.at >= size) end(0);
+    return true;
+  }
+
+  /** The puts and gets answered `unanswered`, for a link that will not dial again. */
+  #abandon(fx: Effect[]): void {
+    for (const { handle } of [...this.#puts, ...this.#gets])
+      fx.push({ do: "answer", request: handle, code: "unanswered" });
+    [this.#puts, this.#gets] = [[], []];
   }
 
   // A read the relay answers with a `position`, which `patience` waits for.
@@ -382,12 +520,15 @@ export class Link {
       this.#enrolled = true;
       fx.push({ do: "enrolled" });
     }
-    if (f.type === "result" && this.#reqs.answer(f.request))
+    if (!this.#transfer(f, now, fx) && f.type === "result" && this.#reqs.answer(f.request))
       fx.push({ do: "answer", request: f.request, code: f.code });
     if (f.type === "position") this.#asked = false;
     this.#perform(r.take(f), now, fx, (later, at) => {
       if (r.state !== "reading" && r.state !== "rest") this.#end(at, later, true);
-      else if (this.#s !== "proving" || f.type === "served") this.#s = r.state;
+      else {
+        if (this.#s !== "proving" || f.type === "served") this.#s = r.state;
+        this.#pump(at, later);
+      }
     });
   }
 
@@ -506,7 +647,7 @@ export class Link {
       fx.push({ do: "close", conn: this.#conn, ...(close === true ? {} : { why: close }) });
     this.#teardown(fx);
     if (r.state !== "giving-back") r.dropped();
-    if (r.state === "put-back" || r.state === "fault") this.#s = r.state;
+    if (r.state === "put-back" || r.state === "fault") [this.#s] = [r.state, this.#abandon(fx)];
     else if (r.state === "giving-back") this.#dial("upload", now, fx);
     else {
       const wait = this.#slow ? this.#c.ask : this.#delay;
@@ -515,10 +656,14 @@ export class Link {
     }
   }
 
-  // A request in flight is answered once, whatever ended the connection (4.4, 6).
+  // A request in flight is answered once, whatever ended the connection (4.4, 6); a put or a get is not one's: it starts again on the next.
   #teardown(fx: Effect[]): void {
+    const wires = new Set([...this.#puts, ...this.#gets].map((t) => t.wire));
     for (const request of this.#reqs.clear())
-      fx.push({ do: "answer", request, code: "unanswered" });
+      if (!wires.has(request)) fx.push({ do: "answer", request, code: "unanswered" });
+    for (const t of [...this.#puts, ...this.#gets])
+      [t.wire, t.at] = [undefined, "bytes" in t ? 0 : t.at];
+    this.#paced = 0;
     [this.#conn, this.#held, this.#up] = [0, undefined, undefined];
     this.#cutter.reset();
   }

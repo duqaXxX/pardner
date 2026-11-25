@@ -5,7 +5,7 @@
  * keys are read again from the sequence at every start.
  */
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { ConfigError } from "../../core/port.ts";
 import { RenamedOnly, writeFileAtomic } from "../../platform-node/key-file.ts";
 import type { Decision } from "../../protocol/bot-reader.ts";
@@ -47,8 +47,8 @@ export interface Saved extends Identity {
   /** Whether the reading met a fault of the relay's sequence: stored until a new pairing (the model's `d.fault`). */
   fault: boolean;
   /**
-   * Built messages by channel. An item carries no file: files, and the key each is sealed under,
-   * come with step 6's design, and no key is stored before it (crypto.md 1, 8).
+   * Built messages by channel. A file of an item keeps `{key, id, size, type, name}` here and in
+   * the file; its bytes are the blob file `blobs/<id hex>` (design G 3.5), and `blob` is empty.
    */
   outboxes: Map<string, OutboxItem[]>;
   /** The channels where the bot met a relay fault: stored until a new pairing (row N2). */
@@ -73,8 +73,14 @@ const HEX = /^(?:[0-9a-f]{2})*$/;
 // replacer reads the holder's raw value: a Node Buffer would otherwise reach it through `toJSON`.
 function encode(saved: Saved): string {
   check(saved);
+  // The sealed bytes are a blob file, and `put` is memory alone: a store that came back says every blob again.
+  const onDisk = (item: OutboxItem) => ({
+    ...item,
+    files: item.files.map(({ blob: _blob, put: _put, ...file }) => file),
+  });
+  const outboxes = new Map([...saved.outboxes].map(([key, list]) => [key, list.map(onDisk)]));
   return JSON.stringify(
-    { ...saved, version: VERSION },
+    { ...saved, outboxes, version: VERSION },
     function (this: Record<string, unknown>, key, value: unknown) {
       const raw = this[key];
       if (isBytes(raw)) return { $hex: toHex(raw) };
@@ -124,7 +130,19 @@ function check(saved: Saved): void {
         !Number.isInteger(item.kind) ||
         !text(item.content) ||
         !Array.isArray(item.files) ||
-        item.files.length > 0 ||
+        !item.files.every(
+          (f) =>
+            record(f) &&
+            isBytes(f.key) &&
+            f.key.length === 32 &&
+            isBytes(f.id) &&
+            f.id.length === 32 &&
+            isBytes(f.blob) &&
+            Number.isInteger(f.size) &&
+            f.size >= 0 &&
+            text(f.type) &&
+            text(f.name),
+        ) ||
         !optionalBytes(item.to) ||
         !optionalBytes(item.incarnation) ||
         (re !== undefined && !(record(re) && isBytes(re.device) && isBytes(re.name))) ||
@@ -155,6 +173,11 @@ function decode(content: string): Saved {
     if (Array.isArray(tagged?.$set)) return new Set(tagged.$set);
     return value;
   }) as Saved & { version?: unknown };
+  if (saved.outboxes instanceof Map)
+    for (const items of saved.outboxes.values())
+      for (const item of Array.isArray(items) ? items : [])
+        for (const file of Array.isArray(item?.files) ? item.files : [])
+          if (record(file)) file.blob = new Uint8Array(0); // the bytes are a blob file
   if (
     !record(saved) ||
     saved.version !== VERSION ||
@@ -216,6 +239,11 @@ export class Store {
   #path: string;
   #last: Promise<void> = Promise.resolve();
   #queued: Promise<void> | undefined;
+
+  /** The folder of the store's file, where `blobs/` is. */
+  get directory(): string {
+    return dirname(this.#path);
+  }
 
   private constructor(path: string, saved: Saved) {
     this.#path = path;

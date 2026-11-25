@@ -29,11 +29,23 @@ export function rig() {
     change: async (edit: (s: typeof saved) => void) => edit(saved),
   } as unknown as Store;
   const refusing = { on: false };
+  /** The file answers: what `queueFile` says, and the drafts it was given. */
+  const files = {
+    says: "queued" as "queued" | "too-large" | "refused" | "not-queued",
+    drafts: [] as Draft[],
+  };
   const outbox = {
     queue: async (channel: Bytes, draft: Draft, also?: (s: typeof saved) => void) => {
       if (refusing.on) return false;
       also?.(saved); // the same write as the message
       return !!queued.push({ channel, draft });
+    },
+    queueFile: async (channel: Bytes, draft: Draft, also?: (s: typeof saved) => void) => {
+      files.drafts.push(draft);
+      if (files.says !== "queued") return files.says;
+      also?.(saved);
+      queued.push({ channel, draft });
+      return "queued";
     },
   } as unknown as Outbox;
   const logs: string[] = [];
@@ -49,10 +61,18 @@ export function rig() {
   const answers: [string, OwnerAnswer][] = [];
   let hold: Promise<void> = Promise.resolve();
   const throwing = { on: false };
+  const opening = {
+    asked: [] as string[],
+    run: (async () => ({ refusal: "no" })) as (path: string) => Promise<unknown>,
+  };
   const target = {
     message: (m: InboundMessage) => {
       messages.push(m);
       return hold;
+    },
+    openFile: (_ref: unknown, path: string) => {
+      opening.asked.push(path);
+      return opening.run(path);
     },
     answer: async (_ref: unknown, id: string, a: OwnerAnswer) => {
       answers.push([id, a]);
@@ -87,6 +107,8 @@ export function rig() {
     inbound.take({ do: "incarnation", incarnation: inc, first: false, changed: false });
   return {
     throwing,
+    files,
+    opening,
     reconnect,
     app,
     bot,

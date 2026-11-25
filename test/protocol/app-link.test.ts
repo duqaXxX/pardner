@@ -13,6 +13,7 @@ import {
   encodeHistorySeal,
   sealEpochKey,
 } from "../../src/protocol/epochs.ts";
+import { SEAL_OVERHEAD, sealBlobUnderKey } from "../../src/protocol/files.ts";
 import { decodeFrame, encodeFrame, type Frame } from "../../src/protocol/frames.ts";
 import { signedId } from "../../src/protocol/ids.ts";
 import {
@@ -3157,4 +3158,155 @@ test("sections 3.2: an own tree whose first copy waits for its key is not judged
   t.drop(30);
   const after = t.connect(60_000);
   assert.equal(lastArrangement(after)?.notApplied, true, "the verdict comes with the key");
+});
+
+/** A text of `sender` in `channel` naming `files` ({blob, key, size}), as `message` does but with the keys and sizes the test gives. */
+const withFiles = (
+  s: Scene,
+  epoch: { id: Bytes; key: Bytes },
+  counter: number,
+  files: { blob: Bytes; key: Bytes; size: number }[],
+) =>
+  signedBy(
+    s.alice.first,
+    sealMessage(
+      platform,
+      epoch.key,
+      {
+        channel: s.channel,
+        counter,
+        epoch: epoch.id,
+        sender: s.alice.first.id,
+        run: fill(4, 16),
+        incarnation: s.wire.incarnation,
+        time: 1_700_000_000_000,
+        kind: 1,
+        name: fill(60 + counter, 16),
+      },
+      {
+        files: files.map(({ blob, key, size }) => ({
+          blob,
+          fileKey: key,
+          size,
+          type: "x",
+          name: "f",
+        })),
+        content: "{}",
+      },
+    ),
+  );
+
+test("G 3.6: the package keeps the key of each file of a body it opens, and opens a fetched blob with it; a bad hash, a bad key, a wrong length is a file that can no longer be read, and a blob no opened body names is unknown", () => {
+  const s = scene();
+  const epoch = s.epoch();
+  const text = Uint8Array.of(7, 8, 9, 10);
+  const good = sealBlobUnderKey(platform, fill(9), text);
+  const wrongKey = sealBlobUnderKey(platform, fill(7), text);
+  assert.equal(good.blob.length, text.length + SEAL_OVERHEAD);
+  s.wire.put(
+    4,
+    withFiles(s, epoch, 1, [
+      { blob: good.id, key: fill(9), size: text.length },
+      { blob: wrongKey.id, key: fill(9), size: text.length },
+    ]),
+  );
+  const r = rig(s);
+  const [view] = messages(r.connect());
+  assert.ok(view);
+  assert.ok(
+    view.files?.every((f) => !("fileKey" in f)),
+    "no key crosses the bridge",
+  );
+  const other = fill(8, 32);
+  assert.deepEqual(r.link.openFile(s.channel, good.id, good.blob), { ok: true, value: text });
+  const refused = { ok: false, error: "open-failed" };
+  const unknown = { ok: false, error: "unknown" }; // no key held: the app may try again once the history is read
+  assert.deepEqual(r.link.openFile(s.channel, good.id, wrongKey.blob), refused, "a bad hash");
+  assert.deepEqual(r.link.openFile(s.channel, wrongKey.id, wrongKey.blob), refused, "a bad key");
+  assert.deepEqual(
+    r.link.openFile(s.channel, good.id, good.blob.slice(0, 5)),
+    refused,
+    "cut short",
+  );
+  assert.deepEqual(r.link.openFile(s.channel, other, good.blob), unknown, "no body names it");
+  assert.deepEqual(r.link.openFile(other, good.id, good.blob), unknown, "another channel's");
+  const fresh = rig(s); // a launch starts with no key: the history is read again first
+  assert.deepEqual(fresh.link.openFile(s.channel, good.id, good.blob), unknown);
+  fresh.connect();
+  assert.deepEqual(fresh.link.openFile(s.channel, good.id, good.blob), { ok: true, value: text });
+});
+
+test("G4: getBlob takes the sealed size from the key map, never from the caller; a blob no opened body names is unknown", () => {
+  const s = scene();
+  const epoch = s.epoch();
+  const good = sealBlobUnderKey(platform, fill(9), Uint8Array.of(7, 8, 9, 10));
+  s.wire.put(4, withFiles(s, epoch, 1, [{ blob: good.id, key: fill(9), size: 4 }]));
+  const r = rig(s);
+  assert.equal(r.link.getBlob(s.channel, good.id, 0), "unknown", "before the history is read");
+  r.connect();
+  assert.equal(r.link.getBlob(s.channel, fill(8, 32), 0), "unknown", "no body names it");
+  assert.equal(r.link.getBlob(fill(8, 32), good.id, 0), "unknown", "another channel's");
+  const got = r.link.getBlob(s.channel, good.id, 0);
+  assert.ok(typeof got !== "string", "a get");
+  const ask = got.effects.flatMap((e) => {
+    if (e.do !== "send") return [];
+    const f = decodeFrame(e.bytes, false, "relay");
+    const g = f.ok ? f : decodeFrame(e.bytes, true, "relay");
+    return g.ok && g.value.type === "get-blob" ? [g.value] : [];
+  })[0];
+  assert.ok(ask, "the get-blob frame goes out");
+  const sealed = 4 + SEAL_OVERHEAD;
+  const frame = (size: number, request = ask.request): Frame => ({
+    type: "blob",
+    request,
+    size,
+    offset: 0,
+    chunk: new Uint8Array(sealed),
+  });
+  const taken = r.give([frame(sealed)], 10);
+  assert.equal(
+    taken.filter((e) => e.do === "blob").length,
+    1,
+    "a frame of the sealed size (plaintext + tag) is taken",
+  );
+  const refused = r.link.getBlob(s.channel, good.id, 20);
+  assert.ok(typeof refused !== "string");
+  const wire = refused.effects.flatMap((e) => {
+    if (e.do !== "send") return [];
+    const f = decodeFrame(e.bytes, false, "relay");
+    const g = f.ok ? f : decodeFrame(e.bytes, true, "relay");
+    return g.ok && g.value.type === "get-blob" ? [g.value.request] : [];
+  })[0] as number;
+  const bad = r.give([frame(4, wire)], 30);
+  assert.deepEqual(
+    bad.filter((e) => e.do === "answer").map((e) => e.do === "answer" && e.code),
+    [1],
+    "a frame that says the plaintext size is refused",
+  );
+});
+
+test("CR-3: the first key a blob was named with in a channel stays; a later body naming it with another key cannot swap it", () => {
+  const s = scene();
+  const epoch = s.epoch();
+  const text = Uint8Array.of(7, 8, 9, 10);
+  const good = sealBlobUnderKey(platform, fill(9), text);
+  s.wire.put(4, withFiles(s, epoch, 1, [{ blob: good.id, key: fill(9), size: 4 }]));
+  s.wire.put(4, withFiles(s, epoch, 2, [{ blob: good.id, key: fill(5), size: 4 }]));
+  const r = rig(s);
+  r.connect();
+  assert.deepEqual(r.link.openFile(s.channel, good.id, good.blob), { ok: true, value: text });
+});
+
+test("CR-7: the keys go when the relay is another: the history is read again and names them anew", () => {
+  const s = scene();
+  const epoch = s.epoch();
+  const good = sealBlobUnderKey(platform, fill(9), Uint8Array.of(7, 8, 9, 10));
+  s.wire.put(4, withFiles(s, epoch, 1, [{ blob: good.id, key: fill(9), size: 4 }]));
+  const r = rig(s);
+  r.connect();
+  r.drop(1);
+  s.wire.items.splice(0, s.wire.items.length);
+  s.wire.incarnation = fill(8, 16);
+  r.connect(60_000);
+  assert.equal(r.link.openFile(s.channel, good.id, good.blob).ok, false);
 });

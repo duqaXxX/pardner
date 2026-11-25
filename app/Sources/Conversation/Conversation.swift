@@ -76,6 +76,42 @@ public struct WorkLine: Sendable, Equatable {
     /// The prompt the line names: it is open while that prompt runs.
     public let prompt: MessageRef?
     public internal(set) var fields: LineFields
+    /// The time of the edit that closed the line (complete or failed): the bot's build time, which the file window compares a file's change with.
+    public internal(set) var ended: Date?
+}
+
+/// Where a click on a call's path stands, as the bot's messages to the hidden prompt say it (file-content design, 3.3 and 3.7).
+public enum OpenAnswer: Sendable, Equatable {
+    /// The prompt is sent; the bot has said nothing.
+    case sent
+    /// The bot started it.
+    case started
+    /// A restart cut it (SD 5.8).
+    case cut
+    /// The bot did not read it.
+    case notRead
+    /// The bot answered with a sentence and no file: a refusal, or a file it lost.
+    case refused(String)
+    /// The bot answered with its file; `modified` is the file's change time on the bot's clock, `at` the answer's time and `position` its place in the channel.
+    case file(FileInfo, modified: Date?, at: Date, position: Int)
+}
+
+/// A hidden prompt with `open: true` and the newest of what its bot said to it.
+public struct OpenRequest: Sendable, Equatable {
+    public let prompt: Message
+    public internal(set) var answer: OpenAnswer = .sent
+
+    /// What the bot said, in position order: a start or a cut never undoes an answer.
+    mutating func take(_ m: Message) {
+        switch (m.body, answer) {
+        case (.start, .sent): answer = .started
+        case (.cut, .sent), (.cut, .started): answer = .cut
+        case (.notRead, .sent), (.notRead, .started): answer = .notRead
+        case (.answer(let markdown), _):
+            if let file = m.files.first, markdown.isEmpty { answer = .file(file, modified: m.modified, at: m.time, position: m.position) } else { answer = .refused(markdown) }
+        default: break
+        }
+    }
 }
 
 /// How a line stands now (turn work design 2.3).
@@ -255,6 +291,8 @@ public struct Channel: Sendable, Equatable {
     // The control prompts of the owner's own devices (`ControlPrompt`), by their reference: the prompt is never drawn; for `/stop` (true) the
     // bot's start, parts, answer and text to it are not drawn either. Whatever else names one with `re` (a request, its lines) is read as usual.
     var controls: [MessageRef: Bool] = [:]
+    /// The clicks on a call's path, by their prompt's reference. A click is no row on any device: its bot's start, cut and answer go to the window that asked.
+    public internal(set) var opens: [MessageRef: OpenRequest] = [:]
     /// The newest bind answer of the channel: the bot's line to a `/bind` prompt that carries the field (channel folder design, 2).
     public internal(set) var bound: BindAnswer?
 
@@ -275,6 +313,16 @@ public struct Channel: Sendable, Equatable {
             return
         }
         if let re = m.re, controls[re] == true, hidden(answerTo: m) { return }
+        // A click counts as one only from the person's own devices, as a control prompt does; any other prompt with the field is a prompt.
+        if m.open, case .prompt = m.body, trusts(controlFrom: m) {
+            opens[m.ref] = OpenRequest(prompt: m)
+            return
+        }
+        // Only the bot the click went to answers it (invariant 1: the other bots of a channel act on nothing here).
+        if let re = m.re, let request = opens[re], m.sender == request.prompt.to, [3, 5, 6, 7].contains(m.kind) {
+            opens[re]?.take(m)
+            return
+        }
         if let re = m.re, let reply = replies[re], let key = threadOf[re], [3, 5, 6, 7].contains(m.kind) {
             threads[key]?.take(verdict: m, of: re, reply: reply)
             return
@@ -298,6 +346,9 @@ public struct Channel: Sendable, Equatable {
             timeline.append(m.position)
         case .start, .cut, .notRead, .reply, .edit, .lineEdit:
             key = m.re.flatMap { threadOf[$0] } ?? m.thread
+        case .file where m.thread == nil:
+            key = nil
+            timeline.append(m.position)
         case .unreadable where m.thread == nil:
             // Its thread is in the body it lacks, but its `re` is in the clear: a message of a thread names that thread (design 2.9).
             // Only a line's text (kind 1, naming its prompt) and a line's edit (kind 11, naming a message that is no thread's root) are
@@ -341,7 +392,7 @@ extension MessageThread {
         // The first sign decides what the opening prompt was (a prompt's start is no sign).
         if fromBot, settlement == nil {
             switch m.body {
-            case .request, .part, .line: settlement = .session
+            case .request, .part, .line, .file: settlement = .session
             // A `tell` is the bot answering a Stop or a reply typed in the thread: it can precede a word's own line.
             case .text(_, let say) where m.thread != nil && say != "tell": settlement = .session
             case .answer where m.re == root?.ref: settlement = m.noSession ? .noSession : .session
@@ -413,10 +464,12 @@ extension MessageThread {
             if answered, replied[re]?.taken == false { replied[re] = nil }
         case .line(let fields) where fromBot:
             lineIndex[m.ref] = items.count
-            items.append(.line(WorkLine(ref: m.ref, position: m.position, time: m.time, prompt: m.re, fields: fields)))
+            items.append(.line(WorkLine(ref: m.ref, position: m.position, time: m.time, prompt: m.re, fields: fields, ended: fields.status.isClosed ? m.time : nil)))
         case .lineEdit(let fields) where fromBot:
             // A line the app does not hold (its text did not open here) changes nothing.
             guard let re = m.re, let i = lineIndex[re], case .line(var line) = items[i] else { return }
+            // The line's end is the edit that closed it: a later edit of a closed line does not move it.
+            if fields.status.isClosed, !line.fields.status.isClosed { line.ended = m.time }
             line.fields = fields
             items[i] = .line(line)
         case .text where fromBot && m.sessionText != nil:
@@ -433,7 +486,7 @@ extension MessageThread {
                 }
             case nil: break
             }
-        case .text:
+        case .text, .file:
             if m.thread != nil { items.append(.message(m)) } // the opening message is the thread's root, not an item
         case .unreadable:
             items.append(.message(m))

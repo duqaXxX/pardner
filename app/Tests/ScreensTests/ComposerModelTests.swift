@@ -353,6 +353,23 @@ final class ComposerModelTests: XCTestCase {
         OutboxItemRow(name: Data(repeating: n, count: 16), kind: kind, to: nil, re: nil, content: content, state: state)
     }
 
+    func testAClicksHiddenPromptIsNeverARowInAnyPhase() {
+        let click = #"{"open":true,"text":"/open /work/notes.md","thread":"T"}"#
+        let c = composer(thread: "T")
+        for state in [OutboxItemState.waiting, .sent] {
+            c.take(items: [item(0xC1, state, click, kind: 2)])
+            XCTAssertTrue(c.rows().isEmpty, "\(state)")
+        }
+        c.take(items: [item(0xC1, .refused, click, kind: 2)])
+        XCTAssertTrue(c.rows().isEmpty, "refused: the file window says so, and no Retry offers a second click")
+        let prompt = #"{"text":"hello","thread":"T"}"#
+        c.take(items: [item(0xC2, .waiting, prompt, kind: 2)])
+        XCTAssertEqual(c.rows().count, 1, "an ordinary prompt is still a row")
+        let flagOff = #"{"open":false,"text":"hello","thread":"T"}"#
+        c.take(items: [item(0xC2, .waiting, prompt, kind: 2), item(0xC3, .waiting, flagOff, kind: 2)])
+        XCTAssertEqual(c.rows().count, 2, "only a true flag hides it")
+    }
+
     func testEachOutcomeIsARowInPlaceWithItsLine() async {
         let table: [(SendOutcome, String)] = [
             (.notSaved, "Pardner could not save the message. Try again."), (.ended, "Pardner is not connected. Try again in a moment."),

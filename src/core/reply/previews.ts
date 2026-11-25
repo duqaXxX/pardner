@@ -200,6 +200,11 @@ export class Previews {
     return said === null ? null : `$ ${oneLine(said, COMMAND_LIMIT)}`;
   }
 
+  /** The path a call names, when its tool is one that names a file; null otherwise. */
+  file(name: string, input: Readonly<Record<string, unknown>>): string | null {
+    return inputText(this.#tools.files, name, input);
+  }
+
   /** The task a call continues, when its tool is one that continues a task; null otherwise. */
   continued(name: string, input: Readonly<Record<string, unknown>>): string | null {
     const { continuers } = this.#tools;

@@ -110,6 +110,7 @@ const PLAIN_OFFER: GuideOffer = {
   loadedContext: false,
   forks: true,
   fileUpload: false,
+  filePicker: false,
   diff: false,
   rewind: false,
   next: false,
@@ -164,7 +165,7 @@ test("/guide offers what the agent and the chat declare", async (t) => {
   await world.says("/guide");
   assert.equal(
     world.inChannel().at(-1),
-    guideText(PLAIN_NAMES, { ...PLAIN_OFFER, bypass: true, fileUpload: true }),
+    guideText(PLAIN_NAMES, { ...PLAIN_OFFER, bypass: true, fileUpload: true, filePicker: true }),
   );
 });
 

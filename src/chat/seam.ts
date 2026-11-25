@@ -89,6 +89,8 @@ export interface TaskUpdate {
   /** Calls made inside it (a subagent's), counted in its title. */
   readonly calls: number;
   readonly preview: Preview | null;
+  /** The file the call names, as the agent wrote it (`ToolVocabulary.files`); absent on any other line. */
+  readonly path?: string;
   /**
    * Null on every line the core hands to a sink. A provider that shows a run of calls as
    * counts folds the lines itself and sets this on the lines it makes:
@@ -484,8 +486,8 @@ export interface ThreadChat {
     readonly content: Uint8Array;
   }): Promise<FileId | null>;
   /**
-   * Deletes a file `share` made. Rejects with `ChatError` when the chat refused. Present with
-   * `fileUpload`.
+   * Deletes a file `share` made. Rejects with `ChatError` when the chat refused. Optional under
+   * `fileUpload`: a chat that cannot withdraw a file row leaves it out.
    */
   unshare?(file: FileId): Promise<void>;
   /**
@@ -951,6 +953,16 @@ export interface InboundMessage {
   handled?(session: boolean): void;
 }
 
+/** A file the owner opened from a call's line (`ChatInbound.openFile`). */
+export interface OpenedFile {
+  readonly name: string;
+  /** The path as the owner reads it: from the folder when inside it. */
+  readonly title: string;
+  readonly content: Buffer;
+  /** The file's last change, in milliseconds. */
+  readonly modified: number;
+}
+
 /**
  * What a provider tells the core. Each call is made for the owner alone: a provider checks who
  * acted, on every path of its own, before it calls. No member rejects for a failure the owner
@@ -1000,6 +1012,13 @@ export interface ChatInbound {
    * `message`.
    */
   stop(ref: ThreadRef): Promise<boolean>;
+  /**
+   * The owner opened the file `path` a call's line named: read from the thread's entry in
+   * `state.json`, when the session's calls named it or it is inside the folder; no session or
+   * turn is reached. A refusal is the owner's sentence. The core always provides it, and it refuses
+   * without `fileUpload`.
+   */
+  openFile?(ref: ThreadRef, path: string): Promise<OpenedFile | { readonly refusal: string }>;
 }
 
 /**

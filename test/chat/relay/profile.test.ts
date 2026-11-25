@@ -222,9 +222,7 @@ test(
       b.store.change = (edit) =>
         write(edit).then(() => Promise.reject(new Error("the disk is full")));
       b.profile?.account(ACCOUNT); // the second write of the run
-      await b.until(() =>
-        b.lines.includes("relay: the store did not write the bot's profile: the disk is full"),
-      );
+      await b.until(() => b.lines.includes("relay: the store did not write: the disk is full"));
       b.store.change = write;
       await r.send({ kind: 1 }, { text: "a push the bot reads to rest" });
       await b.until(async () => (await profiles(r)).length === 2);

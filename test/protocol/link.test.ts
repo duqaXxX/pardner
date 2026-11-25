@@ -1477,3 +1477,312 @@ test("device pairing 3.5.7 an enrol that cannot be framed is refused at construc
     assert.deepEqual(a.link.enrol(enrol as never), { ok: false, error: "bad-input" });
   }
 });
+
+// A blob of two chunks and a little over; a get frame is as long as the test says.
+const CHUNK = 524_288;
+const big = new Uint8Array(CHUNK * 2 + 1000).map((_, i) => i % 251);
+const blobId = fill(30);
+const TOO_LARGE = 8; // the relay's result code (relay `sequence.ts`)
+const puts = (fx: Effect[]) => sends(fx).flatMap((f) => (f.type === "put-blob" ? [f] : []));
+const gets = (fx: Effect[]) => sends(fx).flatMap((f) => (f.type === "get-blob" ? [f] : []));
+const answers = (fx: Effect[]) => fx.filter((e) => e.do === "answer");
+const closes = (fx: Effect[]) => fx.filter((e) => e.do === "close");
+
+/** A put started at 100 on a link at rest: its driver name, its request on the wire and the effects. */
+function started(a: ReturnType<typeof rig>, bytes = big) {
+  a.toRest(0);
+  const put = a.link.putBlob(blobId, bytes, 100);
+  assert.ok(typeof put !== "string");
+  const wire = puts(put.effects)[0]?.request as number;
+  return { handle: put.request, wire, effects: put.effects };
+}
+
+test("G 3.5: a put sends one chunk at a time, a submit goes between two, and the deadline starts at the last write", () => {
+  const a = rig();
+  const { handle, wire, effects } = started(a);
+  assert.equal(puts(effects).length, 1, "only the first chunk goes");
+  assert.deepEqual(
+    puts(effects).map((f) => [f.offset, f.size, f.chunk.length]),
+    [[0, big.length, CHUNK]],
+  );
+  assert.ok(
+    effects.some((e) => e.do === "send" && e.paced),
+    "the driver is told to report its write",
+  );
+  assert.notEqual(handle, wire);
+  // The socket is slow: nothing more goes by itself, and a submit is sent at once.
+  const item = a.s.alice.genesis;
+  const submitted = a.link.submit(1, item.signed, item.sig, 200);
+  assert.ok(submitted !== "busy");
+  assert.deepEqual(puts(submitted.effects), []);
+  assert.deepEqual(
+    sends(submitted.effects).map((f) => f.type),
+    ["submit"],
+  );
+  assert.ok(!submitted.effects.some((e) => e.do === "send" && e.paced), "a submit is not paced");
+  // A tick past `patience` of the put's start finds no deadline on it: it has none until its last chunk is out.
+  assert.deepEqual(closes(a.link.tick(30_150)), []);
+  a.give(1, [{ type: "result", request: submitted.request, code: 0 }], 30_160);
+  const second = a.link.written(1, 31_000);
+  assert.deepEqual(
+    puts(second).map((f) => [f.request, f.offset, f.chunk.length]),
+    [[wire, CHUNK, CHUNK]],
+  );
+  const third = a.link.written(1, 32_000);
+  assert.deepEqual(
+    puts(third).map((f) => [f.request, f.offset, f.chunk.length]),
+    [[wire, CHUNK * 2, 1000]],
+  );
+  assert.deepEqual(puts(a.link.written(1, 33_000)), [], "no chunk after the last");
+  // Its deadline is `patience` after the last write.
+  assert.deepEqual(closes(a.link.tick(62_999)), []);
+  const dropped = a.link.tick(63_000);
+  assert.equal(closes(dropped).length, 1);
+  assert.deepEqual(answers(dropped), [], "not answered: the put goes on next connection");
+  assert.equal(a.link.state, "waiting");
+});
+
+test("G 3.5: a blob the relay holds is answered at the first chunk, which ends the put: no chunk is sent after it", () => {
+  const a = rig();
+  const { handle, wire } = started(a);
+  const done = a.give(1, [{ type: "result", request: wire, code: 0 }], 150);
+  assert.deepEqual(answers(done), [{ do: "answer", request: handle, code: 0 }]);
+  assert.deepEqual(
+    puts(a.link.written(1, 160)),
+    [],
+    "the chunk's write is reported late: nothing follows",
+  );
+  assert.deepEqual(puts(a.link.written(1, 170)), []);
+  // The put's deadline does not outlive it.
+  assert.deepEqual(closes(a.link.tick(100_000)), []);
+});
+
+test("G 3.5: tooLarge at the first chunk ends the put, and the next put in the queue starts", () => {
+  const a = rig();
+  const { handle, wire } = started(a);
+  const next = a.link.putBlob(fill(31), Uint8Array.of(1, 2, 3), 120);
+  assert.ok(typeof next !== "string");
+  assert.deepEqual(puts(next.effects), [], "one put at a time per connection");
+  const done = a.give(1, [{ type: "result", request: wire, code: TOO_LARGE }], 150);
+  assert.deepEqual(answers(done), [{ do: "answer", request: handle, code: TOO_LARGE }]);
+  const [second] = puts(done);
+  assert.equal(second?.size, 3, "the queued put starts");
+  assert.notEqual(second?.request, wire);
+  assert.deepEqual(
+    puts(a.link.written(1, 160)),
+    [],
+    "the first put's stale write sends nothing of the second",
+  );
+  assert.deepEqual(puts(a.link.written(1, 170)), [], "a one-chunk put has no second chunk");
+});
+
+test("G 3.5: a drop before the answer starts the put again on the next connection, from its first chunk", () => {
+  const a = rig();
+  const { handle } = started(a);
+  a.link.written(1, 150);
+  const dropped = a.link.closed(1, 200);
+  assert.deepEqual(answers(dropped), [], "not answered: it is not over");
+  a.link.tick(1200);
+  a.hello(1200, 2);
+  const again = a.give(2, [a.s.wire.served(), ...a.read()], 1200);
+  const [chunk] = puts(again);
+  assert.deepEqual([chunk?.offset, chunk?.chunk.length], [0, CHUNK]);
+  const done = a.give(2, [{ type: "result", request: chunk?.request as number, code: 0 }], 1300);
+  assert.deepEqual(answers(done), [{ do: "answer", request: handle, code: 0 }]);
+});
+
+test("G 3.5: a put queued before the link is at rest goes at the rest, and a stopped link answers it unanswered", () => {
+  const a = rig();
+  const early = a.link.putBlob(blobId, big, 0);
+  assert.ok(typeof early !== "string");
+  assert.deepEqual(puts(early.effects), []);
+  const rest = a.toRest(0);
+  assert.equal(puts(rest).length, 1);
+  assert.deepEqual(answers(a.link.stop(10)), [
+    { do: "answer", request: early.request, code: "unanswered" },
+  ]);
+  assert.equal(a.link.putBlob(blobId, big, 20), "busy");
+  assert.equal(a.link.getBlob(blobId, 10, 20), "busy");
+});
+
+/** `size` bytes of a blob as `blob` frames of `step`. */
+const frames = (
+  request: number,
+  size: number,
+  step: number,
+  from = 0,
+): Extract<Frame, { type: "blob" }>[] =>
+  Array.from({ length: Math.ceil((size - from) / step) }, (_, i) => ({
+    type: "blob" as const,
+    request,
+    size,
+    offset: from + i * step,
+    chunk: new Uint8Array(Math.min(step, size - from - i * step)).fill(i + 1),
+  }));
+
+test("G 3.6: a streamed get is closed on the frame that reaches the size, with no result, and holds no deadline", () => {
+  const a = rig();
+  a.toRest(0);
+  const get = a.link.getBlob(blobId, 10, 100);
+  assert.ok(typeof get !== "string");
+  const [ask] = gets(get.effects);
+  assert.deepEqual([ask?.blob, ask?.offset], [blobId, 0]);
+  const wire = ask?.request as number;
+  const [f1, f2, f3] = frames(wire, 10, 4);
+  assert.ok(f1 && f2 && f3);
+  assert.deepEqual(closes(a.link.tick(100_000)), [], "no deadline while it streams");
+  const one = a.give(1, [f1], 200_000);
+  assert.deepEqual(
+    one.filter((e) => e.do === "blob"),
+    [{ do: "blob", request: get.request, size: 10, offset: 0, chunk: f1.chunk }],
+  );
+  assert.deepEqual(answers(one), []);
+  const two = a.give(1, [f2, f3], 300_000);
+  assert.deepEqual(
+    two.filter((e) => e.do === "blob").map((e) => e.do === "blob" && e.offset),
+    [4, 8],
+  );
+  assert.deepEqual(
+    answers(two),
+    [{ do: "answer", request: get.request, code: 0 }],
+    "answered on the last frame",
+  );
+  assert.deepEqual(closes(a.link.tick(1_000_000)), [], "nothing of the get is left waiting");
+});
+
+test("G 3.6: the get's request id is not given to another request while it streams", () => {
+  const a = rig();
+  a.toRest(0);
+  const get = a.link.getBlob(blobId, 10, 100);
+  assert.ok(typeof get !== "string");
+  const wire = gets(get.effects)[0]?.request as number;
+  a.give(1, [frames(wire, 10, 4)[0] as Frame], 200);
+  const item = a.s.alice.genesis;
+  const ids = new Set<number>();
+  for (let i = 0; i < 3; i++) {
+    const r = a.link.submit(1, item.signed, item.sig, 300 + i);
+    assert.ok(r !== "busy");
+    ids.add(r.request);
+  }
+  const put = a.link.putBlob(blobId, Uint8Array.of(1), 400);
+  assert.ok(typeof put !== "string");
+  ids
+    .add(put.request)
+    .add(puts(put.effects)[0]?.request as number)
+    .add(get.request);
+  assert.equal(ids.size, 6, "every id of every request, put and get is its own");
+  assert.ok(!ids.has(wire) || wire === get.request);
+});
+
+test("G 3.6: a result ends a get: the refusal, and no more frames are taken", () => {
+  const a = rig();
+  a.toRest(0);
+  const get = a.link.getBlob(blobId, 10, 100);
+  assert.ok(typeof get !== "string");
+  const wire = gets(get.effects)[0]?.request as number;
+  const done = a.give(1, [{ type: "result", request: wire, code: 9 }], 200);
+  assert.deepEqual(answers(done), [{ do: "answer", request: get.request, code: 9 }]);
+  assert.deepEqual(
+    a.give(1, [frames(wire, 10, 4)[0] as Frame], 300).filter((e) => e.do === "blob"),
+    [],
+  );
+});
+
+test("G 3.6: a drop mid-get asks again from the last offset received on the next connection", () => {
+  const a = rig();
+  a.toRest(0);
+  const get = a.link.getBlob(blobId, 10, 100);
+  assert.ok(typeof get !== "string");
+  const wire = gets(get.effects)[0]?.request as number;
+  const all = frames(wire, 10, 4);
+  a.give(1, [all[0] as Frame], 200);
+  const dropped = a.link.closed(1, 250);
+  assert.deepEqual(answers(dropped), [], "the get is not over");
+  a.link.tick(1250);
+  a.hello(1250, 2);
+  const again = a.give(2, [a.s.wire.served(), ...a.read()], 1250);
+  const [ask] = gets(again);
+  assert.deepEqual([ask?.blob, ask?.offset], [blobId, 4], "from the last offset received");
+  assert.notEqual(ask?.request, wire);
+  const rest = frames(ask?.request as number, 10, 4, 4);
+  const done = a.give(2, rest, 1300);
+  assert.deepEqual(
+    done.filter((e) => e.do === "blob").map((e) => e.do === "blob" && e.offset),
+    [4, 8],
+  );
+  assert.deepEqual(answers(done), [{ do: "answer", request: get.request, code: 0 }]);
+});
+
+test("G 3.6: a frame out of order, with another size or past the size drops the connection", () => {
+  const bad = (change: (f: Frame & { type: "blob" }) => Frame & { type: "blob" }, seen = 1) => {
+    const a = rig();
+    a.toRest(0);
+    const get = a.link.getBlob(blobId, 10, 100);
+    assert.ok(typeof get !== "string");
+    const wire = gets(get.effects)[0]?.request as number;
+    const all = frames(wire, 10, 4);
+    a.give(1, all.slice(0, seen - 1), 200);
+    const out = a.give(1, [change(all[seen - 1] as Frame & { type: "blob" })], 300);
+    assert.equal(closes(out).length, 1);
+    assert.deepEqual(
+      out.filter((e) => e.do === "blob"),
+      [],
+    );
+    assert.deepEqual(answers(out), [], "the get is asked again, not answered");
+  };
+  bad((f) => ({ ...f, offset: 4 })); // the first frame skips ahead
+  bad((f) => ({ ...f, chunk: new Uint8Array(11) })); // past the size
+  bad((f) => ({ ...f, chunk: new Uint8Array(0) })); // a frame that does not move
+});
+
+test("G 3.6: a frame that says another size than the body declared ends the get as refused and drops the connection, whatever its position", () => {
+  for (const seen of [1, 2]) {
+    const a = rig();
+    a.toRest(0);
+    const get = a.link.getBlob(blobId, 10, 100);
+    assert.ok(typeof get !== "string");
+    const wire = gets(get.effects)[0]?.request as number;
+    const all = frames(wire, 10, 4);
+    a.give(1, all.slice(0, seen - 1), 200);
+    const out = a.give(1, [{ ...(all[seen - 1] as Frame & { type: "blob" }), size: 11 }], 300);
+    assert.equal(closes(out).length, 1, "the stream is not read to its end");
+    assert.deepEqual(answers(out), [{ do: "answer", request: get.request, code: 1 }]);
+    assert.deepEqual(out.filter((e) => e.do === "blob").length, 0);
+    a.link.tick(1300);
+    a.hello(1300, 2);
+    assert.deepEqual(
+      gets(a.give(2, [a.s.wire.served(), ...a.read()], 1300)),
+      [],
+      "not asked again",
+    );
+  }
+});
+
+test("CR-1: a blob id that is not 32 bytes is refused before anything is queued", () => {
+  const a = rig();
+  a.toRest(0);
+  assert.equal(a.link.putBlob(fill(30, 31), big, 100), "bad-input");
+  assert.equal(a.link.putBlob(blobId, "x" as never, 100), "bad-input");
+  assert.equal(a.link.getBlob(fill(30, 33), 10, 100), "bad-input");
+  assert.equal(a.link.getBlob(blobId, -1, 100), "bad-input");
+  const put = a.link.putBlob(blobId, big, 200);
+  assert.ok(typeof put !== "string", "nothing queued before it, so the next put starts");
+  assert.equal(puts(put.effects).length, 1);
+});
+
+test("CR-4: a put or a get queued before the start of a link holding a put-back or a fault is answered", () => {
+  for (const stored of [{ fault: true }, undefined]) {
+    const a = rig(stored ? { stored } : { kept: { ids: [], head: undefined, putBack: true } });
+    const put = a.link.putBlob(blobId, big, 0);
+    const get = a.link.getBlob(blobId, 10, 0);
+    assert.ok(typeof put !== "string" && typeof get !== "string");
+    const fx = a.link.start(1);
+    assert.deepEqual(
+      answers(fx).map((e) => e.do === "answer" && [e.request, e.code]),
+      [
+        [put.request, "unanswered"],
+        [get.request, "unanswered"],
+      ],
+    );
+  }
+});

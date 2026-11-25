@@ -70,6 +70,8 @@ public final class PairingModel {
     public let sections: SectionsModel
     /// The composers of the main window, beside the channel acts: they learn each outbox from the same state.
     public let composers: Composers
+    /// The file windows' model: a click on a call's path, a file row, and the fetch.
+    public let files: FileOpener
 
     public init(controller: PairingController) {
         let devices = DevicesModel(controller: controller)
@@ -78,6 +80,8 @@ public final class PairingModel {
         let composers = Composers(conversation: conversation, devices: devices) { channel, draft in try await controller.send(channel: channel, draft: draft) }
         channels.composers = composers
         sections = SectionsModel(conversation: conversation, channels: channels) { try await controller.arrange($0) }
+        files = FileOpener(conversation: conversation, devices: devices, send: { channel, draft in try await controller.send(channel: channel, draft: draft) }) { await controller.fetchFile(channel: $0, blob: $1) }
+        channels.files = files
         (self.controller, storesOpen, self.devices, self.settings, self.channels, self.conversation, self.composers) = (controller, true, devices, SettingsModel(devices: devices, controller: controller), channels, conversation, composers)
     }
 
@@ -118,6 +122,8 @@ public final class PairingModel {
         let composers = Composers(conversation: conversation, devices: devices) { _, _ in .ended }
         channels.composers = composers
         sections = SectionsModel(conversation: conversation, channels: channels) { _ in .ended }
+        files = FileOpener(conversation: conversation, devices: devices, send: { _, _ in .ended }) { _, _ in .ended }
+        channels.files = files
         (controller, self.phase, showForm, showJoin, self.refused, cancelNote, self.storesOpen, self.devices, self.settings, self.channels, self.conversation, self.composers) =
             (nil, phase, form, join, refused, note, storesOpen, devices, SettingsModel(devices: devices), channels, conversation, composers)
         if case .recovering(.typeKey(let request)) = phase { entry = RecoveryEntryModel(request: request) } // a fixed phase has no controller to apply it

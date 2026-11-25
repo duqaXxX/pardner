@@ -130,7 +130,7 @@ struct ChannelView: View {
             if let t {
                 if t.isWord {
                     // A word or a refused prompt: a message with the bot's lines under it, no session.
-                    Answered(model: model, icons: icons, thread: t, prompt: m).padding(.leading, MessageRow.inset)
+                    Answered(model: model, icons: icons, thread: t, prompt: m, place: FilePlace(channel: channel.id, thread: t.key)).padding(.leading, MessageRow.inset)
                 } else if t.showsSummary(openedBy: m.kind) {
                     // No sign yet keeps the summary, which opens the thread: a first turn with no text can be reached.
                     VStack(alignment: .leading, spacing: 6) {
@@ -278,6 +278,9 @@ struct MessageRow: View {
     var mark = Mark.conversation
     /// The message stands in the tinted block of the open thread: a person's mark is drawn on `surface` there, as the design does.
     var tinted = false
+    /// Where a file row opens its file; nil where the window has no pairing.
+    var place: FilePlace?
+    @Environment(FileOpener.self) private var opener: FileOpener?
 
     var body: some View {
         let name = Naming.sender(message.sender, in: model)
@@ -302,6 +305,8 @@ struct MessageRow: View {
                             Text(verbatim: message.shown)
                         }
                         .foregroundStyle(PardnerColor.muted)
+                    } else if case .file(let title) = message.body {
+                        FileRow(title: title, message: message, place: place, opener: opener)
                     } else if isBot {
                         // A bot's text is read as Markdown, any other body of a bot keeps its code spans only; a person's stays exactly as typed (#73, 5.2).
                         if MarkdownView.reads(message.body) { MarkdownView(text: message.shown, copy: { Clipboard.copy(message.shown) }) } else { Text(CodeSpans.styled(message.shown)) }
@@ -325,6 +330,7 @@ struct Answered: View {
     let icons: [Data: NSImage]
     let thread: MessageThread
     let prompt: Message
+    var place: FilePlace?
 
     var body: some View {
         VStack(alignment: .leading, spacing: PardnerMetrics.gap) {
@@ -335,9 +341,9 @@ struct Answered: View {
                     if case .footer(let duration?, _, _)? = line.sessionText {
                         Text(verbatim: duration).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
                     }
-                case .message(let line): MessageRow(model: model, icons: icons, message: line)
+                case .message(let line): MessageRow(model: model, icons: icons, message: line, place: place)
                 case .unreadable(let count, let first): UnreadableRow(model: model, icons: icons, message: first, count: count, mark: .conversation)
-                case .line(let line): LineRow(line: line, state: thread.state(of: line), indent: 0)
+                case .line(let line): LineRow(line: line, state: thread.state(of: line), indent: 0, place: place)
                 case .body(let line, let index): LineBodyRow(line: line, index: index, indent: 0)
                 case .segment(let answer):
                     // Read at each part that reaches it: a structure half written is drawn half written until a later part (#73, 2.1).
