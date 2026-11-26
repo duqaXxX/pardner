@@ -158,7 +158,7 @@ export class RelayProvider implements ChatProvider {
     if (open) await Promise.all([...open].map((flush) => flush()));
   }
 
-  /** A text of the bot's own (3.8): `say` says how the app draws it. */
+  /** A text of the bot's own (3.8): `say` says how the app draws it. Resolves with the name of its first piece, which an edit of the text would name. */
   async #text(
     channel: string,
     say: "notice" | "say" | "tell",
@@ -172,6 +172,7 @@ export class RelayProvider implements ChatProvider {
     // A long text is several texts, each at most 64 KiB (3.8).
     const pieces = splitParts(markdown);
     const parts = pieces.length ? pieces : [markdown];
+    const first = this.#random(16);
     for (const [index, piece] of parts.entries()) {
       // The folder rides the first piece only: a reader takes it from the answer's start.
       const content = JSON.stringify({
@@ -180,9 +181,15 @@ export class RelayProvider implements ChatProvider {
         markdown: piece,
         ...(bind && index === 0 ? { bind } : {}),
       });
-      const queued = await this.#outbox.queue(fromHex(channel), { kind: 1, re, content });
+      const queued = await this.#outbox.queue(fromHex(channel), {
+        kind: 1,
+        re,
+        content,
+        ...(index === 0 ? { name: first } : {}),
+      });
       if (!queued) throw new ChatError("relay_not_queued", { failure: "failed" });
     }
+    return toHex(first);
   }
 
   /**
@@ -503,9 +510,9 @@ export class RelayProvider implements ChatProvider {
   }
 
   thread(ref: ThreadRef): ThreadChat {
-    const text = (say: "notice" | "say" | "tell") => async (markdown: string) => {
+    const text = (say: "say" | "tell") => async (markdown: string) => {
       await this.#flushed(ref);
-      return this.#text(ref.channel, say, markdown, ref.thread);
+      await this.#text(ref.channel, say, markdown, ref.thread);
     };
     return {
       showRunning() {},
@@ -515,7 +522,10 @@ export class RelayProvider implements ChatProvider {
         this.#aside(ref, { say: "run", at, markdown: "Running scheduled task" }),
       suggestNext: (next) =>
         this.#aside(ref, { say: "next", next: Array.from(next).slice(0, NEXT_LIMIT).join("") }),
-      notice: text("notice"),
+      notice: async (markdown) => {
+        await this.#flushed(ref);
+        return this.#text(ref.channel, "notice", markdown, ref.thread);
+      },
       say: text("say"),
       tell: text("tell"),
       ask: (requestId, request, title) => this.#ask(ref, requestId, request, title),
@@ -566,8 +576,9 @@ export class RelayProvider implements ChatProvider {
   }
 
   channel(channel: string): ChannelChat {
-    const text = (say: "notice" | "say" | "tell") => (markdown: string, answers?: MessageId) =>
-      this.#text(channel, say, markdown, undefined, answers);
+    const text = (say: "say" | "tell") => async (markdown: string, answers?: MessageId) => {
+      await this.#text(channel, say, markdown, undefined, answers);
+    };
     return {
       notice: async (markdown, answers, bind) => {
         // Placed in the outbox before the first await, as `bind.ts` relies on.

@@ -111,6 +111,32 @@ test("withdraw and rewrite write an edit naming the request", DARWIN, async () =
   }
 });
 
+test(
+  "a thread's notice resolves with its name, which a withdrawal's edit names",
+  DARWIN,
+  async () => {
+    const r = await rig();
+    const b = botOn(r);
+    try {
+      b.connection.start();
+      await b.rested();
+      const chat = provider(r, b).thread({ channel: hex(r.channel), thread: threadOf(r) });
+      const notice = await chat.notice("pardner stops once these background tasks end");
+      assert.notEqual(notice, null);
+      assert.equal(await chat.withdraw(notice as string), true);
+      await b.until(async () => (await bodyOf(r, 11)).length === 1);
+      const [text] = await bodyOf(r, 1);
+      const [edit] = await bodyOf(r, 11);
+      assert.equal(hex(text?.name ?? new Uint8Array()), notice);
+      assert.equal(hex(edit?.re?.name ?? new Uint8Array()), notice);
+      assert.equal(hex(edit?.re?.device ?? new Uint8Array()), hex(r.botId));
+    } finally {
+      await b.stop();
+      await r.stop();
+    }
+  },
+);
+
 test("the setup's ask, answer and rewrite come in that order", DARWIN, async () => {
   const r = await rig();
   const b = botOn(r);

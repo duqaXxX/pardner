@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { INJECTED_TURN_WAIT } from "../../../../src/core/sessions/constants.ts";
 import { isSystem, memoryHarnessFor, sdkMessages } from "../../../support/sessions.ts";
-import { inside, isReport, logged, splitBackground } from "./helpers.ts";
+import { closedLines, inside, isReport, logged, splitBackground } from "./helpers.ts";
 
 const ENDED = "a reply ended with no report under it";
 
@@ -59,7 +59,7 @@ test("nothing below the waiting reply: the report renders in it", async (t) => {
   assert.equal(h.bodies().filter(isReport).length, 1);
 });
 
-test("an overtaken reply whose task ends with no turn is logged, and says the end where it is", async (t) => {
+test("an overtaken reply whose task ends with no turn is logged, and posts nothing", async (t) => {
   const lines = logged(t, "info");
   const [first, notice] = splitBackground();
   const h = memoryHarnessFor(t)({ turns: [first, answer] });
@@ -72,12 +72,12 @@ test("an overtaken reply whose task ends with no turn is logged, and says the en
   await h.clock.advance(INJECTED_TURN_WAIT + 1);
   await h.idle();
   assert.equal(lines.filter((line) => line.startsWith(ENDED)).length, 1, lines.join("\n"));
-  // No message of any kind: a stream start or a post would be a new message. The command has
-  // no card to complete, so its end line is written into the thread's last reply, which rests
-  // for it, by edit (the update debounces: `until` gives it the room to land).
+  // No message of any kind: a stream start or a post would be a new message. The command's
+  // line says its end, so no end text is written into the thread's last reply, and the reply
+  // the line is in does not change either (#166).
   assert.equal(h.room.written(h.channel).length, before);
-  await h.until(() => h.replies().some(isReport));
-  assert.deepEqual(h.replies().map(isReport), [false, true]);
+  assert.deepEqual(h.replies().map(isReport), [false, false]);
+  assert.ok(closedLines(h).length > 0, "the line says the end");
 });
 
 test("the same when the notification never comes (the unreported timer)", async (t) => {

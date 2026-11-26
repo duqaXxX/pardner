@@ -9,6 +9,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ python3 -c 'import time; time.sleep(30)'",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_014RM24vF5EeUNHQ57579Vma",
       "message": false,
@@ -27,6 +31,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ python3 -c 'import time; time.sleep(30)'",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_014RM24vF5EeUNHQ57579Vma",
       "message": false,
@@ -59,6 +67,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ python3 -c 'import time; time.sleep(30)'",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_014RM24vF5EeUNHQ57579Vma",
      "message": false,
@@ -77,6 +89,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ python3 -c 'import time; time.sleep(30)'",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_014RM24vF5EeUNHQ57579Vma",
      "message": false,

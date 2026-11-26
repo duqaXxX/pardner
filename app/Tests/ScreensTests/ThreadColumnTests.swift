@@ -25,7 +25,7 @@ private struct Session {
     }
 
     @discardableResult
-    mutating func put(_ kind: Int, _ sender: Data, _ body: [String: Any], to: Data? = nil, re: MessageRef? = nil, time: Double? = nil) -> MessageRef {
+    mutating func put(_ kind: Int, _ sender: Data, _ body: [String: Any]?, to: Data? = nil, re: MessageRef? = nil, time: Double? = nil) -> MessageRef {
         let at = position
         position += 1
         let name = Data(repeating: UInt8(at), count: 16)
@@ -34,10 +34,16 @@ private struct Session {
             "name": .bytes(name), "epoch": .bytes(Data(repeating: 9, count: 32)), "time": .number(time ?? 1_700_000_000_000 + Double(at) * 1000),
             "kind": .number(Double(kind)), "to": to.map { .bytes($0) } ?? .null, "blobs": .array([]), "files": .array([]),
             "re": re.map { .object(["device": .bytes($0.device), "name": .bytes($0.name)]) } ?? .null,
-            "text": .string(String(decoding: try! JSONSerialization.data(withJSONObject: body), as: UTF8.self)), "again": .bool(false),
+            "text": body.map { .string(String(decoding: try! JSONSerialization.data(withJSONObject: $0), as: UTF8.self)) } ?? .null, "again": .bool(false),
         ]))
         return MessageRef(device: sender, name: name)
     }
+
+    /// A message of the thread this device cannot open (a text of `.null`): it names its thread by `re` alone, as a line does.
+    mutating func unreadable(from sender: Data = alice) { put(1, sender, nil, re: prompt) }
+
+    /// A scheduled run's line, as the bot writes it (`provider.ts`, `#aside(... say: "run", at ...)`).
+    mutating func run(at: Double = 1_763_999_940_000) { put(1, bot, ["thread": prompt.hex, "say": "run", "at": at, "markdown": "Running scheduled task"]) }
 
     mutating func typed(_ text: String, from sender: Data = alice, time: Double? = nil) { put(2, sender, ["text": text, "thread": prompt.hex], to: bot, time: time) }
     mutating func say(_ say: String, _ markdown: String) { put(1, bot, ["thread": prompt.hex, "say": say, "markdown": markdown]) }
@@ -133,8 +139,8 @@ final class ThreadColumnTests: XCTestCase {
     func testANoticeDrawsItsCodeSpansAndNotTheirBackticks() {
         let words = "Bound this channel to `/srv/example/project`."
         let styled = width(Text(CodeSpans.styled(words)).font(PardnerFont.ui(size: 13, weight: .regular)))
-        // The icon's 14 points and the 8 between it and the words.
-        XCTAssertEqual(width(SystemEvent(text: words, indent: 0)), styled + 14 + 8, accuracy: 1)
+        // The icon's 14 points and the 8 between it and the words, and the room the span takes at its two sides (#27): the character before it and its own last.
+        XCTAssertEqual(width(SystemEvent(text: words, indent: 0)), styled + 14 + 8 + 2 * InlineCodeText.inset, accuracy: 1)
         XCTAssertNotEqual(width(SystemEvent(text: words, indent: 0)), width(Text(verbatim: words).font(PardnerFont.ui(size: 13, weight: .regular))) + 14 + 8, accuracy: 1)
     }
 
@@ -224,6 +230,63 @@ final class ThreadColumnTests: XCTestCase {
         XCTAssertEqual(joins, [false, true, false, false], "a call line stands between two and three")
     }
 
+    /// A call that opens the bot's reply carries the bot's head, and the text after it joins that head; a later call of the same reply carries
+    /// none (#136).
+    func testACallThatOpensTheBotsReplyCarriesTheBotsHead() {
+        var s = Session()
+        s.typed("read the file")
+        s.line("Read: a.txt")
+        s.botText("Its first line is a title.")
+        s.line("Read: b.txt")
+        let rows = s.rows
+        XCTAssertEqual(rows.map(\.showsHead), [true, true, false, false], "the prompt's head, the call's, the text joins it, the second call has none")
+        XCTAssertEqual(rows[1].head?.author, bot)
+        XCTAssertEqual(rows.map(\.joins), [false, false, true, false])
+    }
+
+    /// A bot's reply has one head: its texts after a call or a system event stand under it, until a person writes (#166).
+    func testABotsReplyHasOneHeadThroughItsCallsAndSystemEvents() {
+        var s = Session()
+        s.publishProfile()
+        s.typed("run the tests")
+        s.botText("Running them.")
+        s.line("Bash: npm test")
+        s.botText("They pass.")
+        s.say("notice", "Stopped.")
+        s.botText("Anything else?")
+        s.typed("no")
+        let rows = s.rows
+        XCTAssertEqual(rows.map(\.showsHead), [true, true, false, false, false, false, true], "the prompt, the reply's one head, then the next prompt")
+        XCTAssertEqual(rows.map(\.joins), [false, false, false, true, false, true, false])
+    }
+
+    /// Messages this device cannot open are drawn between the bot's two texts: the second text is not the first one's continuation across them.
+    func testABotTextAfterUnreadableMessagesOpensItsOwnHead() {
+        var s = Session()
+        s.botText("First.")
+        s.unreadable()
+        s.unreadable()
+        s.botText("Second.")
+        let rows = s.rows
+        guard case .unreadable(2, _) = rows[1].content else { return XCTFail("a counted group of two between the texts") }
+        XCTAssertEqual(rows.map(\.joins), [false, false, false], "the group is drawn between them")
+        XCTAssertTrue(rows[2].showsHead)
+    }
+
+    /// A scheduled run opens a turn: its call opens its own head and its length is the run's, not the earlier reply's (a stopped turn writes
+    /// no footer).
+    func testAScheduledRunOpensATurnOfItsOwn() {
+        var s = Session()
+        s.botText("Done earlier.")
+        s.run()
+        s.line("Read: a.txt")
+        s.botText("Read it.")
+        s.say("footer", "5s")
+        let rows = s.rows
+        XCTAssertEqual(rows.map(\.showsHead), [true, false, true, false], "the earlier text, the run line, the run's call, its text under it")
+        XCTAssertEqual(rows.map(\.duration), [nil, nil, "5s", nil], "the run's length is on the run's head")
+    }
+
     func testATintedBlockJoinsNothingAndNothingJoinsIt() {
         var s = Session()
         s.typed("one")
@@ -307,12 +370,13 @@ final class ThreadColumnTests: XCTestCase {
         XCTAssertEqual(rows[0].duration, "4s")
     }
 
-    func testADurationWithNoAnswerOfTheBotAboveItIsNotDrawn() {
+    /// A turn of calls alone has the bot's head over its first call, and its length goes there; a person's time never carries it (#136).
+    func testACallsOnlyTurnGivesItsLengthToTheHeadOverItsFirstCall() {
         var s = Session()
         s.typed("one")
         s.line("Read: a.txt")
         s.say("footer", "4s")
-        XCTAssertTrue(s.rows.allSatisfy { $0.duration == nil }, "a person's time never carries the bot's seconds")
+        XCTAssertEqual(s.rows.map(\.duration), [nil, "4s"], "the person's prompt, then the call under the bot's head")
     }
 
     func testAFooterWithNoLengthDrawsNoRow() {
@@ -331,7 +395,7 @@ final class ThreadColumnTests: XCTestCase {
         s.typed("/stop")
         s.line("Read: a.txt")
         s.say("footer", "9s")
-        XCTAssertTrue(s.rows.allSatisfy { $0.duration == nil }, "the answer ended with no footer: the calls-only turn's 9s is not its length")
+        XCTAssertEqual(s.rows.map(\.duration), [nil, nil, "9s"], "the answer ended with no footer; the calls-only turn after the prompt has its own head")
     }
 
     @MainActor
@@ -346,7 +410,36 @@ final class ThreadColumnTests: XCTestCase {
         XCTAssertGreaterThan(drawn("3s"), drawn(""), "the length stands under the answer")
     }
 
-    func testAWorksEndClosesItsTurnAndAColdTurnGivesItsLengthToNoOne() {
+    /// A reply whose first row is a text draws its length beside its time: the line under the reply would say it twice.
+    @MainActor
+    func testAWordsAnswerThatStartsWithATextDrawsItsLengthOnce() {
+        func drawn(_ footer: String) -> CGFloat {
+            var s = Session()
+            s.botText("Done.")
+            s.say("footer", footer)
+            let thread = s.model.channels[s.channel]!.threads[s.prompt.hex]!
+            return height(Answered(model: s.model, icons: [:], thread: thread, prompt: thread.root!))
+        }
+        XCTAssertEqual(drawn("3s"), drawn(""), accuracy: 1, "beside the time, with no line of its own")
+    }
+
+    /// A word's answer whose reply starts with a call keeps its length in the conversation: the head that carries it in the thread is the
+    /// call's, which this list does not draw.
+    @MainActor
+    func testAWordsAnswerThatStartsWithACallShowsItsLength() {
+        func drawn(_ footer: String) -> CGFloat {
+            var s = Session()
+            s.line("Read: a.txt")
+            s.answer()
+            s.say("footer", footer)
+            let thread = s.model.channels[s.channel]!.threads[s.prompt.hex]!
+            XCTAssertEqual(ThreadRows.build(thread, isSystem: { _ in false }).first?.duration, footer.isEmpty ? nil : footer, "the call's row carries it")
+            return height(Answered(model: s.model, icons: [:], thread: thread, prompt: thread.root!))
+        }
+        XCTAssertGreaterThan(drawn("3s"), drawn(""), "the length stands under the answer")
+    }
+
+    func testAWorksEndClosesItsTurnAndTheNextTurnHasItsOwnHeadAndLength() {
         var s = Session()
         s.idleAnswer(0xA1)
         s.say("footer", "4s")
@@ -355,7 +448,8 @@ final class ThreadColumnTests: XCTestCase {
         let rows = s.rows
         XCTAssertEqual(rows.count, 2)
         XCTAssertEqual(rows[0].duration, "4s", "the first answer keeps its own length")
-        XCTAssertNil(rows[1].duration)
+        XCTAssertEqual(rows[1].duration, "9s", "the calls-only turn after the work's end has its head and its length")
+        XCTAssertTrue(rows[1].showsHead)
     }
 
     func testEachIdleTurnHasItsHeadAndItsLength() {
@@ -375,7 +469,8 @@ final class ThreadColumnTests: XCTestCase {
         s.typed("two")
         s.line("Read: a.txt")
         s.typed("three")
-        XCTAssertEqual(s.rows.map(\.gapAbove), [PardnerMetrics.messageGap, PardnerMetrics.groupGap, PardnerMetrics.cardGap, PardnerMetrics.messageGap])
+        XCTAssertEqual(s.rows.map(\.gapAbove), [PardnerMetrics.messageGap, PardnerMetrics.groupGap, PardnerMetrics.messageGap, PardnerMetrics.messageGap],
+                       "the call opens the bot's reply: a message's gap")
         XCTAssertEqual(s.rows.map { ThreadRow.stack + $0.offset }, s.rows.map(\.gapAbove), "each row corrects the stack's spacing to its own gap")
     }
 

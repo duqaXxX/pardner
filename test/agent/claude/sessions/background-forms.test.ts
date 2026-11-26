@@ -22,14 +22,14 @@ import {
   recordOf,
   sdkMessages,
 } from "../../../support/sessions.ts";
+import { closedLines } from "./helpers.ts";
 
 const NAME = "background-forms";
 const STARTED =
   'The Monitor reported "tick one"; I\'m waiting for "tick two" before stopping it with TaskStop.';
 const MONITOR_SAID =
   'I was told the Monitor printed "tick two", so I stopped it with TaskStop and it is now shut down.';
-const SHELL_ENDED =
-  '✓ Background command "Sleep 12 seconds then print done" completed (exit code 0)';
+const SHELL_ENDED_TEXT = 'Background command "Sleep 12 seconds then print done" completed';
 const SHELL_SAID =
   "I was told the background `sleep 12; echo done` command finished with exit code 0.";
 const AGENT_SAID = 'I was told the subagent that ran `sleep 20` finished and replied "ok".';
@@ -86,8 +86,14 @@ test("a Monitor, a command and an agent in the background read in one form", asy
     // line is in no record: the turn it opens has no line to say what woke it, and its stop
     // closes its line (the TaskStop call before it is a left-out line, so only a newline parts
     // it from the first words).
-    [`${STARTED}\n${MONITOR_SAID}`, `${SHELL_ENDED}\n\n${SHELL_SAID}\n${AGENT_SAID}`].join("\n\n"),
+    [`${STARTED}\n${MONITOR_SAID}`, `${SHELL_SAID}\n${AGENT_SAID}`].join("\n\n"),
   ]);
+  // The command has a line, which says its end: no end text of the bot (#166).
+  assert.ok(!h.bodies().join("\n").includes(SHELL_ENDED_TEXT));
+  assert.ok(
+    closedLines(h).some((update) => update.name === "Bash"),
+    "the command's line closed",
+  );
   // The form adds no reply: one for the owner's turn.
   assert.equal(h.room.written(h.channel).filter((m) => m.kind === "reply").length, 1);
 });

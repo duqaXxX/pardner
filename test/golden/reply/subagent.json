@@ -202,6 +202,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ ls -la",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01NJC7PqCRjvqpuDbQxHDXTp",
       "message": false,
@@ -220,6 +224,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ ls -la",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01NJC7PqCRjvqpuDbQxHDXTp",
       "message": false,

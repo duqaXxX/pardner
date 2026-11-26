@@ -80,6 +80,7 @@ import {
 import { STATE_MODULES } from "../../../support/state-modules.ts";
 import {
   activityKinds,
+  closedLines,
   expectedTurns,
   footers,
   inside,
@@ -932,10 +933,11 @@ test("resolve directory follows a link before the `..` after it", POSIX_ONLY, (t
   assert.equal(resolved("loop1/../in", root), "missing");
 });
 
-// A report opens with Claude Code's notification summary (recorded: `Background command "..."
-// completed (exit code 0)`, `Agent "..." finished`), never with a tool line.
+// A report is Claude Code's own turn about a task. An agent's end is its summary line (recorded:
+// `Agent "..." finished`) or its card, never a tool line; a command's end is said by its line,
+// which closes in place, and the report holds only the agent's words (#166).
 
-test("a report opens with claude code s summary and takes the footer", async (t) => {
+test("a command s report has no end text, its line says the end, and takes the footer", async (t) => {
   const [first, notice, injected] = splitBackground();
   const h = memoryHarnessFor(t)({ turns: [first] });
   await (await h.session().submit("start it")).done.wait();
@@ -944,7 +946,9 @@ test("a report opens with claude code s summary and takes the footer", async (t)
   await h.sleep(0.05);
   const report = at(h.bodies(), 0); // appended to the one reply there is
   const summary = systemRecord(notice, "task_notification").summary;
-  assert.ok(report.includes(`✓ ${summary}`)); // Claude Code's own words, as in the terminal
+  // The command's line closes in place and says how it ended: no end text of the bot (#166).
+  assert.ok(typeof summary === "string" && !report.includes(summary), report);
+  assert.ok(closedLines(h).length > 0, "the command's line closed");
   // The task has now fully ended (report in, nothing else owed): the reply ends, with its footer.
   assert.ok(noStreamOpen(h));
   assert.deepEqual(footers(h), [true]);
@@ -1775,9 +1779,10 @@ test("an owner query is sent at once while a background turn is expected", async
   await second.done.wait();
   assert.deepEqual(h.clients[0]?.queries, ["start it", "next"]);
   const background = h.bodies().map(isReport);
-  // The prompt went out at once, so its turn ran before the report turn: the notification's end
-  // line opens the answer, and the thread holds the first reply and that one.
-  assert.deepEqual(background, [false, true]);
+  // The prompt went out at once, so its turn ran before the report turn: the command's line
+  // says its end, so no end text opens the answer (#166), and the thread holds the first reply
+  // and that one.
+  assert.deepEqual(background, [false, false]);
 });
 
 /** The task lines the replies show (`[status] title`), in order: a card each on a chat that draws them. */
@@ -2016,9 +2021,12 @@ test("a failed background task shows why in the reply that started it", async (t
   await (await h.session().submit("start it")).done.wait();
   h.clients[0]?.inject([...failed, ...injected]);
   await h.until(() => h.replies().some(isReport));
-  const started = at(h.replies(), 0);
   const words = summary.split(/\s+/).filter(Boolean).join(" ").slice(0, 40);
-  assert.ok(started.includes("✗") && started.includes(words));
+  // The command's line closes in error and says why in its output: no end text of the bot (#166).
+  assert.ok(
+    taskUpdates(h).some((update) => update.status === "error" && update.output?.includes(words)),
+  );
+  assert.ok(!at(h.replies(), 0).includes("✗"));
 });
 
 test("closing the session leaves no card and no stream for running tasks", async (t) => {
@@ -2070,7 +2078,7 @@ test("an idle close ends a reply that still waited for its task", async (t) => {
   assert.deepEqual(posted(h), []);
 });
 
-test("a notification with no turn is said in the reply to the next message and releases the queue", async (t) => {
+test("a notification with no turn leaves the end to the command's line and releases the queue", async (t) => {
   const [first, notice] = splitBackground();
   const h = memoryHarnessFor(t)({ turns: [first, sdkMessages("tools")] });
   const session = h.session();
@@ -2080,11 +2088,10 @@ test("a notification with no turn is said in the reply to the next message and r
   const second = await session.submit("next");
   await reportTurnNeverCame(h); // the wait for a report turn passes
   await second.done.wait();
-  // The task has no line, and the owner's message came before any report: its end is said at
-  // the top of the reply to that message, where the terminal prints it, and in no post of its
-  // own.
-  await h.until(() => isReport(at(h.replies(), 1)));
-  assert.ok(!isReport(at(h.replies(), 0)));
+  // The owner's message came before any report, and the command's line says its end: no end
+  // text opens the reply to that message (#166), and no post of its own.
+  assert.ok(!h.replies().some((text) => text.includes("Background command")));
+  assert.ok(closedLines(h).length > 0, "the command's line closed");
   assert.equal(replyCount(h), 2);
   assert.deepEqual(posted(h), []);
   assert.deepEqual(h.clients[0]?.queries, ["start it", "next"]);
@@ -2125,13 +2132,15 @@ test("a task that ends after a report turn began waits for the next report turn"
   await h.sleep(0.05);
   h.clients[0]?.inject(injected.slice(1));
   await h.until(() => inside(session).active === null && h.replies().some(isReport), 3.0);
-  const text = h.replies().join("\n");
-  assert.ok(text.includes('Background command "Sleep for 5 seconds then print done" completed'));
-  assert.ok(!text.includes("Second sleep"));
-  // No turn comes to report the second: once the wait for one has passed, its end is said in
-  // the reply that started it. The first report's start had cancelled the wait.
+  // The command's line says its end: no end text in the report (#166).
+  assert.ok(!h.replies().join("\n").includes("Background command"));
+  assert.ok(closedLines(h).length > 0, "the first command's line closed");
+  // The second task's end waits for the next report turn.
+  assert.equal(inside(session).ended.length, 1);
+  // No turn comes to report the second: once the wait for one has passed, its end waits no more
+  // (its line says it, so no text is written). The first report's start had cancelled the wait.
   await reportTurnNeverCame(h);
-  await h.until(() => h.replies().join("\n").includes('Background command "Second sleep"'), 3.0);
+  await h.until(() => inside(session).ended.length === 0, 3.0);
 });
 
 test("a query crossing a notification never hangs", async (t) => {
@@ -3176,8 +3185,10 @@ for (const taskType of ["constructor", "__proto__"]) {
     await (await session.submit("start it")).done.wait();
     assert.ok((await session.status()).endsWith("\nBackground: `1 task`"));
     h.clients[0]?.inject([...notice, ...injected]);
-    await h.until(() => h.bodies().some((body) => body.includes('Task "')));
+    // The task's line says its end, so the report is the agent's own words (#166).
+    await h.until(() => h.bodies().some(isReport));
     assert.ok(!h.bodies().some((body) => body.includes("undefined")), h.bodies().join("\n"));
+    assert.ok(taskUpdates(h).every((update) => update.title !== "undefined"));
   });
 }
 
@@ -5276,6 +5287,41 @@ test("a stop says what it waits for in a message where the chat draws no activit
   assert.deepEqual(posted(h), [texts.fill(texts.RESTART_WAITS_MESSAGE, { counts: "1 shell" })]); // once, however long
   drain.cut.abort();
   await drain.promise;
+});
+
+test("the message that says what a stop waits for is withdrawn when the sessions close", async (t) => {
+  const [first] = splitBackground();
+  const h = memoryHarnessFor(t, { chatCapabilities: { activityLine: false } })({ turns: [first] });
+  await (await h.session().submit("start it")).done.wait();
+  const drain = startDrain(h);
+  await polled(h);
+  assert.deepEqual(posted(h), [texts.fill(texts.RESTART_WAITS_MESSAGE, { counts: "1 shell" })]);
+  const session = h.session();
+  assert.ok(await session.stop()); // the task ends: the drain does too
+  await drainEnds(h, drain);
+  assert.deepEqual(posted(h), [texts.fill(texts.RESTART_WAITS_MESSAGE, { counts: "1 shell" })]); // the drain leaves it
+  await h.manager.closeAll();
+  assert.deepEqual(posted(h), []); // the stop withdrew it, as it no longer holds
+});
+
+test("the message of a stop cut short by a second signal is withdrawn as well", async (t) => {
+  const [first] = splitBackground();
+  const h = memoryHarnessFor(
+    t,
+    {},
+    { activityLine: true, activityRefused: true },
+  )({
+    turns: [first],
+  });
+  await (await h.session().submit("start it")).done.wait();
+  const drain = startDrain(h);
+  await polled(h);
+  await polled(h);
+  assert.deepEqual(posted(h), [texts.fill(texts.RESTART_WAITS_MESSAGE, { counts: "1 shell" })]);
+  drain.cut.abort(); // the second signal: no wait for the task
+  await drain.promise;
+  await h.manager.closeAll();
+  assert.deepEqual(posted(h), []);
 });
 
 test("a stop posts nothing where the activity line draws the wait", async (t) => {

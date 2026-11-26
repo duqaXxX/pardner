@@ -9,6 +9,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ sleep 15",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01Y54HD6jqz3tmBKBzz4V8tR",
       "message": false,
@@ -63,6 +67,10 @@
       "agent": null,
       "calls": 0,
       "details": "Running in background",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01Y54HD6jqz3tmBKBzz4V8tR",
       "message": false,
@@ -283,6 +291,10 @@
        "agent": null,
        "calls": 0,
        "details": "Running in background",
+       "fold": [
+        "Ran {n} shell command",
+        "Ran {n} shell commands"
+       ],
        "folded": null,
        "id": "toolu_01Y54HD6jqz3tmBKBzz4V8tR",
        "message": false,
@@ -612,6 +624,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ sleep 15",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01Y54HD6jqz3tmBKBzz4V8tR",
      "message": false,
@@ -666,6 +682,10 @@
      "agent": null,
      "calls": 0,
      "details": "Running in background",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01Y54HD6jqz3tmBKBzz4V8tR",
      "message": false,
@@ -1014,6 +1034,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01Y54HD6jqz3tmBKBzz4V8tR",
      "message": false,
@@ -1032,6 +1056,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01Y54HD6jqz3tmBKBzz4V8tR",
      "message": false,

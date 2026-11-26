@@ -34,6 +34,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ ls -la && git rev-parse --is-inside-work-tree 2>&1; git branch --show-current 2>&1; find . -maxdepth 3 -iname '*migrat*' -not -path '*/node_modules/*' 2>/dev/null | head -50",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01JbTVb4QN3MCFvc4TwoZE7q",
       "message": false,
@@ -52,6 +56,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ ls -la && git rev-parse --is-inside-work-tree 2>&1; git branch --show-current 2>&1; find . -maxdepth 3 -iname '*migrat*' -not -path '*/node_modules/*' 2>/dev/null | head -50",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01JbTVb4QN3MCFvc4TwoZE7q",
       "message": false,
@@ -415,6 +423,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ ls -la && git rev-parse --is-inside-work-tree 2>&1; git branch --show-current 2>&1; find . -maxdepth 3 -iname '*migrat*' -not -path '*/node_modules/*' 2>/dev/null | head -50",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01JbTVb4QN3MCFvc4TwoZE7q",
      "message": false,
@@ -433,6 +445,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ ls -la && git rev-parse --is-inside-work-tree 2>&1; git branch --show-current 2>&1; find . -maxdepth 3 -iname '*migrat*' -not -path '*/node_modules/*' 2>/dev/null | head -50",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01JbTVb4QN3MCFvc4TwoZE7q",
      "message": false,

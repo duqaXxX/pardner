@@ -81,6 +81,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ sleep 50",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01Td1gCHsiirDMRhW8bLiMLr",
       "message": false,
@@ -99,6 +103,10 @@
       "agent": null,
       "calls": 0,
       "details": "Running in background",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01Td1gCHsiirDMRhW8bLiMLr",
       "message": false,
@@ -117,6 +125,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ sleep 55",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01RefenAZD6eLikxHPLNrWYt",
       "message": false,
@@ -135,6 +147,10 @@
       "agent": null,
       "calls": 0,
       "details": "Running in background",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01RefenAZD6eLikxHPLNrWYt",
       "message": false,
@@ -153,6 +169,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ python3 -c 'import time; time.sleep(30)'",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01MvQPaGsorgPsgXQcSMcWy4",
       "message": false,
@@ -207,6 +227,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ python3 -c 'import time; time.sleep(30)'",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01MvQPaGsorgPsgXQcSMcWy4",
       "message": false,
@@ -225,6 +249,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ python3 -c 'import time; time.sleep(30)'",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01MvQPaGsorgPsgXQcSMcWy4",
       "message": false,
@@ -280,6 +308,10 @@
        "agent": null,
        "calls": 0,
        "details": "Running in background",
+       "fold": [
+        "Ran {n} shell command",
+        "Ran {n} shell commands"
+       ],
        "folded": null,
        "id": "toolu_01Td1gCHsiirDMRhW8bLiMLr",
        "message": false,
@@ -295,6 +327,10 @@
        "agent": null,
        "calls": 0,
        "details": "Running in background",
+       "fold": [
+        "Ran {n} shell command",
+        "Ran {n} shell commands"
+       ],
        "folded": null,
        "id": "toolu_01RefenAZD6eLikxHPLNrWYt",
        "message": false,
@@ -540,6 +576,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ sleep 50",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01Td1gCHsiirDMRhW8bLiMLr",
      "message": false,
@@ -558,6 +598,10 @@
      "agent": null,
      "calls": 0,
      "details": "Running in background",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01Td1gCHsiirDMRhW8bLiMLr",
      "message": false,
@@ -576,6 +620,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ sleep 55",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01RefenAZD6eLikxHPLNrWYt",
      "message": false,
@@ -594,6 +642,10 @@
      "agent": null,
      "calls": 0,
      "details": "Running in background",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01RefenAZD6eLikxHPLNrWYt",
      "message": false,
@@ -612,6 +664,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ python3 -c 'import time; time.sleep(30)'",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01MvQPaGsorgPsgXQcSMcWy4",
      "message": false,
@@ -666,6 +722,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ python3 -c 'import time; time.sleep(30)'",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01MvQPaGsorgPsgXQcSMcWy4",
      "message": false,
@@ -684,6 +744,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ python3 -c 'import time; time.sleep(30)'",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01MvQPaGsorgPsgXQcSMcWy4",
      "message": false,
@@ -738,6 +802,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01Td1gCHsiirDMRhW8bLiMLr",
      "message": false,
@@ -756,6 +824,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01Td1gCHsiirDMRhW8bLiMLr",
      "message": false,
@@ -786,6 +858,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01RefenAZD6eLikxHPLNrWYt",
      "message": false,
@@ -804,6 +880,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01RefenAZD6eLikxHPLNrWYt",
      "message": false,

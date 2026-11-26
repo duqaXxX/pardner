@@ -536,12 +536,15 @@ MainActor.assumeIsolated {
             // The channel's folder, as the bot's answer to `/bind` says it.
             let bind = try put(2, alice, ["text": "/bind /srv/example/project"], to: mini, seconds: 1)
             try put(1, mini, ["markdown": "Bound.", "say": "notice", "bind": ["folder": "/srv/example/project", "state": "usable"]], re: bind, seconds: 2)
-            func call(_ title: String, status: String = "complete", path: String? = nil, output: String? = nil, message: Bool = false, agent: String? = nil, preview: [String: Any]? = nil, seconds: Double) throws {
-                var task: [String: Any] = ["title": title, "status": status, "details": NSNull(), "output": output as Any? ?? NSNull(), "task": false, "message": message, "calls": 0,
+            func call(_ title: String, status: String = "complete", path: String? = nil, output: String? = nil, message: Bool = false, agent: String? = nil, preview: [String: Any]? = nil,
+                      background: Bool = false, fold: [String]? = nil, in root: MessageRef? = nil, seconds: Double) throws {
+                var task: [String: Any] = ["title": title, "status": status, "details": NSNull(), "output": output as Any? ?? NSNull(), "task": background, "message": message, "calls": 0,
                                            "preview": preview ?? NSNull(), "startedAt": NSNull()]
                 if let path { task["path"] = path }
                 if let agent { task["agent"] = agent }
-                try put(1, mini, ["thread": fixRoot.hex, "say": "task", "task": task], re: fixRoot, seconds: seconds)
+                if let fold { task["fold"] = fold }
+                let root = root ?? fixRoot
+                try put(1, mini, ["thread": root.hex, "say": "task", "task": task], re: root, seconds: seconds)
             }
             try call("Read: /srv/example/project/src/relay.ts", path: "/srv/example/project/src/relay.ts", seconds: 10)
             try call("Read: /srv/example/other/notes.md", path: "/srv/example/other/notes.md", seconds: 11)
@@ -576,6 +579,26 @@ MainActor.assumeIsolated {
             // Tall, so that the whole thread shows: the diff, the answer's table and its code blocks (unit C).
             try render(appearance, MainWindow(model: shown, devices: botDevices, channels: ChannelsModel(devices: botDevices), composers: boxesHub, channel: sample.channel, thread: sample.thread, now: now),
                        size: NSSize(width: 1280, height: 1500), to: "window-tall-\(theme).png")
+            // The thread's calls folded into one line (#27): finished calls run together, a failed one, a background command and a running one keep their rows; inline code
+            // with its border, between the texts. Written to `window-folds-<theme>.png`.
+            let foldRoot = try put(2, alice, ["text": "What does this project hold?"], to: mini, seconds: 40)
+            try put(3, mini, [:], re: foldRoot, seconds: 41)
+            func say(_ markdown: String, seconds: Double) throws { try put(1, mini, ["thread": foldRoot.hex, "markdown": markdown], seconds: seconds) }
+            let read = ["Read {n} file", "Read {n} files"], ran = ["Ran {n} shell command", "Ran {n} shell commands"]
+            try say("I read the README first.", seconds: 42)
+            try call("Read: /srv/example/project/README.md", path: "/srv/example/project/README.md", fold: read, in: foldRoot, seconds: 43)
+            try call("Read: /srv/example/project/package.json", path: "/srv/example/project/package.json", fold: read, in: foldRoot, seconds: 44)
+            try say("Then I listed the folder with `ls -la` and ran `npm test`.", seconds: 45)
+            // A span that opens its line, and one that wraps over two lines.
+            try say("`npm test` passed. Its output shows that the relay and the protocol suites ran together, and that the one command to start them is `npm run check -- --reporter=spec --test-timeout=30000 --no-warnings --experimental-test-coverage`, which is what CI runs.", seconds: 45.5)
+            try call("Bash: ls -la", fold: ran, in: foldRoot, seconds: 46)
+            try call("Bash: npm test", fold: ran, in: foldRoot, seconds: 47)
+            try call("Bash: cat missing.txt", status: "error", output: "cat: missing.txt: No such file or directory", fold: ran, in: foldRoot, seconds: 48)
+            try call("Bash: sleep 30", background: true, fold: ran, in: foldRoot, seconds: 49)
+            try call("Bash: git status", fold: ran, in: foldRoot, seconds: 50)
+            try call("Bash: npm run build", status: "in_progress", fold: ran, in: foldRoot, seconds: 51)
+            try render(appearance, MainWindow(model: shown, devices: botDevices, channels: ChannelsModel(devices: botDevices), composers: boxesHub, channel: sample.channel, thread: foldRoot.hex, now: now),
+                       size: NSSize(width: 1280, height: 800), to: "window-folds-\(theme).png")
             for (name, make) in screens { try render(appearance, PairingScreen(model: make()), size: page, to: "\(name)-\(theme).png") }
             let source = SyntheticKey()
             let empty = RecoverySheetModel(source: source)

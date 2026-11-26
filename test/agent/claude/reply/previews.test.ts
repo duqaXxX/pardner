@@ -124,6 +124,16 @@ for (const [name, result] of OTHER_SHAPES) {
   });
 }
 
+test("the fold words of a tool are the module's sentences, and none for a tool without (#27)", () => {
+  assert.deepEqual(CLAUDE_PREVIEWS.foldWords("Bash"), [
+    "Ran {n} shell command",
+    "Ran {n} shell commands",
+  ]);
+  assert.deepEqual(CLAUDE_PREVIEWS.foldWords("Read"), ["Read {n} file", "Read {n} files"]);
+  assert.equal(CLAUDE_PREVIEWS.foldWords("WebFetch"), null);
+  assert.equal(CLAUDE_PREVIEWS.foldWords("toString"), null, "an inherited name is no tool");
+});
+
 test("folded calls read as the terminal for bash and read only", () => {
   assert.equal(folded("Bash", 1), "Ran 1 shell command");
   assert.equal(folded("Bash", 3), "Ran 3 shell commands");

@@ -202,6 +202,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ python3 -c \"import time; time.sleep(25)\"",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01SFZY22x3oGU6aLnmZJYgy7",
       "message": false,
@@ -311,6 +315,10 @@
        "agent": null,
        "calls": 0,
        "details": "$ python3 -c \"import time; time.sleep(25)\"",
+       "fold": [
+        "Ran {n} shell command",
+        "Ran {n} shell commands"
+       ],
        "folded": null,
        "id": "toolu_01SFZY22x3oGU6aLnmZJYgy7",
        "message": false,

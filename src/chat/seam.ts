@@ -93,6 +93,13 @@ export interface TaskUpdate {
   /** The file the call names, as the agent wrote it (`ToolVocabulary.files`); absent on any other line. */
   readonly path?: string;
   /**
+   * How the agent's terminal words this call when finished calls are folded into one line: the
+   * sentence for one call and for several (`ToolVocabulary.words`), `{n}` standing for the count.
+   * Absent on a call of a tool that declares none. The core fills it on every line of such a tool;
+   * a chat that folds a run of finished calls reads it, one that does not may ignore it.
+   */
+  readonly fold?: readonly [one: string, many: string];
+  /**
    * Null on every line the core hands to a sink. A provider that shows a run of calls as
    * counts folds the lines itself and sets this on the lines it makes:
    * what replaces the line once the reply's body has ended; empty removes it. A run's line that
@@ -454,9 +461,11 @@ export interface ThreadChat {
   written(): void;
   /**
    * A line of the daemon's own, small and grey, as a message of its own. `text` is plain: the
-   * provider shows it as written, whatever marks it holds.
+   * provider shows it as written, whatever marks it holds. Resolves with the message's id, to
+   * `withdraw` it later, or null when the chat has none to give. A text sent in several
+   * messages resolves with the first one's id.
    */
-  notice(text: string): Promise<void>;
+  notice(text: string): Promise<MessageId | null>;
   /**
    * Puts a request to the owner: a tool's permission, the agent's questions, the same-folder
    * hold, a session's setup or the confirmation of a shell command. `requestId` is what the owner's answer comes back with
@@ -467,8 +476,8 @@ export interface ThreadChat {
    */
   ask(requestId: string, request: OwnerRequest, title: string): Promise<MessageId>;
   /**
-   * Removes a request that was decided or is stale; one already gone counts as removed. False
-   * when the chat did not remove it and it still shows.
+   * Removes a request that was decided or is stale, or a notice by the id `notice` resolved with;
+   * one already gone counts as removed. False when the chat did not remove it and it still shows.
    */
   withdraw(request: MessageId): Promise<boolean>;
   /**

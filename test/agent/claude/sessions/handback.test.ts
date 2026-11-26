@@ -29,7 +29,7 @@ import {
   recordOf,
   sdkMessages,
 } from "../../../support/sessions.ts";
-import { inside, notified, rootStatuses } from "./helpers.ts";
+import { closedLines, inside, notified, rootStatuses } from "./helpers.ts";
 
 const NAME = "subagent-handback";
 const AGENT_ENDED = '✓ Agent "Run echo subagent-ok" finished';
@@ -128,8 +128,10 @@ test("a hand-back is reported in the reply that started the subagent, and the tu
   // The reply ended: the memory chat keeps every report in the one message.
   noExtraMessage(h);
   const whole = h.bodies().join("\n");
-  assert.ok(whole.indexOf(HANDED_BACK) < whole.indexOf(SHELL_ENDED));
-  assert.ok(whole.indexOf(SHELL_ENDED) < whole.indexOf(SHELL_REPORTED));
+  // The command's line says its end: no end text of the bot (#166).
+  assert.ok(!whole.includes(SHELL_ENDED), whole);
+  assert.ok(closedLines(h).length > 0, "the command's line closed");
+  assert.ok(whole.indexOf(HANDED_BACK) < whole.indexOf(SHELL_REPORTED));
   assert.equal(rootStatuses(h).at(-1), "done");
   // The owner is told once, when everything has ended, the turn that did nothing included.
   assert.deepEqual(notified(h), ["done"]);

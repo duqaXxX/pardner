@@ -435,6 +435,7 @@ struct MessageRow: View {
     /// A bot's notice is drawn as a compact system event: the thread panel's form; the conversation draws it as any text of the bot.
     var compactNotices = false
     @Environment(FileOpener.self) private var opener: FileOpener?
+    @Environment(\.botDevices) private var botDevices
 
     var body: some View {
         if compactNotices, model.isSystemEvent(message) {
@@ -446,9 +447,9 @@ struct MessageRow: View {
 
     private var text: some View {
         let name = Naming.sender(message.sender, in: model)
-        // Only a bot publishes a profile (a kind no app device may send), so it says who is a bot; a text's `say` field does not, since
-        // a person's app could write one.
-        let isBot = model.profiles[message.sender] != nil
+        // The device log names a device's kind, and only a bot publishes a profile (a kind no app device may send); a text's `say` field
+        // does not say it, since a person's app could write one. Either is enough: a bot whose profile is not read yet is still a bot (#106).
+        let isBot = botDevices.contains(message.sender) || model.profiles[message.sender] != nil
         return HStack(alignment: .top, spacing: mark.gap) {
             if joins { Color.clear.frame(width: mark.size, height: 0) } else {
                 Avatar(name: name, isBot: isBot, icon: icons[message.sender], size: mark.size, plate: tinted ? PardnerColor.surface : nil)
@@ -458,7 +459,7 @@ struct MessageRow: View {
                     HStack(alignment: .firstTextBaseline, spacing: PardnerMetrics.gap) {
                         Text(name).font(PardnerFont.ui(size: 14, weight: .semibold))
                         if isBot && mark.badgesBots { BotBadge() }
-                        Text(Naming.time(message.time) + (duration.map { " \u{B7} " + $0 } ?? "")).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                        Text(Naming.time(message.time) + (duration.map { " \u{B7} " + Naming.worked($0) } ?? "")).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
                             .help(Naming.dateTime(message.time))
                     }
                     .designLines()
@@ -477,7 +478,7 @@ struct MessageRow: View {
                         // A bot's text is read as Markdown, any other body of a bot keeps its code spans only; a person's stays exactly as typed (#73, 5.2).
                         if MarkdownView.reads(message.body) {
                             MarkdownView(text: message.shown, copy: { Clipboard.copy(message.shown) }, codeGround: tinted ? PardnerColor.surface : PardnerColor.raised).frame(maxWidth: PardnerMetrics.answerWidth, alignment: .leading)
-                        } else { Text(CodeSpans.styled(message.shown, ground: tinted ? PardnerColor.surface : PardnerColor.raised)) }
+                        } else { InlineCodeText(text: CodeSpans.styled(message.shown, ground: tinted ? PardnerColor.surface : PardnerColor.raised)) }
                     } else {
                         mentioned(Naming.mention(of: message, in: model), message.shown)
                     }
@@ -490,6 +491,11 @@ struct MessageRow: View {
         }
         .contextMenu { Button("Copy") { Clipboard.copy(message.shown) } }
     }
+}
+
+extension EnvironmentValues {
+    /// The devices the device log names bots, for a row that decides how its sender is drawn; empty where the window has no pairing.
+    @Entry var botDevices: Set<Data> = []
 }
 
 /// The daemon's own line of an event (`Stopped.`, `Background command completed`): an icon and its words, compact, on the text's column with no avatar.
@@ -517,11 +523,14 @@ struct Answered: View {
     var place: FilePlace?
     /// The channel's bound folder, which a call's path is written from.
     var folder: String?
+    /// The ids of the lines of the folds the owner opened (`CallFold.isOpen`).
+    @State private var opened: Set<String> = []
 
     var body: some View {
+        let rows = ThreadRows.build(thread, isSystem: { _ in false })
         VStack(alignment: .leading, spacing: PardnerMetrics.gap) {
             // The same rows as the thread panel, with their stable identities: a row's own state stays with it when an answer replaces its segments.
-            ForEach(ThreadRows.build(thread, isSystem: { _ in false })) { row in
+            ForEach(rows) { row in
                 switch row.content {
                 case .message(let line) where thread.isRunLine(line):
                     if case .run(let at)? = line.sessionText {
@@ -530,17 +539,34 @@ struct Answered: View {
                 case .message(let line): MessageRow(model: model, icons: icons, message: line, place: place, duration: row.duration)
                 case .unreadable(let count, let first): UnreadableRow(model: model, icons: icons, message: first, count: count, mark: .conversation, duration: row.duration)
                 case .line(let line): LineRow(line: line, state: thread.state(of: line), indent: 0, place: place, folder: folder, images: thread.images[line.ref] ?? [])
+                case .fold(let fold):
+                    FoldRow(fold: fold, isOpen: fold.isOpen(in: opened), toggle: { opened = fold.toggled(opened) }, indent: 0) { line in
+                        LineRow(line: line, state: thread.state(of: line), indent: 0, place: place, folder: folder, images: thread.images[line.ref] ?? [])
+                    }
                 case .body(let line, let index): LineBodyRow(line: line, index: index, indent: 0, firstTop: LineBodyRow.top(underStackOf: PardnerMetrics.gap))
                 case .segment(let answer):
                     // Read at each part that reaches it: a structure half written is drawn half written until a later part (#73, 2.1).
                     MarkdownView(text: answer.shown, copy: { Clipboard.copy(thread.text(of: answer)) }).designLines()
                         .frame(maxWidth: PardnerMetrics.answerWidth, alignment: .leading)
                         .contextMenu { Button("Copy") { Clipboard.copy(thread.text(of: answer)) } }
-                    // This list draws no head for an answer, so the length of its work stands on a line of its own, as it did before the thread's heads.
-                    if let duration = row.duration { Text(verbatim: duration).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted) }
                 }
             }
+            // The length stands beside the time of a head this list draws (a text, a lone unreadable message); the head of a reply that starts
+            // with a call, or with an answer's segment, is not drawn here, so the length stands on a line of its own under the reply.
+            if let line = Self.workedLine(rows) {
+                Text(verbatim: line).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+            }
             if let state { Text(state).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted) }
+        }
+    }
+
+    /// The line that says how long the work took, when the row that carries the length draws no head of its own: a message and a lone
+    /// unreadable row show it beside their time already.
+    static func workedLine(_ rows: [ThreadRow]) -> String? {
+        guard let row = rows.last(where: { $0.duration != nil }), let duration = row.duration else { return nil }
+        switch row.content {
+        case .message, .unreadable: return nil
+        case .line, .fold, .segment, .body: return Naming.worked(duration, asLine: true)
         }
     }
 
