@@ -80,6 +80,18 @@ public enum PardnerColor {
     public static let bg = Tokens.color("bg")
     /// The sidebar.
     public static let side = Tokens.color("side")
+    /// The sidebar's own text, secondary text, selected row, borders, boxes and brand marks: the light sidebar is dark blue, so it does not
+    /// take the window's values; in the dark theme each equals the window's token of the same role.
+    public static let sideText = Tokens.color("side-text")
+    public static let sideMuted = Tokens.color("side-muted")
+    public static let sideRaised = Tokens.color("side-raised")
+    public static let sideLine = Tokens.color("side-line")
+    public static let sideSurface = Tokens.color("side-surface")
+    public static let sideBrand = Tokens.color("side-brand")
+    public static let sideBrandSoft = Tokens.color("side-brand-soft")
+    public static let sideBrandText = Tokens.color("side-brand-text")
+    /// An error line on the sidebar: the window's red does not read on dark blue.
+    public static let sideDelText = Tokens.color("side-del-text")
     /// The right-hand panel.
     public static let panel = Tokens.color("panel")
     /// Cards and inputs.

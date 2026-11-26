@@ -181,7 +181,7 @@ struct ThumbnailView: View {
                     Image(decorative: thumbnail.image, scale: 1).resizable().scaledToFit().frame(maxHeight: ThumbnailRow.height)
                         .clipShape(RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
                 }
-                .buttonStyle(.plain).pointerStyle(.link).help(content.name)
+                .buttonStyle(.clickable).help(content.name)
             case .unreadable:
                 Text(verbatim: ThumbnailWords.unreadable).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
             }

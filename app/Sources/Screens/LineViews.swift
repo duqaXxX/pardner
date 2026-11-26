@@ -202,7 +202,7 @@ struct LineRow: View {
                         Button { openWindow(id: WindowID.reply, value: reply) } label: {
                             Label("Show", systemImage: "chevron.right").font(PardnerFont.ui(size: 12, weight: .medium))
                         }
-                        .buttonStyle(.plain).pointerStyle(.link).foregroundStyle(PardnerColor.muted)
+                        .buttonStyle(.clickable).foregroundStyle(PardnerColor.muted)
                     } else if f.status == .error, let output = f.output {
                         Text(verbatim: Self.bounded(output)).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
                     }
@@ -245,10 +245,10 @@ struct LineRow: View {
                     title.layoutPriority(1)
                     words
                 case .title(let open):
-                    Button(action: open) { title }.buttonStyle(.plain).pointerStyle(.link).layoutPriority(1)
+                    Button(action: open) { title }.buttonStyle(.clickable).layoutPriority(1)
                     words
                 case .words(let open):
-                    Button(action: open) { HStack(spacing: 8) { title.layoutPriority(1); words } }.buttonStyle(.plain).pointerStyle(.link)
+                    Button(action: open) { HStack(spacing: 8) { title.layoutPriority(1); words } }.buttonStyle(.clickable)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

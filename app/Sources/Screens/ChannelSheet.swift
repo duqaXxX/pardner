@@ -36,7 +36,7 @@ public struct ChannelSheet: View {
                     Picker("Bot", selection: Binding(get: { model.resolvedBot(names: names) }, set: { model.pick($0) })) {
                         ForEach(model.choices(names: names)) { Text(verbatim: $0.shown).tag(Optional($0.id)) }
                     }
-                    .labelsHidden().accessibilityLabel("Bot")
+                    .labelsHidden().clickable().accessibilityLabel("Bot")
                 }
             }
             if let problem = model.problem {

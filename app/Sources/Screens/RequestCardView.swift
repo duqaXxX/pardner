@@ -98,7 +98,7 @@ struct RequestCardView: View {
             if let description = p.description { line(description, PardnerColor.text) }
             if let shown = card.shownText {
                 mono(shown.text)
-                if shown.cut { Button("Show all") { card.showAll = true }.buttonStyle(.plain).pointerStyle(.link).font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.agentText) }
+                if shown.cut { Button("Show all") { card.showAll = true }.buttonStyle(.clickable).font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.agentText) }
             }
         case .question(let asked)?:
             ForEach(Array(asked.enumerated()), id: \.offset) { index, question in questionView(index, question) }
@@ -117,14 +117,16 @@ struct RequestCardView: View {
                 Picker("Model", selection: Binding(get: { card.setup?.shownModel ?? "" }, set: { card.setup?.choose(model: $0) })) {
                     ForEach(setup.modelOptions, id: \.value) { Text(verbatim: $0.name).tag($0.value) }
                 }
+                .clickable(enabled)
             }
             if !setup.effortOptions.isEmpty {
                 Picker("Effort", selection: Binding(get: { card.setup?.effort ?? "" }, set: { card.setup?.effort = $0 })) {
                     ForEach(setup.effortOptions, id: \.self) { Text(verbatim: $0 == SetupChoice.default ? "Default" : $0).tag($0) }
                 }
+                .clickable(enabled)
             }
             if request.bypassOffered {
-                Toggle("Bypass", isOn: Binding(get: { card.setup?.bypass ?? false }, set: { card.setup?.bypass = $0 })).toggleStyle(.switch)
+                Toggle("Bypass", isOn: Binding(get: { card.setup?.bypass ?? false }, set: { card.setup?.bypass = $0 })).toggleStyle(.switch).clickable(enabled)
             }
         }
     }
@@ -147,7 +149,7 @@ struct RequestCardView: View {
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).pointerStyle(.link)
+                .buttonStyle(.clickable)
             }
             TextField("Other", text: Binding(get: { card.questions.indices.contains(index) ? card.questions[index].other : "" }, set: { card.setOther(question: index, $0) }))
                 .focused($field, equals: index)

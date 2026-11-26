@@ -500,7 +500,7 @@ MainActor.assumeIsolated {
             let sample = Samples.model()
             // The usage boxes (visual pass, #174): each bot's thread ends a work with its account's numbers, the studio's read 25 minutes ago.
             var shown = sample.model
-            // A fixed clock, so that `Resets in` and `as of` read the same in every run.
+            // A fixed clock, so that `Resets in` reads the same in every run.
             let now = Date(timeIntervalSince1970: 1_764_000_000), nowMs = now.timeIntervalSince1970 * 1000
             let botIDs = [Data([0x4D, 0x14, 0x10, 0x03] + Array(repeating: 3, count: 28)), Data([0x57, 0x0D, 0x10, 0x04] + Array(repeating: 4, count: 28))]
             for (n, (bot, minutesAgo, session, week)) in [(botIDs[0], 3.0, 40.0, 35.0), (botIDs[1], 25.0, 62.0, 18.0)].enumerated() {

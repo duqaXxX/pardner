@@ -220,7 +220,7 @@ struct CodeBlock: View {
         Button { copyCode() } label: {
             Image(systemName: "doc.on.doc").font(.system(size: 12)).foregroundStyle(PardnerColor.muted).frame(width: 20, height: 20).contentShape(Rectangle())
         }
-        .buttonStyle(.plain).pointerStyle(.link).help("Copy code").accessibilityLabel("Copy code")
+        .buttonStyle(.clickable).help("Copy code").accessibilityLabel("Copy code")
     }
 
     var body: some View {

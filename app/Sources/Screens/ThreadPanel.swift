@@ -41,7 +41,7 @@ struct ThreadPanel: View {
                 Spacer()
                 if let composer { SessionControls(composer: composer, state: thread.state) }
                 Button(action: close) { Image(systemName: "xmark").font(.system(size: 13, weight: .semibold)).frame(width: 30, height: 30).contentShape(Rectangle()) }
-                    .buttonStyle(.plain).pointerStyle(.link).foregroundStyle(PardnerColor.muted)
+                    .buttonStyle(.clickable).foregroundStyle(PardnerColor.muted)
                     .accessibilityLabel("Close the thread")
             }
             .padding(.leading, PardnerMetrics.margin).padding(.trailing, 12).frame(height: PardnerMetrics.headerHeight)
@@ -224,7 +224,7 @@ struct SessionControls: View {
                 Button("Plan mode on") { composer.command("/plan on") }
                 Button("Plan mode off") { composer.command("/plan off") }
             } label: { Image(systemName: "ellipsis").frame(width: 30, height: 30) }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).pointerStyle(composer.canCommand ? .link : nil).fixedSize().disabled(!composer.canCommand).accessibilityLabel("Session mode")
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).clickable(composer.canCommand).fixedSize().disabled(!composer.canCommand).accessibilityLabel("Session mode")
         }
     }
 }
@@ -239,52 +239,50 @@ struct StopButton: View {
             Image(systemName: "stop.fill").font(.system(size: 13, weight: .semibold)).foregroundStyle(.red).frame(width: 30, height: 30).contentShape(Rectangle())
                 .pulses(blinks)
         }
-        .buttonStyle(.plain).pointerStyle(composer.canCommand ? .link : nil).disabled(!composer.canCommand)
+        .buttonStyle(.clickable).disabled(!composer.canCommand)
         .accessibilityLabel("Stop the session").help("Stop")
     }
 }
 
 /// The session's data under the header, in the 40 point row the conversation's tabs share: the values at its newest work's end, and the
 /// session's cost when its account has no plan. The model and effort first, the branch with its diff in monospace, then the context with its
-/// bar and the tokens, set apart on the right; one line, the branch cut first. The whole text is the help tag. A timeline of its own redraws
-/// the row each minute, so `as of` appears: the panel's `redraw` moves only at a day's change.
+/// bar and the tokens, set apart on the right; one line, the branch cut first. The whole text is the help tag.
 struct SessionRow: View {
     let model: ReadingModel
     let thread: MessageThread
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 60)) { context in
-            let profile = thread.bot.flatMap { model.profiles[$0] }
-            let cost = thread.costUsage == nil || profile?.plan != nil ? nil
-                : UsageLine.text(profileRead: profile != nil, plan: nil, windows: nil, cost: thread.costUsage, apiSeen: true, place: .composer, now: context.date, timeZone: .current)
-            let line = [thread.session, cost].compactMap { $0 }.joined(separator: " · ")
-            let facts = SessionFacts(line)
-            HStack(spacing: 14) {
-                // In the order the bot wrote them; the context and what follows it are set apart on the right.
-                ForEach(Array(facts.parts.enumerated()), id: \.offset) { index, part in
-                    if index == facts.firstRight { Spacer(minLength: 0) }
-                    switch part {
-                    case .plain(let text): Text(verbatim: text).font(PardnerFont.ui(size: 12, weight: .regular)).lineLimit(1).layoutPriority(1)
-                    case .model(let text): Text(verbatim: text).font(PardnerFont.ui(size: 12, weight: .semibold)).foregroundStyle(PardnerColor.text).lineLimit(1).layoutPriority(1)
-                    case .branch(let branch):
-                        (Text(verbatim: branch.name).foregroundStyle(PardnerColor.muted) + Text(verbatim: (branch.name.isEmpty ? "" : " ") + "+\(branch.added)").foregroundStyle(PardnerColor.addText)
-                            + Text(verbatim: " \u{2212}\(branch.removed)").foregroundStyle(PardnerColor.delText))
-                            .font(PardnerFont.mono(size: 12, weight: .regular)).lineLimit(1).truncationMode(.tail)
-                    case .context(let percent):
-                        HStack(spacing: 6) {
-                            Text(verbatim: "Context \(percent)%")
-                            Capsule().fill(PardnerColor.raised).frame(width: 48, height: 5)
-                                .overlay(alignment: .leading) { Capsule().fill(PardnerColor.agent).frame(width: max(4, 48 * CGFloat(min(percent, 100)) / 100), height: 5) }
-                        }
-                        .fixedSize().accessibilityElement(children: .ignore).accessibilityLabel("\(percent) percent of context used")
-                    case .tokens(let text): Text(verbatim: text).font(PardnerFont.ui(size: 12, weight: .semibold)).foregroundStyle(PardnerColor.text).lineLimit(1).fixedSize()
+        // The cost line reads no time: it has no window, so no reset to count down.
+        let profile = thread.bot.flatMap { model.profiles[$0] }
+        let cost = thread.costUsage == nil || profile?.plan != nil ? nil
+            : UsageLine.text(profileRead: profile != nil, plan: nil, windows: nil, cost: thread.costUsage, apiSeen: true, place: .composer, now: .now)
+        let line = [thread.session, cost].compactMap { $0 }.joined(separator: " · ")
+        let facts = SessionFacts(line)
+        HStack(spacing: 14) {
+            // In the order the bot wrote them; the context and what follows it are set apart on the right.
+            ForEach(Array(facts.parts.enumerated()), id: \.offset) { index, part in
+                if index == facts.firstRight { Spacer(minLength: 0) }
+                switch part {
+                case .plain(let text): Text(verbatim: text).font(PardnerFont.ui(size: 12, weight: .regular)).lineLimit(1).layoutPriority(1)
+                case .model(let text): Text(verbatim: text).font(PardnerFont.ui(size: 12, weight: .semibold)).foregroundStyle(PardnerColor.text).lineLimit(1).layoutPriority(1)
+                case .branch(let branch):
+                    (Text(verbatim: branch.name).foregroundStyle(PardnerColor.muted) + Text(verbatim: (branch.name.isEmpty ? "" : " ") + "+\(branch.added)").foregroundStyle(PardnerColor.addText)
+                        + Text(verbatim: " \u{2212}\(branch.removed)").foregroundStyle(PardnerColor.delText))
+                        .font(PardnerFont.mono(size: 12, weight: .regular)).lineLimit(1).truncationMode(.tail)
+                case .context(let percent):
+                    HStack(spacing: 6) {
+                        Text(verbatim: "Context \(percent)%")
+                        Capsule().fill(PardnerColor.raised).frame(width: 48, height: 5)
+                            .overlay(alignment: .leading) { Capsule().fill(PardnerColor.agent).frame(width: max(4, 48 * CGFloat(min(percent, 100)) / 100), height: 5) }
                     }
+                    .fixedSize().accessibilityElement(children: .ignore).accessibilityLabel("\(percent) percent of context used")
+                case .tokens(let text): Text(verbatim: text).font(PardnerFont.ui(size: 12, weight: .semibold)).foregroundStyle(PardnerColor.text).lineLimit(1).fixedSize()
                 }
             }
-            .font(PardnerFont.secondary).foregroundStyle(PardnerColor.muted).help(line)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, PardnerMetrics.margin).frame(height: PardnerMetrics.subheaderHeight).clipped()
         }
+        .font(PardnerFont.secondary).foregroundStyle(PardnerColor.muted).help(line)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, PardnerMetrics.margin).frame(height: PardnerMetrics.subheaderHeight).clipped()
     }
 }
 
@@ -315,7 +313,7 @@ struct ActivityRow: View {
                         Text(verbatim: words).font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.muted).pulses(true)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain).pointerStyle(.link)
+                    .buttonStyle(.clickable)
                     .popover(isPresented: $listed) {
                         TaskList(tasks: tasks) { line in
                             listed = false
@@ -352,7 +350,7 @@ struct TaskList: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 8).contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain).pointerStyle(.link)
+                    .buttonStyle(.clickable)
                 }
             }
         }

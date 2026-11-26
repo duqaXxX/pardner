@@ -39,7 +39,7 @@ struct ChannelView: View {
                 }
                 if let channels {
                     Menu { ChannelActions(model: model, channels: channels, channel: channel) } label: { Image(systemName: "ellipsis").frame(width: 30, height: 30) }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).pointerStyle(.link).fixedSize().accessibilityLabel("Channel actions")
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).clickable().fixedSize().accessibilityLabel("Channel actions")
                 }
             }
             .padding(.horizontal, PardnerMetrics.margin).frame(height: PardnerMetrics.headerHeight)
@@ -133,7 +133,7 @@ struct ChannelView: View {
             }
             .fixedSize().contentShape(Rectangle())
         }
-        .buttonStyle(.plain).pointerStyle(.link)
+        .buttonStyle(.clickable)
         .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 
@@ -339,22 +339,61 @@ struct DaySeparator: View {
     }
 }
 
-/// The bot's `@name` as a gold label (#174): `agent` ground, `agentInk` text, semibold. A `Text` draws a run's ground as a plain rectangle, so the label has
-/// square corners and no padding where the design rounds them by 5 and pads them: a rounded one needs a view of its own, which breaks the line's flow
-/// and the selection of the text it leads, and a padding of spaces would be copied with the prompt.
+/// The bot's `@name` as a gold label: `agentInk` text, semibold. Its `agent` ground is drawn behind it by `mentioned`, rounded by 5 and padded
+/// 6 at the sides and 1 above and below, as the design draws it: a `Text` run's own background is square and unpadded, and a padding of
+/// characters would be copied with the prompt.
 func mentionLabel(_ mention: String) -> AttributedString {
     var label = AttributedString(mention)
     label.font = PardnerFont.ui(size: 14, weight: .semibold)
     label.foregroundColor = PardnerColor.agentInk
-    label.backgroundColor = PardnerColor.agent
     return label
 }
 
 /// A prompt's text as one selectable text: the bot's `@name` as its label, then the text as written. Without a mention, the text alone.
-func mentioned(_ mention: String?, _ text: String) -> Text {
-    let body = Text(verbatim: text).foregroundStyle(PardnerColor.text)
-    guard let mention else { return body }
-    return Text(mentionLabel(mention)) + Text(verbatim: " ") + body
+func mentioned(_ mention: String?, _ text: String) -> some View { MentionedText(mention: mention, text: text) }
+
+/// The label's ground reads where the mention sits from the text's own layout (`Text.LayoutKey`): the run carries `MentionRun`, since a
+/// layout's character indices are opaque. The space after the mention is widened by the side padding (`kern`, no character), so that the
+/// ground ends a space before the text; at the start of the line the ground reaches 6 points left of the column, where the text stays.
+struct MentionedText: View {
+    let mention: String?
+    let text: String
+
+    /// The ground's padding beyond the run: at each side, and above and below.
+    static let side: CGFloat = 6, edge: CGFloat = 1, radius: CGFloat = 5
+
+    private struct MentionRun: TextAttribute {}
+
+    private var joined: Text {
+        let body = Text(verbatim: text).foregroundStyle(PardnerColor.text)
+        guard let mention else { return body }
+        var space = AttributedString(" ")
+        space.kern = Self.side
+        return Text(mentionLabel(mention)).customAttribute(MentionRun()) + Text(space) + body
+    }
+
+    /// The rectangles of the mention's runs, in the text's coordinates; a mention that wraps has one per line.
+    static func grounds(_ layouts: [Text.LayoutKey.AnchoredLayout], in proxy: GeometryProxy) -> [CGRect] {
+        layouts.flatMap { anchored in
+            let origin = proxy[anchored.origin]
+            return anchored.layout.flatMap { line in
+                line.filter { $0[MentionRun.self] != nil }.map { run in
+                    run.typographicBounds.rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -side, dy: -edge)
+                }
+            }
+        }
+    }
+
+    var body: some View {
+        joined.backgroundPreferenceValue(Text.LayoutKey.self) { layouts in
+            GeometryReader { proxy in
+                ForEach(Array(Self.grounds(layouts, in: proxy).enumerated()), id: \.offset) { _, rect in
+                    RoundedRectangle(cornerRadius: Self.radius).fill(PardnerColor.agent)
+                        .frame(width: rect.width, height: rect.height).position(x: rect.midX, y: rect.midY)
+                }
+            }
+        }
+    }
 }
 
 /// One message: its sender's mark, name and time, then its text as written.
@@ -523,13 +562,13 @@ struct Summary: View {
     let thread: MessageThread
     let open: () -> Void
     var showsTitle = false
-    /// The summary is under the message whose thread the panel shows: the row gains its `Open in panel` label.
+    /// The summary is under the message whose thread the panel shows: the row says so to a screen reader; it draws no label of its own.
     var isOpen = false
     @State private var hovered = false
 
     var body: some View {
         Button(action: open) { if showsTitle { card } else { row } }
-        .buttonStyle(.plain).pointerStyle(.link)
+        .buttonStyle(.clickable)
         .onHover { hovered = $0 }
         .onChange(of: isOpen) { hovered = false }
         .onDisappear { hovered = false }
@@ -541,7 +580,7 @@ struct Summary: View {
         if let bot = thread.bot { Avatar(name: Naming.sender(bot, in: model), isBot: true, icon: icons[bot], size: showsTitle ? 22 : 18).accessibilityHidden(true) }
     }
 
-    /// The row: the bot's mark, the replies, the session's title when it has one, the last reply, the state word and the open label, wrapping
+    /// The row: the bot's mark, the replies, the session's title when it has one, the last reply and the state word, wrapping
     /// onto a next line whole where they do not fit.
     private var row: some View {
         WrapRow(spacing: 8) {
@@ -551,10 +590,6 @@ struct Summary: View {
             if let last = thread.lastReplyWords { Text(last).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted) }
             // A thread between people has no bot, so no state to write.
             if thread.bot != nil, let word = thread.state.pill { pill(word) }
-            if isOpen {
-                Text("Open in panel").font(PardnerFont.ui(size: 12, weight: .semibold)).foregroundStyle(PardnerColor.brandInk)
-                    .padding(.horizontal, 7).frame(height: 18).background(PardnerColor.brand, in: Capsule())
-            }
         }
         .frame(minHeight: 24, alignment: .leading).contentShape(Rectangle())
     }

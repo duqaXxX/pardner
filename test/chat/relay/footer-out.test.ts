@@ -41,6 +41,7 @@ const fields = (over: Partial<FooterFields> = {}): FooterFields => ({
   contextPercent: null,
   sessionLimit: null,
   weekLimit: null,
+  limitsReadAt: null,
   account: null,
   accountPlan: null,
   sessionCost: null,
@@ -80,6 +81,7 @@ const full = fields({
   work: { durationMs: 252_000, doneAt: 1_763_999_820_000 },
   sessionLimit: { percent: 40, resetsAt: 1_764_007_500_000 },
   weekLimit: { percent: 24, resetsAt: null },
+  limitsReadAt: null,
 });
 
 test("a work's end with every part is the content of the shared vector", () => {
@@ -105,6 +107,7 @@ test("one window known, and no length known", () => {
   const known = fields({
     work: { durationMs: 3_723_000, doneAt: 1_763_999_820_000 },
     weekLimit: week,
+    limitsReadAt: null,
   });
   assert.deepEqual(footerContent(known, NOW, true), vector("work end with one window known"));
   const none = fields({ model: "Opus 5.5", work: null, sessionLimit: week });
@@ -334,4 +337,14 @@ test("two overlapping calls with the same words write one; a failed store write 
   await assert.rejects(() => f.provider.titleThread?.(ref, "T") as Promise<void>);
   await f.provider.titleThread?.(ref, "T");
   assert.equal(f.texts().length, 1, "the draft is held: the same words are not written again");
+});
+
+test("a work's end dates the limits by their read, and a cost alone by the work's end", () => {
+  const read = fields({
+    weekLimit: { percent: 41, resetsAt: null },
+    limitsReadAt: 1_763_999_000_000,
+  });
+  assert.equal((footerContent(read, NOW, true).usage as { at: number }).at, 1_763_999_000_000);
+  const cost = fields({ sessionCost: 1.84 });
+  assert.equal((footerContent(cost, NOW, true).usage as { at: number }).at, 1_763_999_820_000);
 });

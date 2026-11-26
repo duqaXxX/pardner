@@ -67,7 +67,8 @@ export function footerContent(footer: FooterFields, now: number, alone: boolean)
   const usage =
     alone && footer.work && (footer.sessionLimit || footer.weekLimit || cost !== null)
       ? {
-          at: footer.work.doneAt,
+          // The limits are dated when they were read; a cost alone is as new as the work.
+          at: footer.limitsReadAt ?? footer.work.doneAt,
           session: limit(footer.sessionLimit),
           week: limit(footer.weekLimit),
           ...(cost === null ? {} : { cost }),

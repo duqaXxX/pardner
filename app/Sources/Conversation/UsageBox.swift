@@ -61,7 +61,4 @@ public struct UsageBox: Equatable, Sendable {
             }
         }
     }
-
-    /// `as of HH:mm` when the drawn usage is more than 10 minutes old.
-    public func asOf(now: Date, timeZone: TimeZone) -> String? { usage.flatMap { UsageLine.asOf($0, now: now, timeZone: timeZone) } }
 }

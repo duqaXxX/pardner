@@ -32,7 +32,7 @@ public struct ReplyWindow: View {
                 Divider()
                 HStack {
                     Spacer()
-                    Button("Copy") { Clipboard.copy(content.output) }.pointerStyle(.link)
+                    Button("Copy") { Clipboard.copy(content.output) }.clickable()
                 }
                 .padding(PardnerMetrics.gap)
             }

@@ -42,7 +42,7 @@ public struct SettingsPanel: View {
         .font(PardnerFont.ui(size: 14, weight: .regular))
     }
 
-    /// The panes at the left, on `side` (the mock's 210 point column); the top clears the traffic lights over it.
+    /// The panes at the left, on `side` (the mock's 210 point column), in the sidebar's own colours; the top clears the traffic lights over it.
     private var side: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Settings").font(PardnerFont.display(size: 17, weight: .bold)).accessibilityAddTraits(.isHeader)
@@ -56,16 +56,16 @@ public struct SettingsPanel: View {
                     }
                     .padding(.horizontal, PardnerMetrics.gap * 1.5).frame(height: 32).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).pointerStyle(.link)
+                .buttonStyle(.clickable)
                 .font(PardnerFont.ui(size: 14, weight: model.pane == pane ? .semibold : .regular))
-                .foregroundStyle(model.pane == pane ? PardnerColor.brandText : PardnerColor.text)
-                .background(model.pane == pane ? PardnerColor.brandSoft : .clear, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
+                .foregroundStyle(model.pane == pane ? PardnerColor.sideBrandText : PardnerColor.sideText)
+                .background(model.pane == pane ? PardnerColor.sideBrandSoft : .clear, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
                 .accessibilityAddTraits(model.pane == pane ? .isSelected : [])
             }
             Spacer()
         }
         .padding(.horizontal, PardnerMetrics.gap).padding(.top, 40)
-        .frame(width: 210).frame(maxHeight: .infinity, alignment: .top).background(PardnerColor.side)
+        .frame(width: 210).frame(maxHeight: .infinity, alignment: .top).foregroundStyle(PardnerColor.sideText).background(PardnerColor.side)
     }
 
     /// A pane's mark: a symbol, and for Bots the mark a bot has in the conversation.
@@ -111,7 +111,7 @@ struct GeneralPane: View {
                 Picker("Appearance", selection: $theme) {
                     ForEach(Theme.allCases, id: \.rawValue) { Text($0.rawValue).tag($0.rawValue) }
                 }
-                .pickerStyle(.segmented).labelsHidden().frame(width: 180)
+                .pickerStyle(.segmented).labelsHidden().clickable().frame(width: 180)
             }
             .padding(PardnerMetrics.gap * 2.5)
             Spacer()
@@ -184,7 +184,7 @@ struct BotsPane: View {
                                 // Redrawn each minute, so a reset's `↻` counts down and goes once it has passed.
                                 TimelineView(.periodic(from: .now, by: 60)) { context in
                                     if let line = UsageLine.text(profileRead: bot.profile != nil, plan: bot.profile?.plan, windows: usage[bot.id], cost: nil,
-                                                                 apiSeen: apiBots.contains(bot.id), place: .bots, now: context.date, timeZone: .current) {
+                                                                 apiSeen: apiBots.contains(bot.id), place: .bots, now: context.date) {
                                         Text(verbatim: line).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
                                     }
                                 }

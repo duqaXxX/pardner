@@ -347,13 +347,61 @@ final class MarkdownViewTests: XCTestCase {
     }
 }
 
+@MainActor
 final class MentionLabelTests: XCTestCase {
-    func testAMentionIsAGoldLabelWithDarkText() {
+    /// The pixels of the mention's gold ground in a rendering of `view`, as the points of their columns and rows, and the size the view takes at that width.
+    private func gold(_ view: some View, _ size: CGSize) throws -> (columns: [CGFloat], rows: [CGFloat], fitting: CGSize) {
+        _ = NSApplication.shared
+        _ = PardnerFonts.register()
+        let hosting = NSHostingView(rootView: view.frame(width: size.width, height: size.height, alignment: .topLeading))
+        hosting.appearance = NSAppearance(named: .aqua)
+        hosting.frame = NSRect(origin: .zero, size: size)
+        hosting.layoutSubtreeIfNeeded()
+        let rep = try XCTUnwrap(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
+        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / size.width
+        var columns = Set<Int>(), rows = Set<Int>()
+        for y in 0..<rep.pixelsHigh {
+            for x in 0..<rep.pixelsWide {
+                guard let p = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                if abs(p.redComponent - 0xE8 / 255) + abs(p.greenComponent - 0xA3 / 255) + abs(p.blueComponent - 0x3D / 255) < 0.03 {
+                    columns.insert(x)
+                    rows.insert(y)
+                }
+            }
+        }
+        let natural = NSHostingView(rootView: view.frame(width: size.width, alignment: .topLeading)).fittingSize
+        return (columns.sorted().map { CGFloat($0) / scale }, rows.sorted().map { CGFloat($0) / scale }, natural)
+    }
+
+    /// The gold ground is drawn behind the label, reaching the side padding left of the text's column and ending before the text. It is
+    /// rendered as the app renders a prompt: `designLines` and selectable text.
+    func testTheGroundIsPaddedAndEndsBeforeTheText() throws {
+        let view = mentioned("@mini", "hello").designLines().textSelection(.enabled).padding(.leading, 20)
+        let ground = try gold(view, CGSize(width: 300, height: 60))
+        let first = try XCTUnwrap(ground.columns.first), last = try XCTUnwrap(ground.columns.last)
+        XCTAssertEqual(first, 14, accuracy: 1.5, "the ground starts 6 points left of the column at 20")
+        XCTAssertGreaterThan(last - first, 40, "the ground covers the label and its padding")
+        XCTAssertLessThan(last, 100, "the ground ends before the text")
+    }
+
+    /// A text that starts with the mention and wraps: the ground stays on the first line, where the mention is.
+    func testTheGroundStaysOnTheFirstLineOfAWrappedText() throws {
+        let text = "hello there this prompt wraps onto a second line and then a third one"
+        let view = mentioned("@mini", text).designLines().textSelection(.enabled).padding(.leading, 20)
+        let ground = try gold(view, CGSize(width: 160, height: 120))
+        XCTAssertGreaterThan(ground.fitting.height, 2 * 21 + MessageRow.lineSpacing, "the text wraps onto more than one line")
+        let top = try XCTUnwrap(ground.rows.first), bottom = try XCTUnwrap(ground.rows.last)
+        XCTAssertLessThan(top, MessageRow.lineSpacing / 2 + 21, "the ground begins on the first line")
+        XCTAssertLessThan(bottom - top, 21, "the ground is one line high: nothing is drawn behind the second line")
+    }
+
+    func testAMentionIsDarkSemiboldTextWithNoCharacterForPadding() {
         PardnerFonts.register()
         let label = mentionLabel("@mini")
         XCTAssertEqual(String(label.characters), "@mini", "no character stands in for padding: a copied prompt holds what was written")
         XCTAssertEqual(label.runs.count, 1)
-        XCTAssertEqual(label.runs.first?.backgroundColor, PardnerColor.agent)
+        XCTAssertNil(label.runs.first?.backgroundColor, "the ground is drawn behind the run, rounded and padded, not as the run's square background")
         XCTAssertEqual(label.runs.first?.foregroundColor, PardnerColor.agentInk)
         XCTAssertEqual(label.runs.first?.font, PardnerFont.ui(size: 14, weight: .semibold))
     }

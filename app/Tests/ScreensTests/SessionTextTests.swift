@@ -132,7 +132,7 @@ final class SessionTextTests: XCTestCase {
 
     private func line(_ s: Around, plan: String?, profileRead: Bool = true, place: UsageLine.Place = .composer, now: Double = 1_764_000_000_000) -> String? {
         UsageLine.text(profileRead: profileRead, plan: plan, windows: s.model.windows[bot], cost: s.thread.costUsage, apiSeen: s.model.apiBots.contains(bot),
-                       place: place, now: Date(timeIntervalSince1970: now / 1000), timeZone: TimeZone(identifier: "UTC")!)
+                       place: place, now: Date(timeIntervalSince1970: now / 1000))
     }
 
     func testACostAloneIsAUsageAndNeverReplacesTheNewestWindows() {
@@ -165,7 +165,7 @@ final class SessionTextTests: XCTestCase {
         XCTAssertNil(line(s, plan: "Claude Max", profileRead: false), "a profile not read yet")
         s.say("footer", "1s", extra: ["usage": usage(at: 1_763_999_820_000, percent: 40)])
         XCTAssertEqual(line(s, plan: "Claude Max"), "Claude Max · 5h 40%")
-        XCTAssertEqual(line(s, plan: "Claude Max", now: 1_764_000_600_001), "Claude Max · 5h 40% · as of 15:57", "as of past ten minutes")
+        XCTAssertEqual(line(s, plan: "Claude Max", now: 1_764_000_600_001), "Claude Max · 5h 40%", "old values carry no time")
         XCTAssertNil(line(s, plan: nil), "windows without a cost never make an API account")
     }
 }

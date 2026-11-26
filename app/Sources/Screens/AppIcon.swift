@@ -6,17 +6,20 @@ import SwiftUI
 public struct AppIcon: View {
     public var size: CGFloat
 
+    /// The tile keeps the light grey the sidebar had when the icon was drawn: the sidebar's colour is dark blue now, and the icon does not follow it.
+    private static let tile = Color(red: 0xE4 / 255, green: 0xE8 / 255, blue: 0xEF / 255)
+
     public init(size: CGFloat) { self.size = size }
 
     public var body: some View {
         let u = size / 1024
         ZStack {
             RoundedRectangle(cornerRadius: 185.4 * u, style: .continuous)
-                .fill(PardnerColor.side)
+                .fill(Self.tile)
                 .frame(width: 824 * u, height: 824 * u)
                 .shadow(color: .black.opacity(0.25), radius: 12 * u, y: 10 * u)
             // The mark's drawing sits low in its 64 unit box: lifted to centre it.
-            Logo(size: 800 * u)
+            Logo(size: 800 * u, cut: Self.tile)
                 .offset(x: 34 * u, y: -31 * u)
         }
         .frame(width: size, height: size)

@@ -101,16 +101,13 @@ public enum UsageLine {
     public enum Place: String, Sendable { case composer, bots }
 
     /// Nil for no line. `windows` is the bot's newest usage that carries a window, `cost` the thread's own newest that carries a cost, and
-    /// `apiSeen` whether any usage of the bot carried one. Each part is left out when not known; a `↻` whose reset has passed is left out,
-    /// and `as of` follows when the usage the line draws is more than 10 minutes old.
-    public static func text(profileRead: Bool, plan: String?, windows: SessionUsage?, cost: SessionUsage?, apiSeen: Bool, place: Place, now: Date, timeZone: TimeZone) -> String? {
+    /// `apiSeen` whether any usage of the bot carried one. Each part is left out when not known; a `↻` whose reset has passed is left out.
+    public static func text(profileRead: Bool, plan: String?, windows: SessionUsage?, cost: SessionUsage?, apiSeen: Bool, place: Place, now: Date) -> String? {
         guard profileRead else { return nil }
         let nowMs = now.timeIntervalSince1970 * 1000
         var parts: [String]
-        var drawn: SessionUsage?
         if let plan {
             parts = [plan]
-            drawn = windows
             if let windows {
                 parts += [("5h", windows.session), ("7d", windows.week)].compactMap { name, window in
                     window.map { w -> String in
@@ -126,19 +123,9 @@ public enum UsageLine {
             parts = ["API"]
             if place == .composer, let cost, let amount = cost.cost {
                 parts.append(String(format: "$%.2f this session", amount))
-                drawn = cost
             }
         }
-        if let drawn, let asOf = asOf(drawn, now: now, timeZone: timeZone) { parts.append(asOf) }
         return parts.joined(separator: " · ")
-    }
-
-    /// `as of HH:mm` when `usage` was read more than 10 minutes before `now`, else nil.
-    static func asOf(_ usage: SessionUsage, now: Date, timeZone: TimeZone) -> String? {
-        guard now.timeIntervalSince1970 * 1000 - usage.at > 600_000 else { return nil }
-        let at = DateFormatter()
-        (at.locale, at.timeZone, at.dateFormat) = (Locale(identifier: "en_US_POSIX"), timeZone, "HH:mm")
-        return "as of " + at.string(from: Date(timeIntervalSince1970: usage.at / 1000))
     }
 
     /// The core's `formatUntil` (`src/core/footer.ts`): minutes under 60, hours under 48, then days and hours.

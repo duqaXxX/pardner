@@ -1,7 +1,7 @@
 {
   "structure": "session-text-content",
-  "version": 4,
-  "source": "steps D2, D3 and E1 designs (#73): D2 sections 3.1 and 3.2, D3 sections 3.2 and 3.3, E1 sections 3.1 and 3.2, E2 section 3.1, 2026-11-24; synthetic values. `content` is the JSON of a kind 1 message the session's bot writes; `reads` is what the app takes from it: for `say` `footer` the line under the reply (`duration`, null when `markdown` is empty), the session's line for the panel's header (`session`, null when absent or not a string) and the account's values (`usage`: `at`, the two windows and `cost`, the session's estimated cost in US dollars, which the bot writes only for an account with no plan; null when absent or not of this shape); for `say` `title` the thread's name (`title`, null when empty). `usageLines` are the account's line, under a thread's composer (`place` `composer`) and in Settings, Bots (`place` `bots`), or null for no line: `profileRead` whether the bot's profile has been read, `plan` its plan, `windows` the bot's newest `usage` that carries a window, `cost` the thread's own newest `usage` that carries a cost (composer only), `apiSeen` whether any `usage` of that bot carried a cost, `now` epoch milliseconds; `<until>` is the core's `formatUntil` of `resetsAt - now`, a reset already passed leaves out its `↻`, and `as of HH:mm` in `timeZone` follows when the `at` of the usage the line draws is more than 10 minutes before `now`; for `say` `run` the epoch milliseconds of a scheduled run's start (`at`, a number: a `run` without one is drawn as an ordinary text) and for `say` `next` the bot's guess at the owner's next prompt (`next`, a non-empty string: the text has no `markdown`) and for `say` `image` the hex name of the line the image files belong to (`line`, a string: an image text without one is drawn as an unreadable row; it is an item of no thread, and its files, which the vector does not hold, are kept under the line); `kind` `none` is a text the app takes no session text from",
+  "version": 5,
+  "source": "steps D2, D3 and E1 designs (#73): D2 sections 3.1 and 3.2, D3 sections 3.2 and 3.3, E1 sections 3.1 and 3.2, E2 section 3.1, 2026-11-24; synthetic values. `content` is the JSON of a kind 1 message the session's bot writes; `reads` is what the app takes from it: for `say` `footer` the line under the reply (`duration`, null when `markdown` is empty), the session's line for the panel's header (`session`, null when absent or not a string) and the account's values (`usage`: `at`, when the windows were read, or the work's end when only a cost is known, the two windows and `cost`, the session's estimated cost in US dollars, which the bot writes only for an account with no plan; null when absent or not of this shape); for `say` `title` the thread's name (`title`, null when empty). `usageLines` are the account's line, under a thread's composer (`place` `composer`) and in Settings, Bots (`place` `bots`), or null for no line: `profileRead` whether the bot's profile has been read, `plan` its plan, `windows` the bot's newest `usage` that carries a window, `cost` the thread's own newest `usage` that carries a cost (composer only), `apiSeen` whether any `usage` of that bot carried a cost, `now` epoch milliseconds; `<until>` is the core's `formatUntil` of `resetsAt - now`, a reset already passed leaves out its `↻`; for `say` `run` the epoch milliseconds of a scheduled run's start (`at`, a number: a `run` without one is drawn as an ordinary text) and for `say` `next` the bot's guess at the owner's next prompt (`next`, a non-empty string: the text has no `markdown`) and for `say` `image` the hex name of the line the image files belong to (`line`, a string: an image text without one is drawn as an unreadable row; it is an item of no thread, and its files, which the vector does not hold, are kept under the line); `kind` `none` is a text the app takes no session text from",
   "texts": [
     {
       "name": "work end with every part",
@@ -289,7 +289,7 @@
   ],
   "usageLines": [
     {
-      "name": "a plan with both windows, the week with no reset, read 3 minutes ago",
+      "name": "a plan with both windows, the week with no reset",
       "place": "composer",
       "profileRead": true,
       "plan": "Claude Max",
@@ -307,7 +307,6 @@
       "cost": null,
       "apiSeen": false,
       "now": 1764000000000,
-      "timeZone": "UTC",
       "text": "Claude Max · 5h 40% ↻ 2h · 7d 24%"
     },
     {
@@ -329,7 +328,6 @@
       "cost": null,
       "apiSeen": false,
       "now": 1764000000000,
-      "timeZone": "UTC",
       "text": "Claude Pro · 5h 7% ↻ 12m · 7d 61% ↻ 3d 5h"
     },
     {
@@ -351,11 +349,10 @@
       "cost": null,
       "apiSeen": false,
       "now": 1764000000000,
-      "timeZone": "UTC",
       "text": "Claude Max · 5h 100% · 7d 24% ↻ 2d 2h"
     },
     {
-      "name": "a reading older than 10 minutes says when",
+      "name": "an old reading carries no time",
       "place": "bots",
       "profileRead": true,
       "plan": "Claude Max",
@@ -370,8 +367,7 @@
       "cost": null,
       "apiSeen": false,
       "now": 1764000000000,
-      "timeZone": "Europe/Rome",
-      "text": "Claude Max · 7d 21% ↻ 47h · as of 16:35"
+      "text": "Claude Max · 7d 21% ↻ 47h"
     },
     {
       "name": "a plan and no window read yet: the plan alone",
@@ -382,7 +378,6 @@
       "cost": null,
       "apiSeen": false,
       "now": 1764000000000,
-      "timeZone": "UTC",
       "text": "Claude Max"
     },
     {
@@ -404,7 +399,6 @@
       "cost": null,
       "apiSeen": false,
       "now": 1764000000000,
-      "timeZone": "UTC",
       "text": null
     },
     {
@@ -421,11 +415,10 @@
       },
       "apiSeen": true,
       "now": 1764000000000,
-      "timeZone": "UTC",
       "text": "API · $1.84 this session"
     },
     {
-      "name": "no plan, an old cost",
+      "name": "no plan, an old cost carries no time",
       "place": "composer",
       "profileRead": true,
       "plan": null,
@@ -438,8 +431,7 @@
       },
       "apiSeen": true,
       "now": 1764000000000,
-      "timeZone": "UTC",
-      "text": "API · $12.50 this session · as of 15:35"
+      "text": "API · $12.50 this session"
     },
     {
       "name": "no plan, a cost seen elsewhere, none in this thread",
@@ -450,7 +442,6 @@
       "cost": null,
       "apiSeen": true,
       "now": 1764000000000,
-      "timeZone": "UTC",
       "text": "API"
     },
     {
@@ -462,7 +453,6 @@
       "cost": null,
       "apiSeen": true,
       "now": 1764000000000,
-      "timeZone": "UTC",
       "text": "API"
     },
     {
@@ -474,7 +464,6 @@
       "cost": null,
       "apiSeen": false,
       "now": 1764000000000,
-      "timeZone": "UTC",
       "text": null
     }
   ]
