@@ -25,6 +25,27 @@ final class MarkdownBlocksTests: XCTestCase {
         return nil
     }
 
+    // MARK: numeric columns (visual pass #174)
+
+    private func grid(_ rows: [[String]]) -> MarkdownBlocks.Table {
+        MarkdownBlocks.Table(columns: rows[0].count, rows: rows.map { $0.map { AttributedString($0) } })
+    }
+
+    func testAColumnOfNumbersAndSizesIsNumericWhateverItsHeaderSays() {
+        let t = grid([["Name", "Weight", "Count", "Share"], ["a", "100 B", "1,204", "12.5%"], ["b", "2.4 MB", "-3", "7%"], ["c", "\u{2014}", "+8", "100 %"]])
+        XCTAssertEqual((0..<4).map { t.isNumeric(column: $0) }, [false, true, true, true])
+    }
+
+    func testAColumnWithAnyWordInItsBodyIsNotNumeric() {
+        let t = grid([["Size", "Version", "Note"], ["10", "v1.2", "3 files"], ["n/a text", "2", "-"]])
+        XCTAssertEqual((0..<3).map { t.isNumeric(column: $0) }, [false, false, false])
+    }
+
+    func testAColumnOfPlaceholdersAloneIsNotNumeric() {
+        XCTAssertFalse(grid([["x"], ["\u{2014}"], [""]]).isNumeric(column: 0), "there is no number to align")
+        XCTAssertFalse(grid([["x"]]).isNumeric(column: 0), "a header alone has no body")
+    }
+
     // MARK: bounds
 
     func testATextOverTheCapIsRefused() {

@@ -95,7 +95,7 @@ public enum SessionText: Sendable, Equatable {
     }
 }
 
-/// The account's line, under a thread's composer and in Settings, Bots (step D3 design, 3.3): `Claude Max · 5h 40% ↻ 2h · 7d 24%`, or
+/// The account's line, in the thread's session row (`API` only) and in Settings, Bots (step D3 design, 3.3): `Claude Max · 5h 40% ↻ 2h · 7d 24%`, or
 /// `API · $1.84 this session` for an account with no plan.
 public enum UsageLine {
     public enum Place: String, Sendable { case composer, bots }
@@ -129,12 +129,16 @@ public enum UsageLine {
                 drawn = cost
             }
         }
-        if let drawn, nowMs - drawn.at > 600_000 {
-            let at = DateFormatter()
-            (at.locale, at.timeZone, at.dateFormat) = (Locale(identifier: "en_US_POSIX"), timeZone, "HH:mm")
-            parts.append("as of " + at.string(from: Date(timeIntervalSince1970: drawn.at / 1000)))
-        }
+        if let drawn, let asOf = asOf(drawn, now: now, timeZone: timeZone) { parts.append(asOf) }
         return parts.joined(separator: " · ")
+    }
+
+    /// `as of HH:mm` when `usage` was read more than 10 minutes before `now`, else nil.
+    static func asOf(_ usage: SessionUsage, now: Date, timeZone: TimeZone) -> String? {
+        guard now.timeIntervalSince1970 * 1000 - usage.at > 600_000 else { return nil }
+        let at = DateFormatter()
+        (at.locale, at.timeZone, at.dateFormat) = (Locale(identifier: "en_US_POSIX"), timeZone, "HH:mm")
+        return "as of " + at.string(from: Date(timeIntervalSince1970: usage.at / 1000))
     }
 
     /// The core's `formatUntil` (`src/core/footer.ts`): minutes under 60, hours under 48, then days and hours.

@@ -197,6 +197,13 @@ public struct Message: Sendable, Equatable {
 
     public var ref: MessageRef { MessageRef(device: sender, name: name) }
 
+    /// A text with `say` `notice`: a small line of the daemon's own (`Stopped.`, `Background command completed`), which the screens draw as a system event
+    /// when a bot wrote it.
+    public var isNotice: Bool {
+        if case .text(_, let say) = body { return say == "notice" }
+        return false
+    }
+
     /// Whether a thread's hint stands when this message of the session's bot comes after it: a work's end and a title.
     var leavesHint: Bool {
         switch sessionText {

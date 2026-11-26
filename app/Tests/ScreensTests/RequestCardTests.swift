@@ -257,6 +257,31 @@ final class RequestCardTests: XCTestCase {
         }
     }
 
+    func testAnEndedPermissionHasItsVerdictAndTheCommandItAsked() async throws {
+        let bash: [String: Any] = ["type": "permission", "toolName": "Bash", "input": ["command": "mkdir deny-test"], "title": NSNull(), "description": NSNull(), "plan": NSNull()]
+        for (allow, verdict) in [(true, true), (false, false)] {
+            let (card, _, s) = makeCard(bash)
+            XCTAssertNil(card.verdict, "a card that waits has none")
+            XCTAssertEqual(card.subject, "mkdir deny-test")
+            let r = deliver(10, alice, ["answer": ["type": "permission", "allow": allow]], at: 4, to: mini, re: s.request)
+            deliver(5, mini, ["thread": "", "markdown": ""], at: 5, re: r)
+            XCTAssertEqual(card.verdict, verdict)
+        }
+        let (edit, _, _) = makeCard(permission)
+        XCTAssertEqual(edit.subject, "a.md", "the file when there is no command")
+        let (terminal, _, _) = makeCard(["type": "terminal", "state": "open", "running": NSNull(), "command": "claude --resume 7f3a9c"])
+        XCTAssertNil(terminal.verdict)
+        XCTAssertNil(terminal.subject)
+    }
+
+    func testAPermissionsFileIsWrittenFromTheChannelsFolder() {
+        let input = String(decoding: try! JSONSerialization.data(withJSONObject: ["file_path": "/srv/example/project/src/a.md"]), as: UTF8.self)
+        XCTAssertEqual(RequestCardModel.subject(ofInput: input, folder: "/srv/example/project"), "src/a.md")
+        XCTAssertEqual(RequestCardModel.subject(ofInput: input, folder: nil), "/srv/example/project/src/a.md")
+        let command = String(decoding: try! JSONSerialization.data(withJSONObject: ["command": "ls /srv/example/project/src"]), as: UTF8.self)
+        XCTAssertEqual(RequestCardModel.subject(ofInput: command, folder: "/srv/example/project"), "ls /srv/example/project/src", "a command is no path")
+    }
+
     func testARefusedReplyIsNotTheAnswer() throws {
         let (card, _, s) = makeCard(permission)
         let r = deliver(10, alice, ["answer": ["type": "permission", "allow": true]], at: 4, to: mini, re: s.request)

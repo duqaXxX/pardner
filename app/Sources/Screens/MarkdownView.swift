@@ -52,6 +52,10 @@ struct MarkdownView: View {
     let text: String
     /// What the row's `Copy` does; a piece with a link offers it as its own menu (design 2.7).
     var copy: (() -> Void)?
+    /// The size of a paragraph and of a table's cells; a system event's is smaller than a text's.
+    var size: CGFloat = 14
+    /// The ground of an inline code span: `surface` on the selected band, where `raised` would blend with it (#174, section 8).
+    var codeGround = PardnerColor.raised
 
     @State private var confirming: LinkConfirmation?
     /// One list step, and one quote bar with its gap.
@@ -65,7 +69,7 @@ struct MarkdownView: View {
                 open(url)
                 return .handled
             })
-            .tint(Color(nsColor: .linkColor))
+            .tint(PardnerColor.brandText)
             .alert("Open this link?", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }), presenting: confirming) { link in
                 Button("Open") { NSWorkspace.shared.open(link.url) }
                 Button("Cancel", role: .cancel) {}
@@ -80,12 +84,12 @@ struct MarkdownView: View {
                 ForEach(pieces.indices, id: \.self) { row(pieces[$0], gaps: Self.gaps(from: $0 > 0 ? pieces[$0 - 1] : nil, to: pieces[$0])) }
             }
         } else {
-            Text(CodeSpans.styled(text)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            Text(CodeSpans.styled(text, ground: codeGround)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    /// The space above piece `b` after piece `a`, the first rule that holds (FA 3.4): before a heading 20, after one 8, between two list items
-    /// 4 (a code block or a table among them stands apart), any other pair 12.
+    /// The space above piece `b` after piece `a`, the first rule that holds (FA 3.4, tightened by #168 to the reference's 8 between a text and
+    /// its block): before a heading 16, after one 6, between two list items 4 (a code block or a table among them stands apart), any other pair 8.
     static func gap(from a: MarkdownBlocks.Piece, to b: MarkdownBlocks.Piece) -> CGFloat {
         func isHeading(_ piece: MarkdownBlocks.Piece) -> Bool { if case .heading = piece.body { true } else { false } }
         func isBlock(_ piece: MarkdownBlocks.Piece) -> Bool {
@@ -94,10 +98,10 @@ struct MarkdownView: View {
             default: false
             }
         }
-        if isHeading(b) { return 20 }
-        if isHeading(a) { return 8 }
+        if isHeading(b) { return 16 }
+        if isHeading(a) { return 6 }
         if b.marker != nil, a.depth > a.bars, !isBlock(a), !isBlock(b) { return 4 }
-        return 12
+        return 8
     }
 
     /// The gap as padding: on `b`'s marker and text together, so a marker stays on its text's first line, and on each bar of `b` that `a`
@@ -124,12 +128,20 @@ struct MarkdownView: View {
     }
 
     /// A run of inline text: SwiftUI's `Text`, or `LinkText` when it holds a kept link, since only AppKit gives a link the pointing hand (2.4).
-    @ViewBuilder private func inline(_ text: AttributedString, size: CGFloat, weight: InterWeight) -> some View {
+    @ViewBuilder private func inline(_ text: AttributedString, size: CGFloat, weight: InterWeight, color: Color = PardnerColor.text, codeSize: CGFloat = 12.5) -> some View {
+        let text = Self.grounded(text, on: codeGround)
         if text.runs.contains(where: { $0.link != nil }) {
-            LinkText(text: text, size: size, weight: weight, open: { open($0) }, copy: copy)
+            LinkText(text: text, size: size, weight: weight, color: color, codeSize: codeSize, open: { open($0) }, copy: copy)
         } else {
             Text(MarkdownFonts.styled(text, size: size, weight: weight)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// `text` with the ground of its code spans set to `ground`.
+    static func grounded(_ text: AttributedString, on ground: Color) -> AttributedString {
+        var out = text
+        for run in text.runs where run.backgroundColor != nil { out[run.range].backgroundColor = ground }
+        return out
     }
 
     /// Asks before a `pardner-link:<n>` url opens anything: the one path from a link to an address.
@@ -137,22 +149,31 @@ struct MarkdownView: View {
         if case .read(_, let links) = MarkdownBlocks.read(text) { confirming = LinkConfirmation(url, links: links) }
     }
 
+    /// A cell: the header row small, semibold and grey, a body row at one point under the text; a code span keeps its monospace face but not its ground (#174).
     private func cell(_ table: MarkdownBlocks.Table, _ row: Int, _ column: Int) -> some View {
-        inline(table.rows[row][column], size: 14, weight: row == 0 ? .semibold : .regular)
+        var text = table.rows[row][column]
+        for run in text.runs where run.backgroundColor != nil { text[run.range].backgroundColor = nil }
+        // A code span of the header is as small as the header's words.
+        if row == 0 { for run in text.runs where run.font != nil { text[run.range].font = PardnerFont.mono(size: 12, weight: .regular) } }
+        return inline(text, size: row == 0 ? 12 : size - 1, weight: row == 0 ? .semibold : .regular, color: row == 0 ? PardnerColor.muted : PardnerColor.text,
+                      codeSize: row == 0 ? 12 : 12.5)
+            .foregroundStyle(row == 0 ? PardnerColor.muted : PardnerColor.text)
     }
 
     @ViewBuilder private func body(of body: MarkdownBlocks.Body) -> some View {
         switch body {
         case .paragraph(let text):
-            inline(text, size: 14, weight: .regular)
+            inline(text, size: size, weight: .regular)
         case .heading(let level, let text):
             inline(text, size: level == 1 ? 18 : level == 2 ? 16 : 14, weight: .semibold)
         case .code(let language, let code):
             CodeBlock(language: language, code: code)
         case .table(let table):
-            // The table takes the column's width, its cells wrapping; a column that would fall under its floor sends it to the sideways scroll.
+            // The table takes the column's width, its cells wrapping; a column that would fall under its floor sends it to the sideways scroll. A card
+            // on `surface` with a hairline border, a column of numbers aligned right.
+            let numeric = (0..<table.columns).map { table.isNumeric(column: $0) }
             ViewThatFits(in: .horizontal) {
-                TableFit(columns: table.columns) {
+                TableFit(columns: table.columns, numeric: numeric) {
                     ForEach(table.rows.indices, id: \.self) { r in
                         ForEach(0..<table.columns, id: \.self) { c in cell(table, r, c) }
                         if r < table.rows.count - 1 { Rectangle().fill(PardnerColor.line).frame(height: 1) }
@@ -163,46 +184,63 @@ struct MarkdownView: View {
                         ForEach(table.rows.indices, id: \.self) { r in
                             if r > 0 { Rectangle().fill(PardnerColor.line).frame(height: 1) }
                             GridRow {
-                                ForEach(0..<table.columns, id: \.self) { c in cell(table, r, c) }
+                                ForEach(0..<table.columns, id: \.self) { c in
+                                    cell(table, r, c).padding(.vertical, TableFit.rowPadding).frame(minHeight: TableFit.rowHeight).gridColumnAlignment(numeric[c] ? .trailing : .leading)
+                                }
                             }
                         }
                     }
                 }
             }
+            .padding(.horizontal, 12)
+            .background(PardnerColor.surface, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(PardnerColor.line))
         case .rule:
             Rectangle().fill(PardnerColor.line).frame(height: 1).frame(maxWidth: .infinity)
         }
     }
 }
 
-/// A fenced block: a strip with its language and a button that copies the block, over the text wrapping at the box's width, a continuation
-/// starting at the box's left edge (FA 3.2). The copy is the text as drawn, `[U+XXXX]` for an invisible character, as a selection of it.
+/// A fenced block on the code ground with a hairline border: a 28 point header with its language and a button that copies the block, over the text
+/// wrapping at the box's width, a continuation starting at the box's left edge (FA 3.2). A block with no language has no header, so no empty first
+/// line (#168): its copy button sits in the top right corner. The copy is the text as drawn, `[U+XXXX]` for an invisible character, as a selection of it.
 struct CodeBlock: View {
     let language: String?
     let code: String
     var copy: (String) -> Void = { Clipboard.copy($0) }
 
-    /// What the strip's button does: copies the block's text as drawn, never its wrapped lines.
+    private static let shape = RoundedRectangle(cornerRadius: 8)
+
+    /// What the copy button does: copies the block's text as drawn, never its wrapped lines.
     func copyCode() { copy(code) }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 0) {
-                if let language {
-                    Text(verbatim: language).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted).lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                Button { copyCode() } label: {
-                    Image(systemName: "doc.on.doc").font(.system(size: 12)).foregroundStyle(PardnerColor.muted).frame(width: 20, height: 20).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).pointerStyle(.link).help("Copy code").accessibilityLabel("Copy code")
-            }
-            .frame(height: 20)
-            Text(verbatim: code).font(PardnerFont.mono(size: 12.5, weight: .regular)).textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+    private var named: Bool { language?.isEmpty == false }
+
+    private var copyButton: some View {
+        Button { copyCode() } label: {
+            Image(systemName: "doc.on.doc").font(.system(size: 12)).foregroundStyle(PardnerColor.muted).frame(width: 20, height: 20).contentShape(Rectangle())
         }
-        .padding(12)
-        .background(PardnerColor.raised, in: RoundedRectangle(cornerRadius: 6))
+        .buttonStyle(.plain).pointerStyle(.link).help("Copy code").accessibilityLabel("Copy code")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let language, named {
+                HStack(spacing: 0) {
+                    Text(verbatim: language).font(PardnerFont.secondary).foregroundStyle(PardnerColor.muted).lineLimit(1)
+                    Spacer(minLength: 0)
+                    copyButton
+                }
+                .padding(.horizontal, 12).frame(height: 28)
+            }
+            // Without a header the corner button takes the room the text leaves at the right of its first line.
+            Text(verbatim: code).font(PardnerFont.code).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 12).padding(.trailing, named ? 12 : 34).padding(.top, named ? 2 : 12).padding(.bottom, 12)
+        }
+        .background(PardnerColor.codeBg, in: Self.shape)
+        .overlay(Self.shape.strokeBorder(PardnerColor.line))
+        .overlay(alignment: .topTrailing) { if !named { copyButton.padding(6) } }
     }
 }
 
@@ -211,8 +249,14 @@ struct CodeBlock: View {
 /// width by natural width, a column held at its floor.
 struct TableFit: Layout {
     let columns: Int
+    /// Whether each column is aligned right (a column of numbers).
+    var numeric: [Bool] = []
     static let spacing: CGFloat = 16
-    static let rowSpacing: CGFloat = 6
+    static let rowSpacing: CGFloat = 0
+    /// A row is at least this high, its cells centred; one that wraps takes its tallest cell and 12 points more (`rowPadding` each side).
+    static let rowHeight: CGFloat = 32
+    /// The room above and under a cell's text, in the fitted table and in the one that scrolls.
+    static let rowPadding: CGFloat = 6
     /// About 12 characters of Inter 14.
     static let floorWidth: CGFloat = 90
 
@@ -263,7 +307,8 @@ struct TableFit: Layout {
 
     private func rowHeights(_ subviews: Subviews, _ widths: [CGFloat]) -> [CGFloat] {
         (0..<(subviews.count + 1) / (columns + 1)).map { r in
-            (0..<columns).map { c in subviews[r * (columns + 1) + c].sizeThatFits(ProposedViewSize(width: widths[c], height: nil)).height }.max() ?? 0
+            let tallest = (0..<columns).map { c in subviews[r * (columns + 1) + c].sizeThatFits(ProposedViewSize(width: widths[c], height: nil)).height }.max() ?? 0
+            return max(Self.rowHeight, tallest + 2 * Self.rowPadding)
         }
     }
 
@@ -283,7 +328,9 @@ struct TableFit: Layout {
         for (r, height) in heights.enumerated() {
             var x = bounds.minX
             for c in 0..<columns {
-                subviews[r * (columns + 1) + c].place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(width: widths[c], height: nil))
+                let right = numeric.indices.contains(c) && numeric[c]
+                subviews[r * (columns + 1) + c].place(at: CGPoint(x: right ? x + widths[c] : x, y: y + height / 2), anchor: right ? .trailing : .leading,
+                                                      proposal: ProposedViewSize(width: widths[c], height: nil))
                 x += widths[c] + Self.spacing
             }
             y += height + Self.rowSpacing

@@ -133,13 +133,37 @@ public final class RequestCardModel {
         return Self.words(answer: json, to: owner) ?? status.words
     }
 
+    /// The owner's answer to a permission once the card ended on it: true for Allowed, false for Denied; nil for any other card.
+    public var verdict: Bool? {
+        guard case .ended = phase, case .permission? = owner else { return nil }
+        switch endedWords {
+        case Self.allowed: return true
+        case Self.denied: return false
+        default: return nil
+        }
+    }
+
+    /// What a permission asked to run or touch, in one line: its input's command, else its file; nil for any other card.
+    public var subject: String? {
+        guard case .permission(let p)? = owner else { return nil }
+        return Self.subject(ofInput: p.input, folder: composer.flatMap { $0.reading.channels[$0.channel]?.bound?.bind.folder })
+    }
+
+    /// The command of a permission's `input`, else its file written from the channel's bound `folder`, as the call's line writes it.
+    static func subject(ofInput json: String, folder: String?) -> String? {
+        guard let input = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] else { return nil }
+        return (input["command"] as? String) ?? (input["file_path"] as? String).map { ToolPath.relative($0, to: folder) }
+    }
+
+    static let allowed = "Allowed", denied = "Denied"
+
     /// The answer a reply's body (`{answer}`) gives, in the words of the button that sent it; nil for a setup and a body it cannot read.
     static func words(answer json: String, to owner: OwnerRequest) -> String? {
         guard let reply = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any], let body = reply["answer"] as? [String: Any] else { return nil }
         func either(_ key: String, _ yes: String, _ no: String) -> String? { (body[key] as? Bool).map { $0 ? yes : no } }
         switch owner {
         case .setup: return nil
-        case .permission: return either("allow", "Allowed", "Denied")
+        case .permission: return either("allow", allowed, denied)
         case .shell: return either("run", "Ran", "Not run")
         case .hold: return either("send", "Sent anyway", "Not sent")
         case .terminal: return either("go", "Sent here", "Not sent")

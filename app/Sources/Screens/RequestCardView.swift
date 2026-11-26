@@ -12,11 +12,17 @@ struct RequestCardView: View {
 
     var body: some View {
         let phase = card.phase
+        // An ended permission is one row: its tool, the command it asked, and what the owner answered.
+        let verdict = card.verdict
         VStack(alignment: .leading, spacing: PardnerMetrics.gap) {
-            Text(verbatim: heading).font(PardnerFont.ui(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+            if verdict == nil { Text(verbatim: heading).font(PardnerFont.ui(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true) }
             switch phase {
             case .ended:
-                Text(verbatim: card.endedWords).font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.muted).fixedSize(horizontal: false, vertical: true)
+                if let verdict, case .permission(let p)? = card.owner {
+                    permissionResult(p, allowed: verdict)
+                } else {
+                    Text(verbatim: card.endedWords).font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.muted).fixedSize(horizontal: false, vertical: true)
+                }
             case .asking(let notes):
                 content(enabled: true)
                 buttons(enabled: true)
@@ -36,6 +42,22 @@ struct RequestCardView: View {
             // Escape in the Other field is the field's: it leaves the field, and the key goes no further (the window would close the thread).
             if field != nil { field = nil; return .handled }
             return focus.wrappedValue == card.request.ref && card.escapePressed() ? .handled : .ignored
+        }
+    }
+
+    /// The tool with its icon, the command in monospace, and `Allowed` or `Denied` as a coloured label with its icon.
+    private func permissionResult(_ p: PermissionRequest, allowed: Bool) -> some View {
+        HStack(spacing: PardnerMetrics.gap) {
+            Image(systemName: ToolTitle.symbol).font(.system(size: 11)).foregroundStyle(PardnerColor.muted).accessibilityHidden(true)
+            Text(verbatim: p.toolName).font(PardnerFont.ui(size: 13, weight: .semibold))
+            Text(verbatim: card.subject ?? heading).font(PardnerFont.mono(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted).lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 0)
+            Label { Text(verbatim: card.endedWords).font(PardnerFont.ui(size: 12, weight: .semibold)) } icon: {
+                Image(systemName: allowed ? "checkmark" : "xmark").font(.system(size: 10, weight: .bold))
+            }
+            .padding(.horizontal, 8).frame(height: 22)
+            .foregroundStyle(allowed ? PardnerColor.okText : PardnerColor.delText)
+            .background(allowed ? PardnerColor.okSoft : PardnerColor.delBg, in: Capsule())
         }
     }
 

@@ -6,8 +6,6 @@ import AppKit
 import SwiftUI
 
 struct ThreadPanel: View {
-    /// The space between the thread's rows.
-    static let rowSpacing = PardnerMetrics.gap * 2
     let model: ReadingModel
     let icons: [Data: NSImage]
     let thread: MessageThread
@@ -29,20 +27,15 @@ struct ThreadPanel: View {
         let _ = redraw // read, so that a change draws the day words again
         let queued = thread.queued
         // The day word before the root and each later entry that opens a day, a bot's answer by the time of its first part.
-        let rows = ThreadRows.build(thread)
+        let rows = ThreadRows.build(thread, isSystem: model.isSystemEvent)
         let days = Naming.dayLabels([thread.root?.time] + rows.map(\.time), now: Date(), calendar: .current)
         VStack(spacing: 0) {
             HStack(spacing: PardnerMetrics.gap) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(verbatim: thread.sessionTitle ?? "Thread").font(PardnerFont.ui(size: 15, weight: .semibold)).lineLimit(1)
+                    Text(verbatim: thread.sessionTitle ?? "Thread").font(PardnerFont.title).lineLimit(1)
                     if let bot = thread.bot {
                         Text([Naming.sender(bot, in: model), thread.state.pill].compactMap { $0 }.joined(separator: " · "))
-                            .font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted).lineLimit(1)
-                    }
-                    // The session's values at its newest work's end; the whole line is the help tag when it is cut.
-                    if let session = thread.session {
-                        Text(verbatim: session).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
-                            .lineLimit(1).truncationMode(.tail).help(session)
+                            .font(PardnerFont.secondary).foregroundStyle(PardnerColor.muted).lineLimit(1)
                     }
                 }
                 Spacer()
@@ -51,12 +44,14 @@ struct ThreadPanel: View {
                     .buttonStyle(.plain).pointerStyle(.link).foregroundStyle(PardnerColor.muted)
                     .accessibilityLabel("Close the thread")
             }
-            .padding(.leading, 16).padding(.trailing, 12).padding(.vertical, 10).frame(minHeight: 58)
+            .padding(.leading, PardnerMetrics.margin).padding(.trailing, 12).frame(height: PardnerMetrics.headerHeight)
             .movesWindow()
+            .overlay(alignment: .bottom) { Rectangle().fill(PardnerColor.line).frame(height: 1) }
+            SessionRow(model: model, thread: thread)
             Divider().overlay(PardnerColor.line)
             ScrollView {
                 // Lazy, as the conversation is: a turn of hundreds of lines and a diff of thousands build the rows on screen alone.
-                LazyVStack(alignment: .leading, spacing: Self.rowSpacing) {
+                LazyVStack(alignment: .leading, spacing: ThreadRow.stack) {
                     if let day = days[0] { DaySeparator(label: day) }
                     if let root = thread.root {
                         MessageRow(model: model, icons: icons, message: root, queued: queued.contains(root.ref), mark: .thread)
@@ -74,20 +69,23 @@ struct ThreadPanel: View {
                     }
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         if let day = days[index + 1] { DaySeparator(label: day) }
-                        switch row.content {
-                        case .message(let m): entry(m, queued: queued)
-                        case .unreadable(let count, let first): UnreadableRow(model: model, icons: icons, message: first, count: count)
-                        case .segment(let a): AnswerRow(model: model, icons: icons, answer: a, whole: thread.text(of: a))
-                        case .line(let l): LineRow(line: l, state: thread.state(of: l), place: place, images: thread.images[l.ref] ?? [])
-                        case .body(let l, let i): LineBodyRow(line: l, index: i, firstTop: LineBodyRow.top(underStackOf: Self.rowSpacing))
+                        Group {
+                            switch row.content {
+                            case .message(let m): entry(m, row: row, queued: queued)
+                            case .unreadable(let count, let first): UnreadableRow(model: model, icons: icons, message: first, count: count, joins: row.joins, duration: row.duration)
+                            case .segment(let a): AnswerRow(model: model, icons: icons, answer: a, whole: thread.text(of: a), joins: row.joins, duration: row.duration)
+                            case .line(let l): LineRow(line: l, state: thread.state(of: l), place: place, folder: folder, images: thread.images[l.ref] ?? [])
+                            case .body(let l, let i): LineBodyRow(line: l, index: i, firstTop: LineBodyRow.top(underStackOf: ThreadRow.stack))
+                            }
                         }
+                        .padding(.top, row.offset)
                     }
                     if let composer { PendingRows(model: composer, mark: .thread) }
                     // The end of the thread, the row the scroll position names while the view follows it; its spacing is the room under the last row, one point more than before.
                     Color.clear.frame(height: 1).id(Self.end)
                 }
                 .scrollTargetLayout()
-                .padding([.horizontal, .top], PardnerMetrics.gap * 2)
+                .padding(.horizontal, PardnerMetrics.margin).padding(.top, PardnerMetrics.listEnd)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             // One identity per thread: the anchor is read when the scroll view is made, so a thread opened after another would keep its offset.
@@ -106,7 +104,6 @@ struct ThreadPanel: View {
                     }
                 }
                 ComposerView(model: composer)
-                if let bot = thread.bot { AccountLine(model: model, thread: thread, bot: bot) }
             }
         }
         .background(PardnerColor.panel)
@@ -116,23 +113,28 @@ struct ThreadPanel: View {
     }
 
     @ViewBuilder
-    private func entry(_ m: Message, queued: Set<MessageRef>) -> some View {
-        if thread.isFooter(m), case .footer(let duration?, _, _)? = m.sessionText {
-            Text(verbatim: duration).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
-        } else if thread.isRunLine(m), case .run(let at)? = m.sessionText {
-            Text(verbatim: Naming.runLine(at: at)).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+    private func entry(_ m: Message, row: ThreadRow, queued: Set<MessageRef>) -> some View {
+        // Cards and lines hang on the text's column, after the avatar.
+        let indent = MessageRow.Mark.thread.indent
+        if thread.isRunLine(m), case .run(let at)? = m.sessionText {
+            Text(verbatim: Naming.runLine(at: at)).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted).padding(.leading, indent)
         } else if case .request(let title, _, _) = m.body {
-            if let composer {
-                RequestCardView(card: composer.card(for: m), focus: $focus)
-            } else {
-                RequestRow(title: title, status: thread.requests[m.ref] ?? .open)
+            Group {
+                if let composer {
+                    RequestCardView(card: composer.card(for: m), focus: $focus)
+                } else {
+                    RequestRow(title: title, status: thread.requests[m.ref] ?? .open)
+                }
             }
+            .padding(.leading, indent)
         } else {
-            MessageRow(model: model, icons: icons, message: m, queued: queued.contains(m.ref), mark: .thread, place: place)
+            MessageRow(model: model, icons: icons, message: m, queued: queued.contains(m.ref), mark: .thread, place: place, joins: row.joins, duration: row.duration, compactNotices: true)
         }
     }
 
     private var place: FilePlace? { channel.map { FilePlace(channel: $0, thread: thread.key) } }
+    /// The folder the channel is bound to, which a call's path is written from.
+    private var folder: String? { channel.flatMap { model.channels[$0]?.bound?.bind.folder } }
 }
 
 /// A bot's answer: drawn from its parts while it is written, whole once it lands.
@@ -142,21 +144,26 @@ struct AnswerRow: View {
     let answer: AnswerGroup
     /// The whole answer, which Copy puts on the pasteboard whichever segment it is chosen on.
     let whole: String
+    /// It stands under the head of the message above, of the same author: no avatar, name or time.
+    var joins = false
+    /// The length of the work this answer ended, which stands beside its time.
+    var duration: String?
 
     var body: some View {
         let name = Naming.sender(answer.ref.device, in: model)
         let mark = MessageRow.Mark.thread
         // `Writing…` stands on the last segment of an answer that is not done.
         let writing = !answer.done && answer.last
+        // A segment that continues its answer, or follows a message of the same bot, stands under the header above it, in the same column.
+        let headless = answer.continues || joins
         HStack(alignment: .top, spacing: mark.gap) {
-            // A segment that continues its answer stands under the header above it, in the same column.
-            if answer.continues { Color.clear.frame(width: mark.size, height: 0) } else { Avatar(name: name, isBot: true, icon: icons[answer.ref.device], size: mark.size) }
+            if headless { Color.clear.frame(width: mark.size, height: 0) } else { Avatar(name: name, isBot: true, icon: icons[answer.ref.device], size: mark.size) }
             VStack(alignment: .leading, spacing: 4) {
-                if !answer.continues {
+                if !headless {
                     HStack(alignment: .firstTextBaseline, spacing: PardnerMetrics.gap) {
                         Text(name).font(PardnerFont.ui(size: 14, weight: .semibold))
                         BotBadge()
-                        Text(Naming.time(answer.time)).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                        Text(Naming.time(answer.time) + (duration.map { " \u{B7} " + $0 } ?? "")).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
                             .help(Naming.dateTime(answer.time))
                         if writing {
                             Text("Writing…").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
@@ -167,7 +174,7 @@ struct AnswerRow: View {
                 // Read at each part that reaches it: a structure half written is drawn half written until a later part (#73, 2.1).
                 MarkdownView(text: answer.shown, copy: { Clipboard.copy(whole) }).designLines()
                     .frame(maxWidth: PardnerMetrics.answerWidth, alignment: .leading)
-                if writing && answer.continues {
+                if writing && headless {
                     Text("Writing…").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
                 }
             }
@@ -183,10 +190,13 @@ struct UnreadableRow: View {
     let message: Message
     let count: Int
     var mark = MessageRow.Mark.thread
+    /// A single row is a message as any other: it may stand under the head above and carry a turn's length.
+    var joins = false
+    var duration: String?
 
     var body: some View {
         if count == 1 {
-            MessageRow(model: model, icons: icons, message: message, mark: mark)
+            MessageRow(model: model, icons: icons, message: message, mark: mark, joins: joins, duration: duration)
         } else {
             HStack(spacing: 6) {
                 Image(systemName: "lock").font(.system(size: 12, weight: .medium)).accessibilityHidden(true)
@@ -234,23 +244,46 @@ struct StopButton: View {
     }
 }
 
-/// The account's line under the composer (step D3 design, 3.3): the usage of the thread's bot, in sight where the terminal keeps its status line.
-/// A timeline of its own redraws the line alone each minute, so a reset's `↻` counts down and `as of` appears: the panel's `redraw` moves only
-/// at a day's change.
-struct AccountLine: View {
+/// The session's data under the header, in the 40 point row the conversation's tabs share: the values at its newest work's end, and the
+/// session's cost when its account has no plan. The model and effort first, the branch with its diff in monospace, then the context with its
+/// bar and the tokens, set apart on the right; one line, the branch cut first. The whole text is the help tag. A timeline of its own redraws
+/// the row each minute, so `as of` appears: the panel's `redraw` moves only at a day's change.
+struct SessionRow: View {
     let model: ReadingModel
     let thread: MessageThread
-    let bot: Data
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
-            let profile = model.profiles[bot]
-            if let line = UsageLine.text(profileRead: profile != nil, plan: profile?.plan, windows: model.windows[bot], cost: thread.costUsage,
-                                         apiSeen: model.apiBots.contains(bot), place: .composer, now: context.date, timeZone: .current) {
-                Text(verbatim: line).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
-                    .lineLimit(1).truncationMode(.tail).help(line)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.bottom, 8)
+            let profile = thread.bot.flatMap { model.profiles[$0] }
+            let cost = thread.costUsage == nil || profile?.plan != nil ? nil
+                : UsageLine.text(profileRead: profile != nil, plan: nil, windows: nil, cost: thread.costUsage, apiSeen: true, place: .composer, now: context.date, timeZone: .current)
+            let line = [thread.session, cost].compactMap { $0 }.joined(separator: " · ")
+            let facts = SessionFacts(line)
+            HStack(spacing: 14) {
+                // In the order the bot wrote them; the context and what follows it are set apart on the right.
+                ForEach(Array(facts.parts.enumerated()), id: \.offset) { index, part in
+                    if index == facts.firstRight { Spacer(minLength: 0) }
+                    switch part {
+                    case .plain(let text): Text(verbatim: text).font(PardnerFont.ui(size: 12, weight: .regular)).lineLimit(1).layoutPriority(1)
+                    case .model(let text): Text(verbatim: text).font(PardnerFont.ui(size: 12, weight: .semibold)).foregroundStyle(PardnerColor.text).lineLimit(1).layoutPriority(1)
+                    case .branch(let branch):
+                        (Text(verbatim: branch.name).foregroundStyle(PardnerColor.muted) + Text(verbatim: (branch.name.isEmpty ? "" : " ") + "+\(branch.added)").foregroundStyle(PardnerColor.addText)
+                            + Text(verbatim: " \u{2212}\(branch.removed)").foregroundStyle(PardnerColor.delText))
+                            .font(PardnerFont.mono(size: 12, weight: .regular)).lineLimit(1).truncationMode(.tail)
+                    case .context(let percent):
+                        HStack(spacing: 6) {
+                            Text(verbatim: "Context \(percent)%")
+                            Capsule().fill(PardnerColor.raised).frame(width: 48, height: 5)
+                                .overlay(alignment: .leading) { Capsule().fill(PardnerColor.agent).frame(width: max(4, 48 * CGFloat(min(percent, 100)) / 100), height: 5) }
+                        }
+                        .fixedSize().accessibilityElement(children: .ignore).accessibilityLabel("\(percent) percent of context used")
+                    case .tokens(let text): Text(verbatim: text).font(PardnerFont.ui(size: 12, weight: .semibold)).foregroundStyle(PardnerColor.text).lineLimit(1).fixedSize()
+                    }
+                }
             }
+            .font(PardnerFont.secondary).foregroundStyle(PardnerColor.muted).help(line)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, PardnerMetrics.margin).frame(height: PardnerMetrics.subheaderHeight).clipped()
         }
     }
 }

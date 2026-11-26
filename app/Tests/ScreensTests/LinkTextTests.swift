@@ -42,6 +42,14 @@ final class LinkTextTests: XCTestCase {
         XCTAssertNil(converted.attribute(.link, at: 0, effectiveRange: nil))
     }
 
+    func testAHeaderCellTakesTheHeadersColourAndItsCodeSpanTheHeadersSize() throws {
+        let converted = LinkText.attributed(try piece("`code` [l](https://example.com/)"), size: 12, weight: .semibold, color: PardnerColor.muted, codeSize: 12)
+        let muted = NSColor(PardnerColor.muted)
+        XCTAssertEqual(converted.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor, muted)
+        XCTAssertEqual(converted.attribute(.foregroundColor, at: converted.length - 1, effectiveRange: nil) as? NSColor, muted)
+        XCTAssertEqual(try fontOf(converted, at: 0), PardnerFont.monoCT(size: 12, weight: .regular) as NSFont)
+    }
+
     func testAHeadingStrongRunGoesBold() throws {
         let converted = LinkText.attributed(try piece("**ab** [l](https://example.com/)"), size: 18, weight: .semibold)
         XCTAssertEqual(try fontOf(converted, at: 0), PardnerFont.uiCT(size: 18, weight: .bold) as NSFont)

@@ -76,6 +76,8 @@ public struct MainWindow: View {
     let sections: SectionsModel?
     /// The composers; nil in the samples.
     let composers: Composers?
+    /// The clock the usage boxes count from; nil is the real one (the screenshots fix it).
+    let now: Date?
     @State private var channel: Data?
     @State private var thread: String?
     @State private var tab: Tab = .conversation
@@ -83,8 +85,9 @@ public struct MainWindow: View {
     enum Tab: String, CaseIterable { case conversation = "Conversation", sessions = "Sessions" }
 
     /// The window over `model`, with a channel and a thread open when given.
-    public init(model: ReadingModel, devices: DevicesModel? = nil, settings: SettingsModel? = nil, channels: ChannelsModel? = nil, sections: SectionsModel? = nil, composers: Composers? = nil, channel: Data? = nil, thread: String? = nil) {
+    public init(model: ReadingModel, devices: DevicesModel? = nil, settings: SettingsModel? = nil, channels: ChannelsModel? = nil, sections: SectionsModel? = nil, composers: Composers? = nil, channel: Data? = nil, thread: String? = nil, now: Date? = nil) {
         self.model = model
+        self.now = now
         self.devices = devices
         self.settings = settings
         self.channels = channels
@@ -142,7 +145,7 @@ public struct MainWindow: View {
         PaneSplit(
             threadOpen: threadOpen,
             sidebar: pane(Sidebar(model: model, selected: shown?.id, choose: { channel = $0 }, openSettings: settings.map { settings in { settings.open($0) } },
-                                  channels: channels, sections: sections), background: PardnerColor.side, underTitleBar: false),
+                                  channels: channels, sections: sections, usageBots: bots.map { ($0.id, $0.name, $0.profile) }, now: now), background: PardnerColor.side, underTitleBar: true),
             conversation: pane(Group {
                 if let c = shown {
                     ChannelView(model: model, icons: icons, channel: c, channels: channels, composers: composers, tab: $tab, thread: $thread)
@@ -159,7 +162,7 @@ public struct MainWindow: View {
             }))
         .frame(minWidth: Self.leastWidth(threadOpen: threadOpen))
         // The window's top edge is the window's own, under the hidden title bar. Each pane's host has a 32 point inset there (measured, macOS 27):
-        // the sidebar keeps it for the traffic lights, the conversation and the panel draw their headers from the top edge, as the design does.
+        // the three columns draw their headers from the top edge, as the design does, and the sidebar's header leaves room for the traffic lights.
         .ignoresSafeArea(.container, edges: .top)
         .onChange(of: shown?.id) { thread = nil }
         .background(PardnerColor.bg)
@@ -242,6 +245,10 @@ struct Sidebar: View {
     var channels: ChannelsModel?
     /// The sections; nil where the window has no pairing, which draws today's list under "Channels".
     var sections: SectionsModel?
+    /// The listed bots whose usage the boxes at the foot of the list draw, one box per account; none where no bot's usage is known.
+    var usageBots: [(id: Data, name: String, profile: BotProfile?)] = []
+    /// The clock the boxes count from; nil is the real one.
+    var now: Date?
     @State private var edit: SectionEdit?
     @State private var hover = SidebarDrag.Hover()
 
@@ -270,13 +277,35 @@ struct Sidebar: View {
         row(id).modifier(zone(sections, "row-\(id.base64EncodedString())", .row(id)))
     }
 
+    /// The header's room for the window's three buttons, which the hidden title bar leaves over the sidebar's top left corner.
+    private static let trafficLights: CGFloat = 80
+
     var body: some View {
-        VStack(alignment: .leading, spacing: PardnerMetrics.gap * 1.5) {
+        VStack(spacing: 0) {
+            // The one 56 point header row of the three columns, drawn from the window's top edge.
             HStack(spacing: PardnerMetrics.gap) {
                 Logo(size: 32)
-                Text("Pardner").font(PardnerFont.display(size: 18, weight: .bold))
+                Text("Pardner").font(PardnerFont.title).lineLimit(1)
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 4).padding(.bottom, PardnerMetrics.gap)
+            // The trailing room is one gap: at the sidebar's least width (200) the title takes what the inset, the logo and the gap leave.
+            .padding(.leading, Self.trafficLights).padding(.trailing, PardnerMetrics.gap).frame(height: PardnerMetrics.headerHeight)
+            .movesWindow()
+            .overlay(alignment: .bottom) { Rectangle().fill(PardnerColor.line).frame(height: 1) }
+            ScrollView { list.padding(PardnerMetrics.gap * 1.5) }
+            VStack(spacing: PardnerMetrics.gap * 1.5) {
+                UsageBoxes(model: model, bots: usageBots, now: now)
+                userRow
+            }
+            .padding(.horizontal, PardnerMetrics.gap * 1.5).padding(.bottom, PardnerMetrics.margin)
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .onChange(of: tree) { edit = SectionsMenu.kept(edit, in: tree) }
+        .background(PardnerColor.side)
+    }
+
+    private var list: some View {
+        VStack(alignment: .leading, spacing: PardnerMetrics.gap * 1.5) {
             if let sections {
                 if let line = SectionsMenu.line(current: sections.current, behind: sections.behind, notApplied: sections.notApplied) {
                     Text(line).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
@@ -300,7 +329,7 @@ struct Sidebar: View {
                             if group.channels.isEmpty {
                                 // The empty section's row takes a drop as its header does: a channel dropped on it goes into the section.
                                 Text("No channels").font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(PardnerColor.muted)
-                                    .padding(.horizontal, PardnerMetrics.gap + 2).frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+                                    .padding(.horizontal, PardnerMetrics.gap + 2).frame(maxWidth: .infinity, minHeight: PardnerMetrics.rowHeight, alignment: .leading)
                                     .contentShape(Rectangle())
                                     .modifier(zone(sections, "empty-\(group.id)", .empty(group.id)))
                             }
@@ -331,35 +360,32 @@ struct Sidebar: View {
             }
             // The whole group is the zone: a drop on its header or its rows takes a channel out of its section.
             .zoned(sections.map { zone($0, "channels", .channels) })
-            Spacer()
-            // The person's row and the Settings button, under a rule.
-            HStack(spacing: 4) {
-                if channels != nil {
-                    Button { openSettings?(.profile) } label: {
-                        HStack(spacing: PardnerMetrics.gap) {
-                            Avatar(name: model.personName ?? "You", isBot: false, icon: nil, size: 28)
-                            Text(model.personName ?? "Set your name").font(PardnerFont.ui(size: 14, weight: model.personName == nil ? .regular : .semibold))
-                                .foregroundStyle(model.personName == nil ? PardnerColor.muted : PardnerColor.text).lineLimit(1)
-                            Spacer()
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).pointerStyle(openSettings == nil ? nil : .link).disabled(openSettings == nil).help("Profile…").accessibilityLabel("Profile…")
-                } else {
-                    Spacer()
-                }
-                if let openSettings {
-                    Button { openSettings(.general) } label: { Image(systemName: "gearshape").foregroundStyle(PardnerColor.muted).frame(width: 30, height: 30).contentShape(Rectangle()) }
-                        .buttonStyle(.plain).pointerStyle(.link).help("Settings…").accessibilityLabel("Settings…")
-                }
-            }
-            .padding(.top, PardnerMetrics.gap + 2)
-            .overlay(alignment: .top) { Rectangle().fill(PardnerColor.line).frame(height: 1) }
         }
-        .padding(PardnerMetrics.gap * 1.5)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .onChange(of: tree) { edit = SectionsMenu.kept(edit, in: tree) }
-        .background(PardnerColor.side)
+    }
+
+    /// The person's row and the Settings button.
+    private var userRow: some View {
+        HStack(spacing: 4) {
+            if channels != nil {
+                Button { openSettings?(.profile) } label: {
+                    HStack(spacing: PardnerMetrics.gap) {
+                        Avatar(name: model.personName ?? "You", isBot: false, icon: nil, size: 28)
+                        Text(model.personName ?? "Set your name").font(PardnerFont.ui(size: 14, weight: model.personName == nil ? .regular : .semibold))
+                            .foregroundStyle(model.personName == nil ? PardnerColor.muted : PardnerColor.text).lineLimit(1)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).pointerStyle(openSettings == nil ? nil : .link).disabled(openSettings == nil).help("Profile…").accessibilityLabel("Profile…")
+            } else {
+                Spacer()
+            }
+            if let openSettings {
+                Button { openSettings(.general) } label: { Image(systemName: "gearshape").foregroundStyle(PardnerColor.muted).frame(width: 30, height: 30).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).pointerStyle(.link).help("Settings…").accessibilityLabel("Settings…")
+            }
+        }
+        .padding(.horizontal, 4).frame(height: PardnerMetrics.userRowHeight)
     }
 
     /// The count a channel's row carries: its threads that wait for the person, nil while none does.
@@ -378,7 +404,7 @@ struct Sidebar: View {
         var body: some View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
-                    Text(title.uppercased()).font(PardnerFont.ui(size: 11, weight: .semibold))
+                    Text(title.uppercased()).font(PardnerFont.sectionLabel)
                     Spacer()
                     trailing
                 }
@@ -410,7 +436,7 @@ struct ChannelRow: View {
                 }
             }
             .font(PardnerFont.ui(size: 14, weight: chosen ? .semibold : .regular))
-            .padding(.horizontal, PardnerMetrics.gap + 2).frame(height: 30)
+            .padding(.horizontal, PardnerMetrics.gap + 2).frame(height: PardnerMetrics.rowHeight)
             .background(chosen ? PardnerColor.raised : hovered ? PardnerColor.raised.opacity(0.5) : .clear, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
             .contentShape(Rectangle())
         }
