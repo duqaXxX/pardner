@@ -196,6 +196,91 @@ MainActor.assumeIsolated {
             }
             exit(0)
         }
+        if ProcessInfo.processInfo.environment["SNAPSHOT_ONLY"] == "reading" {
+            // The thread panel as it reads (the reading pass): a prompt with a mention and a code span, folded and open calls, a diff, and an answer with a heading,
+            // paragraphs, lists, a quote, a table and two code blocks. The panel alone, and the whole window beside the centre column.
+            var live = Samples.model()
+            let mini = Data([0x4D, 0x14, 0x10, 0x03] + Array(repeating: 3, count: 28)), alice = Data([0xA1, 0x1C, 0xE0, 0x01] + Array(repeating: 1, count: 28))
+            var position = 100
+            @discardableResult
+            func put(_ kind: Int, _ sender: Data, _ body: [String: Any], name: UInt8, to: Data? = nil, re: MessageRef? = nil, minutes: Double) -> MessageRef {
+                position += 1
+                let text = String(decoding: try! JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]), as: UTF8.self)
+                live.model.take(view: .object([
+                    "do": .string("message"), "position": .number(Double(position)), "channel": .bytes(live.channel), "sender": .bytes(sender),
+                    "name": .bytes(Data(repeating: name, count: 16)), "epoch": .bytes(Data(repeating: 9, count: 32)), "time": .number(1_763_600_000_000 + minutes * 60_000),
+                    "kind": .number(Double(kind)), "to": to.map { .bytes($0) } ?? .null, "blobs": .array([]), "files": .array([]),
+                    "re": re.map { .object(["device": .bytes($0.device), "name": .bytes($0.name)]) } ?? .null, "text": .string(text), "again": .bool(false),
+                ]))
+                return MessageRef(device: sender, name: Data(repeating: name, count: 16))
+            }
+            let bind = put(2, alice, ["text": "/bind /srv/example/project"], name: 0xD0, to: mini, minutes: 30)
+            put(1, mini, ["say": "notice", "markdown": "Bound.", "bind": ["folder": "/srv/example/project", "state": "usable"]], name: 0xD1, re: bind, minutes: 30.1)
+            let root = put(2, alice, ["text": "Why does the relay test fail on a restart? Look at `relay.test.ts` and fix it."], name: 0xD2, to: mini, minutes: 31)
+            put(3, mini, [:], name: 0xD3, re: root, minutes: 31.1)
+            func call(_ n: UInt8, _ title: String, path: String? = nil, fold: [String]? = nil, preview: [String: Any]? = nil, status: String = "complete", minutes: Double) {
+                var task: [String: Any] = ["title": title, "status": status, "details": NSNull(), "output": NSNull(), "task": false, "message": false, "calls": 0,
+                                           "preview": preview as Any? ?? NSNull(), "startedAt": NSNull()]
+                if let path { task["path"] = path }
+                if let fold { task["fold"] = fold }
+                put(1, mini, ["thread": root.hex, "say": "task", "task": task], name: n, re: root, minutes: minutes)
+            }
+            let read = ["Read {n} file", "Read {n} files"]
+            call(0xD4, "Read: /srv/example/project/test/relay.test.ts", path: "/srv/example/project/test/relay.test.ts", fold: read, minutes: 31.2)
+            call(0xD5, "Read: /srv/example/project/src/relay.ts", path: "/srv/example/project/src/relay.ts", fold: read, minutes: 31.3)
+            call(0xD6, "Bash: npm test", status: "in_progress", minutes: 31.4)
+            let diff = "    5 const relay = start()\n-\u{1F7E5} 6 await relay.stop()\n+\u{1F7E9} 6 await relay.flush()\n+\u{1F7E9} 7 await relay.stop()\n    8 assert.ok(relay.closed)"
+            call(0xD7, "Update(/srv/example/project/test/relay.test.ts)", path: "/srv/example/project/test/relay.test.ts",
+                 preview: ["title": "Update(test/relay.test.ts)", "summary": "Added 2 lines, removed 1 line", "body": diff, "language": "diff", "plain": false, "record": false], minutes: 31.5)
+            let answer = """
+            ## What failed
+
+            The test **kills the relay** before its journal is flushed, so the write of `store.json` is lost. Run `npm test` to see it; the check is in [the test](https://example.com/test).
+
+            ### What I changed
+
+            - Wait for the flush in `closeRelay()`
+            - Keep the `retry` counter
+              - nested item under the counter
+            - Drop the second timer
+
+            1. Run the suite
+            2. Read the output
+
+            > A quote with a `code` span, to see how its bar sits.
+
+            | File | Lines | Share |
+            |---|---|---|
+            | src/relay.ts | 1,204 | 12.5% |
+            | test/relay.test.ts | 88 | 1.1% |
+            | docs/limits.md | 12 | 0.2% |
+
+            | Identifier | Description | Owner | Reviewer | Status | Estimate | Component | Branch |
+            |---|---|---|---|---|---|---|---|
+            | relay-journal-flush | wait-for-the-journal-flush | alice-example | bob-example | merged | 3 | relay-store-layer | fix/relay-journal-flush |
+            | relay-retry-counter | keep-the-retry-counter | carol-example | dave-example | open | 12 | relay-session-layer | fix/relay-retry-counter |
+
+            ```swift
+            let relay = Relay()
+            await relay.flush()
+            ```
+
+            ```
+            127.0.0.1 localhost
+            ::1 localhost
+            ```
+
+            That is all: 6,236 pass.
+            """
+            put(5, mini, ["thread": root.hex, "markdown": answer], name: 0xD8, re: root, minutes: 32)
+            put(1, mini, ["thread": root.hex, "say": "footer", "markdown": "9s"], name: 0xD9, minutes: 32.1)
+            for (appearance, theme) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
+                let window = MainWindow(model: live.model, devices: DevicesModel(), channel: live.channel, thread: root.hex)
+                try renderPanel(appearance, window, height: 1800, to: "reading-panel-\(theme).png")
+                try render(appearance, window, size: NSSize(width: 1280, height: 1000), to: "reading-window-\(theme).png")
+            }
+            exit(0)
+        }
         if ProcessInfo.processInfo.environment["SNAPSHOT_ONLY"] == "sections" {
             // The sidebar's sections (sidebar sections design 7): grouped, then each line that says why the commands are off.
             final class NoDefaults: UserDefaults {

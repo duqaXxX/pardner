@@ -326,16 +326,21 @@ final class CallFoldTests: XCTestCase {
         XCTAssertEqual(FoldLook.chevron, "chevron.right")
         XCTAssertEqual([FoldLook.rotation(open: true), FoldLook.rotation(open: false)], [90, 0])
         XCTAssertEqual(FoldLook.mark, "\u{2713}")
-        XCTAssertEqual([FoldLook.listIndent, FoldLook.listPadding, FoldLook.ruleWidth], [20, 10, 2], "the mock's open list")
+        XCTAssertEqual([FoldLook.listIndent, FoldLook.listPadding, FoldLook.ruleWidth], [16, 10, 1], "details 16 in with a 1 point guide")
     }
 
     // MARK: inline code
 
-    func testInlineCodeHasABorderARadiusAndFourPointsOfPadding() {
+    func testInlineCodeHasARadiusAndFourPointsOfPaddingAndNoBorder() {
         XCTAssertEqual(PardnerMetrics.codeRadius, 4)
         XCTAssertEqual(PardnerMetrics.codePad, 4)
-        XCTAssertEqual(InlineCodeText.border, 1)
-        XCTAssertEqual(InlineCodeText.inset, 5, "the padding and the border")
+        XCTAssertEqual(InlineCodeText.edge, 1, "the ground reaches a point above and below the text")
+        XCTAssertEqual(InlineCodeText.inset, 5, "the padding and the edge: the ground's size is what it was with a border")
+    }
+
+    func testAnInlineCodeSpanStandsOnItsOwnGround() {
+        let runs = CodeSpans.styled("Run `ls` now.").runs.compactMap(\.backgroundColor)
+        XCTAssertEqual(runs, [PardnerColor.codeInline])
     }
 
     func testACodeSpanLosesItsSquareGroundAndWidensItsNeighbours() {

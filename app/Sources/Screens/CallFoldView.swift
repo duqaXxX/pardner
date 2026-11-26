@@ -7,16 +7,16 @@ import SwiftUI
 
 /// What the fold row looks like, apart from its view so that the values can be read without drawing it.
 enum FoldLook {
-    /// Inter at this size, as the mock the owner approved draws it.
-    static let fontSize: CGFloat = 12.5
+    /// Inter at this size, as the mock the owner approved draws it: the size of every tool row.
+    static let fontSize = PardnerFont.toolSize
     static let mark = "\u{2713}"
     static let chevron = "chevron.right"
     /// The chevron turns a quarter while the calls are open.
     static func rotation(open: Bool) -> Double { open ? 90 : 0 }
-    /// What the open calls are indented by under the row, and the room between their rule and them.
-    static let listIndent: CGFloat = 20
+    /// What the open calls are indented by under the row, the width of the guide line along them and the room between the line and them.
+    static let listIndent = PardnerMetrics.toolIndent
     static let listPadding: CGFloat = 10
-    static let ruleWidth: CGFloat = 2
+    static let ruleWidth = PardnerMetrics.toolGuide
 }
 
 struct FoldRow<Calls: View>: View {

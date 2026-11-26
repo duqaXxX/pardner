@@ -314,7 +314,7 @@ private struct MostWidthLayout: Layout {
 }
 
 extension View {
-    /// A block of 14 point text with the design's 21 point lines (`MessageRow.lineSpacing`).
+    /// A block of 14 point text with the design's 22 point lines (`MessageRow.lineSpacing`).
     func designLines() -> some View {
         lineSpacing(MessageRow.lineSpacing).padding(.vertical, MessageRow.lineSpacing / 2)
     }
@@ -339,13 +339,13 @@ struct DaySeparator: View {
     }
 }
 
-/// The bot's `@name` as a gold label: `agentInk` text, semibold. Its `agent` ground is drawn behind it by `mentioned`, rounded by 5 and padded
+/// The bot's `@name` as a gold label: `mentionText`, semibold. Its `mentionBg` ground is drawn behind it by `mentioned`, rounded by 5 and padded
 /// 6 at the sides and 1 above and below, as the design draws it: a `Text` run's own background is square and unpadded, and a padding of
 /// characters would be copied with the prompt.
 func mentionLabel(_ mention: String) -> AttributedString {
     var label = AttributedString(mention)
     label.font = PardnerFont.ui(size: 14, weight: .semibold)
-    label.foregroundColor = PardnerColor.agentInk
+    label.foregroundColor = PardnerColor.mentionText
     return label
 }
 
@@ -388,7 +388,7 @@ struct MentionedText: View {
         joined.backgroundPreferenceValue(Text.LayoutKey.self) { layouts in
             GeometryReader { proxy in
                 ForEach(Array(Self.grounds(layouts, in: proxy).enumerated()), id: \.offset) { _, rect in
-                    RoundedRectangle(cornerRadius: Self.radius).fill(PardnerColor.agent)
+                    RoundedRectangle(cornerRadius: Self.radius).fill(PardnerColor.mentionBg)
                         .frame(width: rect.width, height: rect.height).position(x: rect.midX, y: rect.midY)
                 }
             }
@@ -404,19 +404,24 @@ struct MessageRow: View {
         let gap: CGFloat
         /// Whether a bot's name carries the `Bot` badge, as the thread panel draws it.
         let badgesBots: Bool
+        /// Whether any text of the row is read at most `answerWidth` wide, a person's as a bot's (the thread panel; the conversation caps a bot's alone).
+        var capsText = false
         static let conversation = Mark(size: 36, gap: 12, badgesBots: false)
-        static let thread = Mark(size: 32, gap: 10, badgesBots: true)
+        static let thread = Mark(size: 32, gap: 10, badgesBots: true, capsText: true)
         /// What a row that hangs on the text (a card, a call, a system event) is indented by, so that the avatar column stays empty.
         var indent: CGFloat { size + gap }
     }
     /// What a block under a conversation's message is indented by to line up with its text.
     static let inset = Mark.conversation.size + Mark.conversation.gap
-    /// What a 14 point line lacks to be the design's 21 points high, as CSS's `line-height` makes it: added between lines, and half above and
+    /// What a 14 point line lacks to be the design's 22 points high, as CSS's `line-height` makes it: added between lines, and half above and
     /// half below a block, so that a single line is as high as one of many.
-    static let lineSpacing: CGFloat = {
-        let font = PardnerFont.uiCT(size: 14, weight: .regular)
-        return max(0, 21 - (CTFontGetAscent(font) + CTFontGetDescent(font) + CTFontGetLeading(font)))
-    }()
+    static let lineSpacing = spacing(size: 14, line: PardnerFont.textLine)
+
+    /// What a line of Inter at `size` lacks to be `line` points high.
+    static func spacing(size: CGFloat, line: CGFloat) -> CGFloat {
+        let font = PardnerFont.uiCT(size: size, weight: .regular)
+        return max(0, line - (CTFontGetAscent(font) + CTFontGetDescent(font) + CTFontGetLeading(font)))
+    }
 
     let model: ReadingModel
     let icons: [Data: NSImage]
@@ -438,7 +443,7 @@ struct MessageRow: View {
     @Environment(\.botDevices) private var botDevices
 
     var body: some View {
-        if compactNotices, model.isSystemEvent(message) {
+        if compactNotices, model.isSystemEvent(message, bots: botDevices) {
             SystemEvent(text: message.shown, indent: mark.indent).contextMenu { Button("Copy") { Clipboard.copy(message.shown) } }
         } else {
             text
@@ -449,7 +454,7 @@ struct MessageRow: View {
         let name = Naming.sender(message.sender, in: model)
         // The device log names a device's kind, and only a bot publishes a profile (a kind no app device may send); a text's `say` field
         // does not say it, since a person's app could write one. Either is enough: a bot whose profile is not read yet is still a bot (#106).
-        let isBot = botDevices.contains(message.sender) || model.profiles[message.sender] != nil
+        let isBot = model.isBot(message.sender, bots: botDevices)
         return HStack(alignment: .top, spacing: mark.gap) {
             if joins { Color.clear.frame(width: mark.size, height: 0) } else {
                 Avatar(name: name, isBot: isBot, icon: icons[message.sender], size: mark.size, plate: tinted ? PardnerColor.surface : nil)
@@ -477,8 +482,8 @@ struct MessageRow: View {
                     } else if isBot {
                         // A bot's text is read as Markdown, any other body of a bot keeps its code spans only; a person's stays exactly as typed (#73, 5.2).
                         if MarkdownView.reads(message.body) {
-                            MarkdownView(text: message.shown, copy: { Clipboard.copy(message.shown) }, codeGround: tinted ? PardnerColor.surface : PardnerColor.raised).frame(maxWidth: PardnerMetrics.answerWidth, alignment: .leading)
-                        } else { InlineCodeText(text: CodeSpans.styled(message.shown, ground: tinted ? PardnerColor.surface : PardnerColor.raised)) }
+                            MarkdownView(text: message.shown, copy: { Clipboard.copy(message.shown) }, codeGround: tinted ? PardnerColor.surface : PardnerColor.codeInline).frame(maxWidth: PardnerMetrics.answerWidth, alignment: .leading)
+                        } else { InlineCodeText(text: CodeSpans.styled(message.shown, ground: tinted ? PardnerColor.surface : PardnerColor.codeInline)) }
                     } else {
                         mentioned(Naming.mention(of: message, in: model), message.shown)
                     }
@@ -486,6 +491,7 @@ struct MessageRow: View {
                 .designLines()
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
+                .modifier(MostWidth(most: mark.capsText ? PardnerMetrics.answerWidth : .infinity))
                 if queued { Text("Queued").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted) }
             }
         }
@@ -543,7 +549,7 @@ struct Answered: View {
                     FoldRow(fold: fold, isOpen: fold.isOpen(in: opened), toggle: { opened = fold.toggled(opened) }, indent: 0) { line in
                         LineRow(line: line, state: thread.state(of: line), indent: 0, place: place, folder: folder, images: thread.images[line.ref] ?? [])
                     }
-                case .body(let line, let index): LineBodyRow(line: line, index: index, indent: 0, firstTop: LineBodyRow.top(underStackOf: PardnerMetrics.gap))
+                case .body(let line, let index): LineBodyRow(line: line, index: index, indent: 0, stack: PardnerMetrics.gap)
                 case .segment(let answer):
                     // Read at each part that reaches it: a structure half written is drawn half written until a later part (#73, 2.1).
                     MarkdownView(text: answer.shown, copy: { Clipboard.copy(thread.text(of: answer)) }).designLines()

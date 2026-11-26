@@ -1,5 +1,5 @@
-// A text with its inline code spans drawn as the design draws them (#27): the code ground rounded by 4, a 1 point border in the `line` colour,
-// and 4 points of room at each side inside the border. A `Text` run's own `backgroundColor` is square, has no border and no padding, and a padding of
+// A text with its inline code spans drawn as the design draws them (#27, the reading pass): the code ground rounded by 4 with no border, reaching 5 points
+// beyond the text at each side (4 of room and 1) and 1 point above and below. A `Text` run's own `backgroundColor` is square and has no padding, and a padding of
 // characters would be copied with the text, so the ground is drawn behind the text from its own layout (`Text.LayoutKey`, as the mention's label is,
 // `MentionedText`): each code span is its own `Text` carrying a `TextAttribute`, which the layout hands back with the span's rectangle. The room is a
 // `kern` on the character before the span and on its last character, an attribute and no character, so a copy of the text holds nothing of it.
@@ -10,9 +10,10 @@ struct InlineCodeText: View {
     /// The text with its code spans' fonts set; a run that carries a `backgroundColor` is a code span, and that colour its ground.
     let text: AttributedString
 
-    static let border: CGFloat = 1
-    /// What a span's neighbours are widened by: the padding and the border.
-    static var inset: CGFloat { PardnerMetrics.codePad + border }
+    /// How far a span's ground reaches beyond the room it holds: above and below its text, and at each side on top of the padding.
+    static let edge: CGFloat = 1
+    /// What a span's neighbours are widened by: the padding and the edge.
+    static var inset: CGFloat { PardnerMetrics.codePad + edge }
 
     /// A stretch of the text: a code span with its ground, or what lies between two.
     struct Piece {
@@ -84,7 +85,7 @@ struct InlineCodeText: View {
                 }
                 let wrapsOn = i == line.count && n + 1 < lines.count && lines[n + 1].first?.ground != nil
                 let left = start == 0 ? 0 : inset, right = wrapsOn ? inset : 0
-                out.append((rect: CGRect(x: rect.minX - left, y: rect.minY - border, width: rect.width + left + right, height: rect.height + 2 * border), ground: ground))
+                out.append((rect: CGRect(x: rect.minX - left, y: rect.minY - edge, width: rect.width + left + right, height: rect.height + 2 * edge), ground: ground))
             }
         }
         return out
@@ -104,7 +105,6 @@ struct InlineCodeText: View {
                     GeometryReader { proxy in
                         ForEach(Array(Self.grounds(layouts, in: proxy).enumerated()), id: \.offset) { _, box in
                             RoundedRectangle(cornerRadius: PardnerMetrics.codeRadius).fill(box.ground)
-                                .overlay(RoundedRectangle(cornerRadius: PardnerMetrics.codeRadius).strokeBorder(PardnerColor.line, lineWidth: Self.border))
                                 .frame(width: box.rect.width, height: box.rect.height).position(x: box.rect.midX, y: box.rect.midY)
                         }
                     }

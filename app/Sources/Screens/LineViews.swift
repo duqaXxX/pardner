@@ -57,7 +57,7 @@ struct ThreadRow: Identifiable {
         return joins ? PardnerMetrics.groupGap : head == nil ? PardnerMetrics.cardGap : PardnerMetrics.messageGap
     }
 
-    /// What `gapAbove` leaves to add to a stack spaced by `messageGap`; a body row keeps the spacing, its first one is placed by `LineBodyRow`.
+    /// What `gapAbove` leaves to add to a stack spaced by `messageGap`; a body row is placed by `LineBodyRow`, which closes the stack's spacing itself.
     var offset: CGFloat { if case .body = content { 0 } else { gapAbove - Self.stack } }
 
     /// The spacing of the thread panel's lazy stack, which each row corrects to its own gap by `offset`. Not the message gap on purpose: a ten-question
@@ -314,15 +314,15 @@ struct LineRow: View {
     /// A call's head on one line (step F design FB, 3.1): the title cut in the middle, the details cut at the end, the state words whole on the right.
     private func head(_ f: LineFields, _ form: LineForm, path: String? = nil, link: HeadLink = .none) -> some View {
         let parts = form.words.map { (verb: $0, subject: String?.none) } ?? ToolTitle.parts(f.preview?.title ?? f.title, path: f.path, folder: folder)
-        // The verb in semibold, the path or command after it in muted monospace (visual pass #174, 2).
+        // The row is 12.5 point muted text, the verb alone in semibold, the path or command after it in monospace (visual pass #174, 2; the reading pass).
         let title = HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(verbatim: parts.verb).font(PardnerFont.ui(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+            Text(verbatim: parts.verb).font(PardnerFont.ui(size: PardnerFont.toolSize, weight: .semibold)).foregroundStyle(PardnerColor.muted).lineLimit(1).truncationMode(.middle)
             if let subject = parts.subject {
-                Text(verbatim: subject).font(PardnerFont.mono(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted).lineLimit(1).truncationMode(.middle)
+                Text(verbatim: subject).font(PardnerFont.mono(size: PardnerFont.toolSize, weight: .regular)).foregroundStyle(PardnerColor.muted).lineLimit(1).truncationMode(.middle)
             }
         }
         let words = Self.headWords(f, form).map {
-            Text(verbatim: $0).font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.muted).lineLimit(1).truncationMode(.tail)
+            Text(verbatim: $0).font(PardnerFont.ui(size: PardnerFont.toolSize, weight: .regular)).foregroundStyle(PardnerColor.muted).lineLimit(1).truncationMode(.tail)
         }
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             // The words take the room the state leaves, so that the details run up to it before they are cut; the title is cut first.
@@ -452,14 +452,23 @@ struct LineBodyRow: View {
     let line: WorkLine
     let index: Int
     var indent: CGFloat = MessageRow.Mark.thread.size + MessageRow.Mark.thread.gap
-    /// The offset of the first row, which the caller works out from its stack's spacing (`top(underStackOf:)`); the rows after it keep the spacing.
-    var firstTop: CGFloat = 0
+    /// The spacing of the stack the row stands in, which it takes back: the first row stands `headGap` under its head, each later one right under the row
+    /// above, so that the preview reads as one block (#142). nil for a row in no stack.
+    var stack: CGFloat?
 
     /// How far under its head the first row of a body stands.
     static let headGap: CGFloat = 2
 
     /// The first row's offset in a stack of `spacing`, so that it stands `headGap` under the head above it.
     static func top(underStackOf spacing: CGFloat) -> CGFloat { headGap - spacing }
+
+    /// A later row's offset in a stack of `spacing`: none of the spacing stays between it and the row above.
+    static func top(continuingStackOf spacing: CGFloat) -> CGFloat { -spacing }
+
+    private var top: CGFloat {
+        guard let stack else { return 0 }
+        return index == 0 ? Self.top(underStackOf: stack) : Self.top(continuingStackOf: stack)
+    }
 
     var body: some View {
         if let preview = line.fields.preview, preview.rows.indices.contains(index) {
@@ -472,7 +481,7 @@ struct LineBodyRow: View {
                 }
             }
             .textSelection(.enabled)
-            .padding(.top, index == 0 ? firstTop : 0)
+            .padding(.top, top)
             .padding(.leading, indent).frame(maxWidth: .infinity, alignment: .leading)
         }
     }

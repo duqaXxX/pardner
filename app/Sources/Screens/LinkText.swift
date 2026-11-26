@@ -12,6 +12,9 @@ struct LinkText: NSViewRepresentable {
     /// The text's colour, and the size of a code span: a table's header cell is grey and its spans are as small as its words.
     var color: Color = PardnerColor.text
     var codeSize: CGFloat = 12.5
+    /// The space between two lines (a heading's is its own), and whether the digits are set at one width (a column of numbers).
+    var lineSpacing: CGFloat = MessageRow.lineSpacing
+    var tabular = false
     /// Called with the `pardner-link:<n>` url of a clicked link.
     let open: (URL) -> Void
     /// What the row's own `Copy` does (design 2.7): the one item of this view's menu.
@@ -20,9 +23,10 @@ struct LinkText: NSViewRepresentable {
     /// The text as AppKit draws it, with what `MarkdownFonts.styled` and the row give a `Text`: Inter at `size` and `weight` (strong one
     /// step heavier, emphasized in the italic file), a code span in JetBrains Mono on `raised`, strikethrough, the theme's text colour,
     /// and the design's line spacing.
-    static func attributed(_ text: AttributedString, size: CGFloat, weight: InterWeight, color: Color = PardnerColor.text, codeSize: CGFloat = 12.5) -> NSAttributedString {
+    static func attributed(_ text: AttributedString, size: CGFloat, weight: InterWeight, color: Color = PardnerColor.text, codeSize: CGFloat = 12.5,
+                           lineSpacing: CGFloat = MessageRow.lineSpacing, tabular: Bool = false) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = MessageRow.lineSpacing
+        paragraph.lineSpacing = lineSpacing
         let out = NSMutableAttributedString()
         for run in text.runs {
             let intent = run.inlinePresentationIntent ?? []
@@ -36,7 +40,7 @@ struct LinkText: NSViewRepresentable {
             } else {
                 let heavier: InterWeight = weight == .regular ? .semibold : .bold
                 attributes[.font] = PardnerFont.uiCT(
-                    size: size, weight: intent.contains(.stronglyEmphasized) ? heavier : weight, italic: intent.contains(.emphasized)) as NSFont
+                    size: size, weight: intent.contains(.stronglyEmphasized) ? heavier : weight, italic: intent.contains(.emphasized), tabular: tabular) as NSFont
                 if intent.contains(.strikethrough) { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
             }
             if let link = run.link { attributes[.link] = link }
@@ -82,10 +86,10 @@ struct LinkText: NSViewRepresentable {
     /// Sets the text unless the source is the one already set, so a redraw keeps the selection (the stored text differs from a fresh
     /// conversion once AppKit fixes its attributes, so the two are never compared). SwiftUI may ask the size before it updates the view.
     func apply(to view: NSTextView, coordinator: Coordinator) {
-        let source = Coordinator.Source(text: text, size: size, weight: weight)
+        let source = Coordinator.Source(text: text, size: size, weight: weight, lineSpacing: lineSpacing, tabular: tabular)
         guard coordinator.source != source else { return }
         coordinator.source = source
-        view.textStorage?.setAttributedString(Self.attributed(text, size: size, weight: weight, color: color, codeSize: codeSize))
+        view.textStorage?.setAttributedString(Self.attributed(text, size: size, weight: weight, color: color, codeSize: codeSize, lineSpacing: lineSpacing, tabular: tabular))
     }
 
     /// The size the text takes at the proposed width: as wide as its longest line, as high as its lines, as a `Text` that is fixed
@@ -93,7 +97,7 @@ struct LinkText: NSViewRepresentable {
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: NSTextView, context: Context) -> CGSize? {
         let coordinator = context.coordinator
         apply(to: view, coordinator: coordinator)
-        return coordinator.measure(Self.attributed(text, size: size, weight: weight, color: color, codeSize: codeSize), width: proposal.width)
+        return coordinator.measure(Self.attributed(text, size: size, weight: weight, color: color, codeSize: codeSize, lineSpacing: lineSpacing, tabular: tabular), width: proposal.width)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -101,6 +105,8 @@ struct LinkText: NSViewRepresentable {
             let text: AttributedString
             let size: CGFloat
             let weight: InterWeight
+            let lineSpacing: CGFloat
+            let tabular: Bool
         }
 
         var open: (URL) -> Void

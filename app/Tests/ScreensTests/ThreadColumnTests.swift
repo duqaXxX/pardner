@@ -18,6 +18,8 @@ private struct Session {
     var position = 1
     let channel = Data(repeating: 1, count: 32)
     var prompt: MessageRef!
+    /// The devices the device log names bots, as the window's environment gives them to a row.
+    var bots: Set<Data> = []
 
     init() {
         prompt = put(2, alice, ["text": "go"], to: bot)
@@ -64,7 +66,7 @@ private struct Session {
         put(4, bot, ["thread": prompt.hex, "markdown": markdown], re: MessageRef(device: bot, name: Data(repeating: name, count: 16)))
     }
 
-    var rows: [ThreadRow] { ThreadRows.build(model.channels[channel]!.threads[prompt.hex]!, isSystem: { model.isSystemEvent($0) }) }
+    var rows: [ThreadRow] { ThreadRows.build(model.channels[channel]!.threads[prompt.hex]!, isSystem: { model.isSystemEvent($0, bots: bots) }) }
 }
 
 final class ThreadColumnTests: XCTestCase {
@@ -153,6 +155,30 @@ final class ThreadColumnTests: XCTestCase {
         return hosting.fittingSize.height
     }
 
+    /// The height of `view` laid out `width` wide.
+    @MainActor
+    private func height(_ view: some View, width: CGFloat) -> CGFloat {
+        _ = NSApplication.shared
+        _ = PardnerFonts.register()
+        let hosting = NSHostingView(rootView: view.frame(width: width))
+        hosting.layoutSubtreeIfNeeded()
+        return hosting.fittingSize.height
+    }
+
+    /// A person's message is read at most 680 wide in the thread panel, as a bot's text is; the conversation's rows keep the column's width.
+    @MainActor
+    func testAPersonsMessageInTheThreadIsReadAtMost680Wide() throws {
+        var s = Session()
+        s.typed(Array(repeating: "a long line of words that goes on", count: 60).joined(separator: " "))
+        let message = try XCTUnwrap(s.model.channels[s.channel]?.threads[s.prompt.hex]?.items.compactMap { item -> Message? in
+            if case .message(let m) = item, m.sender == alice { m } else { nil }
+        }.last)
+        func row(_ mark: MessageRow.Mark) -> some View { MessageRow(model: s.model, icons: [:], message: message, mark: mark) }
+        let atCap = height(row(.thread), width: 42 + 680)
+        XCTAssertEqual(height(row(.thread), width: 1400), atCap, accuracy: 1, "a panel wider than the text column wraps at 680 as well")
+        XCTAssertLessThan(height(row(.conversation), width: 1400), atCap - 40, "the conversation's rows keep the column's width")
+    }
+
     private let notice = "Prompt:\n> run the tests\n\nSee [the notes](https://example.com/notes)."
 
     @MainActor
@@ -171,7 +197,7 @@ final class ThreadColumnTests: XCTestCase {
         let messages = s.model.channels[s.channel]!.threads[s.prompt.hex]!.items.compactMap { item -> Message? in if case .message(let m) = item, m.sender == bot { m } else { nil } }
         let (said, plain) = (messages[messages.count - 2], messages[messages.count - 1])
         XCTAssertTrue(said.isNotice)
-        XCTAssertTrue(s.model.isSystemEvent(said), "the rule is the panel's")
+        XCTAssertTrue(s.model.isSystemEvent(said, bots: []), "the rule is the panel's")
         func row(_ m: Message, compact: Bool = false) -> some View {
             MessageRow(model: s.model, icons: [:], message: m, mark: .conversation, compactNotices: compact)
         }
@@ -303,11 +329,29 @@ final class ThreadColumnTests: XCTestCase {
         s.typed("one")
         s.say("notice", "Stopped.")
         let notice = s.model.channels[s.channel]!.threads[s.prompt.hex]!.items.compactMap { item -> Message? in if case .message(let m) = item, m.isNotice { m } else { nil } }[0]
-        XCTAssertFalse(s.model.isSystemEvent(notice), "no profile: the notice is drawn as a message")
+        XCTAssertFalse(s.model.isSystemEvent(notice, bots: []), "no profile and no device log entry: the notice is drawn as a message")
         XCTAssertNotNil(s.rows[1].head, "and it is grouped as one")
         s.publishProfile()
-        XCTAssertTrue(s.model.isSystemEvent(notice))
+        XCTAssertTrue(s.model.isSystemEvent(notice, bots: []))
         XCTAssertNil(s.rows[1].head)
+    }
+
+    /// A bot whose profile is not read yet is still a bot when the device log names it (#177, #106): its notice is the compact row, as its text keeps the bot's mark.
+    @MainActor
+    func testANoticeOfABotWithNoProfileIsTheCompactRowWhenTheDeviceLogNamesIt() {
+        var s = Session()
+        s.typed("one")
+        s.say("notice", "Stopped.")
+        let notice = s.model.channels[s.channel]!.threads[s.prompt.hex]!.items.compactMap { item -> Message? in if case .message(let m) = item, m.isNotice { m } else { nil } }[0]
+        XCTAssertNil(s.model.profiles[bot], "no profile read")
+        XCTAssertFalse(s.model.isSystemEvent(notice, bots: [alice]), "another device's entry says nothing of this sender")
+        XCTAssertTrue(s.model.isSystemEvent(notice, bots: [bot]))
+        s.bots = [bot]
+        XCTAssertNil(s.rows[1].head, "the grouping reads the same set: the notice draws no head of its own")
+        func row(_ bots: Set<Data>) -> some View {
+            MessageRow(model: s.model, icons: [:], message: notice, mark: .thread, compactNotices: true).environment(\.botDevices, bots)
+        }
+        XCTAssertLessThan(height(row([bot])), height(row([])), "the row is the compact one, not a full message with its head")
     }
 
     func testASingleUnreadableMessageIsAHeadWithTheMessageGap() {
