@@ -56,6 +56,8 @@ test("every vector file passes in JavaScriptCore on CryptoKit", {
       spawnSync("swift", [...args, ...scratch], {
         cwd: APP,
         encoding: "utf8",
+        // A build of the whole package from nothing prints megabytes of warnings: spawnSync kills a child past its 1 MiB default.
+        maxBuffer: 64 * 1024 * 1024,
         timeout,
         env: { ...process.env, ...env },
       });
