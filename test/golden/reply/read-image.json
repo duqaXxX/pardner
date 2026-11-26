@@ -9,6 +9,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_01SyntheticImageRead",
       "message": false,
@@ -28,6 +32,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_01SyntheticImageRead",
       "message": false,
@@ -177,6 +185,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_01SyntheticImageRead",
      "message": false,
@@ -196,6 +208,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_01SyntheticImageRead",
      "message": false,

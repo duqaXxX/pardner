@@ -1,6 +1,6 @@
 // A turn's lines in the thread (turn work design 2.6 and 2.7): three forms chosen by the fields alone, the words the terminal wrote
 // drawn as they came (`Text(verbatim:)`, nothing read as markup), and a preview's body in rows of at most 200 lines so that the lazy
-// stack builds only what is on screen. The app owns the words `Running` and `Interrupted` and nothing else in a line.
+// stack builds only what is on screen. The app owns the words `Running`, `Waiting for you` and `Interrupted` and nothing else in a line.
 import Conversation
 import DesignSystem
 import SwiftUI
@@ -12,6 +12,8 @@ struct ThreadRow: Identifiable {
         case unreadable(count: Int, first: Message)
         case segment(AnswerGroup)
         case line(WorkLine)
+        /// A run of finished calls folded into one row (#27).
+        case fold(CallFold)
         /// The `index`th row of the body of the line's preview.
         case body(WorkLine, index: Int)
     }
@@ -20,18 +22,40 @@ struct ThreadRow: Identifiable {
     let content: Content
     /// The time its day word goes by; nil for a row that continues an entry.
     let time: Date?
-    /// Who wrote it and when, for a row that draws a message or an answer; nil for a call, a card, a system event or a counted row.
+    /// Who wrote it and when, for a row that draws a message, an answer or a call that opens the bot's reply; nil for any other call, a card, a
+    /// system event or a counted row.
     var head: Grouping.Head?
-    /// It stands under the head of the row above, of the same author and day, with nothing drawn between: it draws no avatar, name or time.
+    /// It stands under the head above, of the same author and day, with nothing drawn between but the bot's calls, their body rows, cards and
+    /// system events when the head is the bot's: it draws no avatar, name or time.
     var joins = false
-    /// The length of the work the bot's answer ended, which its time carries (`0:36 · 3s`).
+    /// The length of the work a turn took, which the time of the head that opens the bot's reply carries (`0:36 · worked for 3s`): a text or a
+    /// call; a person's head never has one.
     var duration: String?
+    /// The row above it is a call's (a line, a fold or a preview's body): a text under it stands `callGap` from it.
+    var afterCall = false
+
+    /// A call's row or a fold's: the rows that stand `callGap` from their neighbours.
+    var isCall: Bool {
+        switch content {
+        case .line, .fold: true
+        default: false
+        }
+    }
+
+    /// A call's row, a fold's, or a row of a preview's body: what a text under it stands `callGap` from.
+    var endsCall: Bool {
+        if case .body = content { true } else { isCall }
+    }
 
     /// It draws a header of its own: its avatar, name and time. An answer's later segment has none.
     var showsHead: Bool { if case .segment(let a) = content, a.continues { false } else { head != nil && !joins } }
 
-    /// How far under the row above it stands: a group's 4, a message's 20, or a text's 10 to what hangs on it, a card or a call.
-    var gapAbove: CGFloat { joins ? PardnerMetrics.groupGap : head == nil ? PardnerMetrics.cardGap : PardnerMetrics.messageGap }
+    /// How far under the row above it stands: 8 for a call's or a fold's that draws no head of its own, and for a row under a call that draws none either
+    /// (a text that joins the head above, a card, a system event); else a group's 4 (a row that joins), a message's 20 (a head), or a card's 10 (a row with no head).
+    var gapAbove: CGFloat {
+        if isCall && !showsHead || (joins || head == nil) && afterCall { return PardnerMetrics.callGap }
+        return joins ? PardnerMetrics.groupGap : head == nil ? PardnerMetrics.cardGap : PardnerMetrics.messageGap
+    }
 
     /// What `gapAbove` leaves to add to a stack spaced by `messageGap`; a body row keeps the spacing, its first one is placed by `LineBodyRow`.
     var offset: CGFloat { if case .body = content { 0 } else { gapAbove - Self.stack } }
@@ -41,27 +65,82 @@ struct ThreadRow: Identifiable {
     static let stack: CGFloat = 16
 }
 
+/// A run of consecutive finished calls of one reply, drawn as one line (#27): the calls it holds, in order.
+struct CallFold: Equatable {
+    let lines: [WorkLine]
+
+    /// The calls' words by the groups the tools declare, in order of first appearance: each group's sentence filled with its count, joined with
+    /// `, `, the first as written and the rest from a lowercase letter, as the terminal writes it (`Read 2 files, ran 3 shell commands`).
+    var words: String {
+        var groups: [(fold: LineFold, count: Int)] = []
+        for case let fold? in lines.map(\.fields.fold) {
+            if let i = groups.firstIndex(where: { $0.fold == fold }) { groups[i].count += 1 } else { groups.append((fold, 1)) }
+        }
+        return groups.enumerated().map { i, group in
+            let said = group.fold.sentence(group.count)
+            return i == 0 ? said : said.prefix(1).lowercased() + said.dropFirst()
+        }.joined(separator: ", ")
+    }
+
+    /// The ids the owner's open state is kept by: every line of the run, because the run's first line changes when an earlier call of it finishes
+    /// after a later one, and a call in the middle that finishes joins two runs.
+    private var ids: Set<String> { Set(lines.map(ThreadRows.id(of:))) }
+
+    /// Whether the owner has the fold open: any line of the run is in `opened`.
+    func isOpen(in opened: Set<String>) -> Bool { !ids.isDisjoint(with: opened) }
+
+    /// `opened` after a click on the fold: all of the run's ids out if it was open, all in if it was closed.
+    func toggled(_ opened: Set<String>) -> Set<String> { isOpen(in: opened) ? opened.subtracting(ids) : opened.union(ids) }
+
+    /// Whether `line` folds: a finished call of a tool that declares words, which is no task, agent, card of words or preview, and returned no image.
+    /// A call that runs, waits for the owner or failed, a background command, an agent, a message card, a call with a preview and a call with images
+    /// (drawn as thumbnails under it) keep a row of their own.
+    static func holds(_ line: WorkLine, images: [FileInfo]) -> Bool {
+        let f = line.fields
+        return f.status == .complete && f.fold != nil && !f.task && f.agent == nil && !f.message && f.preview == nil && images.isEmpty
+    }
+}
+
 enum ThreadRows {
     /// The id of the row a line's head is drawn in: what the thread's scroll position names to bring it into view.
     static func id(of line: WorkLine) -> String { "l\(line.position)" }
 
-    /// The rows of `thread`, in order: a line with a diff or a body of code is its head then its body rows. A work's end is no row: it closes its turn, and
-    /// its length goes to the head of the bot's answer of that turn, none when the turn drew no answer. `isSystem` says a message is the daemon's own line.
+    /// The rows of `thread`, in order: a line with a diff or a body of code is its head then its body rows. A bot's reply has one head, over the first
+    /// thing it draws, a call or a text. A work's end is no row: it closes its turn, and its length goes to the head of the bot's reply of that turn. `isSystem` says a message is the daemon's own line.
     static func build(_ thread: MessageThread, isSystem: (Message) -> Bool) -> [ThreadRow] {
         var rows: [ThreadRow] = []
-        // The head drawn right above the next row, nil once anything else is; and the bot's last head since the previous work's end.
+        // The head the next row may join: the last one drawn, which a call, a card or a system event of the bot's reply leaves in place, so
+        // that a reply has one head (#166), and which any other head-less row (a counted group of unreadable messages) drops; and the bot's
+        // last head since the previous work's end.
         var above: Grouping.Head?
         var turnHead: Int?
         func add(_ id: String, _ content: ThreadRow.Content, time: Date?, head: Grouping.Head? = nil) {
-            rows.append(ThreadRow(id: id, content: content, time: time, head: head, joins: head.map { Grouping.joins(above, $0) } ?? false))
-            above = head
+            var row = ThreadRow(id: id, content: content, time: time, head: head, joins: head.map { Grouping.joins(above, $0) } ?? false)
+            row.afterCall = rows.last?.endsCall ?? false
+            rows.append(row)
+            if head != nil || above?.author != thread.bot { above = head }
             // A person's words close the turn the bot's last head opened: a length after them is the next turn's.
             if let head, head.author != thread.bot { turnHead = nil } else if rows[rows.count - 1].showsHead, head?.author == thread.bot { turnHead = rows.count - 1 }
         }
+        // The finished calls in a row: one fold, put where they end (a text, a card, a work's end, a call that keeps its row).
+        var run: [WorkLine] = []
+        func flush() {
+            guard let first = run.first else { return }
+            let opens = turnHead == nil && first.ref.device == thread.bot
+            add(id(of: first), .fold(CallFold(lines: run)), time: first.time, head: opens ? Grouping.Head(author: first.ref.device, time: first.time) : nil)
+            run = []
+        }
         for entry in thread.entries {
+            if case .item(.line(let l)) = entry, CallFold.holds(l, images: thread.images[l.ref] ?? []) {
+                run.append(l)
+                continue
+            }
+            flush()
             switch entry {
             case .unreadable(let count, let first):
                 add("u\(first.position)", .unreadable(count: count, first: first), time: first.time, head: count == 1 ? Grouping.Head(author: first.sender, time: first.time) : nil)
+                // A counted group is drawn between the bot's texts: the next one is not the first one's continuation across other messages.
+                if count > 1 { above = nil }
             case .item(.message(let m)):
                 if thread.isFooter(m) {
                     if let i = turnHead, rows[i].duration == nil, case .footer(let duration?, _, _)? = m.sessionText { rows[i].duration = duration }
@@ -70,18 +149,27 @@ enum ThreadRows {
                     turnHead = nil
                     continue
                 }
+                // A scheduled run opens a turn, as a work's end closes one: a stopped turn writes no footer, and the run's own calls and texts
+                // must not join the reply before it nor hand it their length.
+                if thread.isRunLine(m) {
+                    if above?.author == thread.bot { above = nil }
+                    turnHead = nil
+                }
                 // A person's message and a bot's text are heads; the daemon's own line, a run line and a request are drawn without one.
                 var drawsHead = !thread.isRunLine(m) && !isSystem(m)
                 if case .request = m.body { drawsHead = false }
                 add("m\(m.position)", .message(m), time: m.time, head: drawsHead ? Grouping.Head(author: m.sender, time: m.time) : nil)
             case .item(.answer(let a)): add("a\(a.position)", .segment(a), time: a.time, head: Grouping.Head(author: a.ref.device, time: a.time))
             case .item(.line(let l)):
-                add(id(of: l), .line(l), time: l.time)
+                // A call that opens the bot's reply carries the bot's head, so that it does not read as part of the prompt above (#136).
+                let opens = turnHead == nil && l.ref.device == thread.bot
+                add(id(of: l), .line(l), time: l.time, head: opens ? Grouping.Head(author: l.ref.device, time: l.time) : nil)
                 if let preview = l.fields.preview, !preview.record {
                     for index in preview.rows.indices { add("l\(l.position).\(index)", .body(l, index: index), time: nil) }
                 }
             }
         }
+        flush()
         return rows
     }
 }
@@ -259,15 +347,28 @@ struct LineRow: View {
     }
 
     /// The word the core writes as the output of a call the owner stopped (`STOPPED`, src/core/reply/words.ts): that call ended in error, and is not a failure.
-    static let stopped = "Stopped"
+    nonisolated static let stopped = "Stopped"
 
-    /// The mark before a head: a failed call's triangle in red, a stopped one's square in muted, else the generic call symbol in muted.
+    /// Whether `output` is a stop's: the owner's (`Stopped`) or a restart's (`Stopped: the bot restarted`). A call's own output that begins with the word
+    /// (`Stopped waiting for lock`) is not. The mark and the end words both ask it, so that they agree.
+    nonisolated static func isStop(_ output: String?) -> Bool { output == stopped || (output ?? "").hasPrefix(stopped + ":") }
+
+    /// The mark before a head.
+    enum Mark: Equatable { case failed, stopped, call }
+
+    /// A failed call's triangle in red, a stopped one's square in muted, else the generic call symbol in muted.
+    nonisolated static func mark(of f: LineFields) -> Mark {
+        guard f.status == .error else { return .call }
+        return isStop(f.output) ? .stopped : .failed
+    }
+
     @ViewBuilder private func icon(_ f: LineFields) -> some View {
-        if f.status == .error && f.output != Self.stopped {
+        switch Self.mark(of: f) {
+        case .failed:
             Image(systemName: "exclamationmark.triangle").font(.system(size: 12)).foregroundStyle(PardnerColor.delText).frame(width: 14).accessibilityLabel("Failed")
-        } else if f.status == .error {
+        case .stopped:
             Image(systemName: "stop.fill").font(.system(size: 11)).foregroundStyle(PardnerColor.muted).frame(width: 14).accessibilityLabel("Stopped")
-        } else {
+        case .call:
             Image(systemName: ToolTitle.symbol).font(.system(size: 11)).foregroundStyle(PardnerColor.muted).frame(width: 14).accessibilityHidden(true)
         }
     }
@@ -288,6 +389,17 @@ struct LineRow: View {
 
     /// An agent's details (its calls, one to a line) on rows of their own under the head: a call's stay in its head.
     nonisolated static func agentDetails(_ f: LineFields, _ form: LineForm) -> String? { form == .agentAsked ? f.details : nil }
+
+    /// How a background command's closed line ends, in the words the app owns (#166): `✓ Done · 5m 00s` or `× Failed · 5m 00s`, timed from the line's start to the
+    /// edit that closed it, and with no time when the line has no start. nil for every other line: a call, an agent, a card of words, one the owner stopped or a restart closed (`Stopped` and `Stopped: the bot restarted`).
+    nonisolated static func endWords(of line: WorkLine) -> (text: String, failed: Bool)? {
+        let f = line.fields
+        guard f.task, f.agent == nil, !f.message, f.status == .complete || f.status == .error, !isStop(f.output) else { return nil }
+        let failed = f.status == .error
+        let words = failed ? "× Failed" : "✓ Done"
+        guard let start = f.startedAt, let end = line.ended else { return (words, failed) }
+        return ("\(words) · \(Naming.elapsed(end.timeIntervalSince(start)))", failed)
+    }
 
     /// The count of an agent's calls once its line is closed; nil while it works, with no call, or on a line that is no agent's.
     nonisolated static func callCount(of f: LineFields) -> String? {
@@ -325,7 +437,12 @@ struct LineRow: View {
                 Text("Running").font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.agentText)
             }
         case .interrupted: Text("Interrupted").font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.muted)
-        case .waiting, .written: EmptyView()
+        // The call has not run, its card waits for the owner (#137): the words of the card's fallback and of the channel's pill, in their colour.
+        case .waiting: Text("Waiting for you").font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.agentText)
+        case .written:
+            if let end = Self.endWords(of: line) {
+                Text(verbatim: end.text).font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(end.failed ? PardnerColor.delText : PardnerColor.okText)
+            }
         }
     }
 }

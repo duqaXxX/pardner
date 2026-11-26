@@ -32,14 +32,15 @@ enum Naming {
     /// The date and the time of a message, for the tooltip of its time.
     static func dateTime(_ date: Date) -> String { date.formatted(date: .abbreviated, time: .shortened) }
 
-    /// A scheduled run's line as the terminal writes it, `Running scheduled task (Nov 24 10:49pm)`, from the bot's clock in epoch milliseconds
-    /// (step E1 design 3.1): the Mac's zone, the month in English whatever the Mac's language, `am` and `pm` in lower case.
-    static func runLine(at milliseconds: Double, timeZone: TimeZone = .autoupdatingCurrent) -> String {
-        let format = DateFormatter()
-        (format.locale, format.timeZone, format.dateFormat) = (Locale(identifier: "en_US_POSIX"), timeZone, "MMM d h:mma")
-        let time = format.string(from: Date(timeIntervalSince1970: milliseconds / 1000))
-        return "Running scheduled task (\(time.dropLast(2) + time.suffix(2).lowercased()))"
+    /// A scheduled run's line, `Scheduled task started at 19:07`, from the bot's clock in epoch milliseconds, in the Mac's zone and with its
+    /// time as every other time of the app; the day separator above says the day (#165). The terminal writes `Running scheduled task (Nov 24
+    /// 10:49pm)`, which the owner did not read as a run.
+    static func runLine(at milliseconds: Double, locale: Locale = .autoupdatingCurrent, timeZone: TimeZone = .autoupdatingCurrent) -> String {
+        "Scheduled task started at " + time(Date(timeIntervalSince1970: milliseconds / 1000), locale: locale, timeZone: timeZone)
     }
+
+    /// The length of a turn's work from the length the bot wrote (#165): `worked for 9s` beside a reply's time, `Worked for 9s` as a line of its own.
+    static func worked(_ duration: String, asLine: Bool = false) -> String { (asLine ? "Worked" : "worked") + " for " + duration }
 
     /// A day's word for a separator: Today, Yesterday, else the date. `now` and `calendar` are given so that a test fixes them.
     static func day(_ date: Date, now: Date, calendar: Calendar) -> String {

@@ -124,6 +124,18 @@ test("a line is a text at first sight and an edit only when status, output or pr
   assert.equal(body(output).task.id, undefined);
 });
 
+test("a line's fold words go out in its text and in its edits; a line with none writes no key (#27)", async () => {
+  const { reply, queued, body } = setup();
+  const fold = ["Ran {n} shell command", "Ran {n} shell commands"] as const;
+  await reply.task(update({ fold }));
+  await reply.task(update({ fold, status: "complete" }));
+  await reply.task(update({ id: "toolu_2", name: "WebFetch", title: "WebFetch: a" }));
+  const [text, edit, plain] = queued as [Draft, Draft, Draft];
+  assert.deepEqual(body(text).task.fold, fold);
+  assert.deepEqual(body(edit).task.fold, fold);
+  assert.equal("fold" in body(plain).task, false, "a tool with no words carries none");
+});
+
 test("a call's line that becomes a task's line is an edit, and its agent goes out with it", async () => {
   // A background command's call: the call's end only makes the line a task's (`task`, `details`).
   const { reply, queued, body } = setup();

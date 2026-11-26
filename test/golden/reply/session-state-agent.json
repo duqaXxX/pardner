@@ -82,6 +82,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ sleep 15",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01A4furTtJv1qPZ8McHZzJzU",
       "message": false,
@@ -100,6 +104,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ sleep 15",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01A4furTtJv1qPZ8McHZzJzU",
       "message": false,
@@ -118,6 +126,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ sleep 15",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01A4furTtJv1qPZ8McHZzJzU",
       "message": false,

@@ -7,7 +7,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
 import type { AgentSession, PromptContent } from "../../../../src/agent/seam.ts";
-import type { Activity, Reply, RunningList, StatusOptions } from "../../../../src/chat/seam.ts";
+import type {
+  Activity,
+  Reply,
+  RunningList,
+  StatusOptions,
+  TaskUpdate,
+} from "../../../../src/chat/seam.ts";
 import type { TurnRenderer } from "../../../../src/core/reply/renderer.ts";
 import type { Approvals } from "../../../../src/core/requests.ts";
 import { logger, ThreadSession } from "../../../../src/core/sessions/session.ts";
@@ -90,10 +96,30 @@ export function promptOf(turn: Turn): PromptContent {
   return turn.prompt;
 }
 
-// A report opens with Claude Code's notification summary (recorded: `Background command "..."
-// completed (exit code 0)`, `Agent "..." finished`), never with a tool line. An agent's end with a
-// card is the card alone, where it ended.
-export const REPORT = /^(?:[✓✗] (?:Background command|Agent) "|\[complete\] Message from )/m;
+// A report of a command is the agent's own words (recorded: `The background command completed
+// successfully ...`): the command's line says its end, with no end text of the bot (#166). An
+// agent's end is its summary line (`Agent "..." finished`) or, with a card, the card alone, where
+// it ended.
+export const REPORT =
+  /^(?:[✓✗] Agent "|The background command completed |\[complete\] Message from )/m;
+
+/**
+ * The edits that closed a background command's line (#166): the command's end shows there, so a test
+ * that finds no end text first checks that the line says it. An agent's line and its card are not a
+ * command's, and close on their own.
+ */
+export function closedLines(h: Harness): TaskUpdate[] {
+  return h.room
+    .calls("task")
+    .map((call) => call.args[0] as TaskUpdate)
+    .filter(
+      (update) =>
+        update.task === true &&
+        !update.agent &&
+        !update.message &&
+        ["complete", "error"].includes(update.status),
+    );
+}
 
 /** A reply of Claude Code's own turn about a background task (not the owner's). */
 export function isReport(reply: string): boolean {

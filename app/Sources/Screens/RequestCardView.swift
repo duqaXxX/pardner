@@ -73,6 +73,7 @@ struct RequestCardView: View {
         switch card.owner {
         case .setup?: "Set up this session"
         case .shell?: "Run this command?"
+        case .permission? where card.asksCommand: "Allow this command?"
         default: title
         }
     }
@@ -81,8 +82,9 @@ struct RequestCardView: View {
         Text(verbatim: text).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(color).fixedSize(horizontal: false, vertical: true)
     }
 
-    private func mono(_ text: String) -> some View {
-        Text(verbatim: text).font(PardnerFont.mono(size: 12, weight: .regular)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+    private func mono(_ text: String, lines: Int? = nil) -> some View {
+        Text(verbatim: text).font(PardnerFont.mono(size: 12, weight: .regular)).lineLimit(lines).truncationMode(.tail).textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(PardnerMetrics.gap).frame(maxWidth: .infinity, alignment: .leading)
             .background(PardnerColor.surface, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
     }
@@ -93,6 +95,19 @@ struct RequestCardView: View {
     private func content(enabled: Bool) -> some View {
         switch card.owner {
         case .setup(let request)?: setupControls(request, enabled: enabled)
+        case .permission(let p)? where card.asksCommand:
+            line(p.toolName, PardnerColor.muted)
+            if let description = p.description { line(description, PardnerColor.text) }
+            mono(card.shownCommand ?? "", lines: card.commandFolds && !card.showAll ? 2 : nil)
+            if card.commandFolds {
+                Button(card.showAll ? "Hide \u{25B4}" : "Show full command \u{25BE}") { card.showAll.toggle() }
+                    .buttonStyle(.clickable).font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.agentText)
+                    .accessibilityLabel(card.showAll ? "Hide full command" : "Show full command")
+            }
+            if let rest = card.otherInput {
+                mono(rest.text)
+                if rest.cut { Button("Show all") { card.showAll = true }.buttonStyle(.clickable).font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.agentText) }
+            }
         case .permission(let p)?:
             line(p.toolName, PardnerColor.muted)
             if let description = p.description { line(description, PardnerColor.text) }

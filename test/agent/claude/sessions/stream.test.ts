@@ -25,6 +25,7 @@ import {
 } from "../../../support/sessions.ts";
 import {
   activityKinds,
+  closedLines,
   footers,
   inside,
   isReport,
@@ -161,12 +162,13 @@ test("a reply whose turn left a task running rests with no footer, and its repor
   // The reply ended with the turn, with no footer: the session has not ended.
   assert.deepEqual(footers(h), [false]);
   h.clients[0]?.inject([...notice, ...injected]);
-  await h.until(() => written(h).some((text) => isReport(text) || text.includes("✓")));
+  await h.until(() => written(h).some(isReport));
   await h.until(() => rootStatuses(h).at(-1) === "done");
   await h.idle();
-  const summary = String(systemRecord(notice, "task_notification").summary);
   // The report reached the thread, and the session's one footer is under its last message.
-  assert.ok(written(h).join("\n").includes(`✓ ${summary}`));
+  // The command's line says its end: no end text of the bot (#166).
+  assert.ok(!written(h).join("\n").includes("Background command"));
+  assert.ok(closedLines(h).length > 0, "the command's line closed");
   const shown = footers(h);
   assert.equal(shown.at(-1), true);
   assert.equal(shown.filter(Boolean).length, 1);
@@ -415,8 +417,7 @@ test("a reply that rests ends whole with the checkmark when its report arrives",
   await h.sleep(0.2); // past where a failed end's retry would have shown the cross
   assert.equal(rootStatuses(h).at(-1), "done");
   assert.ok(!rootStatuses(h).includes("error"));
-  const summary = String(systemRecord(notice, "task_notification").summary);
-  assert.ok(written(h).join("\n").includes(`✓ ${summary}`)); // the report reached the thread
+  assert.ok(written(h).some(isReport)); // the report reached the thread
   assert.ok(ended(h).every(Boolean));
   assert.equal(thread(h).status, null);
   assert.deepEqual(thread(h).openReplies, []);
@@ -658,7 +659,7 @@ test("a task that outlives its turn is not counted by the thread status", async 
   await h.idle();
   const before = h.room.calls("showActivity").length;
   h.clients[0]?.inject([...notice, ...injected]);
-  await h.until(() => written(h).some((text) => text.includes("✓")));
+  await h.until(() => written(h).some(isReport));
   // The report turn is the agent's own: the line stays as it was.
   assert.ok(
     h.room

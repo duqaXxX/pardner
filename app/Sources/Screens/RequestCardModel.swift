@@ -181,6 +181,54 @@ public final class RequestCardModel {
         }
     }
 
+    /// A permission's input as an object, nil for any other card and for a plan approval, which draws the plan in place of the input.
+    private var permissionInput: [String: Any]? {
+        guard case .permission(let p)? = owner, p.plan == nil else { return nil }
+        return (try? JSONSerialization.jsonObject(with: Data(p.input.utf8))) as? [String: Any]
+    }
+
+    /// The command a permission asks to run, from its input's `command`; nil for any other permission, any other card and an empty command. The card
+    /// draws it in monospace as written; the input's other fields follow it in `otherInput` (#137).
+    public var command: String? {
+        (permissionInput?["command"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// Whether the card draws a command: while it asks or sends; an ended card reads as any permission does, from its title.
+    public var asksCommand: Bool {
+        if case .ended = phase { return false }
+        return command != nil
+    }
+
+    /// Whether a command is drawn on two lines with Show full command until the owner opens it: past two lines or `foldedCharacters`, about two
+    /// lines of the card at the panel's width: the maintainer chose a short card over the whole command (2026-11-26). A line ends at any newline,
+    /// `\r\n` included, which Swift counts as one Character.
+    static func folds(_ command: String) -> Bool {
+        command.count > foldedCharacters || command.split(whereSeparator: \.isNewline).count > 2
+    }
+    static let foldedCharacters = 140
+
+    public var commandFolds: Bool { command.map(Self.folds) ?? false }
+
+    /// The command as drawn: a folded one is cut at `limit` before the view limits its lines, so that a heredoc of hundreds of kilobytes is never laid
+    /// out; whole once `showAll`.
+    public var shownCommand: String? {
+        guard let command else { return nil }
+        return commandFolds && !showAll ? String(command.prefix(Self.limit)) : command
+    }
+
+    /// A command permission's input without `command` (the card draws it itself) and without `description` when that is a string equal to the
+    /// request's `description`, which the card draws; any other `description` stays, as indented JSON with sorted keys, cut at `limit` unless
+    /// `showAll`. Nil when nothing else is in the input. These fields change what the call does (`dangerouslyDisableSandbox`, a host), so the owner
+    /// sees them before allowing it.
+    public var otherInput: (text: String, cut: Bool)? {
+        guard command != nil, var rest = permissionInput, case .permission(let p)? = owner else { return nil }
+        rest["command"] = nil
+        if let drawn = p.description, rest["description"] as? String == drawn { rest["description"] = nil }
+        guard !rest.isEmpty, let data = try? JSONSerialization.data(withJSONObject: rest, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]) else { return nil }
+        let text = String(decoding: data, as: UTF8.self)
+        return showAll || text.count <= Self.limit ? (text, false) : (String(text.prefix(Self.limit)), true)
+    }
+
     /// The input of a permission, or its plan in place of it, cut at `limit` characters unless `showAll`.
     public var shownText: (text: String, cut: Bool)? {
         guard case .permission(let p)? = owner else { return nil }

@@ -81,12 +81,17 @@ final class RunAndHintTests: XCTestCase {
         for case .message(let m) in s.thread.items { XCTAssertFalse(s.thread.isRunLine(m)) }
     }
 
-    func testTheRunLineSaysTheTimeAsTheTerminalDoes() {
+    /// The run line says a scheduled task started, at the time every other row of the app writes (#165).
+    func testTheRunLineSaysAScheduledTaskStartedAtTheAppsTime() {
         let utc = TimeZone(identifier: "UTC")!
         let night = 1_764_024_540_000.0 // Nov 24 2025, 22:49 UTC
-        XCTAssertEqual(Naming.runLine(at: night, timeZone: utc), "Running scheduled task (Nov 24 10:49pm)")
-        XCTAssertEqual(Naming.runLine(at: night, timeZone: TimeZone(identifier: "Europe/Rome")!), "Running scheduled task (Nov 24 11:49pm)")
-        XCTAssertEqual(Naming.runLine(at: night + 8 * 3_600_000 + 16 * 60_000, timeZone: utc), "Running scheduled task (Nov 25 7:05am)")
+        let it = Locale(identifier: "it_IT")
+        XCTAssertEqual(Naming.runLine(at: night, locale: it, timeZone: utc), "Scheduled task started at 22:49")
+        XCTAssertEqual(Naming.runLine(at: night, locale: it, timeZone: TimeZone(identifier: "Europe/Rome")!), "Scheduled task started at 23:49")
+        let date = Date(timeIntervalSince1970: night / 1000)
+        XCTAssertEqual(Naming.runLine(at: night, locale: it, timeZone: utc), "Scheduled task started at " + Naming.time(date, locale: it, timeZone: utc), "as a message's time")
+        XCTAssertEqual(Naming.worked("9s"), "worked for 9s", "beside a time")
+        XCTAssertEqual(Naming.worked("9s", asLine: true), "Worked for 9s", "as a line of its own")
     }
 
     // MARK: the hint

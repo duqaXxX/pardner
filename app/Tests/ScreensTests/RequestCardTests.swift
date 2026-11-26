@@ -171,6 +171,104 @@ final class RequestCardTests: XCTestCase {
         }
     }
 
+    // MARK: a command's permission (#137)
+
+    /// A permission that asks to run a command draws the command, not the input's JSON; any other permission keeps its input.
+    func testACommandsPermissionShowsTheCommandAndAnyOtherKeepsItsInput() {
+        let bash: [String: Any] = ["type": "permission", "toolName": "Bash", "input": ["command": "rm logs/old.log", "description": "Delete old log"],
+                                   "title": "Bash: rm logs/old.log", "description": "Delete old log", "plan": NSNull()]
+        XCTAssertEqual(makeCard(bash).0.command, "rm logs/old.log")
+        XCTAssertNil(makeCard(permission).0.command, "an edit has no command: its input is drawn as before")
+        var planned = bash
+        planned["plan"] = "1. delete the log"
+        XCTAssertNil(makeCard(planned).0.command, "a plan is drawn in place of the input")
+    }
+
+    /// A command folds on two lines with Show full command past two lines or 140 characters; a short one is always whole.
+    func testALongCommandFoldsAndAShortOneDoesNot() {
+        XCTAssertFalse(RequestCardModel.folds("rm logs/old.log"))
+        XCTAssertFalse(RequestCardModel.folds(String(repeating: "a", count: 140)))
+        XCTAssertTrue(RequestCardModel.folds(String(repeating: "a", count: 141)))
+        XCTAssertFalse(RequestCardModel.folds("one\ntwo"))
+        XCTAssertTrue(RequestCardModel.folds("one\ntwo\nthree"))
+        XCTAssertFalse(RequestCardModel.folds("one\r\ntwo"))
+        XCTAssertTrue(RequestCardModel.folds("one\r\ntwo\r\nthree"), "a CRLF is one Character: lines are counted by isNewline")
+    }
+
+    /// A Bash permission; the request's `description` is its own field (the SDK's subtitle), given apart from the input's.
+    private func bash(_ input: [String: Any], description: Any = NSNull(), plan: Any = NSNull()) -> [String: Any] {
+        ["type": "permission", "toolName": "Bash", "input": input, "title": "Bash", "description": description, "plan": plan]
+    }
+
+    /// The input's other fields stay on the card: a sandbox escape or a host the owner allows is never unseen (#137, review row 1).
+    func testACommandCardKeepsEveryOtherFieldOfTheInput() throws {
+        let (escape, _, _) = makeCard(bash(["command": "ls", "description": "List", "dangerouslyDisableSandbox": true], description: "List"))
+        let rest = try XCTUnwrap(escape.otherInput)
+        XCTAssertEqual(object(rest.text) as NSDictionary, ["dangerouslyDisableSandbox": true] as NSDictionary)
+        XCTAssertFalse(rest.cut)
+        let (mcp, _, _) = makeCard(["type": "permission", "toolName": "mcp__x__run", "input": ["command": "ls", "host": "prod.example.com"],
+                                    "title": NSNull(), "description": NSNull(), "plan": NSNull()])
+        XCTAssertEqual(object(try XCTUnwrap(mcp.otherInput).text) as NSDictionary, ["host": "prod.example.com"] as NSDictionary)
+        let (plain, _, _) = makeCard(bash(["command": "ls", "description": "List"], description: "List"))
+        XCTAssertNil(plain.otherInput, "a command and the description the card draws: nothing left to draw")
+        XCTAssertNil(makeCard(permission).0.otherInput, "an approval without a command draws its whole input as before")
+    }
+
+    /// The input's `description` leaves the rest only when it is the string the card draws as the request's description; any other stays, so the
+    /// owner never allows what the card does not show (#137, review row 10).
+    func testAnInputDescriptionIsDroppedOnlyWhenTheCardDrawsIt() throws {
+        func rest(_ input: [String: Any], _ description: Any) throws -> NSDictionary? {
+            try makeCard(bash(input, description: description)).0.otherInput.map { object($0.text) as NSDictionary }
+        }
+        XCTAssertEqual(try rest(["command": "deploy", "description": "SECRET-PAYLOAD"], NSNull()), ["description": "SECRET-PAYLOAD"] as NSDictionary,
+                       "no request description: the card draws none")
+        XCTAssertEqual(try rest(["command": "deploy", "description": ["target": "PROD-HOST"]], "Run a command"),
+                       ["description": ["target": "PROD-HOST"]] as NSDictionary, "not a string")
+        XCTAssertEqual(try rest(["command": "deploy", "description": "MODEL-WORDS"], "Claude will have access to ~/Downloads"),
+                       ["description": "MODEL-WORDS"] as NSDictionary, "the card draws the request's description, not this one")
+        XCTAssertNil(try rest(["command": "deploy", "description": "Deploy it"], "Deploy it"), "equal strings: the card draws it, nothing left")
+        XCTAssertEqual(try rest(["command": "deploy", "description": "Deploy it", "host": "prod"], "Deploy it"), ["host": "prod"] as NSDictionary,
+                       "equal strings: the rest does not repeat it")
+    }
+
+    /// The rest of the input is cut at `limit` until Show all, as any input is.
+    func testTheRestOfAnInputIsCutAtTheLimit() throws {
+        let (card, _, _) = makeCard(bash(["command": "ls", "stdin": String(repeating: "x", count: 5000)]))
+        XCTAssertEqual(try XCTUnwrap(card.otherInput).text.count, RequestCardModel.limit)
+        XCTAssertTrue(try XCTUnwrap(card.otherInput).cut)
+        card.showAll = true
+        XCTAssertGreaterThan(try XCTUnwrap(card.otherInput).text.count, 5000)
+    }
+
+    /// The card asks `Allow this command?` only while it asks; once ended it falls back to the title as before (review row 2).
+    func testTheCommandHeadingIsForAnOpenCardOnly() {
+        let (card, _, s) = makeCard(bash(["command": "ls"]))
+        XCTAssertTrue(card.asksCommand)
+        deliver(11, mini, ["thread": s.thread, "withdrawn": true], at: 6, re: s.request)
+        XCTAssertEqual(card.phase, .ended(.withdrawn))
+        XCTAssertFalse(card.asksCommand)
+        XCTAssertFalse(makeCard(permission).0.asksCommand)
+    }
+
+    /// A folded command gives the view at most `limit` characters, whole after Show full command (review row 4).
+    func testAFoldedCommandIsCutAtTheLimit() throws {
+        let (card, _, _) = makeCard(bash(["command": String(repeating: "x", count: 10_000)]))
+        XCTAssertEqual(card.shownCommand?.count, RequestCardModel.limit)
+        XCTAssertTrue(card.commandFolds)
+        card.showAll = true
+        XCTAssertEqual(card.shownCommand?.count, 10_000)
+        let (short, _, _) = makeCard(bash(["command": "ls"]))
+        XCTAssertEqual(short.shownCommand, "ls")
+        XCTAssertFalse(short.commandFolds)
+    }
+
+    /// An empty command is no command: the card draws the input as for any tool (review row 6).
+    func testAnEmptyCommandIsNoCommand() {
+        let (card, _, _) = makeCard(bash(["command": ""]))
+        XCTAssertNil(card.command)
+        XCTAssertFalse(card.asksCommand)
+    }
+
     // MARK: one reply, the keys
 
     func testOneReplyPerCard() async throws {

@@ -612,6 +612,8 @@ export class ThreadSession {
   // Whether this stop has said, in a message, which background tasks it waits for: only where
   // the thread's activity line cannot (`showRestartWait`).
   private toldWaiting = false;
+  /** The message `showRestartWait` posted, for the close to withdraw; null with none or once withdrawn. */
+  private restartWaitNotice: MessageId | null = null;
   // The status asked of the chat last (`setStatus`): a stop that begins while it is `working`
   // shows the root as restarting (`rootStatus`).
   private lastStatus: SessionStatus | null = null;
@@ -1909,8 +1911,23 @@ export class ThreadSession {
     const held = this.runningKindsOf({ awaitedOnly: true });
     if (held) {
       this.toldWaiting = true;
-      await this.post(texts.fill(texts.RESTART_WAITS_MESSAGE, { counts: held }));
+      this.restartWaitNotice = await this.post(
+        texts.fill(texts.RESTART_WAITS_MESSAGE, { counts: held }),
+      );
     }
+  }
+
+  /**
+   * The restart's wait ends with the session's close: the notice that said what the stop waited
+   * for no longer holds, so it is withdrawn, once. On the relay the withdrawal is queued here and
+   * reaches the relay at the next start, so a stop with no restart keeps the notice until the
+   * bot starts again. Memory only: a crash leaves it standing.
+   */
+  private async withdrawRestartWait(): Promise<void> {
+    const notice = this.restartWaitNotice;
+    if (notice === null) return;
+    this.restartWaitNotice = null;
+    await this.thread.withdraw(notice).catch(() => false);
   }
 
   /**
@@ -2601,6 +2618,9 @@ export class ThreadSession {
       // Only now, with every task cancelled: a round trip to the chat must not hold those up.
       // A loop with runs shown is over with its session, however it closed.
       await this.leaveLoop().catch(() => {});
+      // Before the chat's own close, which may end what a withdrawal needs. The relay only queues
+      // it: the withdrawal reaches the relay at the next start.
+      await this.withdrawRestartWait();
       await this.thread.close();
       // The last chance a change still only debounced gets, and the last chance of a reply
       // whose end failed and whose retry is still waiting: each reply once.
@@ -3349,13 +3369,31 @@ export class ThreadSession {
     ) {
       const line = this.endedLine(event);
       const origin = this.taskReplies.get(event.taskId);
-      // A task with a line of its own closes it, and its card is the row where it ended: no end text.
-      const carded =
+      // The loop card draws no line (`LoopReply.task`), so a task of a scheduled run has none to close.
+      const lined =
         !waiting &&
-        line.card !== null &&
         origin?.inBackground(event.taskId) === true &&
-        !origin.lineless(event.taskId);
-      this.ended.push([event.taskId, carded ? { text: "", card: line.card } : line]);
+        !origin.lineless(event.taskId) &&
+        !(this.replyOf.get(origin) instanceof LoopReply);
+      // A task with a line of its own closes it, and its card is the row where it ended: no end text.
+      const carded = lined && line.card !== null;
+      // The line of a command (or any task that is not an agent) says how it ended (`Done` or
+      // `Failed`, with the time), so its end text would say it twice. The end stays in the list,
+      // with no words: it names the reply the report goes into and tells a report turn from a
+      // scheduled run. A task with no line to close (a quiet one, one a restart left running) and
+      // one that was stopped, which its line does not say, keep the text.
+      // A task whose record `TASKS_KEPT` dropped has no kind to tell an agent from a command by:
+      // its end text stays.
+      const record = this.tasks.get(event.taskId);
+      const lineSays =
+        lined &&
+        record !== undefined &&
+        record[0] !== "subagent" &&
+        (event.status === "completed" || event.status === "failed");
+      this.ended.push([
+        event.taskId,
+        lineSays ? { text: "", card: null } : carded ? { text: "", card: line.card } : line,
+      ]);
     }
     if (event.type === "task_ended" && !stopped && !owned) {
       // A task in the background that ends while a turn runs. With no line to close, its end is
@@ -3860,7 +3898,8 @@ export class ThreadSession {
 
   /**
    * Whether a turn's end is all there is of a turn the agent started and nothing waits to be
-   * said with it: no step taken, no text, no task's end line, no held task event, no notice.
+   * said with it: no step taken, no text, no task's end line with words (a command's, which its
+   * line says, has none), no held task event, no notice.
    * The seam defines it (`turn_ended.steps`, `startedBy`); Claude Code gives a task's
    * notification such a turn once the task's report was handed back (measured 2026-10-10,
    * `subagent-handback.jsonl`). With an end line or a held event waiting, the turn is the
@@ -3872,8 +3911,9 @@ export class ThreadSession {
       event.steps === 0 &&
       !event.finalText &&
       event.ending === "done" &&
-      this.ended.length === 0 &&
-      this.opening === null &&
+      [...(this.opening ?? []), ...this.ended].every(
+        ([, line]) => line.text === "" && line.card === null,
+      ) &&
       this.held.length === 0 &&
       this.notice === null
     );
@@ -3891,6 +3931,9 @@ export class ThreadSession {
     this.injectedExpected = false;
     this.expiry?.cancel();
     this.notificationWaits = false;
+    // What it reported had no words (`saidNothing`): a command's end its line says.
+    this.opening = null;
+    this.ended = [];
     this.settled.set();
     // A reply that waited only for this report has nothing more coming.
     await this.sweepClosedOut(live(signal));
@@ -5760,8 +5803,8 @@ export class ThreadSession {
   }
 
   /** A notice of the daemon's own, small and grey as the footer. */
-  private async post(text: string): Promise<void> {
-    await this.thread.notice(text);
+  private async post(text: string): Promise<MessageId | null> {
+    return this.thread.notice(text);
   }
 
   /** Remove a decided request: the tool's line in the reply records what happened. */

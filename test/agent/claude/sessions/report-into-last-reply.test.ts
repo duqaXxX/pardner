@@ -19,7 +19,8 @@ import {
 } from "./helpers.ts";
 
 const AGENT_REPORT = /^\[complete\] Message from /m;
-const COMMAND_REPORT = /^✓ Background command "/m;
+// The command's line says its end: its report is the agent's own words, with no end text of the bot.
+const COMMAND_REPORT = /^The background command completed /m;
 
 test("two reports for tasks of earlier replies render into the last reply, at rest", async (t) => {
   const [agentStart, agentEnd, agentReport] = splitBackground(sdkMessages("subagent"));
@@ -82,7 +83,7 @@ test("the last reply keeps resting for a task of an earlier reply that ends afte
   assert.equal(replyCount(h), 2, bodies.join("\n---\n"));
   assert.ok(!isReport(bodies[0] ?? ""), "the first reply holds no report");
   const second = bodies[1] ?? "";
-  assert.equal(second.match(/^✓ Background command "/gm)?.length, 2, second);
+  assert.equal(second.match(/^The background command completed /gm)?.length, 2, second);
   // One footer, under the last message of the thread.
   const shown = footers(h);
   assert.deepEqual(

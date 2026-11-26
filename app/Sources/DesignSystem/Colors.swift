@@ -159,6 +159,8 @@ public enum PardnerMetrics {
     public static let controlRadius = value(file.radii, "control")
     /// Session cards, the composer, the bot's box.
     public static let containerRadius = value(file.radii, "container")
+    /// An inline code span's border.
+    public static let codeRadius = value(file.radii, "code")
     /// The one base gap; other gaps are multiples or halves of it.
     public static let gap = value(file.spacing, "gap")
     /// The widest a bot's text is read at: its column is capped here, and left-aligned in a panel wider than this.
@@ -179,4 +181,8 @@ public enum PardnerMetrics {
     public static let messageGap = value(file.spacing, "message-gap")
     public static let groupGap = value(file.spacing, "group-gap")
     public static let cardGap = value(file.spacing, "card-gap")
+    /// Above and below a call's row or a fold's row, and between one and a text.
+    public static let callGap = value(file.spacing, "call-gap")
+    /// An inline code span's room at each side, inside its border.
+    public static let codePad = value(file.spacing, "code-pad")
 }

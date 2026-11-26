@@ -9,6 +9,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_01KQBBbM87jm3tLZFvPivBaW",
       "message": false,
@@ -28,6 +32,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_01KQBBbM87jm3tLZFvPivBaW",
       "message": false,
@@ -47,6 +55,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_01CEC8Te58RpePUngJB4MwTa",
       "message": false,
@@ -66,6 +78,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_01CEC8Te58RpePUngJB4MwTa",
       "message": false,
@@ -85,6 +101,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_01RL4WcyU1EgEKBWXV2YuB6M",
       "message": false,
@@ -104,6 +124,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_01RL4WcyU1EgEKBWXV2YuB6M",
       "message": false,
@@ -123,6 +147,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ sleep 25; echo ledger-done",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01S4Zo6WwvXe5mEVGuBqBXoL",
       "message": false,
@@ -141,6 +169,10 @@
       "agent": null,
       "calls": 0,
       "details": "Running in background",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01S4Zo6WwvXe5mEVGuBqBXoL",
       "message": false,
@@ -166,6 +198,10 @@
        "agent": null,
        "calls": 0,
        "details": "Running in background",
+       "fold": [
+        "Ran {n} shell command",
+        "Ran {n} shell commands"
+       ],
        "folded": null,
        "id": "toolu_01S4Zo6WwvXe5mEVGuBqBXoL",
        "message": false,
@@ -268,6 +304,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_01FmbweB6gRA6C1wsCZVQG4L",
       "message": false,
@@ -287,6 +327,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_01FmbweB6gRA6C1wsCZVQG4L",
       "message": false,
@@ -410,6 +454,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_01KQBBbM87jm3tLZFvPivBaW",
      "message": false,
@@ -429,6 +477,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_01KQBBbM87jm3tLZFvPivBaW",
      "message": false,
@@ -448,6 +500,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_01CEC8Te58RpePUngJB4MwTa",
      "message": false,
@@ -467,6 +523,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_01CEC8Te58RpePUngJB4MwTa",
      "message": false,
@@ -486,6 +546,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_01RL4WcyU1EgEKBWXV2YuB6M",
      "message": false,
@@ -505,6 +569,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_01RL4WcyU1EgEKBWXV2YuB6M",
      "message": false,
@@ -524,6 +592,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ sleep 25; echo ledger-done",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01S4Zo6WwvXe5mEVGuBqBXoL",
      "message": false,
@@ -542,6 +614,10 @@
      "agent": null,
      "calls": 0,
      "details": "Running in background",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01S4Zo6WwvXe5mEVGuBqBXoL",
      "message": false,
@@ -566,6 +642,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01S4Zo6WwvXe5mEVGuBqBXoL",
      "message": false,
@@ -584,6 +664,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01S4Zo6WwvXe5mEVGuBqBXoL",
      "message": false,
@@ -638,6 +722,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_01FmbweB6gRA6C1wsCZVQG4L",
      "message": false,
@@ -657,6 +745,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_01FmbweB6gRA6C1wsCZVQG4L",
      "message": false,

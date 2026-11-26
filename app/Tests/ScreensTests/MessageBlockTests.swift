@@ -1,9 +1,12 @@
 // The message block's decisions (window redesign, unit 1a): the summary's words, the mention in a prompt and the mark's shape.
 // Over the synthetic samples.
+import AppKit
 import Conversation
+import DesignSystem
 import Foundation
 import ProtocolHost
 @testable import Screens
+import SwiftUI
 import XCTest
 
 final class MessageBlockTests: XCTestCase {
@@ -69,5 +72,31 @@ final class MessageBlockTests: XCTestCase {
         let plain = Summary.spoken(model: sample.model, thread: thread, showsTitle: false)
         XCTAssertTrue(plain.hasPrefix("mini, "), plain)
         XCTAssertEqual(Summary.spoken(model: sample.model, thread: thread, showsTitle: true), thread.title + ", " + plain)
+    }
+
+    /// A bot whose profile is not read yet keeps the bot's rounded square in its row: the device log names it a bot (#106). Read at the mark's
+    /// corner, 4 points in from each side: inside a rounded square of radius 10, outside a circle of radius 18.
+    @MainActor
+    func testABotWithNoProfileIsDrawnAsABot() throws {
+        var s = ScrollFixture()
+        s.put(1, s.bot, ["markdown": "hello from the bot"])
+        XCTAssertNil(s.model.profiles[s.bot], "no profile read")
+        let message = try XCTUnwrap(s.model.channels[s.channel]?.messages.first)
+        func corner(bots: Set<Data>) -> [CGFloat] {
+            _ = NSApplication.shared
+            _ = PardnerFonts.register()
+            let row = MessageRow(model: s.model, icons: [:], message: message).environment(\.botDevices, bots)
+            let hosting = NSHostingView(rootView: row.frame(width: 400, height: 80, alignment: .topLeading).background(Color.white).environment(\.colorScheme, .light))
+            hosting.appearance = NSAppearance(named: .aqua)
+            hosting.frame = NSRect(x: 0, y: 0, width: 400, height: 80)
+            hosting.layoutSubtreeIfNeeded()
+            let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)!
+            hosting.cacheDisplay(in: hosting.bounds, to: rep)
+            let scale = CGFloat(rep.pixelsWide) / 400
+            let c = rep.colorAt(x: Int(4 * scale), y: Int(4 * scale))!.usingColorSpace(.sRGB)!
+            return [c.redComponent, c.greenComponent, c.blueComponent].map { ($0 * 255).rounded() }
+        }
+        XCTAssertEqual(corner(bots: []), [255, 255, 255], "with no device log entry or profile the row draws a person's circle")
+        XCTAssertNotEqual(corner(bots: [s.bot]), [255, 255, 255], "the device log names it a bot: a rounded square")
     }
 }
