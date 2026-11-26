@@ -117,6 +117,9 @@ public final class DevicesModel {
     /// The log is read: before that the controller refuses every act as not ready.
     public var ready: Bool { !state.rows.isEmpty }
 
+    /// Every device the device log names a bot, removed ones included: their messages stay in the conversation.
+    public var botIDs: Set<Data> { Set(state.rows.filter { $0.kind == .bot }.map(\.id)) }
+
     /// `confirmAdd` refuses while an entry is kept and not read back (design 3.6).
     public var canAdd: Bool { ready && !state.pendingEntry }
 

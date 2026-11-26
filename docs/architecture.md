@@ -472,7 +472,7 @@ text, since it can quote a message; the daemon logs the states of the connection
   dev server, a watcher) ever ends. A status line does not notify and goes with the restart, where a
   message would do both. Where the chat draws no activity line (it declares none, or refuses it:
   `ThreadChat.activityRefused`), one message says it (`texts.RESTART_WAITS_MESSAGE`), once per stop
-  and never while a turn runs. `/stop` while a turn runs interrupts
+  and never while a turn runs; the session keeps the id `ThreadChat.notice` resolves with and withdraws the message when it closes, since it no longer holds after the restart (on the relay the withdrawal reaches the relay at the next start; the id is in memory only: a crash leaves the message). `/stop` while a turn runs interrupts
   it and ends the tasks with `AgentSession.stopTask`; Claude Code starts no turn to report a task
   stopped this way (measured: "Stopped task, no report turn"), so neither the drain nor the
   thread's next prompt waits `constants.INJECTED_TURN_WAIT` for one. `/stop` with no turn running
@@ -1435,7 +1435,7 @@ closed when the start returns (`ThreadSession.connect`).
   then Claude Code starts a turn of its own to report it. That turn renders into the reply that
   started the task only while that reply is the last thing in the thread
   (`ThreadSession.openingTarget`, keyed by the task id through `ThreadSession.taskReplies`),
-  appended after that reply's own body with one line per task it reports, the tasks that had ended when the agent began the turn (a `session_started` with no prompt queued sets their lines aside; a task that ends after it waits for the next report), as the terminal prints it (`ThreadSession.endedLine`): a command's notification
+  appended after that reply's own body with one line per task it reports, the tasks that had ended when the agent began the turn (a `session_started` with no prompt queued sets their lines aside; a task that ends after it waits for the next report), as the terminal prints it (`ThreadSession.endedLine`), except for a command that has a line in the reply that started it (the line closes in place and the app writes `✓ Done · 5m 00s` or `× Failed · 5m 00s` on it, so its end line is an entry with no words that still names the reply): a command's notification
   `summary`, which already reads `Background command "..." completed (exit code 0)`, or
   `Agent "<description>" finished` built from the task's `task_started` event, since an agent's
   `summary` can be its result or a note for the model, except for an agent that failed, whose summary is the reason and follows the words, and for a completed agent that a task it started still outlives (`ThreadSession.waitsOnOwnWork`, from the `parentTaskId` of each task it starts): it is not done, and the line is the terminal's `Agent "<description>" is waiting on its own background work` (`texts.AGENT_WAITING`, Claude Code 2.1.299 on), written with no mark; plus the duration when the notification's `usage` reports `duration_ms`

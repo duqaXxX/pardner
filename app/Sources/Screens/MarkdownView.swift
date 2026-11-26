@@ -84,7 +84,7 @@ struct MarkdownView: View {
                 ForEach(pieces.indices, id: \.self) { row(pieces[$0], gaps: Self.gaps(from: $0 > 0 ? pieces[$0 - 1] : nil, to: pieces[$0])) }
             }
         } else {
-            Text(CodeSpans.styled(text, ground: codeGround)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            InlineCodeText(text: CodeSpans.styled(text, ground: codeGround))
         }
     }
 
@@ -133,7 +133,7 @@ struct MarkdownView: View {
         if text.runs.contains(where: { $0.link != nil }) {
             LinkText(text: text, size: size, weight: weight, color: color, codeSize: codeSize, open: { open($0) }, copy: copy)
         } else {
-            Text(MarkdownFonts.styled(text, size: size, weight: weight)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            InlineCodeText(text: MarkdownFonts.styled(text, size: size, weight: weight))
         }
     }
 

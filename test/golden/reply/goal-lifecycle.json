@@ -81,6 +81,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 1 > a1.txt && cat a1.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01XhBFtCRFzS2AzFWp47mgYp",
       "message": false,
@@ -99,6 +103,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 1 > a1.txt && cat a1.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01XhBFtCRFzS2AzFWp47mgYp",
       "message": false,
@@ -117,6 +125,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 2 > a2.txt && cat a2.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01EnQknY6M8F66p9trFqhmWD",
       "message": false,
@@ -135,6 +147,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 2 > a2.txt && cat a2.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01EnQknY6M8F66p9trFqhmWD",
       "message": false,
@@ -195,6 +211,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 3 > a3.txt && cat a3.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01Dj3dHJKfMT7DEEFG1Kj9zr",
       "message": false,
@@ -213,6 +233,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 3 > a3.txt && cat a3.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01Dj3dHJKfMT7DEEFG1Kj9zr",
       "message": false,
@@ -322,6 +346,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 4 > a4.txt && cat a4.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01UPdcxkSWXd7V3KFzfQdhZa",
       "message": false,
@@ -340,6 +368,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 4 > a4.txt && cat a4.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01UPdcxkSWXd7V3KFzfQdhZa",
       "message": false,
@@ -358,6 +390,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 5 > a5.txt && cat a5.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_0168hJjFDkq61w3rDkKwwaG9",
       "message": false,
@@ -376,6 +412,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 5 > a5.txt && cat a5.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_0168hJjFDkq61w3rDkKwwaG9",
       "message": false,
@@ -394,6 +434,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 6 > a6.txt && cat a6.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01PdWf1mZH2mM2j5GZc74DEA",
       "message": false,
@@ -412,6 +456,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 6 > a6.txt && cat a6.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01PdWf1mZH2mM2j5GZc74DEA",
       "message": false,
@@ -430,6 +478,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 7 > a7.txt && cat a7.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_017KzLZ6iPWzrT8NttfDAxvQ",
       "message": false,
@@ -448,6 +500,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 7 > a7.txt && cat a7.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_017KzLZ6iPWzrT8NttfDAxvQ",
       "message": false,
@@ -466,6 +522,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 8 > a8.txt && cat a8.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01WF46TypepAdq9vnbDSaw5U",
       "message": false,
@@ -484,6 +544,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 8 > a8.txt && cat a8.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01WF46TypepAdq9vnbDSaw5U",
       "message": false,
@@ -502,6 +566,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 9 > a9.txt && cat a9.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_018UVDxoCKJccgq87ADPDAMk",
       "message": false,
@@ -520,6 +588,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 9 > a9.txt && cat a9.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_018UVDxoCKJccgq87ADPDAMk",
       "message": false,
@@ -538,6 +610,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 10 > a10.txt && cat a10.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01484QPZZgRs6AZVqjMC7YXr",
       "message": false,
@@ -556,6 +632,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 10 > a10.txt && cat a10.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01484QPZZgRs6AZVqjMC7YXr",
       "message": false,
@@ -574,6 +654,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 11 > a11.txt && cat a11.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01BFTnLcPNNXmgQybqSaUZiP",
       "message": false,
@@ -592,6 +676,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 11 > a11.txt && cat a11.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01BFTnLcPNNXmgQybqSaUZiP",
       "message": false,
@@ -610,6 +698,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 12 > a12.txt && cat a12.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01UvsX2ckCrVFCb7hAPAWKWE",
       "message": false,
@@ -628,6 +720,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 12 > a12.txt && cat a12.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01UvsX2ckCrVFCb7hAPAWKWE",
       "message": false,
@@ -646,6 +742,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 13 > a13.txt && cat a13.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_018m8CCkvVxp2YnY1MX1qZM4",
       "message": false,
@@ -664,6 +764,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 13 > a13.txt && cat a13.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_018m8CCkvVxp2YnY1MX1qZM4",
       "message": false,
@@ -682,6 +786,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 14 > a14.txt && cat a14.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01GGvBe5AVLYWLUxXLc3okZK",
       "message": false,
@@ -700,6 +808,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 14 > a14.txt && cat a14.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01GGvBe5AVLYWLUxXLc3okZK",
       "message": false,
@@ -718,6 +830,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 15 > a15.txt && cat a15.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01KCaNCtnC5pSsuPkRLjtnov",
       "message": false,
@@ -736,6 +852,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 15 > a15.txt && cat a15.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01KCaNCtnC5pSsuPkRLjtnov",
       "message": false,
@@ -754,6 +874,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 16 > a16.txt && cat a16.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01KYkfvDMhmCioQZ9AzH5QUZ",
       "message": false,
@@ -772,6 +896,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 16 > a16.txt && cat a16.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01KYkfvDMhmCioQZ9AzH5QUZ",
       "message": false,
@@ -790,6 +918,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 17 > a17.txt && cat a17.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01FA9gU8UVM11xKvwamhw5PT",
       "message": false,
@@ -808,6 +940,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 17 > a17.txt && cat a17.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01FA9gU8UVM11xKvwamhw5PT",
       "message": false,
@@ -826,6 +962,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 18 > a18.txt && cat a18.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01WsFA9zzEd9i3SzHAh6dYV5",
       "message": false,
@@ -844,6 +984,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 18 > a18.txt && cat a18.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01WsFA9zzEd9i3SzHAh6dYV5",
       "message": false,
@@ -862,6 +1006,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 19 > a19.txt && cat a19.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01Va1XCnUcgMCaCkej95oUao",
       "message": false,
@@ -880,6 +1028,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 19 > a19.txt && cat a19.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01Va1XCnUcgMCaCkej95oUao",
       "message": false,
@@ -898,6 +1050,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 20 > a20.txt && cat a20.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_013tm1BySohhousLvu11Tc9j",
       "message": false,
@@ -916,6 +1072,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 20 > a20.txt && cat a20.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_013tm1BySohhousLvu11Tc9j",
       "message": false,
@@ -976,6 +1136,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ for i in $(seq 1 20); do printf 'a%s.txt=%s\\n' \"$i\" \"$(cat a$i.txt)\"; done",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01XAexZvMygkUXzSNFPijXpm",
       "message": false,
@@ -994,6 +1158,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ for i in $(seq 1 20); do printf 'a%s.txt=%s\\n' \"$i\" \"$(cat a$i.txt)\"; done",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01XAexZvMygkUXzSNFPijXpm",
       "message": false,
@@ -1211,6 +1379,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 1 > b1.txt && cat b1.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01DZgPK2qxkEDhRE2F5EN5yL",
       "message": false,
@@ -1229,6 +1401,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 1 > b1.txt && cat b1.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01DZgPK2qxkEDhRE2F5EN5yL",
       "message": false,
@@ -1247,6 +1423,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 2 > b2.txt && cat b2.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01NEvTKStEYnR53swKyDgKig",
       "message": false,
@@ -1265,6 +1445,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 2 > b2.txt && cat b2.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01NEvTKStEYnR53swKyDgKig",
       "message": false,
@@ -1283,6 +1467,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 3 > b3.txt && cat b3.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01QNrwQd4rVT41QBe8Q5gfZi",
       "message": false,
@@ -1301,6 +1489,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ echo 3 > b3.txt && cat b3.txt",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01QNrwQd4rVT41QBe8Q5gfZi",
       "message": false,
@@ -1424,6 +1616,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 1 > a1.txt && cat a1.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01XhBFtCRFzS2AzFWp47mgYp",
      "message": false,
@@ -1442,6 +1638,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 1 > a1.txt && cat a1.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01XhBFtCRFzS2AzFWp47mgYp",
      "message": false,
@@ -1460,6 +1660,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 2 > a2.txt && cat a2.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01EnQknY6M8F66p9trFqhmWD",
      "message": false,
@@ -1478,6 +1682,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 2 > a2.txt && cat a2.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01EnQknY6M8F66p9trFqhmWD",
      "message": false,
@@ -1538,6 +1746,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 3 > a3.txt && cat a3.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01Dj3dHJKfMT7DEEFG1Kj9zr",
      "message": false,
@@ -1556,6 +1768,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 3 > a3.txt && cat a3.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01Dj3dHJKfMT7DEEFG1Kj9zr",
      "message": false,
@@ -1652,6 +1868,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 4 > a4.txt && cat a4.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01UPdcxkSWXd7V3KFzfQdhZa",
      "message": false,
@@ -1670,6 +1890,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 4 > a4.txt && cat a4.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01UPdcxkSWXd7V3KFzfQdhZa",
      "message": false,
@@ -1688,6 +1912,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 5 > a5.txt && cat a5.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_0168hJjFDkq61w3rDkKwwaG9",
      "message": false,
@@ -1706,6 +1934,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 5 > a5.txt && cat a5.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_0168hJjFDkq61w3rDkKwwaG9",
      "message": false,
@@ -1724,6 +1956,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 6 > a6.txt && cat a6.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01PdWf1mZH2mM2j5GZc74DEA",
      "message": false,
@@ -1742,6 +1978,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 6 > a6.txt && cat a6.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01PdWf1mZH2mM2j5GZc74DEA",
      "message": false,
@@ -1760,6 +2000,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 7 > a7.txt && cat a7.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_017KzLZ6iPWzrT8NttfDAxvQ",
      "message": false,
@@ -1778,6 +2022,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 7 > a7.txt && cat a7.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_017KzLZ6iPWzrT8NttfDAxvQ",
      "message": false,
@@ -1796,6 +2044,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 8 > a8.txt && cat a8.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01WF46TypepAdq9vnbDSaw5U",
      "message": false,
@@ -1814,6 +2066,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 8 > a8.txt && cat a8.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01WF46TypepAdq9vnbDSaw5U",
      "message": false,
@@ -1832,6 +2088,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 9 > a9.txt && cat a9.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_018UVDxoCKJccgq87ADPDAMk",
      "message": false,
@@ -1850,6 +2110,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 9 > a9.txt && cat a9.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_018UVDxoCKJccgq87ADPDAMk",
      "message": false,
@@ -1868,6 +2132,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 10 > a10.txt && cat a10.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01484QPZZgRs6AZVqjMC7YXr",
      "message": false,
@@ -1886,6 +2154,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 10 > a10.txt && cat a10.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01484QPZZgRs6AZVqjMC7YXr",
      "message": false,
@@ -1904,6 +2176,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 11 > a11.txt && cat a11.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01BFTnLcPNNXmgQybqSaUZiP",
      "message": false,
@@ -1922,6 +2198,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 11 > a11.txt && cat a11.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01BFTnLcPNNXmgQybqSaUZiP",
      "message": false,
@@ -1940,6 +2220,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 12 > a12.txt && cat a12.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01UvsX2ckCrVFCb7hAPAWKWE",
      "message": false,
@@ -1958,6 +2242,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 12 > a12.txt && cat a12.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01UvsX2ckCrVFCb7hAPAWKWE",
      "message": false,
@@ -1976,6 +2264,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 13 > a13.txt && cat a13.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_018m8CCkvVxp2YnY1MX1qZM4",
      "message": false,
@@ -1994,6 +2286,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 13 > a13.txt && cat a13.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_018m8CCkvVxp2YnY1MX1qZM4",
      "message": false,
@@ -2012,6 +2308,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 14 > a14.txt && cat a14.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01GGvBe5AVLYWLUxXLc3okZK",
      "message": false,
@@ -2030,6 +2330,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 14 > a14.txt && cat a14.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01GGvBe5AVLYWLUxXLc3okZK",
      "message": false,
@@ -2048,6 +2352,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 15 > a15.txt && cat a15.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01KCaNCtnC5pSsuPkRLjtnov",
      "message": false,
@@ -2066,6 +2374,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 15 > a15.txt && cat a15.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01KCaNCtnC5pSsuPkRLjtnov",
      "message": false,
@@ -2084,6 +2396,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 16 > a16.txt && cat a16.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01KYkfvDMhmCioQZ9AzH5QUZ",
      "message": false,
@@ -2102,6 +2418,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 16 > a16.txt && cat a16.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01KYkfvDMhmCioQZ9AzH5QUZ",
      "message": false,
@@ -2120,6 +2440,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 17 > a17.txt && cat a17.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01FA9gU8UVM11xKvwamhw5PT",
      "message": false,
@@ -2138,6 +2462,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 17 > a17.txt && cat a17.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01FA9gU8UVM11xKvwamhw5PT",
      "message": false,
@@ -2156,6 +2484,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 18 > a18.txt && cat a18.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01WsFA9zzEd9i3SzHAh6dYV5",
      "message": false,
@@ -2174,6 +2506,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 18 > a18.txt && cat a18.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01WsFA9zzEd9i3SzHAh6dYV5",
      "message": false,
@@ -2192,6 +2528,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 19 > a19.txt && cat a19.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01Va1XCnUcgMCaCkej95oUao",
      "message": false,
@@ -2210,6 +2550,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 19 > a19.txt && cat a19.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01Va1XCnUcgMCaCkej95oUao",
      "message": false,
@@ -2228,6 +2572,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 20 > a20.txt && cat a20.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_013tm1BySohhousLvu11Tc9j",
      "message": false,
@@ -2246,6 +2594,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 20 > a20.txt && cat a20.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_013tm1BySohhousLvu11Tc9j",
      "message": false,
@@ -2306,6 +2658,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ for i in $(seq 1 20); do printf 'a%s.txt=%s\\n' \"$i\" \"$(cat a$i.txt)\"; done",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01XAexZvMygkUXzSNFPijXpm",
      "message": false,
@@ -2324,6 +2680,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ for i in $(seq 1 20); do printf 'a%s.txt=%s\\n' \"$i\" \"$(cat a$i.txt)\"; done",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01XAexZvMygkUXzSNFPijXpm",
      "message": false,
@@ -2528,6 +2888,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 1 > b1.txt && cat b1.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01DZgPK2qxkEDhRE2F5EN5yL",
      "message": false,
@@ -2546,6 +2910,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 1 > b1.txt && cat b1.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01DZgPK2qxkEDhRE2F5EN5yL",
      "message": false,
@@ -2564,6 +2932,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 2 > b2.txt && cat b2.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01NEvTKStEYnR53swKyDgKig",
      "message": false,
@@ -2582,6 +2954,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 2 > b2.txt && cat b2.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01NEvTKStEYnR53swKyDgKig",
      "message": false,
@@ -2600,6 +2976,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 3 > b3.txt && cat b3.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01QNrwQd4rVT41QBe8Q5gfZi",
      "message": false,
@@ -2618,6 +2998,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ echo 3 > b3.txt && cat b3.txt",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01QNrwQd4rVT41QBe8Q5gfZi",
      "message": false,

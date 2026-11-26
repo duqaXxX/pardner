@@ -175,6 +175,71 @@ final class LineViewsTests: XCTestCase {
         return line.fields
     }
 
+    /// A background command's line opened in progress, then closed by an edit `seconds` after its start (`startedAt` is nil for a line with no start).
+    private func closedTask(_ status: String, after seconds: Int?, output: String? = nil, agent: String? = nil, message: Bool = false, task: Bool = true) -> WorkLine {
+        var s = Session()
+        // The second message the session takes is the edit, written at its position's second: the line's end.
+        let editTime = Double(1_700_000_000_000 + (s.position + 1) * 1000)
+        func fields(_ status: String) -> [String: Any] {
+            ["title": "Run: sleep 300", "status": status, "details": status == "in_progress" ? "Running in background" : NSNull(), "output": status == "in_progress" ? NSNull() : output as Any? ?? NSNull(),
+             "task": task, "message": message, "calls": 0, "preview": NSNull(), "startedAt": seconds.map { editTime - Double($0) * 1000 } ?? NSNull(), "agent": agent as Any? ?? NSNull()]
+        }
+        let ref = s.put(1, s.bot, ["thread": s.prompt.hex, "say": "task", "task": fields("in_progress")], re: s.prompt)
+        s.put(11, s.bot, ["thread": s.prompt.hex, "task": fields(status)], re: ref)
+        guard case .line(let line) = s.thread.items[0] else { fatalError("a line") }
+        return line
+    }
+
+    func testABackgroundCommandsClosedLineSaysDoneOrFailedWithTheTimeItTook() {
+        XCTAssertEqual(LineRow.endWords(of: closedTask("complete", after: 300))?.text, "✓ Done · 5m 00s")
+        XCTAssertEqual(LineRow.endWords(of: closedTask("complete", after: 300))?.failed, false)
+        XCTAssertEqual(LineRow.endWords(of: closedTask("error", after: 12))?.text, "× Failed · 12s")
+        XCTAssertEqual(LineRow.endWords(of: closedTask("error", after: 12))?.failed, true)
+        XCTAssertEqual(LineRow.endWords(of: closedTask("complete", after: 3725))?.text, "✓ Done · 1h 02m")
+    }
+
+    func testAClosedLineWithNoStartSaysDoneOrFailedAlone() {
+        XCTAssertEqual(LineRow.endWords(of: closedTask("complete", after: nil))?.text, "✓ Done")
+        XCTAssertEqual(LineRow.endWords(of: closedTask("error", after: nil))?.text, "× Failed")
+    }
+
+    func testEveryOtherClosedLineSaysNothingAtItsEnd() {
+        XCTAssertNil(LineRow.endWords(of: closedTask("complete", after: 5, task: false)), "a call is no task")
+        XCTAssertNil(LineRow.endWords(of: closedTask("complete", after: 5, agent: "look")), "an agent's line shows its calls")
+        XCTAssertNil(LineRow.endWords(of: closedTask("complete", after: 5, message: true)), "a card of words")
+        XCTAssertNil(LineRow.endWords(of: closedTask("error", after: 5, output: LineRow.stopped)), "a stop is no failure")
+        XCTAssertNil(LineRow.endWords(of: closedTask("complete", after: 5, output: LineRow.stopped)))
+        XCTAssertNil(LineRow.endWords(of: closedTask("in_progress", after: 5)), "an open line has its running words")
+    }
+
+    func testALineTheRestartClosedSaysNoEndWords() {
+        // The relay's restart sweep closes a running line `error` with `Stopped: the bot restarted` (`#closeLines` in src/chat/relay/inbound.ts): a stop, not a failure.
+        XCTAssertNil(LineRow.endWords(of: closedTask("error", after: 300, output: "Stopped: the bot restarted")))
+        XCTAssertEqual(LineRow.endWords(of: closedTask("error", after: 300, output: "Background command failed with exit code 1"))?.text, "× Failed · 5m 00s", "a failure whose summary says otherwise still reads Failed")
+    }
+
+    func testTheMarkAndTheEndWordsAgreeOnWhatIsAStop() {
+        // The mark before a head (red triangle and "Failed", or the muted square and "Stopped") asks the same predicate as the end words.
+        for output in [LineRow.stopped, "Stopped: the bot restarted"] {
+            XCTAssertTrue(LineRow.isStop(output), output)
+        }
+        // An ordinary call's output that merely begins with the word is a failure like any other (a container, a lock).
+        for output in [nil, "", "Background command failed with exit code 1", "The call Stopped early", "Stopped waiting for lock", "Stopped container abc"] as [String?] {
+            XCTAssertFalse(LineRow.isStop(output), output ?? "nil")
+        }
+        XCTAssertTrue(LineRow.isStop("Stopped: x"))
+    }
+
+    func testTheMarkIsChosenByTheSamePredicateAsTheEndWords() {
+        XCTAssertEqual(LineRow.mark(of: fields(status: "error", output: "Stopped: the bot restarted")), .stopped)
+        XCTAssertEqual(LineRow.mark(of: fields(status: "error", output: LineRow.stopped)), .stopped)
+        XCTAssertEqual(LineRow.mark(of: fields(status: "error", output: "Stopped waiting for lock")), .failed)
+        XCTAssertEqual(LineRow.mark(of: fields(status: "error", output: "exit code 1")), .failed)
+        XCTAssertEqual(LineRow.mark(of: fields(status: "error")), .failed)
+        XCTAssertEqual(LineRow.mark(of: fields(status: "complete", output: LineRow.stopped)), .call, "a mark of a stop needs an error")
+        XCTAssertEqual(LineRow.mark(of: fields(status: "in_progress")), .call)
+    }
+
     func testTheFormOfALineIsChosenByItsFields() {
         XCTAssertEqual(LineForm(fields()), .call)
         XCTAssertEqual(LineForm(fields(agent: "look")), .agentAsked)

@@ -602,8 +602,8 @@ class MemoryThread implements ThreadChat {
 
   written(): void {}
 
-  async notice(text: string): Promise<void> {
-    await this.#post(text, "notice").catch(() => {});
+  async notice(text: string): Promise<MessageId | null> {
+    return this.#post(text, "notice").catch(() => null);
   }
 
   async ask(requestId: string, request: OwnerRequest, title: string): Promise<MessageId> {
@@ -706,8 +706,8 @@ class MemoryThread implements ThreadChat {
 
   async close(): Promise<void> {}
 
-  async #post(text: string, kind: MessageKind): Promise<void> {
-    this.#room.write(this.#ref.channel, this.#ref.thread, DAEMON, text, kind);
+  async #post(text: string, kind: MessageKind): Promise<MessageId> {
+    return this.#room.write(this.#ref.channel, this.#ref.thread, DAEMON, text, kind).id;
   }
 }
 

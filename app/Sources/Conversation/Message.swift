@@ -58,6 +58,21 @@ public enum LineStatus: String, Sendable, Equatable {
     var isClosed: Bool { self == .complete || self == .error }
 }
 
+/// How the agent's terminal words a finished call when it folds a run of them into one line: the sentence for one call and for several, `{n}`
+/// standing for the count (`TaskUpdate.fold`, the module's words; the app knows no tool).
+public struct LineFold: Sendable, Equatable {
+    public let one: String
+    public let many: String
+
+    init?(_ value: Any?) {
+        guard let words = value as? [String], words.count == 2 else { return nil }
+        (one, many) = (words[0], words[1])
+    }
+
+    /// The sentence for `count` calls.
+    public func sentence(_ count: Int) -> String { (count == 1 ? one : many).replacingOccurrences(of: "{n}", with: String(count)) }
+}
+
 /// A `TaskUpdate` as the bot writes it into a line's body: without `id`, `name` and `folded`, `startedAt` as wall-clock milliseconds.
 public struct LineFields: Sendable, Equatable {
     public let title: String
@@ -75,6 +90,8 @@ public struct LineFields: Sendable, Equatable {
     public let agent: String?
     /// The file the call named, as the agent wrote it (file-content design, 3.1); nil for a call with no file or one past 4096 bytes.
     public let path: String?
+    /// The words the line's tool folds finished calls by; nil for a tool that declares none, and from a bot that predates the field.
+    public let fold: LineFold?
 
     init?(_ o: [String: Any]) {
         guard let title = o["title"] as? String, let word = o["status"] as? String, let status = LineStatus(rawValue: word) else { return nil }
@@ -87,6 +104,7 @@ public struct LineFields: Sendable, Equatable {
         preview = LinePreview(o["preview"])
         agent = o["agent"] as? String
         path = o["path"] as? String
+        fold = LineFold(o["fold"])
         startedAt = (o["startedAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) }
     }
 }

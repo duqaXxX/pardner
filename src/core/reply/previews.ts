@@ -212,6 +212,12 @@ export class Previews {
     return typeof to === "string" && to !== "" ? to : null;
   }
 
+  /** The sentences the terminal folds finished calls of `name` by (`{n}` the count); null for a tool that declares none. */
+  foldWords(name: string): readonly [one: string, many: string] | null {
+    const { words } = this.#tools;
+    return Object.hasOwn(words, name) ? (words[name] ?? null) : null;
+  }
+
   /**
    * How `n` finished calls of `name` read in a folded line. The terminal's words take a capital
    * only when they open the line (for example `Read 1 file, ran 4 shell commands`); a tool's name is its own.

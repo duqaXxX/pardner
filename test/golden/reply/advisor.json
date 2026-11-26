@@ -45,6 +45,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ python3 -c \"n=2147483647; print(all(n % d for d in range(2, 46341)))\"",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01GT1QMUSYfaGoxm46PCLWVP",
       "message": false,
@@ -63,6 +67,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ python3 -c \"n=2147483647; print(all(n % d for d in range(2, 46341)))\"",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01GT1QMUSYfaGoxm46PCLWVP",
       "message": false,
@@ -185,6 +193,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ python3 -c \"n=2147483647; print(all(n % d for d in range(2, 46341)))\"",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01GT1QMUSYfaGoxm46PCLWVP",
      "message": false,
@@ -203,6 +215,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ python3 -c \"n=2147483647; print(all(n % d for d in range(2, 46341)))\"",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01GT1QMUSYfaGoxm46PCLWVP",
      "message": false,

@@ -9,6 +9,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_042",
       "message": false,
@@ -28,6 +32,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_042",
       "message": false,
@@ -47,6 +55,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_043",
       "message": false,
@@ -66,6 +78,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_043",
       "message": false,
@@ -149,6 +165,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_045",
       "message": false,
@@ -168,6 +188,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_045",
       "message": false,
@@ -226,6 +250,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_042",
      "message": false,
@@ -245,6 +273,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_042",
      "message": false,
@@ -264,6 +296,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_043",
      "message": false,
@@ -283,6 +319,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_043",
      "message": false,
@@ -340,6 +380,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_045",
      "message": false,
@@ -359,6 +403,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_045",
      "message": false,

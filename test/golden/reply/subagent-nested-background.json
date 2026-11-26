@@ -82,6 +82,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ sleep 20; echo done",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01JjA7q6WDz1WJ3ezrrPTEkg",
       "message": false,
@@ -100,6 +104,10 @@
       "agent": null,
       "calls": 0,
       "details": "Running in background",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01JjA7q6WDz1WJ3ezrrPTEkg",
       "message": false,
@@ -179,6 +187,10 @@
        "agent": null,
        "calls": 0,
        "details": "Running in background",
+       "fold": [
+        "Ran {n} shell command",
+        "Ran {n} shell commands"
+       ],
        "folded": null,
        "id": "toolu_01JjA7q6WDz1WJ3ezrrPTEkg",
        "message": false,

@@ -9,6 +9,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ ls",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01Xdzy1JrqnyQh4m9GkKaQvo",
       "message": false,
@@ -27,6 +31,10 @@
       "agent": null,
       "calls": 0,
       "details": "$ ls",
+      "fold": [
+       "Ran {n} shell command",
+       "Ran {n} shell commands"
+      ],
       "folded": null,
       "id": "toolu_01Xdzy1JrqnyQh4m9GkKaQvo",
       "message": false,
@@ -45,6 +53,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_01LnSiTbh8GtkisVrbigeaKe",
       "message": false,
@@ -64,6 +76,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_01LnSiTbh8GtkisVrbigeaKe",
       "message": false,
@@ -127,6 +143,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ ls",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01Xdzy1JrqnyQh4m9GkKaQvo",
      "message": false,
@@ -145,6 +165,10 @@
      "agent": null,
      "calls": 0,
      "details": "$ ls",
+     "fold": [
+      "Ran {n} shell command",
+      "Ran {n} shell commands"
+     ],
      "folded": null,
      "id": "toolu_01Xdzy1JrqnyQh4m9GkKaQvo",
      "message": false,
@@ -163,6 +187,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_01LnSiTbh8GtkisVrbigeaKe",
      "message": false,
@@ -182,6 +210,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_01LnSiTbh8GtkisVrbigeaKe",
      "message": false,

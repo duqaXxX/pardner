@@ -119,6 +119,91 @@ final class ConversationTests: XCTestCase {
         XCTAssertEqual(w.c.threads[root.hex]?.state, .idle)
     }
 
+    func testTheBotsWithdrawalOfItsNoticeTakesTheNoticeOutOfTheThread() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "go"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        let notice = w.deliver(kind: 1, from: w.bot, json: ["thread": root.hex, "say": "notice", "markdown": "restart waits"])
+        let answerLine = w.deliver(kind: 1, from: w.bot, json: ["say": "notice", "markdown": "a line under the prompt"], re: root)
+        let after = w.deliver(kind: 1, from: w.bot, json: ["thread": root.hex, "say": "say", "markdown": "after"])
+        func refs() -> [MessageRef] { w.c.threads[root.hex]?.items.compactMap { if case .message(let m) = $0 { m.ref } else { nil } } ?? [] }
+        XCTAssertEqual(refs(), [notice, answerLine, after])
+        w.deliver(kind: 11, from: w.bot, json: ["thread": root.hex, "withdrawn": true], re: notice)
+        XCTAssertEqual(refs(), [answerLine, after], "the notice's row is gone, the others stay")
+        w.deliver(kind: 11, from: w.bot, json: ["thread": root.hex, "withdrawn": true], re: answerLine)
+        XCTAssertEqual(refs(), [after], "a notice that answers the prompt goes too")
+    }
+
+    func testAWithdrawalChangesNothingForAnotherSendersMessageOrAnAnswer() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "go"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: root)
+        let hers = w.deliver(kind: 1, from: w.alice, json: ["thread": root.hex, "markdown": "a word of hers"])
+        let answer = Data(repeating: 0xAA, count: 16)
+        w.deliver(kind: 4, from: w.bot, json: ["thread": root.hex, "markdown": "the answer"], re: MessageRef(device: w.bot, name: answer))
+        let before = w.c.threads[root.hex]?.items
+        w.deliver(kind: 11, from: w.bot, json: ["thread": root.hex, "withdrawn": true], re: hers)
+        w.deliver(kind: 11, from: w.bot, json: ["thread": root.hex, "withdrawn": true], re: MessageRef(device: w.bot, name: answer))
+        XCTAssertEqual(w.c.threads[root.hex]?.items.count, before?.count, "another sender's message and an answer stay")
+        // Her own withdrawal of her own message is no bot's: nothing either.
+        w.deliver(kind: 11, from: w.alice, json: ["thread": root.hex, "withdrawn": true], re: hers)
+        XCTAssertEqual(w.c.threads[root.hex]?.items.count, before?.count)
+    }
+
+    func testAWithdrawalOfATextIsNoReplyAndMovesNoSession() {
+        var w = World()
+        let first = w.deliver(kind: 2, from: w.alice, json: ["text": "first"], to: w.bot)
+        let second = w.deliver(kind: 2, from: w.alice, json: ["text": "second"], to: w.bot)
+        w.deliver(kind: 3, from: w.bot, json: [:], re: first)
+        let notice = w.deliver(kind: 1, from: w.bot, json: ["thread": first.hex, "say": "notice", "markdown": "restart waits"])
+        w.deliver(kind: 3, from: w.bot, json: [:], re: second)
+        XCTAssertEqual(w.c.sessions.map(\.key), [second.hex, first.hex], "the second replied last")
+        let lastReply = w.c.threads[first.hex]?.lastReply
+        let order = w.c.sessions.map(\.key)
+        // The restart withdraws every session's notice at once, later than any reply: it makes no session newer.
+        w.deliver(kind: 11, from: w.bot, json: ["thread": first.hex, "withdrawn": true], re: notice, time: 1_700_000_900_000)
+        XCTAssertEqual(w.c.threads[first.hex]?.items.count, 0)
+        XCTAssertEqual(w.c.threads[first.hex]?.lastReply, lastReply, "the withdrawal is not a reply")
+        XCTAssertEqual(w.c.sessions.map(\.key), order)
+    }
+
+    func testAWithdrawnRequestStillReadsWithdrawnBesideATextThatIsWithdrawnToo() {
+        var w = World()
+        let root = w.deliver(kind: 2, from: w.alice, json: ["text": "go"], to: w.bot)
+        let request = w.deliver(kind: 9, from: w.bot, json: ["thread": root.hex, "title": "Hold", "request": ["type": "hold"]], re: root)
+        let notice = w.deliver(kind: 1, from: w.bot, json: ["thread": root.hex, "say": "notice", "markdown": "restart waits"])
+        w.deliver(kind: 11, from: w.bot, json: ["thread": root.hex, "withdrawn": true], re: request)
+        XCTAssertEqual(w.c.threads[root.hex]?.requests[request], .withdrawn)
+        XCTAssertEqual(w.c.threads[root.hex]?.items.count, 2, "the withdrawn request's card and the notice stay")
+        w.deliver(kind: 11, from: w.bot, json: ["thread": root.hex, "withdrawn": true], re: notice)
+        XCTAssertEqual(w.c.threads[root.hex]?.requests[request], .withdrawn, "the notice's withdrawal leaves the request as it was")
+        XCTAssertEqual(w.c.threads[root.hex]?.items.count, 1)
+    }
+
+    func testAPersonCannotHideHerOwnTextOfTheChannelsListByWithdrawingIt() {
+        var w = World()
+        let hers = w.deliver(kind: 1, from: w.alice, json: ["markdown": "hers"])
+        XCTAssertEqual(w.c.timeline.count, 1)
+        w.deliver(kind: 11, from: w.alice, json: ["withdrawn": true], re: hers)
+        XCTAssertEqual(w.c.timeline.count, 1, "only a bot of the channel takes back a text of its own")
+        XCTAssertNotNil(w.c.threads[hers.hex])
+    }
+
+    func testTheWithdrawalOfAChannelNoticeTakesItOutOfTheTimeline() {
+        var w = World()
+        w.deliver(kind: 2, from: w.alice, json: ["text": "go"], to: w.bot) // the bot is one the channel knows by a prompt sent to it
+        let notice = w.deliver(kind: 1, from: w.bot, json: ["say": "notice", "markdown": "a channel notice"])
+        let other = w.deliver(kind: 1, from: w.alice, json: ["markdown": "hers"])
+        XCTAssertEqual(w.c.timeline.count, 3)
+        // Another sender's withdrawal changes nothing.
+        w.deliver(kind: 11, from: w.alice, json: ["withdrawn": true], re: notice)
+        XCTAssertEqual(w.c.timeline.count, 3)
+        w.deliver(kind: 11, from: w.bot, json: ["withdrawn": true], re: other)
+        XCTAssertEqual(w.c.timeline.count, 3, "the bot does not withdraw her message")
+        w.deliver(kind: 11, from: w.bot, json: ["withdrawn": true], re: notice)
+        XCTAssertEqual(w.c.timeline, [10, 12], "only the notice's position left the timeline")
+    }
+
     func testACutAndANotReadEndThePrompt() {
         var w = World()
         let root = w.deliver(kind: 2, from: w.alice, json: ["text": "one"], to: w.bot)

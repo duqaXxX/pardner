@@ -37,7 +37,8 @@ enum Grouping {
     struct Head: Equatable { let author: Data, time: Date }
 
     /// Whether a message joins the head drawn right above it: the same author on the same day. `above` is nil when anything else is drawn
-    /// between (a call, a card, a system event, a summary), or nothing is.
+    /// between, or nothing is. In the thread panel the bot's own calls, cards and system events leave `above` in place (a reply has one head);
+    /// a person's message, a counted group of unreadable ones, a summary, a run line and a work's end do not.
     static func joins(_ above: Head?, _ head: Head, calendar: Calendar = .current) -> Bool {
         guard let above else { return false }
         return above.author == head.author && calendar.isDate(above.time, inSameDayAs: head.time)

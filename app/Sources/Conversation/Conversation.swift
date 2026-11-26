@@ -342,6 +342,13 @@ public struct Channel: Sendable, Equatable {
             }
             return
         }
+        // The bot takes back a text of its own that stands in the channel's list: it leaves the timeline (its message stays read).
+        // Only a bot of the channel (one a prompt of its threads went to) does: a person's text stays where it is.
+        if case .edit(true, _, _) = m.body, let re = m.re, let root = threads[re.hex]?.root, root.ref == re, root.sender == m.sender,
+           root.sessionText == nil, case .text = root.body, threads.values.contains(where: { $0.bot == m.sender }) {
+            timeline.removeAll { $0 == root.position }
+            return
+        }
         let key: String?
         switch m.body {
         case .prompt where m.thread == nil, .text where m.thread == nil:
@@ -411,6 +418,13 @@ extension MessageThread {
             case .notRead where m.re == root?.ref: settlement = .notRun
             default: break
             }
+        }
+        // The bot takes back a text of its own (the restart's notice): its row leaves the thread, and that is no reply (`lastReply` and the
+        // sessions' order stay). The items shift, so the indexes are made again.
+        if fromBot, case .edit(true, _, _) = m.body, let i = withdrawnText(by: m) {
+            items.remove(at: i)
+            reindex()
+            return
         }
         switch m.body {
         case .prompt:
@@ -588,6 +602,15 @@ extension MessageThread {
             if prompts[message.ref] == .running { earlierRuns = true }
         }
         return result
+    }
+
+    /// The index of the item the edit `m` withdraws: a text of the edit's own sender that no session word stands in for (a title, a work's end), by `re`.
+    private func withdrawnText(by m: Message) -> Int? {
+        guard let re = m.re else { return nil }
+        return items.firstIndex { item in
+            guard case .message(let text) = item, text.ref == re, text.sender == m.sender, text.sessionText == nil, case .text = text.body else { return false }
+            return true
+        }
     }
 
     private mutating func reindex() {

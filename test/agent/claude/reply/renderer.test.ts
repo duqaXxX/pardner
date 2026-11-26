@@ -161,6 +161,54 @@ test("a running command is titled by its description, any other call by its firs
   );
 });
 
+test("a line of a tool that declares words carries them as its fold; any other tool's line carries none (#27)", async () => {
+  const [command] = eventsOf(recordedEvents("tools"), "call_started");
+  assert.ok(command !== undefined);
+  const bash: SessionEvent = {
+    ...command,
+    callId: "toolu_bash",
+    toolName: "Bash",
+    input: { command: "ls" },
+  };
+  const read: SessionEvent = {
+    ...command,
+    callId: "toolu_read",
+    toolName: "Read",
+    input: { file_path: "/a.txt" },
+  };
+  const other: SessionEvent = { ...command, callId: "toolu_web", toolName: "WebFetch", input: {} };
+  const end = (callId: string): SessionEvent => ({
+    type: "call_ended",
+    callId,
+    isError: false,
+    output: null,
+    images: [],
+    fileChange: null,
+    model: null,
+    parentCallId: null,
+  });
+  const [sink] = await render([
+    bash,
+    read,
+    other,
+    end("toolu_bash"),
+    end("toolu_read"),
+    end("toolu_web"),
+  ]);
+  const last = finals(sink.tasks);
+  assert.deepEqual(last.get("toolu_bash")?.fold, [
+    "Ran {n} shell command",
+    "Ran {n} shell commands",
+  ]);
+  assert.deepEqual(last.get("toolu_read")?.fold, ["Read {n} file", "Read {n} files"]);
+  assert.equal(last.get("toolu_web")?.fold, undefined);
+  assert.equal(
+    sink.tasks.filter((t) => t.id === "toolu_bash").every((t) => t.fold !== undefined),
+    true,
+    "every write of the line carries it, the running one too",
+  );
+});
+
 test("a task its call still waits for is running, and not in the background", async () => {
   // The terminal counts `1 shell still running` for what is in the background alone: a long
   // command in the foreground shows on its own line (seen in a real session, 2026-10-14).

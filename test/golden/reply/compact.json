@@ -28,6 +28,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_01VQB896fYGjEcrom4wpUzm5",
       "message": false,
@@ -47,6 +51,10 @@
       "agent": null,
       "calls": 0,
       "details": null,
+      "fold": [
+       "Read {n} file",
+       "Read {n} files"
+      ],
       "folded": null,
       "id": "toolu_01VQB896fYGjEcrom4wpUzm5",
       "message": false,
@@ -160,6 +168,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_01VQB896fYGjEcrom4wpUzm5",
      "message": false,
@@ -179,6 +191,10 @@
      "agent": null,
      "calls": 0,
      "details": null,
+     "fold": [
+      "Read {n} file",
+      "Read {n} files"
+     ],
      "folded": null,
      "id": "toolu_01VQB896fYGjEcrom4wpUzm5",
      "message": false,

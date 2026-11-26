@@ -172,6 +172,7 @@ public struct MainWindow: View {
         AnyView(content.font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(foreground)
             .ignoresSafeArea(.container, edges: underTitleBar ? .top : [])
             .background(background)
+            .environment(\.botDevices, devices?.botIDs ?? [])
             .onExitCommand { closeThreadOnEscape() })
     }
 

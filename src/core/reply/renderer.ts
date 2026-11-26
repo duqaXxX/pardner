@@ -1119,7 +1119,10 @@ export class TurnRenderer {
     return lines.join("\n");
   }
 
-  async #set(update: TaskUpdate): Promise<void> {
+  async #set(raw: TaskUpdate): Promise<void> {
+    // The module's words for folding the call (a tool that declares none carries none): data to the chat, which words nothing itself.
+    const fold = this.#previews.foldWords(raw.name);
+    const update = fold === null ? raw : { ...raw, fold };
     if (!this.#lines.has(update.id)) {
       // Only a new line puts a card after the text. A line that changes does so where its card
       // sits, and the text stays the last thing in the reply.

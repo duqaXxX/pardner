@@ -21,6 +21,8 @@ struct ThreadPanel: View {
     /// The row the scroll view keeps in view; the end of the thread until the owner scrolls away. A lazy stack counts the rows it has not built
     /// with an estimate, so `defaultScrollAnchor` alone leaves the view over rows never built when rows are added to a long thread.
     @State private var scrolledID: String? = ThreadPanel.end
+    /// The ids of the lines of the folds the owner opened (`CallFold.isOpen`): a rebuild that changes the run's first line keeps the fold open.
+    @State private var opened: Set<String> = []
     private static let end = "end"
 
     var body: some View {
@@ -74,7 +76,16 @@ struct ThreadPanel: View {
                             case .message(let m): entry(m, row: row, queued: queued)
                             case .unreadable(let count, let first): UnreadableRow(model: model, icons: icons, message: first, count: count, joins: row.joins, duration: row.duration)
                             case .segment(let a): AnswerRow(model: model, icons: icons, answer: a, whole: thread.text(of: a), joins: row.joins, duration: row.duration)
+                            case .line(let l) where row.showsHead:
+                                HeadedLine(model: model, icons: icons, line: l, duration: row.duration) {
+                                    LineRow(line: l, state: thread.state(of: l), indent: 0, place: place, folder: folder, images: thread.images[l.ref] ?? [])
+                                }
                             case .line(let l): LineRow(line: l, state: thread.state(of: l), place: place, folder: folder, images: thread.images[l.ref] ?? [])
+                            case .fold(let f) where row.showsHead:
+                                HeadedLine(model: model, icons: icons, line: f.lines[0], duration: row.duration) {
+                                    foldRow(f, indent: 0)
+                                }
+                            case .fold(let f): foldRow(f)
                             case .body(let l, let i): LineBodyRow(line: l, index: i, firstTop: LineBodyRow.top(underStackOf: ThreadRow.stack))
                             }
                         }
@@ -110,6 +121,13 @@ struct ThreadPanel: View {
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in redraw += 1 }
         .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in redraw += 1 }
         .onReceive(NotificationCenter.default.publisher(for: .NSSystemClockDidChange)) { _ in redraw += 1 }
+    }
+
+    /// A fold's row: its calls drawn as the thread draws a call, indented under it while the owner has it open.
+    private func foldRow(_ fold: CallFold, indent: CGFloat = MessageRow.Mark.thread.size + MessageRow.Mark.thread.gap) -> some View {
+        FoldRow(fold: fold, isOpen: fold.isOpen(in: opened), toggle: { opened = fold.toggled(opened) }, indent: indent) { l in
+            LineRow(line: l, state: thread.state(of: l), indent: 0, place: place, folder: folder, images: thread.images[l.ref] ?? [])
+        }
     }
 
     @ViewBuilder
@@ -163,7 +181,7 @@ struct AnswerRow: View {
                     HStack(alignment: .firstTextBaseline, spacing: PardnerMetrics.gap) {
                         Text(name).font(PardnerFont.ui(size: 14, weight: .semibold))
                         BotBadge()
-                        Text(Naming.time(answer.time) + (duration.map { " \u{B7} " + $0 } ?? "")).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                        Text(Naming.time(answer.time) + (duration.map { " \u{B7} " + Naming.worked($0) } ?? "")).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
                             .help(Naming.dateTime(answer.time))
                         if writing {
                             Text("Writing…").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
@@ -180,6 +198,33 @@ struct AnswerRow: View {
             }
         }
         .contextMenu { Button("Copy") { Clipboard.copy(whole) } }
+    }
+}
+
+/// A call that opens the bot's reply, under the bot's head: its avatar, name, badge and time, as an answer's head draws them.
+struct HeadedLine<Line: View>: View {
+    let model: ReadingModel
+    let icons: [Data: NSImage]
+    let line: WorkLine
+    var duration: String?
+    @ViewBuilder let content: () -> Line
+
+    var body: some View {
+        let name = Naming.sender(line.ref.device, in: model)
+        let mark = MessageRow.Mark.thread
+        HStack(alignment: .top, spacing: mark.gap) {
+            Avatar(name: name, isBot: true, icon: icons[line.ref.device], size: mark.size)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: PardnerMetrics.gap) {
+                    Text(name).font(PardnerFont.ui(size: 14, weight: .semibold))
+                    BotBadge()
+                    Text(Naming.time(line.time) + (duration.map { " \u{B7} " + Naming.worked($0) } ?? "")).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                        .help(Naming.dateTime(line.time))
+                }
+                .designLines()
+                content()
+            }
+        }
     }
 }
 
