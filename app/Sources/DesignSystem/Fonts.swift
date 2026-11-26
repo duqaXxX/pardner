@@ -122,3 +122,21 @@ public enum PardnerFont {
         }
     }
 }
+
+/// The type scale of the visual pass (#174, section 5): each use a font and the line height it is set on.
+public extension PardnerFont {
+    /// Pardner, the channel and the thread: Space Grotesk 600, 17 on 22.
+    static var title: Font { display(size: 17, weight: .semibold) }
+    static let titleLine: CGFloat = 22
+    /// Messages and lists: Inter 14 on 21.
+    static var text: Font { ui(size: 14, weight: .regular) }
+    static let textLine: CGFloat = 21
+    /// Times, notes and the session's data: Inter 12 on 16.
+    static var secondary: Font { ui(size: 12, weight: .regular) }
+    static let secondaryLine: CGFloat = 16
+    /// A section's label, drawn upper case: Inter 11.
+    static var sectionLabel: Font { ui(size: 11, weight: .semibold) }
+    /// Code: JetBrains Mono 12.5 on 20.
+    static var code: Font { mono(size: 12.5, weight: .regular) }
+    static let codeLine: CGFloat = 20
+}

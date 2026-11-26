@@ -24,8 +24,10 @@ enum Naming {
     /// The initial drawn on a sender's colour when no icon is given (first-screens decision 9).
     static func initial(_ name: String) -> String { name.first.map { String($0).uppercased() } ?? "?" }
 
-    /// A short time of day, as the boards show beside a sender.
-    static func time(_ date: Date) -> String { date.formatted(date: .omitted, time: .shortened) }
+    /// A short time of day, as the boards show beside a sender: the hour always in two digits (`00:34`, `01:58`; `01:58 AM` where the Mac counts in 12 hours).
+    static func time(_ date: Date, locale: Locale = .autoupdatingCurrent, timeZone: TimeZone = .autoupdatingCurrent) -> String {
+        date.formatted(Date.FormatStyle(locale: locale, timeZone: timeZone).hour(.twoDigits(amPM: .abbreviated)).minute(.twoDigits))
+    }
 
     /// The date and the time of a message, for the tooltip of its time.
     static func dateTime(_ date: Date) -> String { date.formatted(date: .abbreviated, time: .shortened) }

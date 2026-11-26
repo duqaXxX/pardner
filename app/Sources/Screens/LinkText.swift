@@ -9,6 +9,9 @@ struct LinkText: NSViewRepresentable {
     let text: AttributedString
     let size: CGFloat
     let weight: InterWeight
+    /// The text's colour, and the size of a code span: a table's header cell is grey and its spans are as small as its words.
+    var color: Color = PardnerColor.text
+    var codeSize: CGFloat = 12.5
     /// Called with the `pardner-link:<n>` url of a clicked link.
     let open: (URL) -> Void
     /// What the row's own `Copy` does (design 2.7): the one item of this view's menu.
@@ -17,18 +20,19 @@ struct LinkText: NSViewRepresentable {
     /// The text as AppKit draws it, with what `MarkdownFonts.styled` and the row give a `Text`: Inter at `size` and `weight` (strong one
     /// step heavier, emphasized in the italic file), a code span in JetBrains Mono on `raised`, strikethrough, the theme's text colour,
     /// and the design's line spacing.
-    static func attributed(_ text: AttributedString, size: CGFloat, weight: InterWeight) -> NSAttributedString {
+    static func attributed(_ text: AttributedString, size: CGFloat, weight: InterWeight, color: Color = PardnerColor.text, codeSize: CGFloat = 12.5) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = MessageRow.lineSpacing
         let out = NSMutableAttributedString()
         for run in text.runs {
             let intent = run.inlinePresentationIntent ?? []
             var attributes: [NSAttributedString.Key: Any] = [
-                .foregroundColor: NSColor(PardnerColor.text), .paragraphStyle: paragraph,
+                .foregroundColor: NSColor(color), .paragraphStyle: paragraph,
             ]
             if run.font != nil {
-                attributes[.font] = PardnerFont.monoCT(size: 12.5, weight: .regular) as NSFont
-                attributes[.backgroundColor] = NSColor(PardnerColor.raised)
+                attributes[.font] = PardnerFont.monoCT(size: codeSize, weight: .regular) as NSFont
+                // A code span in a table's cell keeps its font and loses its ground (#174); the ground a span carries is the one it is drawn on.
+                if let ground = run.backgroundColor { attributes[.backgroundColor] = NSColor(ground) }
             } else {
                 let heavier: InterWeight = weight == .regular ? .semibold : .bold
                 attributes[.font] = PardnerFont.uiCT(
@@ -65,7 +69,7 @@ struct LinkText: NSViewRepresentable {
         view.isAutomaticLinkDetectionEnabled = false
         view.isAutomaticDataDetectionEnabled = false
         view.displaysLinkToolTips = false
-        view.linkTextAttributes = [.foregroundColor: NSColor.linkColor, .cursor: NSCursor.pointingHand]
+        view.linkTextAttributes = [.foregroundColor: NSColor(PardnerColor.brandText), .cursor: NSCursor.pointingHand]
         return view
     }
 
@@ -81,7 +85,7 @@ struct LinkText: NSViewRepresentable {
         let source = Coordinator.Source(text: text, size: size, weight: weight)
         guard coordinator.source != source else { return }
         coordinator.source = source
-        view.textStorage?.setAttributedString(Self.attributed(text, size: size, weight: weight))
+        view.textStorage?.setAttributedString(Self.attributed(text, size: size, weight: weight, color: color, codeSize: codeSize))
     }
 
     /// The size the text takes at the proposed width: as wide as its longest line, as high as its lines, as a `Text` that is fixed
@@ -89,7 +93,7 @@ struct LinkText: NSViewRepresentable {
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: NSTextView, context: Context) -> CGSize? {
         let coordinator = context.coordinator
         apply(to: view, coordinator: coordinator)
-        return coordinator.measure(Self.attributed(text, size: size, weight: weight), width: proposal.width)
+        return coordinator.measure(Self.attributed(text, size: size, weight: weight, color: color, codeSize: codeSize), width: proposal.width)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {

@@ -18,11 +18,23 @@ final class DesignSystemTests: XCTestCase {
         ("add-bg", PardnerColor.addBg), ("add-text", PardnerColor.addText),
         ("del-bg", PardnerColor.delBg), ("del-text", PardnerColor.delText),
         ("badge", PardnerColor.badge), ("badge-ink", PardnerColor.badgeInk),
+        ("select", PardnerColor.select), ("hover", PardnerColor.hover), ("code-bg", PardnerColor.codeBg),
     ]
 
-    func testTwentyFiveTokensEachWithBothValues() {
-        XCTAssertEqual(Tokens.pairs.count, 25)
+    func testTwentyEightTokensEachWithBothValues() {
+        XCTAssertEqual(Tokens.pairs.count, 28)
         XCTAssertEqual(Set(Self.members.map(\.0)), Set(Tokens.pairs.keys))
+    }
+
+    /// The light palette of the reference (#174, 4b) and the bands and the code ground the later units draw.
+    func testTheLightPaletteIsTheReferences() {
+        let want = ["bg": "#F1F3F7", "panel": "#F1F3F7", "side": "#E4E8EF", "surface": "#FBFCFD", "raised": "#D6DDE9", "line": "#C8D0DD",
+                    "muted": "#4F5B70", "brand-soft": "#D9E4F6", "agent-soft": "#F5E6C6", "ok-soft": "#D5ECDF", "add-bg": "#D8EEE1",
+                    "del-bg": "#F6DADA", "select": "#DFE8F6", "hover": "#F5F7FA", "code-bg": "#F2F5FA"]
+        for (name, hex) in want { XCTAssertEqual(Tokens.pairs[name]?.light, RGBA(hex), name) }
+        XCTAssertEqual(Tokens.pairs["select"]?.dark, RGBA("rgba(127,169,240,.1)"))
+        XCTAssertEqual(Tokens.pairs["hover"]?.dark, RGBA("rgba(255,255,255,.04)"))
+        XCTAssertEqual(Tokens.pairs["code-bg"]?.dark, RGBA("#232323"))
     }
 
     func testParser() {
@@ -98,5 +110,17 @@ final class MetricsTests: XCTestCase {
 
     func testABotsAnswerIsReadAtMost680Wide() {
         XCTAssertEqual(PardnerMetrics.answerWidth, 680)
+    }
+}
+
+final class LayoutMetricsTests: XCTestCase {
+    func testTheRowsAndTheRhythmAreTheIssuesValues() {
+        XCTAssertEqual([PardnerMetrics.headerHeight, PardnerMetrics.subheaderHeight, PardnerMetrics.margin, PardnerMetrics.listEnd], [56, 40, 20, 16])
+        XCTAssertEqual([PardnerMetrics.rowHeight, PardnerMetrics.userRowHeight], [30, 40])
+        XCTAssertEqual([PardnerMetrics.messageGap, PardnerMetrics.groupGap, PardnerMetrics.cardGap], [20, 4, 10])
+    }
+
+    func testTheTypeScaleKeepsItsLineHeights() {
+        XCTAssertEqual([PardnerFont.titleLine, PardnerFont.textLine, PardnerFont.secondaryLine, PardnerFont.codeLine], [22, 21, 16, 20])
     }
 }

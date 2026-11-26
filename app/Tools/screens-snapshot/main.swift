@@ -167,6 +167,35 @@ MainActor.assumeIsolated {
             }
             exit(0)
         }
+        if ProcessInfo.processInfo.environment["SNAPSHOT_ONLY"] == "band" {
+            // The selected message and the thread summary row (#174, units D): a session with a long title, and a bot's text with a code span in its band.
+            var live = Samples.model()
+            let mini = Data([0x4D, 0x14, 0x10, 0x03] + Array(repeating: 3, count: 28)), alice = Data([0xA1, 0x1C, 0xE0, 0x01] + Array(repeating: 1, count: 28))
+            var position = 100
+            @discardableResult
+            func put(_ kind: Int, _ sender: Data, _ body: [String: Any], name: UInt8, to: Data? = nil, re: MessageRef? = nil, minutes: Double) -> MessageRef {
+                position += 1
+                let text = String(decoding: try! JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]), as: UTF8.self)
+                live.model.take(view: .object([
+                    "do": .string("message"), "position": .number(Double(position)), "channel": .bytes(live.channel), "sender": .bytes(sender),
+                    "name": .bytes(Data(repeating: name, count: 16)), "epoch": .bytes(Data(repeating: 9, count: 32)), "time": .number(1_763_600_000_000 + minutes * 60_000),
+                    "kind": .number(Double(kind)), "to": to.map { .bytes($0) } ?? .null, "blobs": .array([]), "files": .array([]),
+                    "re": re.map { .object(["device": .bytes($0.device), "name": .bytes($0.name)]) } ?? .null, "text": .string(text), "again": .bool(false),
+                ]))
+                return MessageRef(device: sender, name: Data(repeating: name, count: 16))
+            }
+            put(1, mini, ["thread": live.queuedThread, "say": "title", "markdown": "Update the setup guide for the new store folder and the migration notes of the previous release"], name: 0xE1, minutes: 12.5)
+            let root = put(1, mini, ["markdown": "Here is what `ls -la` shows in the `docs` folder."], name: 0xE2, minutes: 20)
+            put(1, alice, ["thread": root.hex, "markdown": "Thanks"], name: 0xE3, minutes: 21)
+            put(1, mini, ["thread": root.hex, "say": "title", "markdown": "ls -la command"], name: 0xE4, minutes: 21.5)
+            for (appearance, theme) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
+                for (name, thread, width) in [("docs", live.queuedThread, 1280.0), ("bot", root.hex, 1280.0), ("narrow", live.queuedThread, 1000.0)] {
+                    let window = MainWindow(model: live.model, devices: DevicesModel(), channel: live.channel, thread: thread)
+                    try render(appearance, window, size: NSSize(width: width, height: 800), to: "band-\(name)-\(theme).png")
+                }
+            }
+            exit(0)
+        }
         if ProcessInfo.processInfo.environment["SNAPSHOT_ONLY"] == "sections" {
             // The sidebar's sections (sidebar sections design 7): grouped, then each line that says why the commands are off.
             final class NoDefaults: UserDefaults {
@@ -469,7 +498,84 @@ MainActor.assumeIsolated {
         }
         for (appearance, theme) in themes {
             let sample = Samples.model()
-            try render(appearance, MainWindow(model: sample.model, channel: sample.channel, thread: sample.thread), size: NSSize(width: 1280, height: 800), to: "window-\(theme).png")
+            // The usage boxes (visual pass, #174): each bot's thread ends a work with its account's numbers, the studio's read 25 minutes ago.
+            var shown = sample.model
+            // A fixed clock, so that `Resets in` and `as of` read the same in every run.
+            let now = Date(timeIntervalSince1970: 1_764_000_000), nowMs = now.timeIntervalSince1970 * 1000
+            let botIDs = [Data([0x4D, 0x14, 0x10, 0x03] + Array(repeating: 3, count: 28)), Data([0x57, 0x0D, 0x10, 0x04] + Array(repeating: 4, count: 28))]
+            for (n, (bot, minutesAgo, session, week)) in [(botIDs[0], 3.0, 40.0, 35.0), (botIDs[1], 25.0, 62.0, 18.0)].enumerated() {
+                guard let thread = shown.channels[sample.channel]?.threads.sorted(by: { $0.key < $1.key }).map(\.value).first(where: { $0.bot == bot }), let root = thread.root else { continue }
+                let usage: [String: Any] = ["at": nowMs - minutesAgo * 60_000, "session": ["percent": session, "resetsAt": nowMs + 2.5 * 3_600_000] as [String: Any],
+                                            "week": ["percent": week, "resetsAt": nowMs + 87 * 3_600_000] as [String: Any]]
+                let body: [String: Any] = ["thread": root.ref.hex, "say": "footer", "markdown": "9s", "usage": usage,
+                                           "session": "Sonnet \u{B7} effort low \u{B7} main (+0,-0) \u{B7} ctx 7% \u{B7} 457.4k tokens"]
+                shown.take(view: .object([
+                    "do": .string("message"), "position": .number(Double(2000 + n)), "channel": .bytes(sample.channel), "sender": .bytes(bot), "name": .bytes(Data(repeating: UInt8(0xE0 + n), count: 16)),
+                    "epoch": .bytes(Data(repeating: 9, count: 32)), "time": .number(nowMs), "kind": .number(1), "to": .null, "blobs": .array([]), "files": .array([]),
+                    "re": .null, "again": .bool(false), "text": .string(String(decoding: try JSONSerialization.data(withJSONObject: body), as: UTF8.self)),
+                ]))
+            }
+            // The thread's content column (visual pass #174, unit B): calls with a path inside and outside the bound folder, a stopped call, a failed one, an
+            // agent's reply with markup, a system event, a denied permission, and two messages of one author.
+            let alice = Data([0xA1, 0x1C, 0xE0, 0x01] + Array(repeating: 1, count: 28)), mini = botIDs[0]
+            guard let fixRoot = shown.channels[sample.channel]?.threads[sample.thread]?.root?.ref else { fatalError("the sample thread has a root") }
+            var next = 3000
+            @discardableResult
+            func put(_ kind: Int, _ sender: Data, _ body: [String: Any], to: Data? = nil, re: MessageRef? = nil, seconds: Double) throws -> MessageRef {
+                next += 1
+                let name = Data(repeating: UInt8(next & 0xFF), count: 16)
+                shown.take(view: .object([
+                    "do": .string("message"), "position": .number(Double(next)), "channel": .bytes(sample.channel), "sender": .bytes(sender), "name": .bytes(name),
+                    "epoch": .bytes(Data(repeating: 9, count: 32)), "time": .number(nowMs + seconds * 1000), "kind": .number(Double(kind)), "to": to.map { .bytes($0) } ?? .null,
+                    "blobs": .array([]), "files": .array([]), "again": .bool(false),
+                    "re": re.map { .object(["device": .bytes($0.device), "name": .bytes($0.name)]) } ?? .null,
+                    "text": .string(String(decoding: try JSONSerialization.data(withJSONObject: body), as: UTF8.self)),
+                ]))
+                return MessageRef(device: sender, name: name)
+            }
+            // The channel's folder, as the bot's answer to `/bind` says it.
+            let bind = try put(2, alice, ["text": "/bind /srv/example/project"], to: mini, seconds: 1)
+            try put(1, mini, ["markdown": "Bound.", "say": "notice", "bind": ["folder": "/srv/example/project", "state": "usable"]], re: bind, seconds: 2)
+            func call(_ title: String, status: String = "complete", path: String? = nil, output: String? = nil, message: Bool = false, agent: String? = nil, preview: [String: Any]? = nil, seconds: Double) throws {
+                var task: [String: Any] = ["title": title, "status": status, "details": NSNull(), "output": output as Any? ?? NSNull(), "task": false, "message": message, "calls": 0,
+                                           "preview": preview ?? NSNull(), "startedAt": NSNull()]
+                if let path { task["path"] = path }
+                if let agent { task["agent"] = agent }
+                try put(1, mini, ["thread": fixRoot.hex, "say": "task", "task": task], re: fixRoot, seconds: seconds)
+            }
+            try call("Read: /srv/example/project/src/relay.ts", path: "/srv/example/project/src/relay.ts", seconds: 10)
+            try call("Read: /srv/example/other/notes.md", path: "/srv/example/other/notes.md", seconds: 11)
+            try call("Bash: sleep 180", status: "error", output: "Stopped", seconds: 12)
+            try call("Bash: cat missing.txt", status: "error", output: "cat: missing.txt: No such file or directory", seconds: 13)
+            try call("Agent(look)", output: "**Counts**: 3 files\nthe rest", message: true, agent: "look", seconds: 14)
+            // An Edit's diff as the daemon writes it (`<sign><square> <number> <text>`), and an answer with every component of the visual pass (unit C).
+            let diff = ["    5 node cli.js Alex", "-\u{1F7E5} 6 old line", "+\u{1F7E9} 6 ", "+\u{1F7E9} 7 Test of November 25"].joined(separator: "\n")
+            try call("Edit: /srv/example/project/README.md", path: "/srv/example/project/README.md", preview: ["title": "Update(README.md)", "summary": "Added 2 lines, removed 1 line", "body": diff,
+                                                                                                          "language": "diff", "plain": false, "record": false], seconds: 14.5)
+            let answer = ["Here is what I found in [Example link](https://example.com/docs), run by @mini:", "", "## Results", "",
+                          "| Name | Type | Size | Modified |", "|---|---|---:|---|", "| `README.md` | file | 100 B | Nov 26 00:31 |", "| `cli.js` | file | 2.4 KB | Nov 25 23:55 |",
+                          "| `test` | directory | \u{2014} | Oct 29 22:41 |", "", "```swift", "let x = 1", "```", "", "```", "127.0.0.1 localhost", "```"].joined(separator: "\n")
+            try put(5, mini, ["thread": fixRoot.hex, "markdown": answer], re: fixRoot, seconds: 14.7)
+            try put(1, mini, ["thread": fixRoot.hex, "say": "notice", "markdown": "Background command completed"], seconds: 15)
+            let asked = try put(9, mini, ["thread": fixRoot.hex, "title": "Allow Bash?", "request": ["type": "permission", "toolName": "Bash", "title": NSNull(), "description": NSNull(), "plan": NSNull(),
+                                                                                            "input": ["command": "mkdir deny-test"]]], re: fixRoot, seconds: 16)
+            let denied = try put(10, alice, ["answer": ["type": "permission", "allow": false]], to: mini, re: asked, seconds: 17)
+            try put(5, mini, ["thread": "", "markdown": ""], re: denied, seconds: 18)
+            try put(2, alice, ["text": "Thanks. Run it once more.", "thread": fixRoot.hex], to: mini, seconds: 30)
+            try put(2, alice, ["text": "And tell me when it ends.", "thread": fixRoot.hex], to: mini, seconds: 31)
+            try render(appearance, MainWindow(model: shown, channel: sample.channel, thread: sample.thread), size: NSSize(width: 1280, height: 800), to: "window-\(theme).png")
+            // The same window with this person's two bots as devices: both composers, the person's row and the boxes.
+            var bots = DevicesState()
+            bots.rows = botIDs.enumerated().map { index, id in
+                DeviceRow(id: id, kind: .bot, label: nil, shortForm: "", adder: .none, position: index + 1, active: true, isThisMac: false, seenAt: nil, onlyHolderEpochs: 0, addedWhileRemoving: false)
+            }
+            let botDevices = DevicesModel(state: bots)
+            let boxesHub = Composers(conversation: ConversationModel(reading: shown), devices: botDevices) { _, _ in .ended }
+            try render(appearance, MainWindow(model: shown, devices: botDevices, channels: ChannelsModel(devices: botDevices), composers: boxesHub, channel: sample.channel, thread: sample.thread, now: now),
+                       size: NSSize(width: 1280, height: 800), to: "window-boxes-\(theme).png")
+            // Tall, so that the whole thread shows: the diff, the answer's table and its code blocks (unit C).
+            try render(appearance, MainWindow(model: shown, devices: botDevices, channels: ChannelsModel(devices: botDevices), composers: boxesHub, channel: sample.channel, thread: sample.thread, now: now),
+                       size: NSSize(width: 1280, height: 1500), to: "window-tall-\(theme).png")
             for (name, make) in screens { try render(appearance, PairingScreen(model: make()), size: page, to: "\(name)-\(theme).png") }
             let source = SyntheticKey()
             let empty = RecoverySheetModel(source: source)

@@ -200,7 +200,7 @@ struct ComposerView: View {
                         ComposerField(model: model, height: $height).id("\(model.channel.base64EncodedString())/\(model.thread ?? "")").frame(height: height)
                     }
                 }
-                .padding(.vertical, model.thread == nil ? 12 : 10).padding(.horizontal, model.thread == nil ? 14 : 12)
+                .padding(.vertical, 12).padding(.horizontal, 14)
                 Rectangle().fill(PardnerColor.line).frame(height: 1)
                 // The hint goes first when the box is wide enough for it, then the Commands button's word; the buttons stay.
                 ViewThatFits(in: .horizontal) {
@@ -217,9 +217,9 @@ struct ComposerView: View {
                 Text(notice).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.delText).fixedSize(horizontal: false, vertical: true)
             }
         }
-        // A card standing on its own under the messages, with no rule above it: wider margins in the conversation than in the thread panel.
-        // The top keeps a scrolled message off the card's border.
-        .padding(.horizontal, model.thread == nil ? 24 : 16).padding(.top, 8).padding(.bottom, 20)
+        // A card standing on its own under the messages, with no rule above it, the same in the conversation and in the thread panel so that the
+        // two cards' lower borders sit at one height. The top keeps a scrolled message off the card's border.
+        .padding(.horizontal, PardnerMetrics.margin).padding(.top, 8).padding(.bottom, PardnerMetrics.margin)
     }
 }
 
@@ -240,13 +240,14 @@ extension ComposerView {
             CommandsButton(word: commandsWord)
             Spacer(minLength: PardnerMetrics.gap)
             if hint {
-                Text("Return to send, Shift-Return for a new line").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted).lineLimit(1).fixedSize()
+                Text("Return to send").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted).lineLimit(1).fixedSize()
                     .padding(.horizontal, 6)
             }
             Button { model.submit() } label: {
-                Image(systemName: "arrow.up").font(.system(size: 13, weight: .semibold)).foregroundStyle(PardnerColor.brandInk)
-                    .frame(width: 38, height: 30).background(PardnerColor.brand, in: RoundedRectangle(cornerRadius: 8))
-                    .opacity(model.sendOff ? 0.4 : 1).contentShape(Rectangle())
+                // Filled in the brand colour while Return would send, a grey chip while it would not.
+                Image(systemName: "arrow.up").font(.system(size: 13, weight: .semibold)).foregroundStyle(model.sendOff ? PardnerColor.muted : PardnerColor.brandInk)
+                    .frame(width: 38, height: 30).background(model.sendOff ? PardnerColor.raised : PardnerColor.brand, in: RoundedRectangle(cornerRadius: 8))
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain).pointerStyle(model.sendOff ? nil : .link).disabled(model.sendOff).help("Send").accessibilityLabel("Send")
         }
@@ -264,7 +265,8 @@ struct ComposerTool: View {
 
     var body: some View {
         if let reason = off, !reason.isEmpty {
-            icon.opacity(0.45).help(reason)
+            // A tool that is not there yet is drawn as the others are (#174); its help says why it does nothing.
+            icon.help(reason)
                 .accessibilityElement(children: .ignore).accessibilityAddTraits(.isButton).accessibilityLabel(label).accessibilityHint(reason)
         } else {
             Button(action: action) { icon }
@@ -273,11 +275,38 @@ struct ComposerTool: View {
         }
     }
 
+    /// Outlined, in the one grey. The system's `face.smiling` is drawn filled in the dark appearance (offscreen render, 2026-11-26, in the dark
+    /// appearance only), so the emoji's outline is drawn by `EmojiOutline`, as the reference draws it.
+    @ViewBuilder private var glyph: some View {
+        if symbol == "face.smiling" {
+            EmojiOutline().stroke(style: StrokeStyle(lineWidth: 1.2, lineCap: .round)).frame(width: 14, height: 14)
+        } else {
+            Image(systemName: symbol).font(.system(size: 14, weight: .regular))
+        }
+    }
+
     private var icon: some View {
-        Image(systemName: symbol).font(.system(size: 14, weight: .regular)).foregroundStyle(PardnerColor.muted)
+        glyph
+            .foregroundStyle(PardnerColor.muted)
             .frame(width: 28, height: 28)
             .background(chosen ? PardnerColor.raised : .clear, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
             .contentShape(Rectangle())
+    }
+}
+
+/// A face in a circle on the reference's 16 point grid: the circle, the smile and two eyes.
+struct EmojiOutline: Shape {
+    func path(in rect: CGRect) -> Path {
+        let k = min(rect.width, rect.height) / 16
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: rect.minX + x * k, y: rect.minY + y * k) }
+        var path = Path()
+        path.addEllipse(in: CGRect(origin: point(2, 2), size: CGSize(width: 12 * k, height: 12 * k)))
+        path.addArc(center: point(8, 7.84), radius: 3 * k, startAngle: .degrees(33.6), endAngle: .degrees(146.4), clockwise: false)
+        for x in [6, 10] as [CGFloat] {
+            path.move(to: point(x, 6.3))
+            path.addLine(to: point(x, 6.7))
+        }
+        return path
     }
 }
 

@@ -49,7 +49,7 @@ final class LineViewsTests: XCTestCase {
         var s = Session()
         let body = (1...20_000).map { "+🟩 \($0) line" }.joined(separator: "\n")
         s.line("Edit", preview: ["title": "Update(a.txt)", "summary": "Added 20000 lines", "body": body, "language": "diff", "plain": false, "record": false])
-        let rows = ThreadRows.build(s.thread)
+        let rows = ThreadRows.build(s.thread, isSystem: { _ in false })
         XCTAssertEqual(rows.count, 1 + 100)
         XCTAssertEqual(Set(rows.map(\.id)).count, rows.count, "each row has an identity of its own")
         guard case .line = rows[0].content, case .body(_, let last) = rows[100].content else { return XCTFail("a head, then body rows") }
@@ -61,7 +61,7 @@ final class LineViewsTests: XCTestCase {
         var s = Session()
         s.line("Run: ls")
         s.line("Asked", preview: ["title": "Asked", "summary": "", "body": "a\nb", "language": "", "plain": true, "record": true])
-        XCTAssertEqual(ThreadRows.build(s.thread).count, 2)
+        XCTAssertEqual(ThreadRows.build(s.thread, isSystem: { _ in false }).count, 2)
     }
 
     func testTheRowsKeepTheOrderOfTheEntries() {
@@ -69,7 +69,7 @@ final class LineViewsTests: XCTestCase {
         s.put(4, s.bot, ["thread": s.prompt.hex, "markdown": "Before. "], re: MessageRef(device: s.bot, name: Data(repeating: 0xAA, count: 16)))
         s.line("Run: ls")
         s.put(4, s.bot, ["thread": s.prompt.hex, "markdown": "After."], re: MessageRef(device: s.bot, name: Data(repeating: 0xAA, count: 16)))
-        let kinds = ThreadRows.build(s.thread).map { row -> String in
+        let kinds = ThreadRows.build(s.thread, isSystem: { _ in false }).map { row -> String in
             switch row.content {
             case .segment: "segment"
             case .line: "line"
@@ -85,7 +85,7 @@ final class LineViewsTests: XCTestCase {
         let line = s.thread.items[0]
         guard case .line(let l) = line else { return XCTFail() }
         for _ in 0..<12 { s.put(11, s.bot, nil, re: l.ref) }
-        let rows = ThreadRows.build(s.thread)
+        let rows = ThreadRows.build(s.thread, isSystem: { _ in false })
         XCTAssertEqual(rows.count, 2)
         guard case .unreadable(let count, _) = rows[1].content else { return XCTFail("one counted row") }
         XCTAssertEqual(count, 12)
@@ -109,11 +109,23 @@ final class LineViewsTests: XCTestCase {
         XCTAssertEqual(DiffTint(" 3 same"), .plain)
         XCTAssertEqual(DiffTint("..."), .plain)
         XCTAssertEqual(DiffTint(""), .plain)
-        let text = DiffTint.text("+🟩 1 new\n-🟥 1 old\n 2 same", diff: true)
-        XCTAssertEqual(String(text.characters), "+🟩 1 new\n-🟥 1 old\n 2 same")
-        let tints = text.runs.map { $0.backgroundColor != nil }
-        XCTAssertEqual(tints, [true, true, false])
-        XCTAssertTrue(DiffTint.text("+not a diff", diff: false).runs.allSatisfy { $0.backgroundColor == nil })
+    }
+
+    func testADiffLineLosesItsSquareAndKeepsItsNumberAndItsText() {
+        XCTAssertEqual(DiffLine("+🟩  7 new text"), DiffLine(tint: .added, sign: "+", number: " 7", text: "new text"))
+        XCTAssertEqual(DiffLine("-🟥 12 old"), DiffLine(tint: .removed, sign: "-", number: "12", text: "old"))
+        XCTAssertEqual(DiffLine("    5   indented 7"), DiffLine(tint: .plain, sign: " ", number: "5", text: "  indented 7"), "a context line has two spaces where the square goes")
+        XCTAssertEqual(DiffLine("+🟩 6 "), DiffLine(tint: .added, sign: "+", number: "6", text: ""), "an added empty line")
+        XCTAssertEqual(DiffLine("+🟩 7 7").text, "7", "the text's own digits stay the text")
+    }
+
+    func testALineOfAnotherShapeKeepsAllItsWordsAndNoSign() {
+        for row in ["...", "… +3 lines", "+a", "-b", "+🟩 no number", ""] {
+            XCTAssertEqual(DiffLine(row).text, row)
+            XCTAssertEqual(DiffLine(row).sign, "")
+            XCTAssertEqual(DiffLine(row).number, "")
+        }
+        XCTAssertEqual(DiffLine("+a").tint, .added, "it is still tinted by its first character")
     }
 
     func testTheTimeALineHasRunIsCountedLikeTheTerminal() {
@@ -124,8 +136,8 @@ final class LineViewsTests: XCTestCase {
     }
 
     func testACarriageReturnBeforeTheLineEndKeepsEachLineTinted() {
-        let text = DiffTint.text("+a\r\n-b\r\n c", diff: true)
-        XCTAssertEqual(text.runs.map { $0.backgroundColor != nil }, [true, true, false])
+        let lines = "+a\r\n-b\r\n c".components(separatedBy: "\n").map(DiffLine.init)
+        XCTAssertEqual(lines.map(\.tint), [.added, .removed, .plain])
     }
 
     func testAnUnreadableRunCountsAsOneReply() {
@@ -205,6 +217,12 @@ final class LineViewsTests: XCTestCase {
         XCTAssertNil(ReplyContent(fields(agent: "look", message: true)), "no output, no window")
     }
 
+    func testAnAgentsReplyPreviewIsFirstSaidWithoutItsMarkup() {
+        let f = fields(agent: "look", message: true, output: "\n**Counts**: 3 files\nmore")
+        XCTAssertEqual(LineRow.headWords(f, .agentReplied), "Counts: 3 files")
+        XCTAssertEqual(LineRow.tooltip(f, .agentReplied, path: nil), "Agent replied\nCounts: 3 files")
+    }
+
     func testAnAgentsTaskIsItsHeadAndItsDetailsStandApart() {
         let f = fields(agent: "Run ls", details: "Bash: ls -la\nRead: a.txt")
         XCTAssertEqual(LineRow.headWords(f, .agentAsked), "Run ls", "the child call lines never join the task")
@@ -281,7 +299,7 @@ final class LineViewsTests: XCTestCase {
         let body = (1...250).map { "+line \($0)" }.joined(separator: "\n")
         let preview: [String: Any] = ["title": "Update(a.txt)", "summary": "Added 250 lines", "body": body, "language": "diff", "plain": false, "record": false]
         let line = workLine("Edit", preview: preview)
-        for spacing in [ThreadPanel.rowSpacing, PardnerMetrics.gap] {
+        for spacing in [ThreadRow.stack, PardnerMetrics.gap] {
             let top = LineBodyRow.top(underStackOf: spacing)
             XCTAssertEqual(top, 2 - spacing)
             let alone = stackHeight(spacing: spacing, line: line, index: 0, offset: nil)
@@ -291,10 +309,71 @@ final class LineViewsTests: XCTestCase {
         }
     }
 
+    func testADiffRowIsOneAttributedTextOfAllItsLines() {
+        PardnerFonts.register()
+        let lines = ["    5 node cli.js", "-\u{1F7E5} 6 old line", "+\u{1F7E9} 6 new line", "..."].map(DiffLine.init)
+        let pieces = DiffRowText.pieces(lines)
+        XCTAssertEqual(pieces.count, lines.count, "one piece per source line (the row tags each with its index, which the grounds tests read back)")
+        var text = AttributedString()
+        pieces.forEach { text += $0 }
+        XCTAssertEqual(String(text.characters), "  5 node cli.js\n- 6 old line\n+ 6 new line\n...", "no square, one text for the whole row")
+        let removed = text.runs.first { String(text.characters[$0.range]) == "old line" }
+        XCTAssertEqual(removed?.foregroundColor, PardnerColor.delText)
+        XCTAssertEqual(text.runs.first { String(text.characters[$0.range]) == " 6 " && $0.foregroundColor == PardnerColor.muted }?.foregroundColor, PardnerColor.muted, "the number is muted")
+        XCTAssertTrue(text.runs.allSatisfy { $0.backgroundColor == nil }, "the grounds are drawn from the layout, not by the text")
+    }
+
+    /// The colour of the column at the right of a hosted diff row, per point from the top: `+` added ground, `-` removed, `.` none.
     @MainActor
-    func testTheThreadsRowsAre16PointsApart() {
-        XCTAssertEqual(ThreadPanel.rowSpacing, 16)
-        XCTAssertEqual(PardnerMetrics.gap, 8)
+    private func groundColumn(_ row: String, width: CGFloat) -> String {
+        _ = NSApplication.shared
+        _ = PardnerFonts.register()
+        let hosting = NSHostingView(rootView: DiffRowText(row: row).frame(width: width).environment(\.colorScheme, .light))
+        hosting.appearance = NSAppearance(named: .aqua)
+        hosting.layoutSubtreeIfNeeded()
+        hosting.frame = NSRect(origin: .zero, size: hosting.fittingSize)
+        hosting.layoutSubtreeIfNeeded()
+        guard let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else { return "" }
+        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        func close(_ a: NSColor, _ b: NSColor) -> Bool {
+            guard let a = a.usingColorSpace(.sRGB), let b = b.usingColorSpace(.sRGB) else { return false }
+            return abs(a.redComponent - b.redComponent) + abs(a.greenComponent - b.greenComponent) + abs(a.blueComponent - b.blueComponent) < 0.06
+        }
+        var added = NSColor(PardnerColor.addBg), removed = NSColor(PardnerColor.delBg)
+        NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance { added = NSColor(PardnerColor.addBg).usingColorSpace(.sRGB) ?? added; removed = NSColor(PardnerColor.delBg).usingColorSpace(.sRGB) ?? removed }
+        return (0..<rep.pixelsHigh).map { y in
+            guard let pixel = rep.colorAt(x: rep.pixelsWide - 3, y: y), pixel.alphaComponent > 0.5 else { return "." }
+            return close(pixel, added) ? "+" : close(pixel, removed) ? "-" : "?"
+        }.joined()
+    }
+
+    @MainActor
+    func testADiffRowsGroundsSpanTheColumnAndAWrappedLineKeepsOne() {
+        let long = "+\u{1F7E9} 1 a long added line with an emoji \u{1F600} that wraps onto a second and a third line of this narrow column for sure"
+        let column = groundColumn([long, "-\u{1F7E5} 2 old", "  3 plain"].joined(separator: "\n"), width: 240)
+        let runs = column.reduce(into: [(Character, Int)]()) { if $0.last?.0 == $1 { $0[$0.count - 1].1 += 1 } else { $0.append(($1, 1)) } }
+        XCTAssertEqual(runs.map(\.0), ["+", "-", "."], "added, then removed with no gap, then no ground: \(runs)")
+        XCTAssertGreaterThan(Double(runs[0].1), Double(runs[1].1) * 2.4, "the wrapped line's ground covers all its pieces: \(runs)")
+        let gap = groundColumn("+\u{1F7E9} 1 new\n\n-\u{1F7E5} 2 old", width: 240)
+        XCTAssertEqual(gap.reduce(into: "") { if $0.last != $1 { $0.append($1) } }, "+.-", "an empty line between two keeps the ground of the one after it: \(gap)")
+    }
+
+    /// The ground of each layout line of a row at width 240, one character per line (`+` added, `-` removed, `.` none), from its column.
+    @MainActor
+    private func grounds(_ row: String, layoutLines: Int) -> String {
+        let column = Array(groundColumn(row, width: 240))
+        let pitch = Double(column.count) / Double(layoutLines)
+        return String((0..<layoutLines).map { column[min(column.count - 1, Int((Double($0) + 0.5) * pitch))] })
+    }
+
+    @MainActor
+    func testTheGroundsFollowTheSourceLinesWhateverTheTextHoldsOrReads() {
+        let (add, del) = ("+\u{1F7E9}", "-\u{1F7E5}")
+        // A lone CR or a paragraph separator breaks the layout line inside one source line; Hebrew starts a right-to-left run.
+        XCTAssertEqual(grounds("\(add) 1 a\rb\n  2 ctx\n\(del) 3 old", layoutLines: 4), "++.-", "a CR inside the added line")
+        XCTAssertEqual(grounds("\(add) 1 a\u{2029}b\n  2 ctx\n\(del) 3 old", layoutLines: 4), "++.-", "a paragraph separator inside the added line")
+        XCTAssertEqual(grounds("  1 ctx\n\(add) 2 \u{5E9}\u{5DC}\u{5D5}\u{5DD} \u{5E2}\u{5D5}\u{5DC}\u{5DD}\n  3 ctx", layoutLines: 3), ".+.", "a line of Hebrew")
+        XCTAssertEqual(grounds("  1 ctx\n\(add) 2 \u{5E9}\u{5DC}\u{5D5}\u{5DD}\n  3 ctx\n\(del) 4 old\n  5 ctx", layoutLines: 5), ".+.-.", "Hebrew, then a removed line")
     }
 
     /// The widest gap between two inked columns of a rendered head, in points, and the width it was drawn at.

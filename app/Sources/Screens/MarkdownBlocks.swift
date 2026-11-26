@@ -56,6 +56,14 @@ enum MarkdownBlocks {
     struct Table: Equatable {
         var columns: Int
         var rows: [[AttributedString]]
+
+        /// Whether the column's body cells all read as a number, with a sign, separators and a short unit (`1,204`, `12.5%`, `2.4 MB`), a cell of
+        /// nothing or of dashes being no objection: it is aligned right, by what it holds and not by its header's word (#174).
+        func isNumeric(column: Int) -> Bool {
+            let cells = rows.dropFirst().map { String($0[column].characters).trimmingCharacters(in: .whitespaces) }
+            let filled = cells.filter { !$0.isEmpty && !$0.allSatisfy { "-\u{2013}\u{2014}".contains($0) } }
+            return !filled.isEmpty && filled.allSatisfy { $0.wholeMatch(of: /[+\-\u{2212}]?[$\u{20AC}\u{A3}]?\d[\d,._]*\s?[%A-Za-z]{0,3}/) != nil }
+        }
     }
 
     /// The deepest nesting drawn (2.3); the same for lists and quotes.

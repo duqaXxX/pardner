@@ -175,8 +175,8 @@ enum CodeSpans {
         return pieces
     }
 
-    /// `text` with its code spans in JetBrains Mono on the `raised` colour, as the design draws them; a text over `most` as written.
-    static func styled(_ text: String) -> AttributedString {
+    /// `text` with its code spans in JetBrains Mono on `ground` (`raised`, or `surface` on the selected band), as the design draws them; a text over `most` as written.
+    static func styled(_ text: String, ground: Color = PardnerColor.raised) -> AttributedString {
         guard text.count <= most else { return AttributedString(text) }
         var out = AttributedString()
         for piece in pieces(text) {
@@ -186,7 +186,7 @@ enum CodeSpans {
             case .code(let s):
                 var code = AttributedString(s)
                 code.font = PardnerFont.mono(size: 12.5, weight: .regular)
-                code.backgroundColor = PardnerColor.raised
+                code.backgroundColor = ground
                 out += code
             }
         }

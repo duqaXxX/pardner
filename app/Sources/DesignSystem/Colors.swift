@@ -122,13 +122,19 @@ public enum PardnerColor {
     public static let delBg = Tokens.color("del-bg")
     /// The text of a removed line.
     public static let delText = Tokens.color("del-text")
+    /// The band behind the message whose thread is open.
+    public static let select = Tokens.color("select")
+    /// The band behind a message under the pointer: lighter than `select`, so that the two differ.
+    public static let hover = Tokens.color("hover")
+    /// The ground of a code block.
+    public static let codeBg = Tokens.color("code-bg")
     /// Unread and attention counts.
     public static let badge = Tokens.color("badge")
     /// Text on `badge`.
     public static let badgeInk = Tokens.color("badge-ink")
 }
 
-/// The radii, the base gap and the answer's width (first-screens decision 5), from the same `tokens.json`.
+/// The radii, the base gap, the answer's width (first-screens decision 5) and the layout's rows and rhythm (visual pass, #174), from the same `tokens.json`.
 public enum PardnerMetrics {
     private static var file: Tokens.File { Tokens.file }
 
@@ -145,4 +151,20 @@ public enum PardnerMetrics {
     public static let gap = value(file.spacing, "gap")
     /// The widest a bot's text is read at: its column is capped here, and left-aligned in a panel wider than this.
     public static let answerWidth = value(file.spacing, "answer-width")
+    /// The header row shared by the three columns.
+    public static let headerHeight = value(file.spacing, "header-height")
+    /// The row under the header: the centre's tabs and the panel's session data.
+    public static let subheaderHeight = value(file.spacing, "subheader-height")
+    /// The side margin of a header, a list and a composer.
+    public static let margin = value(file.spacing, "margin")
+    /// The room at each end of a message list.
+    public static let listEnd = value(file.spacing, "list-end")
+    /// A sidebar row.
+    public static let rowHeight = value(file.spacing, "row-height")
+    /// The person's row at the foot of the sidebar.
+    public static let userRowHeight = value(file.spacing, "user-row-height")
+    /// Between messages, between messages of one author, and between a text and the cards under it.
+    public static let messageGap = value(file.spacing, "message-gap")
+    public static let groupGap = value(file.spacing, "group-gap")
+    public static let cardGap = value(file.spacing, "card-gap")
 }

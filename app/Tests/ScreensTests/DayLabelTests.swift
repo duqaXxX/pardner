@@ -41,3 +41,25 @@ final class DayLabelTests: XCTestCase {
         XCTAssertEqual(Naming.dayLabels(times, now: at(23, hour: 1), calendar: calendar), ["Yesterday"])
     }
 }
+
+final class TimeOfDayTests: XCTestCase {
+    private func time(_ hour: Int, _ minute: Int, locale: String) -> String {
+        let utc = TimeZone(secondsFromGMT: 0)!
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = utc
+        let date = calendar.date(from: DateComponents(year: 2026, month: 11, day: 26, hour: hour, minute: minute))!
+        return Naming.time(date, locale: Locale(identifier: locale), timeZone: utc)
+    }
+
+    func testTheHourHasTwoDigitsWhereTheMacCountsIn24Hours() {
+        XCTAssertEqual(time(0, 34, locale: "en_GB"), "00:34")
+        XCTAssertEqual(time(1, 58, locale: "en_GB"), "01:58")
+        XCTAssertEqual(time(17, 5, locale: "en_GB"), "17:05")
+        XCTAssertEqual(time(1, 53, locale: "en_IT"), "01:53", "the system's short style wrote 1:53 there")
+    }
+
+    func testTheHourKeepsTwoDigitsInTheTwelveHourClockToo() {
+        XCTAssertTrue(time(1, 58, locale: "en_US").hasPrefix("01:58"), time(1, 58, locale: "en_US"))
+        XCTAssertTrue(time(0, 34, locale: "en_US").hasPrefix("12:34"), time(0, 34, locale: "en_US"))
+    }
+}
