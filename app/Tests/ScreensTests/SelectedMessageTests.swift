@@ -1,5 +1,5 @@
 // The selected message and the thread summary row (visual pass, issue #174, unit D): which message stands on the band, the band's ground and reach,
-// that it moves nothing, the summary's parts and its `Open in panel` label. Synthetic content.
+// that it moves nothing, the summary's parts, and that the open summary draws no label. Synthetic content.
 import AppKit
 import Conversation
 import DesignSystem
@@ -79,7 +79,7 @@ final class SelectedMessageTests: XCTestCase {
             XCTAssertTrue(isBand(rep, x: 150, y: 77), "8 points below the block (it ends at 70)")
             XCTAssertFalse(isBand(rep, x: 150, y: 79), "and no more")
             XCTAssertFalse(isBand(render(band(selected: false, dark: dark), size: size, dark: dark), x: 0, y: 55), "no band unselected")
-            if !dark { XCTAssertEqual(rgb(rep, 0, 55).map { $0.rounded() }, [223, 232, 246], "the light band is #DFE8F6") }
+            if !dark { XCTAssertEqual(rgb(rep, 0, 55).map { $0.rounded() }, [230, 238, 250], "the light band is #E6EEFA") }
         }
     }
 
@@ -154,11 +154,12 @@ final class SelectedMessageTests: XCTestCase {
         return count
     }
 
-    func testTheOpenLabelIsOnlyInTheSelectedMessagesSummary() throws {
+    /// The selected message's band says which thread is open; its summary draws no `Open in panel` label.
+    func testTheOpenSummaryDrawsNoLabel() throws {
         let t = try thread(title: "ls -la command")
         XCTAssertEqual(brandPixels(summary(t, isOpen: false)), 0, "no filled element in a summary that is not open")
-        XCTAssertGreaterThan(brandPixels(summary(t, isOpen: true)), 300, "the open one carries the filled label")
-        XCTAssertGreaterThan(size(summary(t, isOpen: true)).width, size(summary(t, isOpen: false)).width, "the label takes room in the row")
+        XCTAssertEqual(brandPixels(summary(t, isOpen: true)), 0, "no filled element in the open one either")
+        XCTAssertEqual(size(summary(t, isOpen: true)).width, size(summary(t, isOpen: false)).width, "the open row is as wide as any other")
     }
 
     func testTheSummaryRowHasNoBoxAndKeepsItsActionAndWords() throws {

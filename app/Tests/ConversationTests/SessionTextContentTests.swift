@@ -67,11 +67,10 @@ final class SessionTextContentTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(lines.count, 11)
         for l in lines {
             let name = l["name"] as? String ?? "?"
-            let zone = try XCTUnwrap(TimeZone(identifier: try XCTUnwrap(l["timeZone"] as? String)), name)
             let now = Date(timeIntervalSince1970: try XCTUnwrap(l["now"] as? Double) / 1000)
             let place = try XCTUnwrap(UsageLine.Place(rawValue: try XCTUnwrap(l["place"] as? String)), name)
             let text = UsageLine.text(profileRead: try XCTUnwrap(l["profileRead"] as? Bool), plan: l["plan"] as? String, windows: usage(l["windows"]),
-                                      cost: usage(l["cost"]), apiSeen: try XCTUnwrap(l["apiSeen"] as? Bool), place: place, now: now, timeZone: zone)
+                                      cost: usage(l["cost"]), apiSeen: try XCTUnwrap(l["apiSeen"] as? Bool), place: place, now: now)
             XCTAssertEqual(text, l["text"] as? String, name)
         }
     }

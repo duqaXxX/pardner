@@ -52,6 +52,7 @@ function fields(known: Partial<FooterFields> = {}): FooterFields {
     contextPercent: null,
     sessionLimit: null,
     weekLimit: null,
+    limitsReadAt: null,
     account: null,
     accountPlan: null,
     sessionCost: null,
@@ -79,6 +80,7 @@ test("status fields list the footer s values one per line", () => {
     sessionTokens: 12_345,
     sessionLimit: { percent: 3, resetsAt: NOW + 2 * HOUR + 10 * MINUTE },
     weekLimit: { percent: 25, resetsAt: null },
+    limitsReadAt: null,
     effort: "high",
     advisor: null,
     effortObserved: null,
@@ -334,4 +336,52 @@ test("a work's length is written as the terminal writes it", () => {
     [93_780_000, "1d 2h 3m"],
   ];
   for (const [ms, text] of cases) assert.equal(formatWorkDuration(ms), text, `${ms} ms`);
+});
+
+test("a read is dated by the wall clock and is in flight until it settles; a failure keeps the date", async () => {
+  let release: (usage: Usage) => void = () => {};
+  let fail = false;
+  const usage: Usage = { session: null, week: { percent: 9, resetsAt: null }, account: null };
+  let wall = 1_000;
+  const cache = new UsageCache(
+    () =>
+      fail
+        ? Promise.reject(new Error("no"))
+        : new Promise<Usage>((resolve) => {
+            release = resolve;
+          }),
+    { ttl: 0, now: () => wall, warn: () => {} },
+  );
+  assert.equal(cache.inFlight, null);
+  const refresh = cache.refreshIfStale();
+  const flight = cache.inFlight;
+  assert.ok(flight !== null, "a read runs");
+  release(usage);
+  await refresh;
+  await flight;
+  assert.equal(cache.inFlight, null);
+  assert.equal(cache.readAt, 1_000);
+  fail = true;
+  wall = 2_000;
+  await cache.refreshIfStale();
+  assert.equal(cache.readAt, 1_000, "a failed read keeps the date of the value it kept");
+});
+
+test("an invalidate during a read leaves the cache stale, so the next refresh reads again", async () => {
+  let calls = 0;
+  let release: () => void = () => {};
+  const cache = new UsageCache(
+    async () => {
+      calls += 1;
+      if (calls === 1) await new Promise<void>((resolve) => (release = resolve));
+      return { session: null, week: null, account: null };
+    },
+    { ttl: 300_000, clock: () => 0 },
+  );
+  const first = cache.refreshIfStale();
+  cache.invalidate();
+  release();
+  await first;
+  await cache.refreshIfStale();
+  assert.equal(calls, 2, "the change during the first read is not lost");
 });

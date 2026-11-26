@@ -1094,7 +1094,12 @@ and the account come from one process started for the read,
 started in the home directory with none of the owner's setting sources, without the
 permission to bypass and without the Chrome flag (`UsageProbe`, over `ClaudeBackend.startBare`).
 The core caches them for five minutes (`footer.UsageCache`, `footer.USAGE_TTL`); the event `limits_changed`, which
-the back end makes of the SDK's rate-limit record, invalidates the cache. A probe with no answer
+the back end makes of the SDK's rate-limit record, invalidates the cache. A turn starts a read in the
+background. When the session has ended and a read is still on its way, the footer waits for it in a
+task of its own (`footerWait`, up to `constants.USAGE_WAIT`, 10 seconds) while the reader goes on, then
+draws the footer owed at that moment; `/status` waits the same way inline. The cache dates the limits
+(`readAt`), the footer hands that time to the chat as `limitsReadAt` when a limit is known, and an
+`invalidate` during a read leaves the cache stale. A probe with no answer
 within `usage.USAGE_TIMEOUT` gives up and closes its session. The limit fields exist only with a
 claude.ai subscription. A field that cannot be read is left out.
 The git fields and the trust verdict come from one lookup, `directory.verdictBy` (the agent's

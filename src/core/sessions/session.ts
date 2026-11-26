@@ -127,6 +127,7 @@ import {
   TASK_WORDS,
   TASKS_KEPT,
   TURN_EVENTS,
+  USAGE_WAIT,
 } from "./constants.ts";
 import type { SessionDeps } from "./deps.ts";
 import {
@@ -354,6 +355,16 @@ export class ThreadSession {
   // What the session only starts and never waits on (a usage refresh, the root's status) is not kept:
   // a usage refresh shares one probe across every session, and is never cancelled.
   private readonly expiring = new Set<Task>();
+  // The footers waiting for a usage read, or drawing after it (`showFooterIfEnded`); cancelled with
+  // the session's tasks. At most one waits (`footerWaiting`); one past its wait may still draw.
+  private readonly footerWaits = new Set<Task>();
+  // Whether a footer is waiting for a usage read: an end in the meantime is served by it.
+  private footerWaiting = false;
+  // A turn's end under `Working…` whose footer waits: the line stays until it is drawn, as
+  // `turnEnding` keeps it while a footer is read inline.
+  private footerKeepsWorking = false;
+  // The newest usage refresh this session started (`refreshUsage`), never cancelled.
+  private usageRefresh: Task | null = null;
   // Approval ids open right now, waiting on the owner's decision (`waitingForOwner`); a hold
   // adds `HOLD_MARKER` here too.
   private readonly waiting = new Set<string>();
@@ -904,7 +915,7 @@ export class ThreadSession {
   private threadActivity(): Activity | null {
     if (this.closedFlag || this.waitingForOwner || this.interrupting) return null;
     if (this.compacting && (this.busy || this.promptOwed())) return { kind: "compacting" };
-    if (this.promptOwed() || this.turnEnding) return { kind: "working" };
+    if (this.promptOwed() || this.turnEnding || this.footerKeepsWorking) return { kind: "working" };
     const held = this.draining ? this.runningKindsOf({ awaitedOnly: true }) : "";
     if (held) {
       // A stop that only background tasks hold: said here whatever the list shows, since
@@ -2334,6 +2345,7 @@ export class ThreadSession {
     try {
       await this.ensureConnected();
       this.refreshUsage();
+      await this.usageSettled();
       ({ fields: data, untrusted: markedRepository } = await this.footerData(this.sessionTokens));
     } catch (error) {
       // Not an answer to give: the word is refused as a message is, and nothing changed.
@@ -2475,10 +2487,40 @@ export class ThreadSession {
     const usage = this.usage;
     // The probe starts an agent process of its own.
     if (usage === null || this.startsBlocked) return;
-    new Task(async () => {
+    // Kept so a footer knows a read is on its way before the task reaches the cache: it ends once
+    // a read this turn can use has settled, its own or one another session started first.
+    this.usageRefresh = new Task(async () => {
       if (await this.updatingElsewhere()) return;
       await usage.refreshIfStale();
+      await usage.inFlight;
     });
+  }
+
+  /** The usage read a footer would wait for, or null when none is on its way. */
+  private usagePending(): Promise<void> | null {
+    const own = this.usageRefresh;
+    if (own !== null && !own.done) return own.settled();
+    return this.usage?.inFlight ?? null;
+  }
+
+  /**
+   * Waits for a usage read already running, at most `USAGE_WAIT`, so what follows takes the limits
+   * read in this turn; returns at once when none runs, and when `signal` aborts.
+   */
+  private async usageSettled(signal?: AbortSignal): Promise<void> {
+    const flight = this.usagePending();
+    if (flight === null || signal?.aborted) return;
+    const limit = new AbortController();
+    const stop = () => limit.abort();
+    signal?.addEventListener("abort", stop, { once: true });
+    try {
+      await Promise.race([flight, this.deps.clock.sleep(USAGE_WAIT, limit.signal)]);
+    } catch {
+      // the time ran out early: the caller's abort
+    } finally {
+      signal?.removeEventListener("abort", stop);
+      limit.abort();
+    }
   }
 
   /** Whether another process of the machine is updating pardner (`SessionDeps.updating`). */
@@ -2618,9 +2660,14 @@ export class ThreadSession {
     // stops could still end a turn and record its session after a rebind. `expiring`'s own
     // timers go too: none should outlive the session, and a stray one firing after would try
     // to post a closing through one that is already gone.
-    const tasks = [this.worker, this.reader, this.expiry, this.idleExpiry, ...this.expiring].filter(
-      (task): task is Task => task !== null,
-    );
+    const tasks = [
+      this.worker,
+      this.reader,
+      this.expiry,
+      this.idleExpiry,
+      ...this.footerWaits,
+      ...this.expiring,
+    ].filter((task): task is Task => task !== null);
     for (const task of tasks) task.cancel();
     for (const task of tasks) await task.settled();
   }
@@ -4096,7 +4143,7 @@ export class ThreadSession {
    */
   private async showFooterIfEnded(
     signal?: AbortSignal,
-    options: { readonly live?: boolean } = {},
+    options: { readonly live?: boolean; readonly waited?: boolean } = {},
   ): Promise<void> {
     const reply = this.footerOwedTo;
     if (reply === null) {
@@ -4111,7 +4158,43 @@ export class ThreadSession {
     }
     // Taken before the footer is read: work that starts during the read gets its own start.
     const work = this.takeWork();
-    const footer = await this.readFooter(signal, options.live ?? true, work);
+    const live = options.live ?? true;
+    if (live && options.waited !== true && this.usagePending() !== null) {
+      // A usage read is running (a short turn ends before it answers): the footer waits for it in a
+      // task of its own, so the reader goes on. The waiter draws whatever footer is owed when it
+      // wakes, on the state of that moment; one pending waiter serves every end in the meantime.
+      this.footerKeepsWorking ||= this.turnEnding;
+      // Served only while it waits: an end after its wait, while it draws the footer owed then,
+      // starts a waiter of its own or draws inline.
+      if (!this.footerWaiting) {
+        this.footerWaiting = true;
+        const waiter: Task = new Task(
+          async (waiting) => {
+            try {
+              try {
+                await this.usageSettled(waiting);
+              } finally {
+                this.footerWaiting = false;
+              }
+              // A close cancelled it: the forced end draws its own footer where it draws one.
+              waiting.throwIfAborted();
+              await this.showFooterIfEnded(waiting, { waited: true });
+            } finally {
+              this.footerWaits.delete(waiter);
+              // A waiter still waiting or drawing keeps the line for its own footer: the last clears it.
+              if (this.footerWaits.size === 0) {
+                this.footerKeepsWorking = false;
+                if (!this.closedFlag) this.showThreadStatus();
+              }
+            }
+          },
+          { immediate: true },
+        );
+        this.footerWaits.add(waiter);
+      }
+      return;
+    }
+    const footer = await this.readFooter(signal, live, work);
     if (footer === null || this.footerOwedTo !== reply || !this.sessionEnded()) return;
     if (await reply.showFooter(footer, signal)) {
       if (this.footerOwedTo === reply) {
@@ -5376,7 +5459,9 @@ export class ThreadSession {
     const reading = await gitReading(here, verdictBy(this.deps.agent));
     const [branch, changes] = reading.state;
     const gitUntrusted = reading.untrusted !== null;
+    // The limits and their date in one step: a read of another session may land at any await.
     const usage = this.usage?.current ?? null;
+    const readAt = this.usage?.readAt ?? null;
     // The limits name the account they were read for, never one beside another's (#276).
     const account = usage === null ? this.account : usage.account;
     // A switch the usage does not name yet is the newer word; once a request has gone to the
@@ -5398,6 +5483,8 @@ export class ThreadSession {
       contextPercent: context.percentage,
       sessionLimit: usage?.session ?? null,
       weekLimit: usage?.week ?? null,
+      // A cost alone is dated by the work's end: the date is the limits'.
+      limitsReadAt: usage?.session || usage?.week ? readAt : null,
       account: account?.name ?? null,
       accountPlan: account?.plan ?? null,
       // The plan the agent reported at connect, which the bot's profile carries and the app reads:

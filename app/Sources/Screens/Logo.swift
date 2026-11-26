@@ -1,26 +1,33 @@
 // The Pardner mark, ported from the logo board's SVG (actions/data/2026-11-19-app-design.html, 64 by 64
-// units): a speech bubble in `brand` with two eyes and a smile cut in the sidebar's colour, and a hat in
+// units): a speech bubble in `brand` with two eyes and a smile cut in the colour of the ground it sits on, and a hat in
 // `agent` tilted on its corner, with its band.
 import DesignSystem
 import SwiftUI
 
 public struct Logo: View {
     public var size: CGFloat = 28
+    /// The bubble's colour: `brand`, or the sidebar's own brand where the logo sits on the sidebar.
+    public var bubble: Color = PardnerColor.brand
 
-    public init(size: CGFloat = 28) { self.size = size }
+    /// The eyes and the smile: the ground the logo sits on, so they read as holes. The window's ground by default.
+    public var cut: Color = PardnerColor.bg
+
+    public init(size: CGFloat = 28, bubble: Color = PardnerColor.brand, cut: Color = PardnerColor.bg) {
+        (self.size, self.bubble, self.cut) = (size, bubble, cut)
+    }
 
     public var body: some View {
         Canvas { context, canvas in
             let s = canvas.width / 64
             context.scaleBy(x: s, y: s)
-            context.fill(Self.bubble, with: .color(PardnerColor.brand))
+            context.fill(Self.bubble, with: .color(bubble))
             for x in [26.0, 38.0] {
-                context.fill(Path(ellipseIn: CGRect(x: x - 2.2, y: 39.5 - 2.2, width: 4.4, height: 4.4)), with: .color(PardnerColor.side))
+                context.fill(Path(ellipseIn: CGRect(x: x - 2.2, y: 39.5 - 2.2, width: 4.4, height: 4.4)), with: .color(cut))
             }
             var smile = Path()
             smile.move(to: CGPoint(x: 27, y: 44.5))
             smile.addQuadCurve(to: CGPoint(x: 37, y: 44.5), control: CGPoint(x: 32, y: 48.7))
-            context.stroke(smile, with: .color(PardnerColor.side), style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
+            context.stroke(smile, with: .color(cut), style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
             // rotate(-14 27 29) translate(4.6 -3.3) scale(0.7), as the board's `transform`.
             var hat = context
             hat.translateBy(x: 27, y: 29)

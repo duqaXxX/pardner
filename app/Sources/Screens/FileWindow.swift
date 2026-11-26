@@ -149,7 +149,7 @@ struct FileRow: View {
                 opener.open(content)
                 openWindow(id: WindowID.file, value: content)
             } label: { label(size) }
-            .buttonStyle(.plain).pointerStyle(.link)
+            .buttonStyle(.clickable)
         } else {
             label(size)
         }

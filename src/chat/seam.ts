@@ -138,6 +138,8 @@ export interface FooterFields {
   readonly contextPercent: number | null;
   readonly sessionLimit: UsageLimit | null;
   readonly weekLimit: UsageLimit | null;
+  /** When the two limits were read, in epoch milliseconds; null when neither is known. */
+  readonly limitsReadAt: number | null;
   /** What names the account the agent is logged in to (an email); null when not known. */
   readonly account: string | null;
   /** The account's plan, which `/status` shows beside it; null when not known. */

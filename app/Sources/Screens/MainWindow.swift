@@ -145,7 +145,7 @@ public struct MainWindow: View {
         PaneSplit(
             threadOpen: threadOpen,
             sidebar: pane(Sidebar(model: model, selected: shown?.id, choose: { channel = $0 }, openSettings: settings.map { settings in { settings.open($0) } },
-                                  channels: channels, sections: sections, usageBots: bots.map { ($0.id, $0.name, $0.profile) }, now: now), background: PardnerColor.side, underTitleBar: true),
+                                  channels: channels, sections: sections, usageBots: bots.map { ($0.id, $0.name, $0.profile) }, now: now), background: PardnerColor.side, foreground: PardnerColor.sideText, underTitleBar: true),
             conversation: pane(Group {
                 if let c = shown {
                     ChannelView(model: model, icons: icons, channel: c, channels: channels, composers: composers, tab: $tab, thread: $thread)
@@ -168,8 +168,8 @@ public struct MainWindow: View {
         .background(PardnerColor.bg)
     }
 
-    private func pane<Content: View>(_ content: Content, background: Color = PardnerColor.bg, underTitleBar: Bool = true) -> AnyView {
-        AnyView(content.font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(PardnerColor.text)
+    private func pane<Content: View>(_ content: Content, background: Color = PardnerColor.bg, foreground: Color = PardnerColor.text, underTitleBar: Bool = true) -> AnyView {
+        AnyView(content.font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(foreground)
             .ignoresSafeArea(.container, edges: underTitleBar ? .top : [])
             .background(background)
             .onExitCommand { closeThreadOnEscape() })
@@ -209,6 +209,8 @@ struct Avatar: View {
     var size: CGFloat = 32
     /// The colour behind a person's initial where the default would not stand out, as on a tinted block.
     var plate: Color? = nil
+    /// The colour of a person's initial where the default would not read on `plate`, as on the sidebar.
+    var ink: Color? = nil
 
     /// The shape of a sender's mark by its kind.
     static func shape(isBot: Bool) -> Mark { isBot ? .roundedSquare : .circle }
@@ -225,7 +227,7 @@ struct Avatar: View {
             } else {
                 Text(Naming.initial(name))
                     .font(PardnerFont.ui(size: Self.initialSize(size), weight: .bold))
-                    .foregroundStyle(isBot ? PardnerColor.agentInk : PardnerColor.brandText)
+                    .foregroundStyle(isBot ? PardnerColor.agentInk : ink ?? PardnerColor.brandText)
                     .frame(width: size, height: size)
                     .background(isBot ? PardnerColor.agent : plate ?? PardnerColor.brandSoft)
             }
@@ -284,14 +286,14 @@ struct Sidebar: View {
         VStack(spacing: 0) {
             // The one 56 point header row of the three columns, drawn from the window's top edge.
             HStack(spacing: PardnerMetrics.gap) {
-                Logo(size: 32)
+                Logo(size: 32, bubble: PardnerColor.sideBrand, cut: PardnerColor.side)
                 Text("Pardner").font(PardnerFont.title).lineLimit(1)
                 Spacer(minLength: 0)
             }
             // The trailing room is one gap: at the sidebar's least width (200) the title takes what the inset, the logo and the gap leave.
             .padding(.leading, Self.trafficLights).padding(.trailing, PardnerMetrics.gap).frame(height: PardnerMetrics.headerHeight)
             .movesWindow()
-            .overlay(alignment: .bottom) { Rectangle().fill(PardnerColor.line).frame(height: 1) }
+            .overlay(alignment: .bottom) { Rectangle().fill(PardnerColor.sideLine).frame(height: 1) }
             ScrollView { list.padding(PardnerMetrics.gap * 1.5) }
             VStack(spacing: PardnerMetrics.gap * 1.5) {
                 UsageBoxes(model: model, bots: usageBots, now: now)
@@ -308,11 +310,11 @@ struct Sidebar: View {
         VStack(alignment: .leading, spacing: PardnerMetrics.gap * 1.5) {
             if let sections {
                 if let line = SectionsMenu.line(current: sections.current, behind: sections.behind, notApplied: sections.notApplied) {
-                    Text(line).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                    Text(line).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.sideMuted)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, PardnerMetrics.gap)
                 }
                 if edit == nil, let problem = sections.problem {
-                    Text(problem).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.delText)
+                    Text(problem).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.sideDelText)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, PardnerMetrics.gap)
                 }
                 if case .new? = edit, let edit { SectionNameField(sections: sections, edit: edit) { self.edit = nil } }
@@ -328,7 +330,7 @@ struct Sidebar: View {
                             ForEach(group.channels, id: \.self) { sectionRow($0, in: sections) }
                             if group.channels.isEmpty {
                                 // The empty section's row takes a drop as its header does: a channel dropped on it goes into the section.
-                                Text("No channels").font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                                Text("No channels").font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(PardnerColor.sideMuted)
                                     .padding(.horizontal, PardnerMetrics.gap + 2).frame(maxWidth: .infinity, minHeight: PardnerMetrics.rowHeight, alignment: .leading)
                                     .contentShape(Rectangle())
                                     .modifier(zone(sections, "empty-\(group.id)", .empty(group.id)))
@@ -342,18 +344,18 @@ struct Sidebar: View {
                     Button("New Channel…") { channels.openNew() }.disabled(!channels.ready)
                     if let sections { Button("New Section…") { edit = .new(channel: nil) }.disabled(!sections.current) }
                 } label: { Image(systemName: "plus").font(.system(size: 12, weight: .semibold)).frame(width: 22, height: 22) }
-                    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-                    .disabled(!channels.ready && !(sections?.current ?? false)).pointerStyle(channels.ready || sections?.current == true ? .link : nil)
+                    .menuStyle(.button).buttonStyle(.clickable).menuIndicator(.hidden).fixedSize()
+                    .disabled(!channels.ready && !(sections?.current ?? false)).clickable(channels.ready || sections?.current == true)
                     .help("New channel or section").accessibilityLabel("New channel or section"))
             }) {
                 if let row = channels?.creatingRow(known: Set(model.channels.keys)) {
                     Text(row)
-                        .font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                        .font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(PardnerColor.sideMuted)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, PardnerMetrics.gap).padding(.vertical, 6)
                 }
                 if let line = channels?.refusalLine {
-                    Text(line).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.delText)
+                    Text(line).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.sideDelText)
                         .fixedSize(horizontal: false, vertical: true).padding(.horizontal, PardnerMetrics.gap).padding(.vertical, 4)
                 }
                 ForEach(tree.rest, id: \.self) { row($0) }
@@ -369,20 +371,20 @@ struct Sidebar: View {
             if channels != nil {
                 Button { openSettings?(.profile) } label: {
                     HStack(spacing: PardnerMetrics.gap) {
-                        Avatar(name: model.personName ?? "You", isBot: false, icon: nil, size: 28)
+                        Avatar(name: model.personName ?? "You", isBot: false, icon: nil, size: 28, plate: PardnerColor.sideBrandSoft, ink: PardnerColor.sideBrandText)
                         Text(model.personName ?? "Set your name").font(PardnerFont.ui(size: 14, weight: model.personName == nil ? .regular : .semibold))
-                            .foregroundStyle(model.personName == nil ? PardnerColor.muted : PardnerColor.text).lineLimit(1)
+                            .foregroundStyle(model.personName == nil ? PardnerColor.sideMuted : PardnerColor.sideText).lineLimit(1)
                         Spacer()
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).pointerStyle(openSettings == nil ? nil : .link).disabled(openSettings == nil).help("Profile…").accessibilityLabel("Profile…")
+                .buttonStyle(.clickable).disabled(openSettings == nil).help("Profile…").accessibilityLabel("Profile…")
             } else {
                 Spacer()
             }
             if let openSettings {
-                Button { openSettings(.general) } label: { Image(systemName: "gearshape").foregroundStyle(PardnerColor.muted).frame(width: 30, height: 30).contentShape(Rectangle()) }
-                    .buttonStyle(.plain).pointerStyle(.link).help("Settings…").accessibilityLabel("Settings…")
+                Button { openSettings(.general) } label: { Image(systemName: "gearshape").foregroundStyle(PardnerColor.sideMuted).frame(width: 30, height: 30).contentShape(Rectangle()) }
+                    .buttonStyle(.clickable).help("Settings…").accessibilityLabel("Settings…")
             }
         }
         .padding(.horizontal, 4).frame(height: PardnerMetrics.userRowHeight)
@@ -408,7 +410,7 @@ struct Sidebar: View {
                     Spacer()
                     trailing
                 }
-                .foregroundStyle(PardnerColor.muted)
+                .foregroundStyle(PardnerColor.sideMuted)
                 .padding(.horizontal, PardnerMetrics.gap).padding(.bottom, 4)
                 content
             }
@@ -429,7 +431,7 @@ struct ChannelRow: View {
         Button(action: choose) {
             HStack(spacing: PardnerMetrics.gap) {
                 // `#` in a column of its own, so that the names line up.
-                Text("#").foregroundStyle(chosen ? PardnerColor.brandText : PardnerColor.muted).frame(width: 12, alignment: .leading).accessibilityHidden(true)
+                Text("#").foregroundStyle(chosen ? PardnerColor.sideBrandText : PardnerColor.sideMuted).frame(width: 12, alignment: .leading).accessibilityHidden(true)
                 Text(verbatim: name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                 if let waiting {
                     WaitingBadge(count: waiting)
@@ -437,10 +439,10 @@ struct ChannelRow: View {
             }
             .font(PardnerFont.ui(size: 14, weight: chosen ? .semibold : .regular))
             .padding(.horizontal, PardnerMetrics.gap + 2).frame(height: PardnerMetrics.rowHeight)
-            .background(chosen ? PardnerColor.raised : hovered ? PardnerColor.raised.opacity(0.5) : .clear, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
+            .background(chosen ? PardnerColor.sideRaised : hovered ? PardnerColor.sideRaised.opacity(0.5) : .clear, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain).pointerStyle(.link).onHover { hovered = $0 }
+        .buttonStyle(.clickable).onHover { hovered = $0 }
         .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 }

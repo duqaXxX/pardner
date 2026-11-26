@@ -60,7 +60,7 @@ struct EllipsisMenu<Items: View>: View {
 
     var body: some View {
         Menu { items } label: { Image(systemName: "ellipsis").frame(width: 22, height: 22) }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).pointerStyle(.link).fixedSize().accessibilityLabel(label)
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).clickable().fixedSize().accessibilityLabel(label)
     }
 }
 
@@ -84,12 +84,12 @@ struct SectionHeader: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain).pointerStyle(.link).accessibilityLabel(Text(verbatim: "\(folded ? "Unfold" : "Fold") \(group.name)"))
+            .buttonStyle(.clickable).accessibilityLabel(Text(verbatim: "\(folded ? "Unfold" : "Fold") \(group.name)"))
             EllipsisMenu(label: "Section actions") { SectionActions(sections: sections, channels: channels, group: group, rename: rename) }
                 .opacity(hovered ? 1 : 0).allowsHitTesting(hovered)
             if folded, let waiting { WaitingBadge(count: waiting) }
         }
-        .foregroundStyle(PardnerColor.muted)
+        .foregroundStyle(PardnerColor.sideMuted)
         .padding(.horizontal, PardnerMetrics.gap).padding(.bottom, 4)
         .onHover { hovered = $0 }
         .contextMenu { SectionActions(sections: sections, channels: channels, group: group, rename: rename) }
@@ -156,11 +156,11 @@ struct SectionNameField: View {
             TextField("Section name", text: $text)
                 .textFieldStyle(.plain).focused($focused).onSubmit(send).onExitCommand(perform: done)
                 .padding(.horizontal, PardnerMetrics.gap).frame(height: 28)
-                .background(PardnerColor.surface, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
-                .overlay(RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius).stroke(PardnerColor.line))
+                .background(PardnerColor.sideSurface, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
+                .overlay(RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius).stroke(PardnerColor.sideLine))
                 .accessibilityLabel("Section name").disabled(!sections.current)
             if let problem = sections.problem {
-                Text(problem).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.delText).frame(maxWidth: .infinity, alignment: .leading)
+                Text(problem).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.sideDelText).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .onAppear {

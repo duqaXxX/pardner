@@ -82,7 +82,9 @@ struct PardnerApp: App {
                 .frame(minHeight: MainWindow.leastHeight)
                 .environment(delegate.pairing.files)
                 .task { delegate.pairing.start() }
-                .background(WindowReader { delegate.mainWindow = $0 })
+                // No size: for the cursor AppKit takes the view under the mouse from the subviews, front to back, and SwiftUI had put
+                // this background's view in front of the columns, so the root answered for them and no column showed the hand (#133).
+                .background(WindowReader { delegate.mainWindow = $0 }.frame(width: 0, height: 0))
                 .onAppear {
                     delegate.showWindow = { openWindow(id: "main") }
                     delegate.pairing.settings.present = { openWindow(id: WindowID.settings) }

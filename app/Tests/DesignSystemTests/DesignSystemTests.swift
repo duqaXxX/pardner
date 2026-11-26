@@ -19,22 +19,38 @@ final class DesignSystemTests: XCTestCase {
         ("del-bg", PardnerColor.delBg), ("del-text", PardnerColor.delText),
         ("badge", PardnerColor.badge), ("badge-ink", PardnerColor.badgeInk),
         ("select", PardnerColor.select), ("hover", PardnerColor.hover), ("code-bg", PardnerColor.codeBg),
+        ("side-text", PardnerColor.sideText), ("side-muted", PardnerColor.sideMuted), ("side-raised", PardnerColor.sideRaised),
+        ("side-line", PardnerColor.sideLine), ("side-surface", PardnerColor.sideSurface), ("side-brand", PardnerColor.sideBrand),
+        ("side-brand-soft", PardnerColor.sideBrandSoft), ("side-brand-text", PardnerColor.sideBrandText),
+        ("side-del-text", PardnerColor.sideDelText),
     ]
 
-    func testTwentyEightTokensEachWithBothValues() {
-        XCTAssertEqual(Tokens.pairs.count, 28)
+    func testThirtySevenTokensEachWithBothValues() {
+        XCTAssertEqual(Tokens.pairs.count, 37)
         XCTAssertEqual(Set(Self.members.map(\.0)), Set(Tokens.pairs.keys))
     }
 
-    /// The light palette of the reference (#174, 4b) and the bands and the code ground the later units draw.
+    /// The light palette of the corrected reference (2026-11-26): a dark blue sidebar with its own values, a white centre, and the bands
+    /// and the code ground the earlier units drew.
     func testTheLightPaletteIsTheReferences() {
-        let want = ["bg": "#F1F3F7", "panel": "#F1F3F7", "side": "#E4E8EF", "surface": "#FBFCFD", "raised": "#D6DDE9", "line": "#C8D0DD",
-                    "muted": "#4F5B70", "brand-soft": "#D9E4F6", "agent-soft": "#F5E6C6", "ok-soft": "#D5ECDF", "add-bg": "#D8EEE1",
-                    "del-bg": "#F6DADA", "select": "#DFE8F6", "hover": "#F5F7FA", "code-bg": "#F2F5FA"]
+        let want = ["bg": "#FBFCFD", "panel": "#F3F5F8", "side": "#1F3357", "surface": "#FFFFFF", "raised": "#E3E8F0", "line": "#D5DBE5",
+                    "text": "#1B2434", "muted": "#525E73", "brand": "#2F5FB3", "brand-soft": "#E3ECFA", "brand-text": "#2452A3",
+                    "agent": "#E8A33D", "agent-ink": "#2A1B05", "agent-soft": "#FBEFD9", "agent-text": "#85560A", "ok-soft": "#E0F3EA",
+                    "add-bg": "#E3F4EB", "del-bg": "#FBE6E6", "select": "#E6EEFA", "hover": "#F5F7FA", "code-bg": "#F2F5FA",
+                    "side-text": "#F4F6FA", "side-muted": "#B4C2DA", "side-raised": "rgba(255,255,255,.16)", "side-line": "rgba(255,255,255,.14)",
+                    "side-surface": "rgba(255,255,255,.07)", "side-brand": "#8FB4F5", "side-brand-soft": "rgba(255,255,255,.18)",
+                    "side-brand-text": "#FFFFFF", "side-del-text": "#F2B0B0"]
         for (name, hex) in want { XCTAssertEqual(Tokens.pairs[name]?.light, RGBA(hex), name) }
         XCTAssertEqual(Tokens.pairs["select"]?.dark, RGBA("rgba(127,169,240,.1)"))
         XCTAssertEqual(Tokens.pairs["hover"]?.dark, RGBA("rgba(255,255,255,.04)"))
         XCTAssertEqual(Tokens.pairs["code-bg"]?.dark, RGBA("#232323"))
+    }
+
+    /// The dark theme is not touched by the sidebar's tokens: each takes the dark value of the window's token of its role.
+    func testTheSidebarTokensAreTheWindowsInTheDarkTheme() {
+        for role in ["text", "muted", "raised", "line", "surface", "brand", "brand-soft", "brand-text", "del-text"] {
+            XCTAssertEqual(Tokens.pairs["side-" + role]?.dark, Tokens.pairs[role]?.dark, role)
+        }
     }
 
     func testParser() {
@@ -70,7 +86,7 @@ final class DesignSystemTests: XCTestCase {
 
     // The pairs and the method of actions/scripts/2026-11-19-design-extract/contrast.py.
     static let pairs = [
-        ("text", "bg"), ("muted", "bg"), ("muted", "side"), ("muted", "raised"), ("text", "side"),
+        ("text", "bg"), ("muted", "bg"), ("side-muted", "side"), ("muted", "raised"), ("side-text", "side"), ("side-del-text", "side"),
         ("brand-ink", "brand"), ("brand-text", "brand-soft"), ("brand-text", "bg"), ("agent-ink", "agent"),
         ("agent-text", "agent-soft"), ("ok-text", "ok-soft"), ("add-text", "add-bg"), ("del-text", "del-bg"),
         ("badge-ink", "badge"),
@@ -86,7 +102,7 @@ final class DesignSystemTests: XCTestCase {
     }
 
     func testTextOnGroundPairsKeepAAInBothThemes() {
-        XCTAssertEqual(Self.pairs.count, 14)
+        XCTAssertEqual(Self.pairs.count, 15)
         for theme in ["light", "dark"] {
             let pick = { (n: String) in theme == "light" ? Tokens.pairs[n]!.light : Tokens.pairs[n]!.dark }
             let base = [pick("bg").red, pick("bg").green, pick("bg").blue]

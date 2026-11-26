@@ -125,6 +125,6 @@ struct PardnerButton: ButtonStyle {
             .padding(.horizontal, PardnerMetrics.gap * 2).padding(.vertical, 7)
             .background(prominent ? PardnerColor.brand : PardnerColor.raised, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
             .opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.4)
-            .pointerStyle(enabled ? .link : nil)
+            .clickable(enabled)
     }
 }

@@ -68,51 +68,73 @@ export interface FooterField {
  */
 export class UsageCache {
   current: Usage | null = null;
+  /** When `current` was read, in epoch milliseconds; null while nothing was read. Read it in the same step as `current`. */
+  readAt: number | null = null;
   private readonly fetch: () => Promise<Usage>;
   private readonly ttl: number;
   private readonly clock: () => number;
+  private readonly now: () => number;
   private readonly warn: (message: string) => void;
   private fetchedAt: number | null = null;
-  private refreshing = false;
+  private refreshing: Promise<void> | null = null;
+  // Counts `invalidate` calls: a read that one came during is not fresh, its limits may predate the change.
+  private generation = 0;
 
   constructor(
     fetch: () => Promise<Usage>,
     options: {
       readonly ttl?: number;
       readonly clock?: () => number;
+      /** The wall time `readAt` is dated on; `Date.now` when absent. */
+      readonly now?: () => number;
       readonly warn?: (message: string) => void;
     } = {},
   ) {
     this.fetch = fetch;
     this.ttl = options.ttl ?? USAGE_TTL;
     this.clock = options.clock ?? (() => performance.now());
+    this.now = options.now ?? Date.now;
     this.warn = options.warn ?? ((message) => logger.warning(message));
+  }
+
+  /** The refresh running now, which settles when it has read or failed; null when none runs. */
+  get inFlight(): Promise<void> | null {
+    return this.refreshing;
   }
 
   invalidate(): void {
     this.fetchedAt = null;
+    this.generation += 1;
   }
 
   /** Refresh when older than the TTL; a failure keeps the old value and waits a full TTL. */
   async refreshIfStale(): Promise<void> {
-    if (this.refreshing) {
+    if (this.refreshing !== null) {
       return;
     }
-    this.refreshing = true;
-    try {
-      if (this.fetchedAt !== null && this.clock() - this.fetchedAt < this.ttl) {
-        return;
-      }
-      try {
-        this.current = await this.fetch();
-      } catch (error) {
-        // The footer is optional: never let it break a reply. The name only, never the text.
-        this.warn(`usage refresh failed: ${errorName(error)}`);
-      }
-      this.fetchedAt = this.clock();
-    } finally {
-      this.refreshing = false;
+    if (this.fetchedAt !== null && this.clock() - this.fetchedAt < this.ttl) {
+      return;
     }
+    const refresh = this.read();
+    this.refreshing = refresh;
+    try {
+      await refresh;
+    } finally {
+      this.refreshing = null;
+    }
+  }
+
+  private async read(): Promise<void> {
+    const generation = this.generation;
+    try {
+      // One step for the two: a reader takes the limits and their date together.
+      this.current = await this.fetch();
+      this.readAt = this.now();
+    } catch (error) {
+      // The footer is optional: never let it break a reply. The name only, never the text.
+      this.warn(`usage refresh failed: ${errorName(error)}`);
+    }
+    if (generation === this.generation) this.fetchedAt = this.clock();
   }
 }
 

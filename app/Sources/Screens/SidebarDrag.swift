@@ -146,8 +146,8 @@ struct DropZone: ViewModifier {
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
             .overlay(alignment: mark?.below == false ? .top : .bottom) {
                 if let mark {
-                    if mark.below == nil { RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius).stroke(PardnerColor.text, lineWidth: 1.5) }
-                    else { Capsule().fill(PardnerColor.text).frame(height: 2) }
+                    if mark.below == nil { RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius).stroke(PardnerColor.sideText, lineWidth: 1.5) }
+                    else { Capsule().fill(PardnerColor.sideText).frame(height: 2) }
                 }
             }
             .onDrop(of: [SidebarDrag.type], delegate: Delegate(zone: self))

@@ -249,7 +249,7 @@ extension ComposerView {
                     .frame(width: 38, height: 30).background(model.sendOff ? PardnerColor.raised : PardnerColor.brand, in: RoundedRectangle(cornerRadius: 8))
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain).pointerStyle(model.sendOff ? nil : .link).disabled(model.sendOff).help("Send").accessibilityLabel("Send")
+            .buttonStyle(.clickable).disabled(model.sendOff).help("Send").accessibilityLabel("Send")
         }
     }
 }
@@ -270,8 +270,8 @@ struct ComposerTool: View {
                 .accessibilityElement(children: .ignore).accessibilityAddTraits(.isButton).accessibilityLabel(label).accessibilityHint(reason)
         } else {
             Button(action: action) { icon }
-                .buttonStyle(.plain).disabled(off != nil).opacity(off != nil ? 0.45 : 1)
-                .pointerStyle(off != nil ? nil : .link).help(label).accessibilityLabel(label)
+                .buttonStyle(.clickable).disabled(off != nil).opacity(off != nil ? 0.45 : 1)
+                .help(label).accessibilityLabel(label)
         }
     }
 
@@ -369,7 +369,7 @@ struct BotList: View {
                         .padding(.horizontal, PardnerMetrics.gap).padding(.vertical, 6)
                         .background(index == model.pickIndex ? PardnerColor.raised : .clear)
                 }
-                .buttonStyle(.plain).pointerStyle(.link)
+                .buttonStyle(.clickable)
             }
         }
         .background(PardnerColor.surface, in: RoundedRectangle(cornerRadius: PardnerMetrics.containerRadius))
@@ -405,7 +405,7 @@ struct PendingRows: View {
                 if row.status.canDismiss {
                     Spacer(minLength: 0)
                     Button { model.dismiss(row.id) } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)) }
-                        .buttonStyle(.plain).pointerStyle(.link).foregroundStyle(PardnerColor.muted).accessibilityLabel("Dismiss")
+                        .buttonStyle(.clickable).foregroundStyle(PardnerColor.muted).accessibilityLabel("Dismiss")
                 }
             }
         }

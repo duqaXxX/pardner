@@ -310,7 +310,7 @@ struct RemoveDevices: View {
                     }
                 }
             }
-            .toggleStyle(.checkbox).accessibilityLabel("Remove \(DevicesModel.title(choice.row))")
+            .toggleStyle(.checkbox).clickable().accessibilityLabel("Remove \(DevicesModel.title(choice.row))")
             .padding(PardnerMetrics.gap * 1.5).frame(maxWidth: .infinity, alignment: .leading).card()
         }
         if !model.onlyHolders.isEmpty {

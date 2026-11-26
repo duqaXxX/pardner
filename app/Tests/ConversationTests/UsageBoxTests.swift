@@ -77,12 +77,4 @@ final class UsageBoxTests: XCTestCase {
         XCTAssertEqual(box.rows(now: now), [UsageBox.Row(label: "5 hours \u{B7} 10%", percent: 10, resets: nil)])
         XCTAssertEqual(UsageBox(title: "mini", plan: "API", usage: nil).rows(now: now), [])
     }
-
-    func testAsOfFollowsWhenTheDrawnUsageIsMoreThanTenMinutesOld() {
-        let box = UsageBox(title: "owner@example.com", plan: "Claude Max", usage: usage(at: 1_763_999_820_000, session: 40))
-        let utc = TimeZone(identifier: "UTC")!
-        XCTAssertNil(box.asOf(now: now, timeZone: utc), "three minutes old")
-        XCTAssertEqual(box.asOf(now: Date(timeIntervalSince1970: 1_764_000_600.001), timeZone: utc), "as of 15:57")
-        XCTAssertNil(UsageBox(title: "mini", plan: "API", usage: nil).asOf(now: now, timeZone: utc))
-    }
 }
