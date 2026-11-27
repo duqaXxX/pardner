@@ -98,14 +98,14 @@ final class MarkdownViewTests: XCTestCase {
         }
     }
 
-    func testAWideTableKeepsItsHeaderGroundAsOneBandAcrossTheGapsOfItsColumns() {
+    func testAWideTablesPreviewKeepsItsHeaderGroundAsOneBandAcrossTheGapsOfItsColumns() {
         let wide = "| Identifier | Description | Owner | Reviewer | Status | Estimate | Component | Branch |\n|---|---|---|---|---|---|---|---|\n"
             + "| relay-journal-flush | wait-for-the-journal-flush | alice-example | bob-example | merged | 3 | relay-store-layer | fix/relay-journal-flush |"
         for (name, theme) in [(NSAppearance.Name.aqua, \TokenPair.light), (.darkAqua, \TokenPair.dark)] {
             let v = Tokens.pairs["table-head"]![keyPath: theme]
             let head = [v.red, v.green, v.blue].map { Int(round($0 * 255)) }
-            // Row 0 is 32 points high and its text sits in the middle, so y 4 is ground alone; every x of the visible width, clear of the card's rounded corners, is on it.
-            for x in stride(from: 12, to: 388, by: 3) { XCTAssertEqual(pixel(of: wide, name, x: x, y: 4), head, "x \(x) (\(name.rawValue))") }
+            // Row 0 is 32 points high and its text sits in the middle, so y 4 is ground alone; every x of the visible width, clear of the card's rounded corners and of the fade at its right edge (24 points), is on it.
+            for x in stride(from: 12, to: 352, by: 3) { XCTAssertEqual(pixel(of: wide, name, x: x, y: 4), head, "x \(x) (\(name.rawValue))") }
         }
     }
 
@@ -353,7 +353,7 @@ final class MarkdownViewTests: XCTestCase {
         XCTAssertEqual([MarkdownView.listStep, MarkdownView.barWidth, MarkdownView.barGap], [20, 2, 12])
     }
 
-    // MARK: a table takes the column's width, or scrolls (design FA 3.3)
+    // MARK: a table takes the column's width, or shows a preview (design FA 3.3, wide-table preview)
 
     func testBoundsAFractionNarrowerThanTheNaturalWidthsKeepThem() {
         XCTAssertEqual(TableFit.widths(natural: [100, 80], floors: [90, 80], in: 195.6), [100, 80], "0.4 point under the natural sum and the gap")
@@ -410,26 +410,6 @@ final class MarkdownViewTests: XCTestCase {
         let oneLine = height(of: wide, width: 4000)
         let fitted = height(of: wide, width: 400)
         XCTAssertGreaterThan(fitted, oneLine + 20, "its cells wrap in the 400 points")
-    }
-
-    func testATableWhoseColumnsWouldBeUnderTheirFloorsScrollsSideways() {
-        PardnerFonts.register()
-        // 20 characters is more than the 90 point floor: a table that stayed fitted would wrap them.
-        let wide = grid(columns: 20, cell: "abcdefghijklmnopqrst")
-        XCTAssertEqual(height(of: wide, width: 400), height(of: wide, width: 4000), accuracy: 0.5, "no cell wraps: the table scrolls")
-    }
-
-    func testTheScrollingTableKeepsTheSameRowRuleAsTheFittedOne() {
-        PardnerFonts.register()
-        // Cells of 29 points, taller than the 32 point row less its padding: a row is the cell and 6 points above and under, in both layouts.
-        func height(_ text: String, width: CGFloat) -> CGFloat {
-            let hosting = NSHostingView(rootView: MarkdownView(text: text, size: 30).frame(width: width))
-            hosting.layoutSubtreeIfNeeded()
-            return hosting.fittingSize.height
-        }
-        let scrolling = height(grid(columns: 20, cell: "abcdefghijklmnopqrst"), width: 400)
-        let fitted = height(grid(columns: 1, cell: "abcdefghijklmnopqrst"), width: 400)
-        XCTAssertEqual(scrolling, fitted, accuracy: 0.5, "the same three rows, with or without the sideways scroll")
     }
 
     // MARK: a code block

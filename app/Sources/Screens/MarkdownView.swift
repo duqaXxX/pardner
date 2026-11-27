@@ -63,8 +63,11 @@ struct MarkdownView: View {
     /// The message or answer the text is of, which names its code blocks for their open state (`LongBlock.key`); nil draws every block whole.
     var foldKey: String?
     var blocks: OpenBlocks = .shared
+    /// The place of the one piece to draw, a table, set out of its list or quote and at its natural widths: what the table window shows (`TableContent`).
+    var only: Int?
 
     @State private var confirming: LinkConfirmation?
+    @Environment(\.openWindow) private var openWindow
     /// One list step (the bullet hangs at its left, the text starts one step in), and one quote bar with the room between it and its text.
     static let listStep = PardnerMetrics.listIndent
     static let barWidth = PardnerMetrics.quoteBar
@@ -93,8 +96,12 @@ struct MarkdownView: View {
             let joined = pieces.first.map(Self.opens) ?? false
             VStack(alignment: .leading, spacing: 0) {
                 if let mention, !joined { MentionedText(mention: mention).padding(.bottom, PardnerMetrics.paragraphGap) }
-                ForEach(pieces.indices, id: \.self) {
-                    row(pieces[$0], gaps: Self.gaps(from: $0 > 0 ? pieces[$0 - 1] : nil, to: pieces[$0]), mention: $0 == 0 && joined ? mention : nil, index: $0)
+                if let only {
+                    if pieces.indices.contains(only) { body(of: pieces[only].body, mention: nil, index: only) }
+                } else {
+                    ForEach(pieces.indices, id: \.self) {
+                        row(pieces[$0], gaps: Self.gaps(from: $0 > 0 ? pieces[$0 - 1] : nil, to: pieces[$0]), mention: $0 == 0 && joined ? mention : nil, index: $0)
+                    }
                 }
             }
         } else {
@@ -200,47 +207,56 @@ struct MarkdownView: View {
         case .code(let language, let code):
             CodeBlock(language: language, code: code, key: foldKey.map { LongBlock.key(message: $0, block: index) }, blocks: blocks)
         case .table(let table):
-            // The table takes the column's width, its cells wrapping; a column that would fall under its floor sends it to the sideways scroll. A card
-            // on `container` with a hairline border and a faint ground behind the header row, a column of numbers aligned right.
-            let numeric = (0..<table.columns).map { table.isNumeric(column: $0) }
-            ViewThatFits(in: .horizontal) {
-                TableFit(columns: table.columns, numeric: numeric, bleed: Self.tablePad) {
-                    // The header's ground, the first child: drawn under the cells and across the card's padding.
-                    PardnerColor.tableHead
-                    ForEach(table.rows.indices, id: \.self) { r in
-                        ForEach(0..<table.columns, id: \.self) { c in cell(table, r, c, tabular: numeric[c]) }
-                        if r < table.rows.count - 1 { Rectangle().fill(PardnerColor.line).frame(height: 1) }
-                    }
-                }
-                .padding(.horizontal, Self.tablePad)
-                ScrollView(.horizontal) {
-                    Grid(alignment: .leading, horizontalSpacing: TableFit.spacing, verticalSpacing: TableFit.rowSpacing) {
-                        ForEach(table.rows.indices, id: \.self) { r in
-                            if r > 0 { Rectangle().fill(PardnerColor.line).frame(height: 1) }
-                            GridRow {
-                                ForEach(0..<table.columns, id: \.self) { c in
-                                    // A cell fills its column, and the header's ground reaches half the gap each side (the card's padding at the ends): one band.
-                                    cell(table, r, c, tabular: numeric[c]).padding(.vertical, TableFit.rowPadding).frame(minHeight: TableFit.rowHeight)
-                                        .frame(maxWidth: .infinity, alignment: numeric[c] ? .trailing : .leading)
-                                        .background {
-                                            if r == 0 {
-                                                PardnerColor.tableHead.padding(.leading, c == 0 ? -Self.tablePad : -TableFit.spacing / 2)
-                                                    .padding(.trailing, c == table.columns - 1 ? -Self.tablePad : -TableFit.spacing / 2)
-                                            }
-                                        }
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, Self.tablePad)
-                }
-            }
-            .background(PardnerColor.container, in: RoundedRectangle(cornerRadius: 8))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(PardnerColor.line))
+            tableCard(table, index: index)
         case .rule:
             Rectangle().fill(PardnerColor.line).frame(height: 1).frame(maxWidth: .infinity)
         }
+    }
+
+    /// The table takes the column's width, its cells wrapping; a column that would fall under its floor makes it a preview (the columns that fit, a fade and a
+    /// footer, and a click opens the whole table in a window of its own). A card on `container` with a hairline border and a faint ground behind the header
+    /// row, a column of numbers aligned right. The table's own window (`only`) draws it whole at its natural widths.
+    @ViewBuilder private func tableCard(_ table: MarkdownBlocks.Table, index: Int) -> some View {
+        let numeric = (0..<table.columns).map { table.isNumeric(column: $0) }
+        Group {
+            if only != nil {
+                grid(table, numeric, mode: .whole)
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    grid(table, numeric, mode: .fitted)
+                    Button { openWindow(id: WindowID.table, value: TableContent(text: text, piece: index)) } label: {
+                        grid(table, numeric, mode: .preview).mask {
+                            HStack(spacing: 0) {
+                                Rectangle()
+                                LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: TableFit.fade)
+                            }
+                        }
+                    }
+                    .buttonStyle(.clickable).accessibilityLabel("Open table")
+                }
+            }
+        }
+        .background(PardnerColor.container, in: RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(PardnerColor.line))
+    }
+
+    private func grid(_ table: MarkdownBlocks.Table, _ numeric: [Bool], mode: TableFit.Mode) -> some View {
+        TableFit(columns: table.columns, numeric: numeric, bleed: Self.tablePad, mode: mode) {
+            // The header's ground, the first child: drawn under the cells and across the card's padding.
+            PardnerColor.tableHead
+            ForEach(table.rows.indices, id: \.self) { r in
+                ForEach(0..<table.columns, id: \.self) { c in cell(table, r, c, tabular: numeric[c]) }
+                if r < table.rows.count - 1 { Rectangle().fill(PardnerColor.line).frame(height: 1) }
+            }
+            // A preview's footer for each count of columns it may leave out: the layout places the one that is true.
+            if mode == .preview {
+                ForEach(0..<table.columns, id: \.self) { hidden in
+                    Text(verbatim: TableFit.footer(hidden: hidden)).font(PardnerFont.ui(size: PardnerFont.toolSize, weight: .regular)).foregroundStyle(PardnerColor.muted)
+                }
+            }
+        }
+        .padding(.horizontal, Self.tablePad)
     }
 }
 
@@ -298,13 +314,28 @@ struct CodeBlock: View {
 
 /// A table's header ground, then its cells in row-major order, one rule after every row but the last, laid out in the width it is given (FA 3.3): its ideal width
 /// is its columns' floors, so `ViewThatFits` keeps it while the floors fit; given the natural widths it keeps them, given less it shares the
-/// width by natural width, a column held at its floor.
+/// width by natural width, a column held at its floor. A preview or the table's window lays the same cells out another way (`Mode`).
 struct TableFit: Layout {
+    enum Mode {
+        /// Every column in the width given.
+        case fitted
+        /// Every column at its natural width, whatever the width given: the table's window.
+        case whole
+        /// The columns that fit at their natural widths, from the left, and a footer: after the cells, one footer for each count of columns left out.
+        case preview
+    }
+
     let columns: Int
     /// Whether each column is aligned right (a column of numbers).
     var numeric: [Bool] = []
     /// How far the header's ground reaches beyond the cells at each side: the card's padding.
     var bleed: CGFloat = 0
+    var mode: Mode = .fitted
+    /// The width of a preview's fade at its right edge, which the last column drawn stays clear of.
+    static let fade: CGFloat = 24
+    /// The room above a preview's footer and under it.
+    private static let footerAbove: CGFloat = 2
+    private static let footerBelow: CGFloat = 10
     static let spacing: CGFloat = 16
     static let rowSpacing: CGFloat = 0
     /// A row is at least this high, its cells centred; one that wraps takes its tallest cell and 12 points more (`rowPadding` each side).
@@ -320,16 +351,32 @@ struct TableFit: Layout {
         var floors: [CGFloat] = []
     }
 
-    /// The subviews are the header's ground, then each row's cells and, but for the last row, its rule.
+    /// The subviews are the header's ground, then each row's cells and, but for the last row, its rule, then a preview's footers.
+    private var footers: Int { mode == .preview ? columns : 0 }
+    private func rows(_ subviews: Subviews) -> Int { (subviews.count - footers) / (columns + 1) }
     private func isRule(_ index: Int) -> Bool { index % (columns + 1) == columns }
     private func cell(_ row: Int, _ column: Int) -> Int { 1 + row * (columns + 1) + column }
 
     func makeCache(subviews: Subviews) -> Cache {
         var natural = [CGFloat](repeating: 0, count: columns)
-        for (i, subview) in subviews.enumerated() where i > 0 && !isRule(i - 1) {
+        for (i, subview) in subviews.enumerated() where i > 0 && i < subviews.count - footers && !isRule(i - 1) {
             natural[(i - 1) % (columns + 1)] = max(natural[(i - 1) % (columns + 1)], subview.sizeThatFits(.unspecified).width)
         }
         return Cache(natural: natural, floors: natural.map { min($0, Self.floorWidth) })
+    }
+
+    /// How many columns a preview draws in `width`: the first, then each next one while it fits whole at its natural width with `reserve` kept free; always one.
+    static func drawn(natural: [CGFloat], in width: CGFloat, reserve: CGFloat = 0) -> Int {
+        var count = 1
+        while count < natural.count, extent(of: Array(natural.prefix(count + 1))) <= width - reserve + 0.5 { count += 1 }
+        return count
+    }
+
+    /// A preview's footer for `hidden` columns left out.
+    static func footer(hidden: Int) -> String {
+        if hidden == 0 { return "Open table" }
+        let noun = hidden == 1 ? "column" : "columns"
+        return "+\(hidden) \(noun) \u{00B7} Open table"
     }
 
     /// The width of `widths` side by side with the gaps between them: the ideal width when they are the floors.
@@ -361,30 +408,52 @@ struct TableFit: Layout {
         return fitted
     }
 
+    /// The widths of the columns drawn, in the width given: a preview draws fewer than there are.
+    private func drawnWidths(_ cache: Cache, _ width: CGFloat?) -> [CGFloat] {
+        switch mode {
+        case .fitted: return Self.widths(natural: cache.natural, floors: cache.floors, in: width)
+        case .whole: return cache.natural
+        case .preview:
+            guard let width else { return cache.natural }
+            return Array(cache.natural.prefix(Self.drawn(natural: cache.natural, in: width, reserve: max(Self.fade - bleed, 0))))
+        }
+    }
+
+    /// The footer that names `hidden` columns left out.
+    private func footer(_ subviews: Subviews, hidden: Int) -> LayoutSubview { subviews[subviews.count - columns + hidden] }
+
     private func rowHeights(_ subviews: Subviews, _ widths: [CGFloat]) -> [CGFloat] {
-        (0..<subviews.count / (columns + 1)).map { r in
-            let tallest = (0..<columns).map { c in subviews[cell(r, c)].sizeThatFits(ProposedViewSize(width: widths[c], height: nil)).height }.max() ?? 0
+        (0..<rows(subviews)).map { r in
+            let tallest = widths.indices.map { c in subviews[cell(r, c)].sizeThatFits(ProposedViewSize(width: widths[c], height: nil)).height }.max() ?? 0
             return max(Self.rowHeight, tallest + 2 * Self.rowPadding)
         }
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
-        let widths = Self.widths(natural: cache.natural, floors: cache.floors, in: proposal.width)
+        let widths = drawnWidths(cache, proposal.width)
         let heights = rowHeights(subviews, widths)
-        // A row, the space under it, its rule, and the space under the rule.
-        let total = heights.reduce(0, +) + CGFloat(max(heights.count - 1, 0)) * (2 * Self.rowSpacing + 1)
-        return CGSize(width: Self.extent(of: widths), height: total)
+        // A row, the space under it, its rule, and the space under the rule; a preview's footer under them.
+        var total = heights.reduce(0, +) + CGFloat(max(heights.count - 1, 0)) * (2 * Self.rowSpacing + 1)
+        if mode == .preview { total += Self.footerAbove + footer(subviews, hidden: columns - widths.count).sizeThatFits(.unspecified).height + Self.footerBelow }
+        let width = mode == .preview ? proposal.width : nil
+        return CGSize(width: width ?? Self.extent(of: widths), height: total)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
-        let widths = Self.widths(natural: cache.natural, floors: cache.floors, in: bounds.width)
+        let widths = drawnWidths(cache, bounds.width)
         let heights = rowHeights(subviews, widths)
-        let total = Self.extent(of: widths)
+        // A preview's header ground and rules run to the fade; the columns left out are placed beyond the edge, which the card clips.
+        let total = mode == .preview ? bounds.width : Self.extent(of: widths)
+        let beyond = CGPoint(x: bounds.maxX + bleed + 1000, y: bounds.minY)
         var y = bounds.minY
         subviews[0].place(at: CGPoint(x: bounds.minX - bleed, y: bounds.minY), anchor: .topLeading, proposal: ProposedViewSize(width: total + 2 * bleed, height: heights[0]))
         for (r, height) in heights.enumerated() {
             var x = bounds.minX
             for c in 0..<columns {
+                guard c < widths.count else {
+                    subviews[cell(r, c)].place(at: beyond, anchor: .topLeading, proposal: ProposedViewSize(width: cache.natural[c], height: nil))
+                    continue
+                }
                 let right = numeric.indices.contains(c) && numeric[c]
                 subviews[cell(r, c)].place(at: CGPoint(x: right ? x + widths[c] : x, y: y + height / 2), anchor: right ? .trailing : .leading,
                                                       proposal: ProposedViewSize(width: widths[c], height: nil))
@@ -395,6 +464,11 @@ struct TableFit: Layout {
                 subviews[cell(r, columns)].place(at: CGPoint(x: bounds.minX, y: y), anchor: .topLeading, proposal: ProposedViewSize(width: total, height: 1))
                 y += 1 + Self.rowSpacing
             }
+        }
+        guard mode == .preview else { return }
+        for hidden in 0..<columns {
+            let here = hidden == columns - widths.count
+            footer(subviews, hidden: hidden).place(at: here ? CGPoint(x: bounds.minX, y: y + Self.footerAbove) : beyond, anchor: .topLeading, proposal: .unspecified)
         }
     }
 }

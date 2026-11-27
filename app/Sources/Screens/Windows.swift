@@ -13,6 +13,8 @@ public enum WindowID {
     public static let reply = "reply"
     /// One window per file opened, by value (`FileWindowContent`).
     public static let file = "file"
+    /// One window per table opened, by value (`TableContent`).
+    public static let table = "table"
 }
 
 /// What every window root shares (app windows design 4, 7.2): it dismisses itself when its model holds nothing (the Window menu is
