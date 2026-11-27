@@ -63,6 +63,8 @@ struct MarkdownView: View {
     /// The message or answer the text is of, which names its code blocks for their open state (`LongBlock.key`); nil draws every block whole.
     var foldKey: String?
     var blocks: OpenBlocks = .shared
+    /// The scroller style a table's sideways bar assumes; nil follows the system's (a test sets it, so that a height does not depend on the machine's mouse).
+    var legacyScrollers: Bool?
 
     @State private var confirming: LinkConfirmation?
     /// One list step (the bullet hangs at its left, the text starts one step in), and one quote bar with the room between it and its text.
@@ -234,7 +236,7 @@ struct MarkdownView: View {
                     }
                     .padding(.horizontal, Self.tablePad)
                 }
-                .hoverScrollbar()
+                .hoverScrollbar(legacy: legacyScrollers)
             }
             .background(PardnerColor.container, in: RoundedRectangle(cornerRadius: 8))
             .clipShape(RoundedRectangle(cornerRadius: 8))
