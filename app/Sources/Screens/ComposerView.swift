@@ -6,10 +6,15 @@ import DesignSystem
 import SwiftUI
 
 /// The field: an `NSTextView` in a scroll view, since Return, Shift-Return, marked text, a paste or drop of a file and Backspace at the start are its
-/// events. The view is made again for each composer (`.id` at its use), so that no undo history carries one composer's text into another's.
+/// events. It holds rich text and the model holds its Markdown (`ComposerMarkdown`). The view is made again for each composer (`.id` at its use), so
+/// that no undo history carries one composer's text into another's.
 struct ComposerField: NSViewRepresentable {
     let model: ComposerModel
     @Binding var height: CGFloat
+    /// How far the field is scrolled, which the chip over its first line follows.
+    @Binding var scroll: CGFloat
+    /// The room of the bot's chip, which the first line of the text starts after.
+    var indent: CGFloat = 0
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -18,11 +23,21 @@ struct ComposerField: NSViewRepresentable {
         let view = ComposerTextView()
         view.delegate = context.coordinator
         view.coordinator = context.coordinator
+        view.firstLineIndent = indent
+        model.format = { [weak view, weak coordinator = context.coordinator] format, url in
+            guard let view, let coordinator, view.isEditable else { return }
+            view.window?.makeFirstResponder(view)
+            view.apply(format, url: url)
+            coordinator.refreshActive(view)
+        }
         view.drawsBackground = false
-        view.isRichText = false
+        view.isRichText = true
+        view.importsGraphics = false
+        // No Font menu, and no font panel to carry a font or a colour in: the field's marks are its tools'.
+        view.usesFontPanel = false
         view.allowsUndo = true
         // Inter 14, as the messages above it.
-        view.font = PardnerFont.uiCT(size: 14, weight: .regular) as NSFont
+        view.typingAttributes = ComposerMarkdown.base(firstLineIndent: indent)
         view.textContainerInset = .zero
         view.textContainer?.lineFragmentPadding = 0
         view.isVerticallyResizable = true
@@ -36,25 +51,37 @@ struct ComposerField: NSViewRepresentable {
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(context.coordinator, selector: #selector(Coordinator.clipMoved(_:)), name: NSView.boundsDidChangeNotification, object: scroll.contentView)
         return scroll
     }
 
-    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) { coordinator.parent.model.hasMarkedText = false }
+    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+        coordinator.parent.model.hasMarkedText = false
+        NotificationCenter.default.removeObserver(coordinator)
+    }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let view = scroll.documentView as? NSTextView else { return }
         context.coordinator.parent = self
         view.isEditable = model.availability == .ready
-        if view.string != model.text, !view.hasMarkedText() {
+        let coordinator = context.coordinator
+        // The Markdown the view holds is what it last told the model or what the model last gave it, so that no pass turns a text into rich text and back.
+        if model.text != coordinator.synced, !view.hasMarkedText() {
             let wasEmpty = view.string.isEmpty
-            view.string = model.text
+            coordinator.synced = model.text
+            view.textStorage?.setAttributedString(model.textRestored ? ComposerMarkdown.restored(from: model.text) : ComposerMarkdown.plain(model.text))
+            coordinator.restyle(view)
             // The text took the empty field (the guess, a restore): the caret is after it.
             if wasEmpty { view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0)) }
             // The model replaced the text (a send, a pick, a restore): what was typed before is no longer what an undo would undo.
             view.undoManager?.removeAllActions(withTarget: view)
             view.undoManager?.removeAllActions()
         }
-        view.textColor = NSColor(PardnerColor.text)
+        (view as? ComposerTextView)?.firstLineIndent = indent
+        if coordinator.restyled != indent { coordinator.restyle(view) }
+        let ink = NSColor(PardnerColor.text)
+        if view.textColor != ink { view.textColor = ink }
         if model.focusRequested {
             // After the update: the request is cleared in the model, which this pass must not change. A second pass before it runs queues a
             // second block, which finds the request gone and does nothing, so the palette opens once.
@@ -76,21 +103,67 @@ struct ComposerField: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ComposerField
+        /// The Markdown the view and the model last agreed on.
+        var synced = ""
+        /// The chip's room the text is styled for.
+        var restyled: CGFloat = 0
         init(_ parent: ComposerField) { self.parent = parent }
+
+        /// Tells the view how far the text is scrolled, so that the chip over its first line goes with it.
+        /// The notification comes while the scroll view lays out, where SwiftUI state is not written: `measure` defers its height the same way.
+        @MainActor @objc func clipMoved(_ notification: Notification) {
+            let offset = (notification.object as? NSClipView)?.bounds.origin.y ?? 0
+            DispatchQueue.main.async { [self] in scrolled(to: offset) }
+        }
+
+        func scrolled(to offset: CGFloat) {
+            if parent.scroll != offset { parent.scroll = offset }
+        }
+
+        /// Styles the text for the chip's room, and an empty field's typing attributes with it, which a deleted text resets.
+        @MainActor func restyle(_ view: NSTextView) {
+            guard let storage = view.textStorage, !view.hasMarkedText() else { return }
+            restyled = parent.indent
+            ComposerMarkdown.style(storage, firstLineIndent: parent.indent)
+            if storage.length == 0 { view.typingAttributes = ComposerMarkdown.base(firstLineIndent: parent.indent) }
+            // A marker or a bar is drawn from the whole text, so that an edit renumbers the items below it.
+            view.needsDisplay = true
+        }
+
+        /// The row's tools that are on at the caret.
+        @MainActor func refreshActive(_ view: NSTextView) {
+            guard let view = view as? ComposerTextView else { return }
+            let now = view.activeFormats()
+            if now != parent.model.active { parent.model.active = now }
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            if let view = notification.object as? NSTextView { refreshActive(view) }
+        }
 
         func textDidChange(_ notification: Notification) {
             guard let view = notification.object as? NSTextView else { return }
-            parent.model.edited(view.string)
+            restyle(view)
+            if let storage = view.textStorage { synced = ComposerMarkdown.markdown(from: storage) }
+            parent.model.edited(synced)
+            refreshActive(view)
             parent.model.hasMarkedText = view.hasMarkedText()
             measure(view)
         }
+
+        /// A click on a link in the field is no opening of it: the link is text being edited.
+        func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool { true }
 
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
             let model = parent.model
             switch selector {
             case #selector(NSResponder.insertNewline(_:)):
                 let shift = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
-                return model.returnPressed(shift: shift, marked: textView.hasMarkedText())
+                if model.returnPressed(shift: shift, marked: textView.hasMarkedText()) { return true }
+                // Shift-Return: the field's own newline carries a list item or a code line on; the cases it does not are the field's to handle.
+                guard !textView.hasMarkedText(), (textView as? ComposerTextView)?.insertLineInBlock() == true else { return false }
+                refreshActive(textView)
+                return true
             case #selector(NSResponder.moveUp(_:)) where model.picking:
                 model.movePick(-1)
                 return true
@@ -116,9 +189,11 @@ struct ComposerField: NSViewRepresentable {
         func measure(_ view: NSTextView) {
             guard let layout = view.layoutManager, let container = view.textContainer else { return }
             layout.ensureLayout(for: container)
-            let line = layout.defaultLineHeight(for: view.font ?? NSFont.systemFont(ofSize: 14))
+            let line = layout.defaultLineHeight(for: ComposerMarkdown.font(strong: false, emphasis: false, code: false, block: nil))
             let wanted = min(max(layout.usedRect(for: container).height, line * 2), line * 8)
             if abs(parent.height - wanted) > 0.5 { parent.height = wanted }
+            // A field made again for another composer starts at the top, with no notice of it.
+            scrolled(to: view.enclosingScrollView?.contentView.bounds.origin.y ?? 0)
         }
     }
 }
@@ -126,6 +201,24 @@ struct ComposerField: NSViewRepresentable {
 /// An `NSTextView` that refuses a pasted or dropped file, and a pasted image, and says so.
 final class ComposerTextView: NSTextView {
     weak var coordinator: ComposerField.Coordinator?
+    /// The room the first line of the text leaves for the bot's chip, which a tool needs to write a paragraph's style.
+    var firstLineIndent: CGFloat = 0
+
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+        drawBlockMarks()
+    }
+
+    /// Command-B and Command-I, which the field's text has no menu item for.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // Caps Lock, the numeric pad and the function key are no part of the shortcut.
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
+        guard isEditable, window?.firstResponder === self, flags == .command,
+              let format = [("b", ComposerFormat.strong), ("i", .emphasis)].first(where: { $0.0 == event.charactersIgnoringModifiers?.lowercased() })?.1
+        else { return super.performKeyEquivalent(with: event) }
+        coordinator?.parent.model.format(format, nil)
+        return true
+    }
 
     /// A file URL on a pasteboard (Finder also puts the file's name there as a string), or an image with no text beside it.
     static func holdsFile(_ board: NSPasteboard) -> Bool {
@@ -155,23 +248,55 @@ final class ComposerTextView: NSTextView {
             coordinator?.parent.model.pasteRefused()
             return true
         }
+        // Text from another view goes in as plain text at the drop point, with none of the formatting it carries but the block it lands in; a drag inside
+        // the field is its own.
+        if let storage = textStorage, sender.draggingSource as AnyObject? !== self, let text = sender.draggingPasteboard.string(forType: .string) {
+            let range = NSRange(location: characterIndexForInsertion(at: convert(sender.draggingLocation, from: nil)), length: 0)
+            guard shouldChangeText(in: range, replacementString: text) else { return false }
+            let dropped = NSMutableAttributedString(attributedString: ComposerMarkdown.plain(text))
+            // At the end the drop point is the last paragraph: its block when it has text, the caret's only when the caret is there too.
+            let end = range.location == storage.length
+            let lastHasText = end && storage.length > 0 && (storage.string as NSString).character(at: storage.length - 1) != 0x0A
+            let block = !end ? ComposerMarkdown.block(in: storage, at: range.location)
+                : lastHasText ? ComposerMarkdown.block(in: storage, at: storage.length - 1)
+                : selectedRange().location == storage.length ? (typingAttributes[.composerBlock] as? String).flatMap(ComposerMarkdown.Block.init) : nil
+            if let block { dropped.addAttribute(.composerBlock, value: block.rawValue, range: NSRange(location: 0, length: dropped.length)) }
+            storage.replaceCharacters(in: range, with: dropped)
+            didChangeText()
+            setSelectedRange(NSRange(location: range.location + (text as NSString).length, length: 0))
+            return true
+        }
         return super.performDragOperation(sender)
     }
 }
 
-/// The grey text in an empty field: the bot's suggestion on up to the field's two lines (step F design FB, 3.2), the placeholder on one.
+/// The grey text in an empty field: the bot's suggestion on up to the field's two lines (step F design FB, 3.2), the placeholder on one. The suggestion is
+/// set in italic with a `Tab` key cap after it, so that it does not read as the placeholder; `indent` keeps the first line after the bot's chip.
 struct ComposerHint: View {
     let suggestion: String?
     let placeholder: String
+    var indent: CGFloat = 0
 
     var body: some View {
-        Text(suggestion ?? placeholder).foregroundStyle(PardnerColor.muted).lineLimit(suggestion == nil ? 1 : 2).allowsHitTesting(false)
+        HStack(alignment: .lastTextBaseline, spacing: 6) {
+            // An empty image of the chip's width: the one way a `Text` indents its first line alone.
+            (indent > 0 ? Text(Image(nsImage: NSImage(size: NSSize(width: indent, height: 1)))) : Text(verbatim: ""))
+                + (suggestion.map { Text(verbatim: $0).font(PardnerFont.ui(size: 14, weight: .regular, italic: true)) } ?? Text(verbatim: placeholder))
+            if suggestion != nil {
+                Text("Tab").font(PardnerFont.ui(size: 11, weight: .medium)).padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(PardnerColor.raised, in: RoundedRectangle(cornerRadius: 4))
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(PardnerColor.line))
+            }
+        }
+        .foregroundStyle(PardnerColor.muted).lineLimit(suggestion == nil ? 1 : 2).allowsHitTesting(false)
     }
 }
 
 struct ComposerView: View {
     let model: ComposerModel
     @State private var height: CGFloat = 34
+    @State private var chipWidth: CGFloat = 0
+    @State private var scroll: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -183,23 +308,27 @@ struct ComposerView: View {
             }
             VStack(spacing: 0) {
                 if model.formatting {
-                    FormattingRow()
+                    FormattingRow(model: model)
                     Rectangle().fill(PardnerColor.line).frame(height: 1)
                 }
-                HStack(alignment: .top, spacing: PardnerMetrics.gap) {
+                // The chip is laid over the field, and the text's first line starts after it and its next lines under it (#167).
+                let indent = model.label == nil ? 0 : chipWidth + PardnerMetrics.gap
+                ZStack(alignment: .topLeading) {
+                    if model.text.isEmpty {
+                        ComposerHint(suggestion: model.suggestion, placeholder: model.placeholder, indent: indent)
+                    }
+                    ComposerField(model: model, height: $height, scroll: $scroll, indent: indent).id("\(model.channel.base64EncodedString())/\(model.thread ?? "")").frame(height: height)
                     if let label = model.label {
                         Text("@" + model.name(of: label))
                             .font(PardnerFont.ui(size: 12, weight: .medium)).foregroundStyle(PardnerColor.agentText)
                             .padding(.horizontal, 6).padding(.vertical, 1)
                             .background(PardnerColor.agentSoft, in: RoundedRectangle(cornerRadius: PardnerMetrics.controlRadius))
-                    }
-                    ZStack(alignment: .topLeading) {
-                        if model.text.isEmpty {
-                            ComposerHint(suggestion: model.suggestion, placeholder: model.placeholder)
-                        }
-                        ComposerField(model: model, height: $height).id("\(model.channel.base64EncodedString())/\(model.thread ?? "")").frame(height: height)
+                            .onGeometryChange(for: CGFloat.self, of: \.size.width) { chipWidth = $0 }
+                            .offset(y: -scroll)
+                            .allowsHitTesting(false)
                     }
                 }
+                .clipped()
                 .padding(.vertical, 12).padding(.horizontal, 14)
                 Rectangle().fill(PardnerColor.line).frame(height: 1)
                 // The hint goes first when the box is wide enough for it, then the Commands button's word; the buttons stay.
@@ -285,7 +414,7 @@ struct ComposerTool: View {
         }
     }
 
-    private var icon: some View {
+    var icon: some View {
         glyph
             .foregroundStyle(PardnerColor.muted)
             .frame(width: 28, height: 28)
@@ -331,29 +460,82 @@ struct CommandsButton: View {
     }
 }
 
-/// The formatting row: bold to code block, as the reference composer orders them, all off until the app renders Markdown (#73).
+/// The formatting row: bold to code block, as the reference composer orders them. A tool runs on the field through `ComposerModel.format`; the ones on at its
+/// caret are drawn chosen. Paragraph style is a menu, and a link asks its address in a popover.
 struct FormattingRow: View {
-    private static let tools: [(String, String)] = [
-        ("bold", "Bold"), ("italic", "Italic"), ("underline", "Underline"), ("strikethrough", "Strikethrough"), ("paragraphsign", "Paragraph style"),
-        ("link", "Link"), ("list.number", "Numbered list"), ("list.bullet", "Bulleted list"), ("text.quote", "Quote"),
-        ("chevron.left.forwardslash.chevron.right", "Code"), ("curlybraces", "Code block"),
-    ]
+    let model: ComposerModel
+    @State private var linking = false
+
+    private var off: String? { model.availability == .ready ? nil : "" }
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            row(Self.tools)
-            ScrollView(.horizontal, showsIndicators: false) { row(Self.tools) }
+            row
+            ScrollView(.horizontal, showsIndicators: false) { row }
         }
         .padding(.horizontal, PardnerMetrics.gap).padding(.vertical, 4)
     }
 
-    private func row(_ tools: [(String, String)]) -> some View {
+    private func tool(_ symbol: String, _ label: String, _ format: ComposerFormat) -> some View {
+        ComposerTool(symbol: symbol, label: label, off: off, chosen: model.active.contains(format)) { model.format(format, nil) }
+    }
+
+    private var row: some View {
         HStack(spacing: 2) {
-            ForEach(tools, id: \.0) { tool in
-                ComposerTool(symbol: tool.0, label: tool.1, off: "Formatting is not available yet")
-            }
+            tool("bold", "Bold (\u{2318}B)", .strong)
+            tool("italic", "Italic (\u{2318}I)", .emphasis)
+            tool("strikethrough", "Strikethrough", .strike)
+            paragraphMenu
+            ComposerTool(symbol: "link", label: "Link", off: off, chosen: model.active.contains(.link)) { linking = true }
+                .popover(isPresented: $linking) { LinkPopover(model: model) { linking = false } }
+            tool("list.number", "Numbered list", .block(.number))
+            tool("list.bullet", "Bulleted list", .block(.bullet))
+            tool("text.quote", "Quote", .block(.quote))
+            tool("chevron.left.forwardslash.chevron.right", "Code", .code)
+            tool("curlybraces", "Code block", .block(.code))
             Spacer(minLength: 0)
         }
+    }
+
+    /// Normal and the three headings; the one the caret's paragraph is shows a check.
+    private var paragraphMenu: some View {
+        Menu {
+            ForEach([("Normal", nil), ("Heading 1", .h1), ("Heading 2", .h2), ("Heading 3", .h3)] as [(String, ComposerMarkdown.Block?)], id: \.0) { title, block in
+                Button { model.format(.block(block), nil) } label: {
+                    if model.active.contains(.block(block)) { Label(title, systemImage: "checkmark") } else { Text(title) }
+                }
+            }
+        } label: {
+            ComposerTool(symbol: "paragraphsign", label: "Paragraph style").icon
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().disabled(off != nil).clickable(off == nil).help("Paragraph style").accessibilityLabel("Paragraph style")
+    }
+}
+
+/// The address of a link, asked where the Link tool is. With the field's text selected the link is on it; with none, the address is typed as the link.
+struct LinkPopover: View {
+    let model: ComposerModel
+    let done: () -> Void
+    @State private var address = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PardnerMetrics.gap) {
+            TextField("Link address", text: $address).textFieldStyle(.roundedBorder).frame(width: 240).onSubmit(add)
+            HStack {
+                if model.active.contains(.link) {
+                    Button("Remove link") { model.format(.link, nil); done() }.clickable()
+                }
+                Spacer(minLength: 0)
+                Button("Add link", action: add).disabled(ComposerFormat.address(address) == nil).clickable(ComposerFormat.address(address) != nil).keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(PardnerMetrics.gap)
+    }
+
+    private func add() {
+        guard let url = ComposerFormat.address(address) else { return }
+        model.format(.link, url)
+        done()
     }
 }
 

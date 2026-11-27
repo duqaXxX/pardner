@@ -79,6 +79,9 @@ public final class ComposerModel {
     /// The key of the thread this composer answers in; nil for the channel's.
     public let thread: String?
     public private(set) var text = ""
+    /// Whether `text` is Markdown the field shows with its formatting when it reads back as the same text: one that came back from a failed send, or the rest
+    /// after a mention. Any other text the model sets (the bot's suggestion) goes in as typed, so that the bot gets exactly what the person sees.
+    public private(set) var textRestored = false
     /// The bot the channel composer's message is a prompt to; nil sends a text.
     public private(set) var label: Data?
     /// Escape closed the bot list: it stays closed until the `@` that opened it goes, or the field is a lone `@` again.
@@ -173,14 +176,14 @@ public final class ComposerModel {
     public func edited(_ new: String) {
         // A lone `@` that was not one before is a new one: the `@` the list was closed for went, by Backspace or a whole text typed over.
         let freshAt = new == "@" && text != "@"
-        text = new
+        (text, textRestored) = (new, false)
         notice = nil
         pickIndex = 0
         if text.first != "@" || freshAt { pickerClosed = false }
         let typed = text.dropFirst().lowercased()
         let startsAName = choices().contains { $0.name.lowercased().hasPrefix(typed) }
         if thread == nil, label == nil, !pickerClosed, !startsAName, let named = Self.mention(in: text, bots: choices()) {
-            (label, text, pickerClosed) = (named.bot, named.rest, false)
+            (label, text, textRestored, pickerClosed) = (named.bot, named.rest, true, false)
         }
     }
 
@@ -241,6 +244,12 @@ public final class ComposerModel {
 
     /// Whether this composer shows the formatting row; one per channel and thread, as the composer is.
     public var formatting = false
+
+    /// What the row's tools do, set by the field that is made for this composer: a tool and, for a link, its address (nil takes the link away).
+    @ObservationIgnored var format: (ComposerFormat, URL?) -> Void = { _, _ in }
+
+    /// The tools that are on at the field's caret or selection, which the field keeps.
+    var active: Set<ComposerFormat> = []
 
     /// What the empty field says: in a channel, its name, and how to reach a bot while no bot is named and one can be; in a session's thread,
     /// the bot a reply goes to, named as the bot list names it, while a reply can go.
@@ -479,7 +488,7 @@ public final class ComposerModel {
         if entry.restores, text.isEmpty, label == nil {
             // A text that starts with `@` comes back as the text it was, the bot list closed; any other leaves the list free, so that an
             // `@` typed over it opens the list as in an empty field (#107).
-            (text, pickerClosed) = (entry.text, entry.text.first == "@")
+            (text, textRestored, pickerClosed) = (entry.text, true, entry.text.first == "@")
             if thread == nil { label = entry.to }
         }
     }
