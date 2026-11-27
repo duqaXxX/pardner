@@ -75,7 +75,7 @@ final class MarkdownViewTests: XCTestCase {
     private func pixel(of text: String, _ name: NSAppearance.Name, x: Int, y: Int) -> [Int] {
         _ = NSApplication.shared
         PardnerFonts.register()
-        let hosting = NSHostingView(rootView: MarkdownView(text: text, legacyScrollers: false).frame(width: 400, height: 200, alignment: .topLeading))
+        let hosting = NSHostingView(rootView: MarkdownView(text: text).frame(width: 400, height: 200, alignment: .topLeading))
         hosting.appearance = NSAppearance(named: name)
         hosting.frame = NSRect(x: 0, y: 0, width: 400, height: 200)
         hosting.layoutSubtreeIfNeeded()
@@ -266,35 +266,11 @@ final class MarkdownViewTests: XCTestCase {
         XCTAssertGreaterThan(body, header + 2)
         func height(_ table: String) -> CGFloat {
             // The cell's padding of 12 on each side.
-            let hosting = NSHostingView(rootView: MarkdownView(text: table, legacyScrollers: false).frame(width: ((header + body) / 2).rounded() + 24))
+            let hosting = NSHostingView(rootView: MarkdownView(text: table).frame(width: ((header + body) / 2).rounded() + 24))
             hosting.layoutSubtreeIfNeeded()
             return hosting.fittingSize.height
         }
         XCTAssertGreaterThan(height("| x |\n| --- |\n| \(word) |"), height("| \(word) |\n| --- |\n| x |") + 10)
-    }
-
-    func testAWideTablesSidewaysBarIsHiddenWhileThePointerIsElsewhere() {
-        _ = NSApplication.shared
-        PardnerFonts.register()
-        let wide = (0..<12).map { "column-with-a-long-name-\($0)" }
-        let cells: String = wide.joined(separator: " | ")
-        let rule: String = String(repeating: " --- |", count: wide.count)
-        let table: String = "| \(cells) |\n|\(rule)\n| \(cells) |"
-        let view = MarkdownView(text: table, legacyScrollers: false).frame(width: 400, height: 300, alignment: .topLeading)
-        let hosting = NSHostingView(rootView: view)
-        let window = NSWindow(contentRect: NSRect(x: -3000, y: -3000, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = hosting
-        window.orderFront(nil)
-        defer { window.close() }
-        // Polled to a deadline, not a fixed wait: a slower runner lays the table out later (#179).
-        let deadline = Date().addingTimeInterval(2)
-        while Date() < deadline {
-            hosting.layoutSubtreeIfNeeded()
-            if ScrollHost.scrollView(in: hosting)?.hasHorizontalScroller == false { break }
-            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
-        }
-        XCTAssertEqual(ScrollHost.scrollView(in: hosting)?.hasHorizontalScroller, false, "the table scrolls sideways, and its bar shows over it alone")
     }
 
     // MARK: the gaps between an answer's blocks (#73, step F, design FA 3.4; the reading pass)
@@ -415,7 +391,7 @@ final class MarkdownViewTests: XCTestCase {
 
     /// The height of `text` laid out `width` wide.
     private func height(of text: String, width: CGFloat) -> CGFloat {
-        let hosting = NSHostingView(rootView: MarkdownView(text: text, legacyScrollers: false).frame(width: width))
+        let hosting = NSHostingView(rootView: MarkdownView(text: text).frame(width: width))
         hosting.layoutSubtreeIfNeeded()
         return hosting.fittingSize.height
     }
@@ -447,7 +423,7 @@ final class MarkdownViewTests: XCTestCase {
         PardnerFonts.register()
         // Cells of 29 points, taller than the 32 point row less its padding: a row is the cell and 6 points above and under, in both layouts.
         func height(_ text: String, width: CGFloat) -> CGFloat {
-            let hosting = NSHostingView(rootView: MarkdownView(text: text, size: 30, legacyScrollers: false).frame(width: width))
+            let hosting = NSHostingView(rootView: MarkdownView(text: text, size: 30).frame(width: width))
             hosting.layoutSubtreeIfNeeded()
             return hosting.fittingSize.height
         }

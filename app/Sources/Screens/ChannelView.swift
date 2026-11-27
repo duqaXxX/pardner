@@ -85,7 +85,6 @@ struct ChannelView: View {
             // bottom. The Sessions tab starts at the top.
             .defaultScrollAnchor(tab == .conversation ? .bottom : .top)
             .defaultScrollAnchor(.top, for: .alignment)
-            .focusedScrollbar(.conversation)
             if tab == .conversation, let composers {
                 ComposerView(model: composers.composer(channel: channel.id))
             }
