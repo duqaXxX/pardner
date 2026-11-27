@@ -25,6 +25,8 @@ const ASK_PREVIEW = sdkJson("ask-preview-can-use-tool") as JsonObject;
 const BASH = { command: "echo ok", description: "Print ok" };
 /** Every call counts as started: the translator's answer is the seam's, tested on its own. */
 const STARTED = () => true;
+/** No tool has words of its own: `mcpVerb` is tested on its own. */
+const NO_VERB = () => null;
 
 // Requests.
 
@@ -35,7 +37,7 @@ test("a tool's call that asks is a permission request for that call", () => {
     displayName: "Bash",
     suggestions: [],
   };
-  assert.deepEqual(toRequest("Bash", BASH, context, STARTED), {
+  assert.deepEqual(toRequest("Bash", BASH, context, STARTED, NO_VERB), {
     type: "permission",
     callId: "toolu_000",
     toolName: "Bash",
@@ -47,7 +49,7 @@ test("a tool's call that asks is a permission request for that call", () => {
 
 test("the agent's own sentence for a request crosses when it writes one", () => {
   const context = { toolUseID: "toolu_000", title: "Claude wants to print ok" };
-  const request = toRequest("Bash", BASH, context, STARTED);
+  const request = toRequest("Bash", BASH, context, STARTED, NO_VERB);
   assert.equal(request.type, "permission");
   assert.deepEqual(request.type === "permission" ? [request.title, request.description] : null, [
     "Claude wants to print ok",
@@ -58,7 +60,7 @@ test("the agent's own sentence for a request crosses when it writes one", () => 
 test("a question is a question request, each question with its options", () => {
   const input = ASK.input as JsonObject;
   assert.equal(ASK.tool_name, QUESTION_TOOL);
-  assert.deepEqual(toRequest(QUESTION_TOOL, input, { toolUseID: "toolu_000" }, STARTED), {
+  assert.deepEqual(toRequest(QUESTION_TOOL, input, { toolUseID: "toolu_000" }, STARTED, NO_VERB), {
     type: "question",
     callId: "toolu_000",
     toolName: QUESTION_TOOL,
@@ -89,7 +91,7 @@ test("a question is a question request, each question with its options", () => {
 test("an option's preview crosses with it", () => {
   const input = ASK_PREVIEW.input as JsonObject;
   const context = { toolUseID: ASK_PREVIEW.tool_use_id as string };
-  const request = toRequest(QUESTION_TOOL, input, context, STARTED);
+  const request = toRequest(QUESTION_TOOL, input, context, STARTED, NO_VERB);
   assert.equal(request.type, "question");
   if (request.type !== "question") return;
   assert.equal(request.callId, "toolu_01DRb6mwGd2AsnBb1YjRS282");
@@ -108,7 +110,7 @@ test("an option's preview crosses with it", () => {
 
 test("a question with no header and an option with no description still cross", () => {
   const input = { questions: [{ question: "Go on?", options: [{ label: "Yes" }] }] };
-  const request = toRequest(QUESTION_TOOL, input, { toolUseID: "toolu_000" }, STARTED);
+  const request = toRequest(QUESTION_TOOL, input, { toolUseID: "toolu_000" }, STARTED, NO_VERB);
   assert.deepEqual(request.type === "question" ? request.questions : null, [
     {
       header: "",
@@ -132,7 +134,7 @@ test("a question tool's call with no question to show is a permission request", 
   ];
   for (const questions of shapes) {
     const input = { questions };
-    const request = toRequest(QUESTION_TOOL, input, { toolUseID: "toolu_000" }, STARTED);
+    const request = toRequest(QUESTION_TOOL, input, { toolUseID: "toolu_000" }, STARTED, NO_VERB);
     assert.equal(request.type, "permission", JSON.stringify(questions));
     assert.deepEqual(request.type === "permission" ? request.input : null, input);
   }
@@ -146,21 +148,23 @@ test("another tool's questions are its input and nothing more", () => {
       toolUseID: "toolu_000",
     },
     STARTED,
+    NO_VERB,
   );
   assert.equal(request.type, "permission");
 });
 
 test("a call that names itself with nothing has no call id", () => {
-  const request = toRequest("Bash", BASH, { toolUseID: "" }, STARTED);
+  const request = toRequest("Bash", BASH, { toolUseID: "" }, STARTED, NO_VERB);
   assert.equal(request.callId, null);
 });
 
 test("a call the translator has not started is a request for no call", () => {
   const started = (callId: string) => callId === "toolu_000";
-  assert.equal(toRequest("Bash", BASH, { toolUseID: "toolu_000" }, started).callId, "toolu_000");
-  assert.equal(toRequest("Bash", BASH, { toolUseID: "toolu_001" }, started).callId, null);
+  const id = (toolUseID: string) => ({ toolUseID });
+  assert.equal(toRequest("Bash", BASH, id("toolu_000"), started, NO_VERB).callId, "toolu_000");
+  assert.equal(toRequest("Bash", BASH, id("toolu_001"), started, NO_VERB).callId, null);
   assert.equal(
-    toRequest(QUESTION_TOOL, ASK.input as JsonObject, { toolUseID: "toolu_001" }, started).callId,
+    toRequest(QUESTION_TOOL, ASK.input as JsonObject, id("toolu_001"), started, NO_VERB).callId,
     null,
   );
 });
@@ -324,4 +328,14 @@ test("the core's answers become the SDK's permission results", () => {
     behavior: "allow",
     updatedInput: { questions, answers: { Q: "A" } },
   });
+});
+
+test("a tool the agent has words for crosses with them, one it has none for with none", () => {
+  const verbOf = (name: string) => (name === "Survey" ? "Surveys - ask (MCP)" : null);
+  const id = { toolUseID: "toolu_000" };
+  assert.equal(
+    (toRequest("Survey", BASH, id, STARTED, verbOf) as { verb?: string }).verb,
+    "Surveys - ask (MCP)",
+  );
+  assert.equal("verb" in toRequest("Bash", BASH, id, STARTED, verbOf), false);
 });

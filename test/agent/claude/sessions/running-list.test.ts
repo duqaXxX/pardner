@@ -327,6 +327,27 @@ test("a call of an agent nested in the subagent is not its step", async (t) => {
   assert.equal(inside(session).runningList()?.lines[0]?.agent?.calls, 1);
 });
 
+test("a subagent's call to an MCP tool is its step in the terminal's words", async (t) => {
+  const items = sdkMessages("session-state-agent");
+  const { first, call } = subagentCalls(items);
+  const h = memoryHarnessFor(t)({ turns: [items.slice(0, first + 1)] });
+  const session = h.session();
+  await (await session.submit("launch it")).done.wait();
+  await h.until(() => holders(h).length === 1);
+  // The recorded call under the agent's call, as a call to a tool of the `claude.ai Example
+  // Docs` server the recorded init lists.
+  const mcp = structuredClone(recordOf(call) as JsonObject);
+  const block = (mcp.message as { content: JsonObject[] }).content[0] as JsonObject;
+  block.name = "mcp__claude_ai_Example_Docs__batch";
+  block.input = {};
+  h.clients[0]?.inject([{ record: mcp }]);
+  await h.until(() => inside(session).runningList()?.lines[0]?.agent !== null);
+  assert.equal(
+    inside(session).runningList()?.lines[0]?.agent?.step,
+    "claude.ai Example Docs - batch (MCP)",
+  );
+});
+
 test("a command's line has no step", async (t) => {
   const [first] = splitBackground();
   const h = memoryHarnessFor(t)({ turns: [first] });

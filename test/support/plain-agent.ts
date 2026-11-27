@@ -168,6 +168,8 @@ const VERSION = "plain-1.0";
 export interface CallOptions {
   /** The call's output; `done` when absent. */
   readonly output?: string;
+  /** The agent's own words for the tool, as `call_started.verb`; none when absent. */
+  readonly verb?: string;
   /** The call fails when it runs (an allowed call, or one that asks nothing). */
   readonly isError?: boolean;
   /** The call asks the owner first (`RequestHandler.permission`); a denial ends it as an error. */
@@ -986,7 +988,14 @@ export class PlainSession implements AgentSession {
   ): Promise<void> {
     const callId = this.#nextId("call");
     turn.calls += 1;
-    this.#push({ type: "call_started", callId, toolName, input, parentCallId: null });
+    this.#push({
+      type: "call_started",
+      callId,
+      toolName,
+      input,
+      parentCallId: null,
+      ...(options.verb !== undefined && { verb: options.verb }),
+    });
     let allowed = true;
     let message = "";
     if (options.permission === true) {

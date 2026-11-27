@@ -3731,7 +3731,7 @@ export class ThreadSession {
     if (taskId === undefined || before === undefined) return;
     const words =
       this.previews.described(event.toolName, event.input) ??
-      taskTitle(event.toolName, event.input);
+      taskTitle(event.toolName, event.input, event.verb);
     this.steps.set(taskId, {
       ...before,
       words: oneLine(words, TITLE_LIMIT),
@@ -5560,7 +5560,9 @@ export class ThreadSession {
     if (this.closedFlag) return toAnswer(DENY, questions, this.names);
     const title =
       request.title ||
-      (request.type === "question" ? request.toolName : taskTitle(request.toolName, request.input));
+      (request.type === "question"
+        ? request.toolName
+        : taskTitle(request.toolName, request.input, request.verb));
     const [approvalId, pending] = this.deps.approvals.open(
       this.channelId,
       this.threadId,

@@ -75,12 +75,14 @@ function questionsOf(input: Input): Question[] | null {
  * One call of the permission callback as the request the core shows. The request names its call
  * only when `started` says the translator has emitted that call's start (the seam's contract of
  * `RequestHandler`): the core waits for a named call's start before it shows the request.
+ * `verbOf` gives the terminal's words for a tool that is named otherwise (a call to an MCP tool).
  */
 export function toRequest(
   toolName: string,
   input: Input,
   context: CallContext,
   started: (callId: string) => boolean,
+  verbOf: (toolName: string) => string | null,
 ): PermissionRequest | QuestionRequest {
   const named = words(context.toolUseID);
   const callId = named !== null && started(named) ? named : null;
@@ -94,6 +96,7 @@ export function toRequest(
       questions,
     };
   }
+  const verb = verbOf(toolName);
   return {
     type: "permission",
     callId,
@@ -101,6 +104,7 @@ export function toRequest(
     input,
     title: words(context.title),
     description: words(context.description),
+    ...(verb !== null && { verb }),
   };
 }
 

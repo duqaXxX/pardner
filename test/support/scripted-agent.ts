@@ -346,8 +346,12 @@ export class FakeAgentSession implements AgentSession {
   /** The request the back end makes of a permission callback, put to the core's handler. */
   #ask(call: CanUseToolCall): Promise<PermissionAnswer | QuestionAnswer> {
     // As the back end does: a call no record named (its start is not on `events`) is no call.
-    const mapped = toRequest(call.toolName, call.input, { toolUseID: call.callId }, (id) =>
-      this.#translator.started(id),
+    const mapped = toRequest(
+      call.toolName,
+      call.input,
+      { toolUseID: call.callId },
+      (id) => this.#translator.started(id),
+      (name) => this.#translator.verbOf(name),
     );
     const signal = (call.abort ?? new AbortController()).signal;
     if (mapped.type === "question") {
