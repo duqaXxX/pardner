@@ -78,11 +78,6 @@ final class ColumnsController: NSSplitViewController {
     private let autosaveName: String
     private var threadOpen = false
     private var applying = false
-    /// The pane the person last acted in, read by the panes' scroll views (step F design FB, 3.3).
-    let focus = PaneFocus()
-    private var mouseMonitor: Any?
-    private var responderObservation: NSKeyValueObservation?
-    private var keyObservers: [NSObjectProtocol] = []
     private var panel: NSSplitViewItem { splitViewItems[2] }
 
     /// A controller whose first-launch flags live in `defaults`; `autosaveName` is the window's, and tests pass their own.
@@ -119,72 +114,6 @@ final class ColumnsController: NSSplitViewController {
         super.viewDidLoad()
     }
 
-    // The monitor, the first responder's observation and the key notifications are installed and removed together: `viewDidAppear` and
-    // `viewWillDisappear` come in pairs at an order-out, a miniaturize and a close (measured, 2026-11-25).
-    override func viewDidAppear() {
-        super.viewDidAppear()
-        observeFocus()
-    }
-
-    override func viewWillDisappear() {
-        super.viewWillDisappear()
-        stopObservingFocus()
-    }
-
-    private func observeFocus() {
-        stopObservingFocus()
-        guard let window = view.window else { return }
-        focus.key = window.isKeyWindow
-        let center = NotificationCenter.default
-        keyObservers = [
-            center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.focus.key = true }
-            },
-            center.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.focus.key = false }
-            },
-        ]
-        // `.initial`: a caret already in a composer when the window appears gives its pane the focus.
-        responderObservation = window.observe(\.firstResponder, options: [.initial, .new]) { [weak self] window, _ in
-            MainActor.assumeIsolated { self?.focus.acted(in: self?.pane(holding: window.firstResponder)) }
-        }
-        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown]) { [weak self] event in
-            MainActor.assumeIsolated { self?.acted(on: event) }
-            return event
-        }
-    }
-
-    /// A click acts in the pane under it, a key in the pane that holds the first responder (the caret may be in a pane that was not clicked).
-    private func acted(on event: NSEvent) {
-        // Another window of the app (a file, the settings) has its own events.
-        guard let window = view.window, event.window === window else { return }
-        if event.type == .keyDown {
-            focus.acted(in: pane(holding: window.firstResponder))
-        } else {
-            focus.acted(in: PaneFocus.pane(at: event.locationInWindow, in: paneFrames()))
-        }
-    }
-
-    private func stopObservingFocus() {
-        if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
-        mouseMonitor = nil
-        responderObservation = nil
-        keyObservers.forEach(NotificationCenter.default.removeObserver)
-        keyObservers = []
-    }
-
-    /// The sidebar's, the conversation's and the panel's frames in the window's coordinates; a collapsed panel has none.
-    func paneFrames() -> [CGRect] {
-        hosts.map { $0.view.isHiddenOrHasHiddenAncestor ? .zero : $0.view.convert($0.view.bounds, to: nil) }
-    }
-
-    /// The pane the responder is in, nil for one in none (the window itself, a view of no pane).
-    private func pane(holding responder: NSResponder?) -> PaneFocus.Pane? {
-        guard let view = responder as? NSView else { return nil }
-        let panes: [PaneFocus.Pane] = [.sidebar, .conversation, .panel]
-        return zip(hosts, panes).first { view.isDescendant(of: $0.0.view) }?.1
-    }
-
     /// The panel's most width is the room the split has: all of it but the sidebar as it stands, the conversation's least and the
     /// dividers. A most width is what stops a drag and bounds a width that comes back (a thread opened again, a new launch), so the
     /// panel never takes width from the sidebar.
@@ -213,12 +142,9 @@ final class ColumnsController: NSSplitViewController {
     func update(sidebar: AnyView, conversation: AnyView, panel content: AnyView, threadOpen: Bool) {
         loadViewIfNeeded() // SwiftUI may update before the view is loaded
         self.threadOpen = threadOpen
-        // The environment crosses the nested hosting controllers (measured, 2026-11-25).
-        hosts[0].rootView = AnyView(sidebar.environment(focus))
-        hosts[1].rootView = AnyView(conversation.environment(focus))
-        hosts[2].rootView = AnyView(content.environment(focus))
-        // The panel that had the focus is going away: the channel takes it, so that its bar does not wait for a click.
-        if !threadOpen, focus.pane == .panel { focus.acted(in: .conversation) }
+        hosts[0].rootView = sidebar
+        hosts[1].rootView = conversation
+        hosts[2].rootView = content
         if panel.isCollapsed == threadOpen {
             boundPanel() // before the panel comes back at the width it had
             panel.isCollapsed = !threadOpen

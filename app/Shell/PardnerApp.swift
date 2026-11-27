@@ -142,6 +142,11 @@ struct PardnerApp: App {
             FileWindow(content: content, opener: delegate.pairing.files)
         }
         .defaultSize(width: 760, height: 600).restorationBehavior(.disabled).commandsRemoved()
+        // A wide table read whole (wide-table preview): one window per table, as wide as the table within the screen, closed by the window's controls.
+        WindowGroup("Table", id: WindowID.table, for: TableContent.self) { $content in
+            TableWindow(content: content)
+        }
+        .windowResizability(.contentMinSize).restorationBehavior(.disabled).commandsRemoved()
     }
 }
 

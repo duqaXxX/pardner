@@ -108,7 +108,6 @@ struct ThreadPanel: View {
             // The newest entry in view, and a short thread starting under its header.
             .defaultScrollAnchor(.bottom)
             .defaultScrollAnchor(.top, for: .alignment)
-            .focusedScrollbar(.panel)
             if let composer {
                 if let bot = thread.bot {
                     // A click on a task of the list brings its line into view through the scroll position, which stops following the end.
