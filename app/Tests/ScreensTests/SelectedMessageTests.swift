@@ -79,7 +79,7 @@ final class SelectedMessageTests: XCTestCase {
             XCTAssertTrue(isBand(rep, x: 150, y: 77), "8 points below the block (it ends at 70)")
             XCTAssertFalse(isBand(rep, x: 150, y: 79), "and no more")
             XCTAssertFalse(isBand(render(band(selected: false, dark: dark), size: size, dark: dark), x: 0, y: 55), "no band unselected")
-            if !dark { XCTAssertEqual(rgb(rep, 0, 55).map { $0.rounded() }, [230, 238, 250], "the light band is #E6EEFA") }
+            if !dark { XCTAssertEqual(rgb(rep, 0, 55).map { $0.rounded() }, [238, 243, 251], "the light band is #EEF3FB") }
         }
     }
 
@@ -196,11 +196,11 @@ final class SelectedMessageTests: XCTestCase {
 
     func testACodeSpanOnTheBandIsDrawnOnSurface() throws {
         let plain = CodeSpans.styled("a `b` c")
-        XCTAssertEqual(plain.runs.compactMap(\.backgroundColor), [PardnerColor.raised])
+        XCTAssertEqual(plain.runs.compactMap(\.backgroundColor), [PardnerColor.codeInline])
         XCTAssertEqual(CodeSpans.styled("a `b` c", ground: PardnerColor.surface).runs.compactMap(\.backgroundColor), [PardnerColor.surface])
         let marked = try XCTUnwrap(try? AttributedString(markdown: "a `b` c", options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
         var coded = marked
-        for run in marked.runs where (run.inlinePresentationIntent ?? []).contains(.code) { coded[run.range].backgroundColor = PardnerColor.raised }
+        for run in marked.runs where (run.inlinePresentationIntent ?? []).contains(.code) { coded[run.range].backgroundColor = PardnerColor.codeInline }
         XCTAssertEqual(MarkdownView.grounded(coded, on: PardnerColor.surface).runs.compactMap(\.backgroundColor), [PardnerColor.surface], "only the code span's ground changes")
     }
 }

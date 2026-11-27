@@ -140,6 +140,15 @@ public enum PardnerColor {
     public static let hover = Tokens.color("hover")
     /// The ground of a code block.
     public static let codeBg = Tokens.color("code-bg")
+    /// The ground of a container inside a message (a table, a request's card): darker than the ground it stands on, where `surface` stays for inputs.
+    public static let container = Tokens.color("container")
+    /// The ground of an inline code span, which has no border.
+    public static let codeInline = Tokens.color("code-inline")
+    /// The faint ground of a table's header row.
+    public static let tableHead = Tokens.color("table-head")
+    /// The ground of the bot's `@name` in a prompt, and its text.
+    public static let mentionBg = Tokens.color("mention-bg")
+    public static let mentionText = Tokens.color("mention-text")
     /// Unread and attention counts.
     public static let badge = Tokens.color("badge")
     /// Text on `badge`.
@@ -159,7 +168,7 @@ public enum PardnerMetrics {
     public static let controlRadius = value(file.radii, "control")
     /// Session cards, the composer, the bot's box.
     public static let containerRadius = value(file.radii, "container")
-    /// An inline code span's border.
+    /// An inline code span's ground.
     public static let codeRadius = value(file.radii, "code")
     /// The one base gap; other gaps are multiples or halves of it.
     public static let gap = value(file.spacing, "gap")
@@ -183,6 +192,21 @@ public enum PardnerMetrics {
     public static let cardGap = value(file.spacing, "card-gap")
     /// Above and below a call's row or a fold's row, and between one and a text.
     public static let callGap = value(file.spacing, "call-gap")
-    /// An inline code span's room at each side, inside its border.
+    /// An inline code span's room at each side, inside its ground.
     public static let codePad = value(file.spacing, "code-pad")
+    /// Between two paragraphs of a text; before and after a table, a code block and a quote; between two items of a list.
+    public static let paragraphGap = value(file.spacing, "paragraph-gap")
+    public static let blockGap = value(file.spacing, "block-gap")
+    public static let itemGap = value(file.spacing, "item-gap")
+    /// Above a heading of a text, and under it.
+    public static let headingBefore = value(file.spacing, "heading-before")
+    public static let headingAfter = value(file.spacing, "heading-after")
+    /// What a list is indented by (its bullet hangs at the left, its text starts here), per level.
+    public static let listIndent = value(file.spacing, "list-indent")
+    /// A quote's bar, and the room between the bar and its text.
+    public static let quoteBar = value(file.spacing, "quote-bar")
+    public static let quotePad = value(file.spacing, "quote-pad")
+    /// What a tool's open details are indented by, and the width of the guide line along them.
+    public static let toolIndent = value(file.spacing, "tool-indent")
+    public static let toolGuide = value(file.spacing, "tool-guide")
 }

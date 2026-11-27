@@ -23,13 +23,15 @@ struct ThreadPanel: View {
     @State private var scrolledID: String? = ThreadPanel.end
     /// The ids of the lines of the folds the owner opened (`CallFold.isOpen`): a rebuild that changes the run's first line keeps the fold open.
     @State private var opened: Set<String> = []
+    /// The devices the device log names bots: a notice of one is a system event even before its profile is read (#177).
+    @Environment(\.botDevices) private var botDevices
     private static let end = "end"
 
     var body: some View {
         let _ = redraw // read, so that a change draws the day words again
         let queued = thread.queued
         // The day word before the root and each later entry that opens a day, a bot's answer by the time of its first part.
-        let rows = ThreadRows.build(thread, isSystem: model.isSystemEvent)
+        let rows = ThreadRows.build(thread, isSystem: { model.isSystemEvent($0, bots: botDevices) })
         let days = Naming.dayLabels([thread.root?.time] + rows.map(\.time), now: Date(), calendar: .current)
         VStack(spacing: 0) {
             HStack(spacing: PardnerMetrics.gap) {
@@ -86,7 +88,7 @@ struct ThreadPanel: View {
                                     foldRow(f, indent: 0)
                                 }
                             case .fold(let f): foldRow(f)
-                            case .body(let l, let i): LineBodyRow(line: l, index: i, firstTop: LineBodyRow.top(underStackOf: ThreadRow.stack))
+                            case .body(let l, let i): LineBodyRow(line: l, index: i, stack: ThreadRow.stack)
                             }
                         }
                         .padding(.top, row.offset)
@@ -430,7 +432,7 @@ extension View {
     func requestFrame(open: Bool) -> some View {
         padding(PardnerMetrics.gap * 1.5)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(open ? PardnerColor.agentSoft : PardnerColor.surface, in: RoundedRectangle(cornerRadius: PardnerMetrics.containerRadius))
+            .background(open ? PardnerColor.agentSoft : PardnerColor.container, in: RoundedRectangle(cornerRadius: PardnerMetrics.containerRadius))
             .overlay(RoundedRectangle(cornerRadius: PardnerMetrics.containerRadius).stroke(open ? PardnerColor.agent : PardnerColor.line))
     }
 }

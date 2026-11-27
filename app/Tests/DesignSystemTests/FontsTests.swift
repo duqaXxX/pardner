@@ -28,6 +28,23 @@ final class FontsTests: XCTestCase {
         XCTAssertEqual(PardnerFonts.register(), [])
     }
 
+    /// The width `text` is laid out at in `font`: through a line, which applies the font's features (a glyph's own advance does not).
+    private func laidOut(_ text: String, _ font: CTFont) -> Double {
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
+        return CTLineGetTypographicBounds(line, nil, nil, nil)
+    }
+
+    /// A column of numbers: with `tabular` every digit has one width (Inter's `tnum` feature), without it the `1` is narrower.
+    func testTabularDigitsHaveOneWidthAndTheDefaultOnesDoNot() {
+        PardnerFonts.register()
+        let tabular = PardnerFont.uiCT(size: 14, weight: .regular, tabular: true)
+        let proportional = PardnerFont.uiCT(size: 14, weight: .regular)
+        XCTAssertEqual(laidOut("1111", tabular), laidOut("8888", tabular), accuracy: 0.001)
+        XCTAssertEqual(laidOut("1111", tabular), laidOut("0000", tabular), accuracy: 0.001)
+        XCTAssertLessThan(laidOut("1111", proportional), laidOut("8888", proportional) - 1, "the default digits are proportional")
+        XCTAssertNotEqual(PardnerFont.ui(size: 14, weight: .regular, tabular: true), PardnerFont.ui(size: 14, weight: .regular))
+    }
+
     func testEachFamilyResolvesByName() {
         PardnerFonts.register()
         for family in ["Inter Variable", "Space Grotesk", "JetBrains Mono"] {

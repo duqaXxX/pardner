@@ -71,6 +71,112 @@ final class MarkdownViewTests: XCTestCase {
         }
     }
 
+    /// The colour at (x, y) of `text` drawn 400 points wide in the appearance `name`, as sRGB bytes.
+    private func pixel(of text: String, _ name: NSAppearance.Name, x: Int, y: Int) -> [Int] {
+        _ = NSApplication.shared
+        PardnerFonts.register()
+        let hosting = NSHostingView(rootView: MarkdownView(text: text).frame(width: 400, height: 200, alignment: .topLeading))
+        hosting.appearance = NSAppearance(named: name)
+        hosting.frame = NSRect(x: 0, y: 0, width: 400, height: 200)
+        hosting.layoutSubtreeIfNeeded()
+        let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)!
+        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)
+        return [color?.redComponent, color?.greenComponent, color?.blueComponent].map { Int(round(($0 ?? 0) * 255)) }
+    }
+
+    func testATableCardIsAContainerWithItsHeaderOnAFaintGroundAcrossTheCard() {
+        let table = "| File | Lines |\n|---|---|\n| a.ts | 1,204 |\n| b.ts | 88 |"
+        for (name, theme) in [(NSAppearance.Name.aqua, \TokenPair.light), (.darkAqua, \TokenPair.dark)] {
+            func hex(_ token: String) -> [Int] {
+                let v = Tokens.pairs[token]![keyPath: theme]
+                return [v.red, v.green, v.blue].map { Int(round($0 * 255)) }
+            }
+            XCTAssertEqual(pixel(of: table, name, x: 3, y: 16), hex("table-head"), "the header's ground reaches the card's edge (\(name.rawValue))")
+            XCTAssertEqual(pixel(of: table, name, x: 60, y: 5), hex("table-head"), "and runs behind the cells")
+            XCTAssertEqual(pixel(of: table, name, x: 3, y: 50), hex("container"), "a body row stands on the container ground")
+        }
+    }
+
+    func testAWideTableKeepsItsHeaderGroundAsOneBandAcrossTheGapsOfItsColumns() {
+        let wide = "| Identifier | Description | Owner | Reviewer | Status | Estimate | Component | Branch |\n|---|---|---|---|---|---|---|---|\n"
+            + "| relay-journal-flush | wait-for-the-journal-flush | alice-example | bob-example | merged | 3 | relay-store-layer | fix/relay-journal-flush |"
+        for (name, theme) in [(NSAppearance.Name.aqua, \TokenPair.light), (.darkAqua, \TokenPair.dark)] {
+            let v = Tokens.pairs["table-head"]![keyPath: theme]
+            let head = [v.red, v.green, v.blue].map { Int(round($0 * 255)) }
+            // Row 0 is 32 points high and its text sits in the middle, so y 4 is ground alone; every x of the visible width, clear of the card's rounded corners, is on it.
+            for x in stride(from: 12, to: 388, by: 3) { XCTAssertEqual(pixel(of: wide, name, x: x, y: 4), head, "x \(x) (\(name.rawValue))") }
+        }
+    }
+
+    func testAHeadingIsSemiboldLevelOneIs16On24AndTheOthersAre14On22() {
+        XCTAssertEqual(MarkdownView.heading(1).size, 16)
+        XCTAssertEqual(MarkdownView.heading(1).line, 24)
+        for level in 2...6 {
+            XCTAssertEqual(MarkdownView.heading(level).size, 14, "level \(level)")
+            XCTAssertEqual(MarkdownView.heading(level).line, 22, "level \(level)")
+        }
+        XCTAssertEqual(MessageRow.lineSpacing, MessageRow.spacing(size: 14, line: 22))
+    }
+
+    @MainActor
+    func testTheCellsOfANumericColumnSetTheirDigitsAtOneWidth() {
+        PardnerFonts.register()
+        let figures = MarkdownFonts.styled(AttributedString("1,204"), size: 13, weight: .regular, tabular: true)
+        XCTAssertEqual(figures.runs.first?.font, PardnerFont.ui(size: 13, weight: .regular, tabular: true))
+        let words = MarkdownFonts.styled(AttributedString("1,204"), size: 13, weight: .regular)
+        XCTAssertEqual(words.runs.first?.font, PardnerFont.ui(size: 13, weight: .regular), "a column of words keeps the proportional digits")
+        func width(_ text: String, tabular: Bool) -> CGFloat {
+            let hosting = NSHostingView(rootView: Text(MarkdownFonts.styled(AttributedString(text), size: 13, weight: .regular, tabular: tabular)).fixedSize())
+            hosting.layoutSubtreeIfNeeded()
+            return hosting.fittingSize.width
+        }
+        XCTAssertEqual(width("1111", tabular: true), width("8888", tabular: true), accuracy: 0.5, "drawn, a column's figures are as wide as each other")
+        XCTAssertLessThan(width("1111", tabular: false), width("8888", tabular: false) - 1)
+    }
+
+    // MARK: a code block with no language draws no empty strip (#168)
+
+    @MainActor
+    private func size(of view: some View, width: CGFloat) -> CGSize {
+        _ = NSApplication.shared
+        PardnerFonts.register()
+        let hosting = NSHostingView(rootView: view.frame(width: width))
+        hosting.layoutSubtreeIfNeeded()
+        return hosting.fittingSize
+    }
+
+    @MainActor
+    func testACodeBlockWithNoLanguageHasNoStripAndKeepsItsCopyButtonInTheCorner() {
+        let code = "127.0.0.1 localhost"
+        let text = size(of: Text(verbatim: code).font(PardnerFont.code), width: 300).height
+        XCTAssertEqual(size(of: CodeBlock(language: nil, code: code), width: 300).height, text + 24, accuracy: 1, "12 points above and below the text, no header")
+        XCTAssertEqual(size(of: CodeBlock(language: "", code: code), width: 300).height, text + 24, accuracy: 1, "an empty language is none")
+        XCTAssertEqual(size(of: CodeBlock(language: "swift", code: code), width: 300).height, text + 28 + 2 + 12, accuracy: 1, "a named block keeps its 28 point header")
+        var copied: String?
+        CodeBlock(language: nil, code: code, copy: { copied = $0 }).copyCode()
+        XCTAssertEqual(copied, code, "the copy action stays")
+    }
+
+    @MainActor
+    func testTheCopyButtonOfAnUnnamedBlockStandsInItsTopRightCorner() {
+        _ = NSApplication.shared
+        PardnerFonts.register()
+        let hosting = NSHostingView(rootView: CodeBlock(language: nil, code: "x").frame(width: 200, height: 60, alignment: .topLeading))
+        hosting.appearance = NSAppearance(named: .aqua)
+        hosting.frame = NSRect(x: 0, y: 0, width: 200, height: 60)
+        hosting.layoutSubtreeIfNeeded()
+        let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)!
+        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        let ground = rep.colorAt(x: 100, y: 5)!.usingColorSpace(.sRGB)!
+        var inked = 0
+        for y in 4..<26 { for x in 166..<196 {
+            let c = rep.colorAt(x: x, y: y)!.usingColorSpace(.sRGB)!
+            if abs(c.redComponent - ground.redComponent) > 0.15 { inked += 1 }
+        } }
+        XCTAssertGreaterThan(inked, 8, "the copy icon is drawn at the top right, over the text's first line")
+    }
+
     func testAListMarkerOfThreeDigitsKeepsItsWidthAndAGap() {
         func width(_ text: String) -> CGFloat {
             let hosting = NSHostingView(rootView: MarkdownView(text: text))
@@ -167,7 +273,7 @@ final class MarkdownViewTests: XCTestCase {
         XCTAssertGreaterThan(height("| x |\n| --- |\n| \(word) |"), height("| \(word) |\n| --- |\n| x |") + 10)
     }
 
-    // MARK: the gaps between an answer's blocks (#73, step F, design FA 3.4)
+    // MARK: the gaps between an answer's blocks (#73, step F, design FA 3.4; the reading pass)
 
     private func piece(_ body: MarkdownBlocks.Body = .paragraph(AttributedString("p")), depth: Int = 0, bars: Int = 0, marker: String? = nil) -> MarkdownBlocks.Piece {
         MarkdownBlocks.Piece(depth: depth, bars: bars, marker: marker, body: body)
@@ -184,32 +290,49 @@ final class MarkdownViewTests: XCTestCase {
         XCTAssertEqual(MarkdownView.gap(from: piece(heading), to: piece(depth: 1, marker: "•")), 6, "a list under a heading")
     }
 
-    func testListItemsStand4ApartAndEveryOtherPairOfPieces8() {
+    func testListItemsStand4ApartAndEveryOtherPairOfPieces10() {
         let item = piece(depth: 1, marker: "•")
         XCTAssertEqual(MarkdownView.gap(from: item, to: piece(depth: 1, marker: "•")), 4)
         XCTAssertEqual(MarkdownView.gap(from: item, to: piece(depth: 2, marker: "•")), 4, "a nested item")
         XCTAssertEqual(MarkdownView.gap(from: piece(depth: 2, marker: "•"), to: piece(depth: 1, marker: "•")), 4)
-        XCTAssertEqual(MarkdownView.gap(from: piece(), to: piece()), 8)
-        XCTAssertEqual(MarkdownView.gap(from: piece(), to: item), 8, "a list after a paragraph")
-        XCTAssertEqual(MarkdownView.gap(from: item, to: piece()), 8, "a paragraph after a list")
-        XCTAssertEqual(MarkdownView.gap(from: item, to: piece(depth: 1)), 8, "the second paragraph of an item has no marker")
-        XCTAssertEqual(MarkdownView.gap(from: piece(), to: piece(.rule)), 8)
-        XCTAssertEqual(MarkdownView.gap(from: piece(.rule), to: piece()), 8)
+        XCTAssertEqual(MarkdownView.gap(from: piece(), to: piece()), 10, "two paragraphs")
+        XCTAssertEqual(MarkdownView.gap(from: piece(), to: item), 10, "a list after a paragraph")
+        XCTAssertEqual(MarkdownView.gap(from: item, to: piece()), 10, "a paragraph after a list")
+        XCTAssertEqual(MarkdownView.gap(from: item, to: piece(depth: 1)), 10, "the second paragraph of an item has no marker")
+        XCTAssertEqual(MarkdownView.gap(from: piece(), to: piece(.rule)), 10)
+        XCTAssertEqual(MarkdownView.gap(from: piece(.rule), to: piece()), 10)
     }
 
-    func testACodeBlockOrATableInAnItemStands8FromItsNeighbours() {
+    func testTheGapsAreTheTokens() {
+        XCTAssertEqual([PardnerMetrics.paragraphGap, PardnerMetrics.blockGap, PardnerMetrics.itemGap], [10, 12, 4])
+        XCTAssertEqual([PardnerMetrics.headingBefore, PardnerMetrics.headingAfter], [16, 6])
+    }
+
+    func testACodeBlockATableAndAQuoteStand12FromWhatIsBeforeAndAfterThem() {
+        for block in [code, table] {
+            XCTAssertEqual(MarkdownView.gap(from: piece(), to: piece(block)), 12, "before")
+            XCTAssertEqual(MarkdownView.gap(from: piece(block), to: piece()), 12, "after")
+            XCTAssertEqual(MarkdownView.gap(from: piece(block), to: piece(block)), 12, "two blocks")
+        }
+        XCTAssertEqual(MarkdownView.gap(from: piece(), to: piece(depth: 1, bars: 1)), 12, "a quote starts")
+        XCTAssertEqual(MarkdownView.gap(from: piece(depth: 1, bars: 1), to: piece()), 12, "a quote ends")
+        XCTAssertEqual(MarkdownView.gap(from: piece(depth: 1, bars: 1), to: piece(depth: 2, bars: 2)), 12, "a quote inside a quote")
+        XCTAssertEqual(MarkdownView.gap(from: piece(heading), to: piece(code)), 6, "a heading's own gap wins")
+    }
+
+    func testACodeBlockOrATableInAnItemStands12FromItsNeighbours() {
         let item = piece(depth: 1, marker: "•")
-        XCTAssertEqual(MarkdownView.gap(from: item, to: piece(code, depth: 1, marker: "•")), 8, "an item that starts with a code block")
-        XCTAssertEqual(MarkdownView.gap(from: item, to: piece(table, depth: 1)), 8)
-        XCTAssertEqual(MarkdownView.gap(from: piece(code, depth: 1, marker: "•"), to: piece(depth: 1, marker: "•")), 8, "the next item after a code block")
-        XCTAssertEqual(MarkdownView.gap(from: piece(table, depth: 1, marker: "•"), to: piece(depth: 1, marker: "•")), 8)
+        XCTAssertEqual(MarkdownView.gap(from: item, to: piece(code, depth: 1, marker: "•")), 12, "an item that starts with a code block")
+        XCTAssertEqual(MarkdownView.gap(from: item, to: piece(table, depth: 1)), 12)
+        XCTAssertEqual(MarkdownView.gap(from: piece(code, depth: 1, marker: "•"), to: piece(depth: 1, marker: "•")), 12, "the next item after a code block")
+        XCTAssertEqual(MarkdownView.gap(from: piece(table, depth: 1, marker: "•"), to: piece(depth: 1, marker: "•")), 12)
     }
 
-    func testAQuotesParagraphsAreEightApartAndItsBarRunsThroughTheGap() {
+    func testAQuotesParagraphsAreTenApartAndItsBarRunsThroughTheGap() {
         let quoted = piece(depth: 1, bars: 1)
-        XCTAssertEqual(MarkdownView.gap(from: quoted, to: quoted), 8)
+        XCTAssertEqual(MarkdownView.gap(from: quoted, to: quoted), 10)
         let shared = MarkdownView.gaps(from: quoted, to: quoted)
-        XCTAssertEqual(shared.content, 8)
+        XCTAssertEqual(shared.content, 10)
         XCTAssertEqual(shared.bars, [0], "the bar both pieces have is not pushed down: it runs through the gap")
         let item = piece(depth: 2, bars: 1, marker: "•")
         XCTAssertEqual(MarkdownView.gap(from: item, to: piece(depth: 2, bars: 1, marker: "•")), 4, "a list inside a quote")
@@ -217,13 +340,17 @@ final class MarkdownViewTests: XCTestCase {
 
     func testAQuoteThatStartsAfterAParagraphLeavesItsBarAtTheTopOfItsText() {
         let started = MarkdownView.gaps(from: piece(), to: piece(depth: 1, bars: 1))
-        XCTAssertEqual(started.content, 8)
-        XCTAssertEqual(started.bars, [8], "the bar starts where the quote's text does")
+        XCTAssertEqual(started.content, 12)
+        XCTAssertEqual(started.bars, [12], "the bar starts where the quote's text does")
         let deeper = MarkdownView.gaps(from: piece(depth: 1, bars: 1), to: piece(depth: 2, bars: 2))
-        XCTAssertEqual(deeper.bars, [0, 8], "the outer bar runs on, the new inner one starts at the text")
+        XCTAssertEqual(deeper.bars, [0, 12], "the outer bar runs on, the new inner one starts at the text")
         let first = MarkdownView.gaps(from: nil, to: piece(depth: 1, bars: 1))
         XCTAssertEqual(first.content, 0, "the first piece has no gap")
         XCTAssertEqual(first.bars, [0])
+    }
+
+    func testAListIsIndented20WithAHangingBulletAndAQuoteHasA2PointBarAnd12OfPadding() {
+        XCTAssertEqual([MarkdownView.listStep, MarkdownView.barWidth, MarkdownView.barGap], [20, 2, 12])
     }
 
     // MARK: a table takes the column's width, or scrolls (design FA 3.3)
@@ -349,7 +476,7 @@ final class MarkdownViewTests: XCTestCase {
 
 @MainActor
 final class MentionLabelTests: XCTestCase {
-    /// The pixels of the mention's gold ground in a rendering of `view`, as the points of their columns and rows, and the size the view takes at that width.
+    /// The pixels of the mention's ground (`mention-bg`, light) in a rendering of `view`, as the points of their columns and rows, and the size the view takes at that width.
     private func gold(_ view: some View, _ size: CGSize) throws -> (columns: [CGFloat], rows: [CGFloat], fitting: CGSize) {
         _ = NSApplication.shared
         _ = PardnerFonts.register()
@@ -364,7 +491,7 @@ final class MentionLabelTests: XCTestCase {
         for y in 0..<rep.pixelsHigh {
             for x in 0..<rep.pixelsWide {
                 guard let p = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
-                if abs(p.redComponent - 0xE8 / 255) + abs(p.greenComponent - 0xA3 / 255) + abs(p.blueComponent - 0x3D / 255) < 0.03 {
+                if abs(p.redComponent - 0xFB / 255) + abs(p.greenComponent - 0xEF / 255) + abs(p.blueComponent - 0xD9 / 255) < 0.03 {
                     columns.insert(x)
                     rows.insert(y)
                 }
@@ -390,10 +517,10 @@ final class MentionLabelTests: XCTestCase {
         let text = "hello there this prompt wraps onto a second line and then a third one"
         let view = mentioned("@mini", text).designLines().textSelection(.enabled).padding(.leading, 20)
         let ground = try gold(view, CGSize(width: 160, height: 120))
-        XCTAssertGreaterThan(ground.fitting.height, 2 * 21 + MessageRow.lineSpacing, "the text wraps onto more than one line")
+        XCTAssertGreaterThan(ground.fitting.height, 2 * PardnerFont.textLine + MessageRow.lineSpacing, "the text wraps onto more than one line")
         let top = try XCTUnwrap(ground.rows.first), bottom = try XCTUnwrap(ground.rows.last)
-        XCTAssertLessThan(top, MessageRow.lineSpacing / 2 + 21, "the ground begins on the first line")
-        XCTAssertLessThan(bottom - top, 21, "the ground is one line high: nothing is drawn behind the second line")
+        XCTAssertLessThan(top, MessageRow.lineSpacing / 2 + PardnerFont.textLine, "the ground begins on the first line")
+        XCTAssertLessThan(bottom - top, PardnerFont.textLine, "the ground is one line high: nothing is drawn behind the second line")
     }
 
     func testAMentionIsDarkSemiboldTextWithNoCharacterForPadding() {
@@ -402,7 +529,7 @@ final class MentionLabelTests: XCTestCase {
         XCTAssertEqual(String(label.characters), "@mini", "no character stands in for padding: a copied prompt holds what was written")
         XCTAssertEqual(label.runs.count, 1)
         XCTAssertNil(label.runs.first?.backgroundColor, "the ground is drawn behind the run, rounded and padded, not as the run's square background")
-        XCTAssertEqual(label.runs.first?.foregroundColor, PardnerColor.agentInk)
+        XCTAssertEqual(label.runs.first?.foregroundColor, PardnerColor.mentionText)
         XCTAssertEqual(label.runs.first?.font, PardnerFont.ui(size: 14, weight: .semibold))
     }
 }

@@ -68,6 +68,30 @@ final class LinkTextTests: XCTestCase {
         XCTAssertEqual(style.lineSpacing, MessageRow.lineSpacing)
     }
 
+    func testAHeadingsLineSpacingAndANumericCellsDigitsReachTheConversion() throws {
+        let heading = MessageRow.spacing(size: 16, line: 24)
+        XCTAssertNotEqual(heading, MessageRow.lineSpacing, "level 1 is set on its own line")
+        let text = try piece("12 [l](https://example.com/)")
+        let set = LinkText.attributed(text, size: 16, weight: .semibold, lineSpacing: heading, tabular: true)
+        let style = try XCTUnwrap(set.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+        XCTAssertEqual(style.lineSpacing, heading)
+        XCTAssertEqual(try fontOf(set, at: 0), PardnerFont.uiCT(size: 16, weight: .semibold, tabular: true) as NSFont)
+        XCTAssertNotEqual(try fontOf(set, at: 0), PardnerFont.uiCT(size: 16, weight: .semibold) as NSFont, "tabular digits are another font")
+    }
+
+    func testALevelOneHeadingWithALinkTakesTheSameHeightAsOneWithout() {
+        PardnerFonts.register()
+        func height(_ markdown: String) -> CGFloat {
+            let hosting = NSHostingView(rootView: MarkdownView(text: markdown).frame(width: 120))
+            hosting.layoutSubtreeIfNeeded()
+            return hosting.fittingSize.height
+        }
+        let words = "alpha beta gamma delta epsilon zeta eta theta iota kappa"
+        let plain = height("# \(words)"), linked = height("# [\(words)](https://example.com/x)")
+        XCTAssertGreaterThan(plain, 100, "the heading wraps to several lines")
+        XCTAssertEqual(linked, plain, accuracy: 3, "the lines of a heading that holds a link are as far apart as those of one that holds none")
+    }
+
     func testTheViewShowsThePointingHandAndNothingElseOpensALink() {
         let view = LinkText.makeTextView()
         XCTAssertEqual(view.linkTextAttributes?[.cursor] as? NSCursor, NSCursor.pointingHand)

@@ -65,9 +65,9 @@ public enum MonoWeight: Double, CaseIterable, Sendable {
 /// The three uses of type in the design, each a font at a size and a weight. Call `PardnerFonts.register()` first.
 public enum PardnerFont {
     /// Inter: lists, messages, controls. A variable font built from a `CTFont` has no bold or italic face SwiftUI can
-    /// derive, so emphasis asks for the weight and the italic file here.
-    public static func ui(size: CGFloat, weight: InterWeight, italic: Bool = false) -> Font {
-        Font(ctFont(file: interFile(italic: italic), size: size, weight: weight.rawValue))
+    /// derive, so emphasis asks for the weight and the italic file here. `tabular` gives every digit one width, for a column of numbers.
+    public static func ui(size: CGFloat, weight: InterWeight, italic: Bool = false, tabular: Bool = false) -> Font {
+        Font(ctFont(file: interFile(italic: italic), size: size, weight: weight.rawValue, tabular: tabular))
     }
 
     /// Space Grotesk: the name, the activity figures.
@@ -81,8 +81,8 @@ public enum PardnerFont {
     }
 
     /// Inter as a `CTFont`, for an AppKit view that draws text by itself (the composer's field, a link's text view).
-    public static func uiCT(size: CGFloat, weight: InterWeight, italic: Bool = false) -> CTFont {
-        ctFont(file: interFile(italic: italic), size: size, weight: weight.rawValue)
+    public static func uiCT(size: CGFloat, weight: InterWeight, italic: Bool = false, tabular: Bool = false) -> CTFont {
+        ctFont(file: interFile(italic: italic), size: size, weight: weight.rawValue, tabular: tabular)
     }
 
     /// JetBrains Mono as a `CTFont`, for drawing glyphs by hand (the recovery key is never given to a `Text`).
@@ -99,6 +99,7 @@ public enum PardnerFont {
         let file: String
         let size: CGFloat
         let weight: Double
+        let tabular: Bool
     }
 
     /// Fonts already built. Reading a font file costs about 90 microseconds, and a long table asks for a font per cell at every
@@ -107,15 +108,19 @@ public enum PardnerFont {
 
     /// The font of a bundled file with its `wght` axis set, built once per file, size and weight; the file's own descriptor names
     /// the family, so no name lookup can land on another face.
-    static func ctFont(file: String, size: CGFloat, weight: Double) -> CTFont {
-        let key = Key(file: file, size: size, weight: weight)
+    static func ctFont(file: String, size: CGFloat, weight: Double, tabular: Bool = false) -> CTFont {
+        let key = Key(file: file, size: size, weight: weight, tabular: tabular)
         return built.withLock { cache in
             if let font = cache[key] { return font }
             let url = Bundle.module.resourceURL!.appendingPathComponent("Fonts/\(file)")
             guard let base = (CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor])?.first
             else { fatalError("DesignSystem: \(file) is missing or unreadable") }
-            let varied = CTFontDescriptorCreateCopyWithAttributes(
-                base, [kCTFontVariationAttribute: [weightAxis: weight]] as CFDictionary)
+            var attributes: [CFString: Any] = [kCTFontVariationAttribute: [weightAxis: weight]]
+            if tabular {
+                // Inter's `tnum` OpenType feature, asked by its tag.
+                attributes[kCTFontFeatureSettingsAttribute] = [[kCTFontOpenTypeFeatureTag: "tnum", kCTFontOpenTypeFeatureValue: 1]]
+            }
+            let varied = CTFontDescriptorCreateCopyWithAttributes(base, attributes as CFDictionary)
             let font = CTFontCreateWithFontDescriptor(varied, size, nil)
             cache[key] = font
             return font
@@ -128,9 +133,16 @@ public extension PardnerFont {
     /// Pardner, the channel and the thread: Space Grotesk 600, 17 on 22.
     static var title: Font { display(size: 17, weight: .semibold) }
     static let titleLine: CGFloat = 22
-    /// Messages and lists: Inter 14 on 21.
+    /// Messages and lists: Inter 14 on 22.
     static var text: Font { ui(size: 14, weight: .regular) }
-    static let textLine: CGFloat = 21
+    static let textLine: CGFloat = 22
+    /// A heading inside a message, semibold: level 1 is Inter 16 on 24, the others 14 on 22.
+    static let headingSize1: CGFloat = 16
+    static let headingLine1: CGFloat = 24
+    static let headingSize: CGFloat = 14
+    static let headingLine: CGFloat = 22
+    /// A tool's row (a call, a fold): Inter 12.5, muted, the verb alone semibold.
+    static let toolSize: CGFloat = 12.5
     /// Times, notes and the session's data: Inter 12 on 16.
     static var secondary: Font { ui(size: 12, weight: .regular) }
     static let secondaryLine: CGFloat = 16

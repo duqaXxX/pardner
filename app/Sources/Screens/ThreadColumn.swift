@@ -94,7 +94,11 @@ struct SessionFacts: Equatable {
 }
 
 extension ReadingModel {
-    /// Whether `message` is a bot's notice, drawn as a compact system event: only a bot publishes a profile, so it says who is one. The one rule of the
-    /// grouping and of the drawing.
-    func isSystemEvent(_ message: Message) -> Bool { message.isNotice && profiles[message.sender] != nil }
+    /// Whether `sender` is a bot: the device log names it one (`bots`, the devices of the window's pairing) or it published a profile, which only a bot can.
+    /// A bot whose profile is not read yet is still one (#106).
+    func isBot(_ sender: Data, bots: Set<Data>) -> Bool { bots.contains(sender) || profiles[sender] != nil }
+
+    /// Whether `message` is a bot's notice, drawn as a compact system event. The one rule of the grouping and of the drawing, and it reads the bot as a
+    /// message row does (#177).
+    func isSystemEvent(_ message: Message, bots: Set<Data>) -> Bool { message.isNotice && isBot(message.sender, bots: bots) }
 }

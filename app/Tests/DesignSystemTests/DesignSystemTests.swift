@@ -19,31 +19,41 @@ final class DesignSystemTests: XCTestCase {
         ("del-bg", PardnerColor.delBg), ("del-text", PardnerColor.delText),
         ("badge", PardnerColor.badge), ("badge-ink", PardnerColor.badgeInk),
         ("select", PardnerColor.select), ("hover", PardnerColor.hover), ("code-bg", PardnerColor.codeBg),
+        ("container", PardnerColor.container), ("code-inline", PardnerColor.codeInline), ("table-head", PardnerColor.tableHead),
+        ("mention-bg", PardnerColor.mentionBg), ("mention-text", PardnerColor.mentionText),
         ("side-text", PardnerColor.sideText), ("side-muted", PardnerColor.sideMuted), ("side-raised", PardnerColor.sideRaised),
         ("side-line", PardnerColor.sideLine), ("side-surface", PardnerColor.sideSurface), ("side-brand", PardnerColor.sideBrand),
         ("side-brand-soft", PardnerColor.sideBrandSoft), ("side-brand-text", PardnerColor.sideBrandText),
         ("side-del-text", PardnerColor.sideDelText),
     ]
 
-    func testThirtySevenTokensEachWithBothValues() {
-        XCTAssertEqual(Tokens.pairs.count, 37)
+    func testFortyTwoTokensEachWithBothValues() {
+        XCTAssertEqual(Tokens.pairs.count, 42)
         XCTAssertEqual(Set(Self.members.map(\.0)), Set(Tokens.pairs.keys))
     }
 
-    /// The light palette of the corrected reference (2026-11-26): a dark blue sidebar with its own values, a white centre, and the bands
-    /// and the code ground the earlier units drew.
-    func testTheLightPaletteIsTheReferences() {
-        let want = ["bg": "#FBFCFD", "panel": "#F3F5F8", "side": "#1F3357", "surface": "#FFFFFF", "raised": "#E3E8F0", "line": "#D5DBE5",
-                    "text": "#1B2434", "muted": "#525E73", "brand": "#2F5FB3", "brand-soft": "#E3ECFA", "brand-text": "#2452A3",
+    /// The light palette of the reading pass (2026-11-27): the centre and the thread panel on one white, the containers inside a message darker than it,
+    /// an inline code span with a ground of its own, and the sidebar's values the corrected reference's.
+    func testTheLightPaletteIsTheReadingPass() {
+        let want = ["bg": "#FFFFFF", "panel": "#FFFFFF", "side": "#1F3357", "surface": "#FFFFFF", "raised": "#E3E8F0", "line": "#E3E7EE",
+                    "text": "#1B2434", "muted": "#5B6676", "brand": "#2F5FB3", "brand-soft": "#E3ECFA", "brand-text": "#2452A3",
                     "agent": "#E8A33D", "agent-ink": "#2A1B05", "agent-soft": "#FBEFD9", "agent-text": "#85560A", "ok-soft": "#E0F3EA",
-                    "add-bg": "#E3F4EB", "del-bg": "#FBE6E6", "select": "#E6EEFA", "hover": "#F5F7FA", "code-bg": "#F2F5FA",
+                    "add-bg": "#E3F4EB", "del-bg": "#FBE6E6", "select": "#EEF3FB", "hover": "#F5F7FA", "code-bg": "#F6F8FA",
+                    "container": "#F6F8FA", "code-inline": "#EEF1F5", "table-head": "#EEF1F5", "mention-bg": "#FBEFD9", "mention-text": "#85560A",
                     "side-text": "#F4F6FA", "side-muted": "#B4C2DA", "side-raised": "rgba(255,255,255,.16)", "side-line": "rgba(255,255,255,.14)",
                     "side-surface": "rgba(255,255,255,.07)", "side-brand": "#8FB4F5", "side-brand-soft": "rgba(255,255,255,.18)",
                     "side-brand-text": "#FFFFFF", "side-del-text": "#F2B0B0"]
         for (name, hex) in want { XCTAssertEqual(Tokens.pairs[name]?.light, RGBA(hex), name) }
-        XCTAssertEqual(Tokens.pairs["select"]?.dark, RGBA("rgba(127,169,240,.1)"))
-        XCTAssertEqual(Tokens.pairs["hover"]?.dark, RGBA("rgba(255,255,255,.04)"))
-        XCTAssertEqual(Tokens.pairs["code-bg"]?.dark, RGBA("#232323"))
+        XCTAssertNotEqual(Tokens.pairs["select"]?.light, Tokens.pairs["hover"]?.light, "the band of the open thread differs from the one under the pointer")
+    }
+
+    /// The dark values the pass adds or keeps: containers and code on the grounds of the sketch, the mention as the dark theme draws it today.
+    func testTheDarkValuesOfTheReadingPass() {
+        let want = ["bg": "#1B1B1B", "panel": "#1B1B1B", "side": "#161616", "code-bg": "#232323", "container": "#232323", "code-inline": "#2A2A2A",
+                    "table-head": "#202020", "mention-bg": "#E9B04F", "mention-text": "#2A1B05", "select": "rgba(127,169,240,.1)", "hover": "rgba(255,255,255,.04)"]
+        for (name, hex) in want { XCTAssertEqual(Tokens.pairs[name]?.dark, RGBA(hex), name) }
+        XCTAssertEqual(Tokens.pairs["mention-bg"]?.dark, Tokens.pairs["agent"]?.dark, "the dark mention is the agent's gold as before")
+        XCTAssertEqual(Tokens.pairs["mention-text"]?.dark, Tokens.pairs["agent-ink"]?.dark)
     }
 
     /// The dark theme is not touched by the sidebar's tokens: each takes the dark value of the window's token of its role.
@@ -89,7 +99,7 @@ final class DesignSystemTests: XCTestCase {
         ("text", "bg"), ("muted", "bg"), ("side-muted", "side"), ("muted", "raised"), ("side-text", "side"), ("side-del-text", "side"),
         ("brand-ink", "brand"), ("brand-text", "brand-soft"), ("brand-text", "bg"), ("agent-ink", "agent"),
         ("agent-text", "agent-soft"), ("ok-text", "ok-soft"), ("add-text", "add-bg"), ("del-text", "del-bg"),
-        ("badge-ink", "badge"),
+        ("badge-ink", "badge"), ("mention-text", "mention-bg"), ("text", "container"), ("muted", "container"), ("text", "code-inline"),
     ]
 
     private func over(_ f: RGBA, _ b: [Double]) -> [Double] {
@@ -102,7 +112,7 @@ final class DesignSystemTests: XCTestCase {
     }
 
     func testTextOnGroundPairsKeepAAInBothThemes() {
-        XCTAssertEqual(Self.pairs.count, 15)
+        XCTAssertEqual(Self.pairs.count, 19)
         for theme in ["light", "dark"] {
             let pick = { (n: String) in theme == "light" ? Tokens.pairs[n]!.light : Tokens.pairs[n]!.dark }
             let base = [pick("bg").red, pick("bg").green, pick("bg").blue]
@@ -137,6 +147,17 @@ final class LayoutMetricsTests: XCTestCase {
     }
 
     func testTheTypeScaleKeepsItsLineHeights() {
-        XCTAssertEqual([PardnerFont.titleLine, PardnerFont.textLine, PardnerFont.secondaryLine, PardnerFont.codeLine], [22, 21, 16, 20])
+        XCTAssertEqual([PardnerFont.titleLine, PardnerFont.textLine, PardnerFont.secondaryLine, PardnerFont.codeLine], [22, 22, 16, 20])
+    }
+
+    func testTheReadingRhythmIsTheSketchs() {
+        XCTAssertEqual([PardnerMetrics.paragraphGap, PardnerMetrics.blockGap, PardnerMetrics.itemGap, PardnerMetrics.messageGap], [10, 12, 4, 20])
+        XCTAssertEqual([PardnerMetrics.headingBefore, PardnerMetrics.headingAfter], [16, 6])
+        XCTAssertEqual([PardnerMetrics.listIndent, PardnerMetrics.quoteBar, PardnerMetrics.quotePad, PardnerMetrics.toolIndent, PardnerMetrics.toolGuide], [20, 2, 12, 16, 1])
+    }
+
+    func testTheHeadingsAndTheToolRowsHaveTheirOwnScale() {
+        XCTAssertEqual([PardnerFont.headingLine, PardnerFont.headingLine1], [22, 24])
+        XCTAssertEqual([PardnerFont.headingSize, PardnerFont.headingSize1, PardnerFont.toolSize], [14, 16, 12.5])
     }
 }

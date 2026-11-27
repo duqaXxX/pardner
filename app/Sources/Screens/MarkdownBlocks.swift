@@ -312,7 +312,7 @@ enum MarkdownBlocks {
                 if intent.contains(.code) {
                     piece = AttributedString(CodeMarks.shown(text))
                     piece.font = PardnerFont.mono(size: 12.5, weight: .regular)
-                    piece.backgroundColor = PardnerColor.raised
+                    piece.backgroundColor = PardnerColor.codeInline
                 } else {
                     piece = AttributedString(text)
                     let styles = intent.intersection([.emphasized, .stronglyEmphasized, .strikethrough])

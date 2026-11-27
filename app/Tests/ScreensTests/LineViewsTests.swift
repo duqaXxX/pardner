@@ -352,7 +352,7 @@ final class LineViewsTests: XCTestCase {
     private func stackHeight(spacing: CGFloat, line: WorkLine, index: Int, offset: CGFloat?) -> CGFloat {
         _ = NSApplication.shared
         _ = PardnerFonts.register()
-        let row = LineBodyRow(line: line, index: index, indent: 0, firstTop: offset ?? 0)
+        let row = LineBodyRow(line: line, index: index, indent: 0, stack: offset == nil ? nil : spacing)
         let view = offset == nil ? AnyView(row) : AnyView(VStack(alignment: .leading, spacing: spacing) { Color.clear.frame(height: 10); row })
         let hosting = NSHostingView(rootView: view.frame(width: 400))
         hosting.layoutSubtreeIfNeeded()
@@ -360,7 +360,7 @@ final class LineViewsTests: XCTestCase {
     }
 
     @MainActor
-    func testTheFirstRowOfADiffStandsTwoPointsUnderItsHeadInEveryStack() {
+    func testTheFirstRowOfADiffStandsTwoPointsUnderItsHeadAndTheLaterOnesRightUnderTheOneAboveInEveryStack() {
         let body = (1...250).map { "+line \($0)" }.joined(separator: "\n")
         let preview: [String: Any] = ["title": "Update(a.txt)", "summary": "Added 250 lines", "body": body, "language": "diff", "plain": false, "record": false]
         let line = workLine("Edit", preview: preview)
@@ -369,8 +369,9 @@ final class LineViewsTests: XCTestCase {
             XCTAssertEqual(top, 2 - spacing)
             let alone = stackHeight(spacing: spacing, line: line, index: 0, offset: nil)
             XCTAssertEqual(stackHeight(spacing: spacing, line: line, index: 0, offset: top) - alone, 10 + 2, accuracy: 0.5, "a head 10 points high, then 2 points, then the row (stack of \(spacing))")
+            XCTAssertEqual(LineBodyRow.top(continuingStackOf: spacing), -spacing)
             let second = stackHeight(spacing: spacing, line: line, index: 1, offset: nil)
-            XCTAssertEqual(stackHeight(spacing: spacing, line: line, index: 1, offset: top) - second, 10 + spacing, accuracy: 0.5, "the rows after the first keep the stack's spacing")
+            XCTAssertEqual(stackHeight(spacing: spacing, line: line, index: 1, offset: top) - second, 10, accuracy: 0.5, "a later row stands right under the one above, with no gap (#142), stack of \(spacing)")
         }
     }
 
@@ -465,9 +466,14 @@ final class LineViewsTests: XCTestCase {
     func testTheDetailsTakeTheRoomUpToTheStateWords() {
         let details = String(repeating: "a long run of details that more than fills the room ", count: 4)
         let line = workLine("Bash", details: details)
-        let gap = widestGap(line, state: .interrupted, width: 380)
-        XCTAssertGreaterThan(gap, 0)
-        XCTAssertLessThanOrEqual(gap, 10, "the cut details end 8 points from the state words, the spacer keeping no more")
+        XCTAssertGreaterThan(widestGap(line, state: .interrupted, width: 380), 0)
+        // The 8 points between the details and the state words, and what the cut leaves: under the width of the next character, which is at most the widest of the text's.
+        let font = PardnerFont.uiCT(size: PardnerFont.toolSize, weight: .regular) as NSFont
+        let widest = Set(details).map { (String($0) as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+        for width in [360, 380, 400] as [CGFloat] {
+            let gap = widestGap(line, state: .interrupted, width: width)
+            XCTAssertLessThanOrEqual(gap, 8 + widest, "width \(width): the cut details end 8 points and under a character from the state words, the spacer keeping no more")
+        }
     }
 
     @MainActor

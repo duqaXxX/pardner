@@ -188,7 +188,7 @@ final class MarkdownBlocksTests: XCTestCase {
         guard case .paragraph(let body) = pieces[0].body else { return XCTFail("not a paragraph") }
         let code = try XCTUnwrap(body.runs.first { $0.backgroundColor != nil })
         XCTAssertEqual(String(body[code.range].characters), "npm test")
-        XCTAssertEqual(code.backgroundColor, PardnerColor.raised)
+        XCTAssertEqual(code.backgroundColor, PardnerColor.codeInline)
         XCTAssertEqual(code.font, PardnerFont.mono(size: 12.5, weight: .regular))
     }
 
