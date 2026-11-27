@@ -732,9 +732,60 @@ test("a failed edit changed no file", () => {
   const [ended] = of(perRecord("edit-write")[137] ?? [], "call_ended");
   assert.equal(ended?.isError, true);
   assert.equal(ended?.fileChange, null);
+  // The words of the terminal's failed Edit, with no wrapper (CLI 2.1.321, measured 2026-11-10).
+  assert.equal(ended?.output, "String to replace not found in file.\nString: 2\tbeta");
+});
+
+// `subagent-message-bypass`, recorded on 2.1.316 with the TypeScript SDK 0.3.316 (#135): a failed
+// SendMessage whose result the SDK wraps in the same tag.
+test("a failed call's output crosses without the SDK's tag, in every recording", () => {
+  const [ended] = of(perRecord("subagent-message-bypass")[65] ?? [], "call_ended");
+  assert.equal(ended?.isError, true);
+  assert.match(ended?.output ?? "", /^InputValidationError: SendMessage failed/);
+  assert.doesNotMatch(ended?.output ?? "", /tool_use_error/);
+  for (const name of sdkRecordings()) {
+    for (const event of of(events(name), "call_ended")) {
+      assert.doesNotMatch(event.output ?? "", /tool_use_error/, name);
+    }
+  }
+});
+
+test("the tag is stripped from a failed call's whole wrapper, in a string or a list of text parts", () => {
+  const ended = (content: unknown, isError = true) => {
+    const record = {
+      type: "user",
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "t1", content, is_error: isError }],
+      },
+    };
+    return of(new Translator().translate(record), "call_ended")[0]?.output;
+  };
+  assert.equal(ended("<tool_use_error>Words</tool_use_error>"), "Words");
+  assert.equal(ended("<tool_use_error>Words</tool_use_error>\n"), "Words");
   assert.equal(
-    ended?.output,
-    "<tool_use_error>String to replace not found in file.\nString: 2\tbeta</tool_use_error>",
+    ended([{ type: "text", text: "<tool_use_error>Listed</tool_use_error>" }]),
+    "Listed",
+  );
+  assert.equal(
+    ended([
+      { type: "text", text: "<tool_use_error>First" },
+      { type: "text", text: "Second</tool_use_error>" },
+    ]),
+    "First\nSecond",
+  );
+  // Left as it is: no closing tag, text after the closing tag, a tag inside the words, a blank
+  // wrapper, and a successful output that starts with the tag.
+  assert.equal(ended("<tool_use_error>Cut off here"), "<tool_use_error>Cut off here");
+  assert.equal(
+    ended("<tool_use_error>Words</tool_use_error> more"),
+    "<tool_use_error>Words</tool_use_error> more",
+  );
+  assert.equal(ended("plain <tool_use_error> text"), "plain <tool_use_error> text");
+  assert.equal(ended("<tool_use_error></tool_use_error>"), "<tool_use_error></tool_use_error>");
+  assert.equal(
+    ended("<tool_use_error>Words</tool_use_error>", false),
+    "<tool_use_error>Words</tool_use_error>",
   );
 });
 

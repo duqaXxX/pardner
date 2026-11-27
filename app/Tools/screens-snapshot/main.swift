@@ -232,6 +232,17 @@ MainActor.assumeIsolated {
             let diff = "    5 const relay = start()\n-\u{1F7E5} 6 await relay.stop()\n+\u{1F7E9} 6 await relay.flush()\n+\u{1F7E9} 7 await relay.stop()\n    8 assert.ok(relay.closed)"
             call(0xD7, "Update(/srv/example/project/test/relay.test.ts)", path: "/srv/example/project/test/relay.test.ts",
                  preview: ["title": "Update(test/relay.test.ts)", "summary": "Added 2 lines, removed 1 line", "body": diff, "language": "diff", "plain": false, "record": false], minutes: 31.5)
+            // A diff whose first line is removed and last is added: the band's room above and below shows.
+            call(0xDB, "Update(/srv/example/project/src/relay.ts)", path: "/srv/example/project/src/relay.ts",
+                 preview: ["title": "Update(src/relay.ts)", "summary": "Added 1 line, removed 1 line", "body": "-\u{1F7E5} 12 await stop()\n+\u{1F7E9} 12 await flush()", "language": "diff", "plain": false, "record": false], minutes: 31.55)
+            call(0xDA, "Write(/srv/example/project/src/flush.ts)", path: "/srv/example/project/src/flush.ts",
+                 preview: ["title": "Write(src/flush.ts)", "summary": "Wrote 3 lines", "body": "export async function flush(relay: Relay) {\n  await relay.journal.sync()\n}", "language": "typescript", "plain": false, "record": false], minutes: 31.6)
+            // The long-block rule (2026-11-27): a Write of 60 lines and an 80-line diff are drawn closed, 24 lines and a footer.
+            call(0xDF, "Write(/srv/example/project/src/journal.ts)", path: "/srv/example/project/src/journal.ts",
+                 preview: ["title": "Write(src/journal.ts)", "summary": "Wrote 60 lines", "body": (1...60).map { "export const entry\($0) = \($0)" }.joined(separator: "\n"), "language": "typescript", "plain": false, "record": false], minutes: 31.62)
+            call(0xE0, "Update(/srv/example/project/src/store.ts)", path: "/srv/example/project/src/store.ts",
+                 preview: ["title": "Update(src/store.ts)", "summary": "Added 40 lines, removed 40 lines",
+                           "body": (1...40).flatMap { ["-\u{1F7E5} \($0) const old\($0) = \($0)", "+\u{1F7E9} \($0) const next\($0) = \($0 + 1)"] }.joined(separator: "\n"), "language": "diff", "plain": false, "record": false], minutes: 31.64)
             let answer = """
             ## What failed
 
@@ -270,14 +281,27 @@ MainActor.assumeIsolated {
             ::1 localhost
             ```
 
+            ```typescript
+            \((1...40).map { "export const value\($0) = \($0)" }.joined(separator: "\n"))
+            ```
+
             That is all: 6,236 pass.
             """
             put(5, mini, ["thread": root.hex, "markdown": answer], name: 0xD8, re: root, minutes: 32)
             put(1, mini, ["thread": root.hex, "say": "footer", "markdown": "9s"], name: 0xD9, minutes: 32.1)
+            // A person's message with markup, in the conversation and as a thread's first message: read as a bot's text is, the mention a chip before its first paragraph.
+            let markup = "Please check this too:\n\n## Steps\n\n- run `npm test`\n- read the **output**\n\n```sh\nnpm test -- --watch\n```\n\n| File | Lines |\n|---|---|\n| relay.ts | 1,204 |"
+            let second = put(2, alice, ["text": markup], name: 0xDD, to: mini, minutes: 33)
+            put(3, mini, [:], name: 0xDE, re: second, minutes: 33.1)
+            // A person's message that opens with a code span: the chip's ground and the span's ground keep a space between them.
+            let third = put(2, alice, ["text": "`npm test` fails on a restart, then run `npm test -- --watch` again"], name: 0xE1, to: mini, minutes: 34)
+            put(3, mini, [:], name: 0xE2, re: third, minutes: 34.1)
             for (appearance, theme) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
                 let window = MainWindow(model: live.model, devices: DevicesModel(), channel: live.channel, thread: root.hex)
-                try renderPanel(appearance, window, height: 1800, to: "reading-panel-\(theme).png")
+                try renderPanel(appearance, window, height: 3200, to: "reading-panel-\(theme).png")
                 try render(appearance, window, size: NSSize(width: 1280, height: 1000), to: "reading-window-\(theme).png")
+                try renderPanel(appearance, MainWindow(model: live.model, devices: DevicesModel(), channel: live.channel, thread: second.hex), height: 900, to: "reading-person-panel-\(theme).png")
+                try renderPanel(appearance, MainWindow(model: live.model, devices: DevicesModel(), channel: live.channel, thread: third.hex), height: 400, to: "reading-code-first-panel-\(theme).png")
             }
             exit(0)
         }

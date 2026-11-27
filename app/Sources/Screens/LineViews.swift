@@ -107,7 +107,8 @@ enum ThreadRows {
 
     /// The rows of `thread`, in order: a line with a diff or a body of code is its head then its body rows. A bot's reply has one head, over the first
     /// thing it draws, a call or a text. A work's end is no row: it closes its turn, and its length goes to the head of the bot's reply of that turn. `isSystem` says a message is the daemon's own line.
-    static func build(_ thread: MessageThread, isSystem: (Message) -> Bool) -> [ThreadRow] {
+    /// `isOpen` says whether a block is open by its key (`LongBlock.key`): a closed long body has its first row alone, the rest being the lines it does not show.
+    static func build(_ thread: MessageThread, isSystem: (Message) -> Bool, isOpen: (String) -> Bool) -> [ThreadRow] {
         var rows: [ThreadRow] = []
         // The head the next row may join: the last one drawn, which a call, a card or a system event of the bot's reply leaves in place, so
         // that a reply has one head (#166), and which any other head-less row (a counted group of unreadable messages) drops; and the bot's
@@ -165,7 +166,7 @@ enum ThreadRows {
                 let opens = turnHead == nil && l.ref.device == thread.bot
                 add(id(of: l), .line(l), time: l.time, head: opens ? Grouping.Head(author: l.ref.device, time: l.time) : nil)
                 if let preview = l.fields.preview, !preview.record {
-                    for index in preview.rows.indices { add("l\(l.position).\(index)", .body(l, index: index), time: nil) }
+                    for index in 0..<LongBlock.rowsDrawn(of: preview, open: isOpen(LongBlock.key(of: l))) { add("l\(l.position).\(index)", .body(l, index: index), time: nil) }
                 }
             }
         }
@@ -272,13 +273,9 @@ struct LineRow: View {
                 let form = LineForm(f)
                 if form == .agentReplied, let reply = ReplyContent(f) {
                     head(f, form, link: .words { openWindow(id: WindowID.reply, value: reply) })
-                } else if let opener, let place, let path = opener.link(for: line) {
+                } else if let opener, let place, let path = LongBlock.file(of: line, place: place, opener: opener) {
                     // The call's file: a click opens its content in a window of its own (file-content design, 3.7).
-                    head(f, form, path: path, link: .title {
-                        let content = FileWindowContent(channel: place.channel, thread: place.thread, bot: line.ref.device, source: .path(path))
-                        opener.open(content, lineEnd: line.ended)
-                        openWindow(id: WindowID.file, value: content)
-                    })
+                    head(f, form, path: path, link: .title { Self.openFile(path, of: line, place: place, opener: opener, openWindow: openWindow) })
                 } else {
                     head(f, form)
                 }
@@ -302,6 +299,13 @@ struct LineRow: View {
         }
         .padding(.leading, indent)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A click on a call's path, or on its preview's `Open file`: the file's content in a window of its own.
+    static func openFile(_ path: String, of line: WorkLine, place: FilePlace, opener: FileOpener, openWindow: OpenWindowAction) {
+        let content = FileWindowContent(channel: place.channel, thread: place.thread, bot: line.ref.device, source: .path(path))
+        opener.open(content, lineEnd: line.ended)
+        openWindow(id: WindowID.file, value: content)
     }
 
     /// What of a head is a link: nothing, its title alone (a file), or its title and details (a reply). The blank part of the row is never one.
@@ -447,7 +451,8 @@ struct LineRow: View {
     }
 }
 
-/// One row of a preview's body, in the monospace font, invisible code points written as their numbers (#73, 2.5).
+/// One row of a preview's body, in the monospace font, invisible code points written as their numbers (#73, 2.5), with the body's room inside
+/// its band: `previewPadX` at the sides, `previewPadY` above the first row and below the last.
 struct LineBodyRow: View {
     let line: WorkLine
     let index: Int
@@ -455,6 +460,11 @@ struct LineBodyRow: View {
     /// The spacing of the stack the row stands in, which it takes back: the first row stands `headGap` under its head, each later one right under the row
     /// above, so that the preview reads as one block (#142). nil for a row in no stack.
     var stack: CGFloat?
+    /// The thread the line is in, which `Open file` opens its file by; nil where the window has no pairing.
+    var place: FilePlace?
+    var blocks: OpenBlocks = .shared
+    @Environment(\.openWindow) private var openWindow
+    @Environment(FileOpener.self) private var opener: FileOpener?
 
     /// How far under its head the first row of a body stands.
     static let headGap: CGFloat = 2
@@ -472,17 +482,38 @@ struct LineBodyRow: View {
 
     var body: some View {
         if let preview = line.fields.preview, preview.rows.indices.contains(index) {
-            let row = CodeMarks.shown(preview.rows[index])
-            Group {
-                if preview.language == "diff" {
-                    DiffRowText(row: row)
-                } else {
-                    Text(row).font(PardnerFont.mono(size: 12, weight: .regular)).fixedSize(horizontal: false, vertical: true)
+            let key = LongBlock.key(of: line)
+            let total = LongBlock.count(of: preview)
+            let open = blocks.isOpen(key)
+            // A long body that is closed shows its first lines in its first row; a later row (a list that kept all its rows) has nothing to draw.
+            let drawn = LongBlock.rowsDrawn(of: preview, open: open)
+            if index < drawn {
+                let shown = LongBlock.isLong(total) && !open ? LongBlock.head(of: preview.rows[index]) : preview.rows[index]
+                let row = CodeMarks.shown(shown)
+                // The body's room (`previewPadX` and `previewPadY`) is at the sides of every row and above the first row and below the last alone, so that the rows join.
+                let first = index == 0, last = index == drawn - 1
+                VStack(alignment: .leading, spacing: 0) {
+                    Group {
+                        if preview.language == "diff" {
+                            DiffRowText(row: row, first: first, last: last)
+                        } else {
+                            Text(row).font(PardnerFont.mono(size: 12, weight: .regular)).fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, PardnerMetrics.previewPadX)
+                                .padding(.top, first ? PardnerMetrics.previewPadY : 0).padding(.bottom, last ? PardnerMetrics.previewPadY : 0)
+                        }
+                    }
+                    .textSelection(.enabled)
+                    if last, let label = LongBlock.footer(total: total, open: open) {
+                        let path = LongBlock.file(of: line, place: place, opener: opener)
+                        LongBlockFooter(label: label, toggle: { blocks.toggle(key) }, openFile: path.map { path in
+                            { if let place, let opener { LineRow.openFile(path, of: line, place: place, opener: opener, openWindow: openWindow) } }
+                        })
+                        .padding(.horizontal, PardnerMetrics.previewPadX).padding(.bottom, PardnerMetrics.previewPadY)
+                    }
                 }
+                .padding(.top, top)
+                .padding(.leading, indent).frame(maxWidth: .infinity, alignment: .leading)
             }
-            .textSelection(.enabled)
-            .padding(.top, top)
-            .padding(.leading, indent).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -492,8 +523,13 @@ struct LineBodyRow: View {
 /// and a line that wraps keeps one ground for all its pieces.
 struct DiffRowText: View {
     let lines: [DiffLine]
+    /// Whether the row is the first of its body, or the last: those carry the body's room above and below, inside the ground.
+    let first: Bool, last: Bool
 
-    init(row: String) { lines = row.components(separatedBy: "\n").map(DiffLine.init) } // "\n" alone: a line may end in "\r"
+    init(row: String, first: Bool = false, last: Bool = false) {
+        lines = row.components(separatedBy: "\n").map(DiffLine.init) // "\n" alone: a line may end in "\r"
+        (self.first, self.last) = (first, last)
+    }
 
     /// The room between two lines, so that a line stands 20 points from the next.
     private static let spacing: CGFloat = 4
@@ -534,7 +570,8 @@ struct DiffRowText: View {
         Self.pieces(lines).enumerated().map { Text($1).customAttribute(SourceLine(index: $0)) }.reduce(Text(verbatim: ""), +)
             .font(PardnerFont.mono(size: 12, weight: .regular))
             .lineSpacing(Self.spacing).fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 8).padding(.vertical, Self.spacing / 2)
+            .padding(.horizontal, PardnerMetrics.previewPadX)
+            .padding(.top, first ? PardnerMetrics.previewPadY : Self.spacing / 2).padding(.bottom, last ? PardnerMetrics.previewPadY : Self.spacing / 2)
             .frame(maxWidth: .infinity, alignment: .leading)
             .backgroundPreferenceValue(Text.LayoutKey.self) { layouts in
                 GeometryReader { proxy in

@@ -501,26 +501,226 @@ final class MentionLabelTests: XCTestCase {
         return (columns.sorted().map { CGFloat($0) / scale }, rows.sorted().map { CGFloat($0) / scale }, natural)
     }
 
-    /// The gold ground is drawn behind the label, reaching the side padding left of the text's column and ending before the text. It is
+    /// The gold ground is drawn behind the label, starting at the text's column (the label stands its side padding inside it) and ending before the text. It is
     /// rendered as the app renders a prompt: `designLines` and selectable text.
     func testTheGroundIsPaddedAndEndsBeforeTheText() throws {
-        let view = mentioned("@mini", "hello").designLines().textSelection(.enabled).padding(.leading, 20)
-        let ground = try gold(view, CGSize(width: 300, height: 60))
+        let ground = try gold(person("hello"), CGSize(width: 300, height: 60))
         let first = try XCTUnwrap(ground.columns.first), last = try XCTUnwrap(ground.columns.last)
-        XCTAssertEqual(first, 14, accuracy: 1.5, "the ground starts 6 points left of the column at 20")
+        XCTAssertEqual(first, 20, accuracy: 1.5, "the ground's left edge is the column at 20, where the author's name starts")
         XCTAssertGreaterThan(last - first, 40, "the ground covers the label and its padding")
         XCTAssertLessThan(last, 100, "the ground ends before the text")
+    }
+
+    /// The room between the mention's ground (`mention-bg`) and the ground of a code span (`code-inline`), light, in points, read on the mention's middle row of a
+    /// rendering of `view`: the columns after the last gold one up to the first code-ground one. A ground drawn over the other leaves none.
+    private func roomBetweenChipAndCode(_ view: some View, _ size: CGSize) throws -> CGFloat {
+        _ = NSApplication.shared
+        _ = PardnerFonts.register()
+        let hosting = NSHostingView(rootView: view.frame(width: size.width, height: size.height, alignment: .topLeading))
+        hosting.appearance = NSAppearance(named: .aqua)
+        hosting.frame = NSRect(origin: .zero, size: size)
+        hosting.layoutSubtreeIfNeeded()
+        let rep = try XCTUnwrap(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
+        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / size.width
+        func near(_ p: NSColor, _ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> Bool {
+            abs(p.redComponent - r / 255) + abs(p.greenComponent - g / 255) + abs(p.blueComponent - b / 255) < 0.03
+        }
+        var goldRows: [Int] = []
+        for y in 0..<rep.pixelsHigh where (0..<rep.pixelsWide).contains(where: { x in rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB).map { near($0, 0xFB, 0xEF, 0xD9) } ?? false }) {
+            goldRows.append(y)
+        }
+        let row = try XCTUnwrap(goldRows.isEmpty ? nil : goldRows[goldRows.count / 2], "the mention's ground")
+        let pixels = (0..<rep.pixelsWide).map { rep.colorAt(x: $0, y: row)?.usingColorSpace(.sRGB) }
+        let lastGold = try XCTUnwrap(pixels.lastIndex { $0.map { near($0, 0xFB, 0xEF, 0xD9) } ?? false })
+        let code = try XCTUnwrap(pixels.indices.first { $0 > lastGold && (pixels[$0].map { near($0, 0xEE, 0xF1, 0xF5) } ?? false) }, "the code ground after the mention's")
+        return CGFloat(code - lastGold - 1) / scale
+    }
+
+    /// The leftmost dark pixel of each text line of `view` (text ink: darker than the white and the gold ground), in points, one entry per line of 22 points.
+    private func inkStarts(_ view: some View, _ size: CGSize) throws -> [CGFloat] {
+        _ = NSApplication.shared
+        _ = PardnerFonts.register()
+        let hosting = NSHostingView(rootView: view.frame(width: size.width, height: size.height, alignment: .topLeading))
+        hosting.appearance = NSAppearance(named: .aqua)
+        hosting.frame = NSRect(origin: .zero, size: size)
+        hosting.layoutSubtreeIfNeeded()
+        let rep = try XCTUnwrap(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
+        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / size.width
+        var starts: [Int: Int] = [:]
+        for y in 0..<rep.pixelsHigh {
+            for x in 0..<rep.pixelsWide {
+                guard let p = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), p.alphaComponent > 0.5, p.brightnessComponent < 0.6 else { continue }
+                let line = Int(CGFloat(y) / scale / 22)
+                starts[line] = min(starts[line] ?? .max, x)
+            }
+        }
+        return starts.keys.sorted().map { CGFloat(starts[$0]!) / scale }
+    }
+
+    /// The mention's text moves in by the ground's side padding so that its ground lines up with the column; the lines under it stay at the column.
+    func testTheMentionsTextStandsASidePaddingInAndTheOtherLinesStayAtTheColumn() throws {
+        let text = "hello there this prompt wraps onto a second line and then a third one"
+        let starts = try inkStarts(person(text), CGSize(width: 160, height: 120))
+        XCTAssertGreaterThanOrEqual(starts.count, 3, "the text wraps onto at least three lines")
+        XCTAssertEqual(starts[0], 20 + MentionedText.side, accuracy: 2, "the mention's text starts a side padding right of the column: \(starts)")
+        for later in starts.dropFirst() { XCTAssertEqual(later, 20, accuracy: 2, "a later line starts at the column: \(starts)") }
     }
 
     /// A text that starts with the mention and wraps: the ground stays on the first line, where the mention is.
     func testTheGroundStaysOnTheFirstLineOfAWrappedText() throws {
         let text = "hello there this prompt wraps onto a second line and then a third one"
-        let view = mentioned("@mini", text).designLines().textSelection(.enabled).padding(.leading, 20)
-        let ground = try gold(view, CGSize(width: 160, height: 120))
+        let ground = try gold(person(text), CGSize(width: 160, height: 120))
         XCTAssertGreaterThan(ground.fitting.height, 2 * PardnerFont.textLine + MessageRow.lineSpacing, "the text wraps onto more than one line")
         let top = try XCTUnwrap(ground.rows.first), bottom = try XCTUnwrap(ground.rows.last)
         XCTAssertLessThan(top, MessageRow.lineSpacing / 2 + PardnerFont.textLine, "the ground begins on the first line")
         XCTAssertLessThan(bottom - top, PardnerFont.textLine, "the ground is one line high: nothing is drawn behind the second line")
+    }
+
+    // MARK: a person's message is read as a bot's is
+
+    /// A person's message, as the rows draw it: `MarkdownView` with the bot's mention, in the column the rows put it in.
+    private func person(_ text: String) -> some View {
+        MarkdownView(text: text, mention: "@mini").designLines().textSelection(.enabled).padding(.leading, 20)
+    }
+
+    /// The same message drawn as typed: the chip and the whole text in one run, with no Markdown read.
+    private func typed(_ text: String) -> some View {
+        InlineCodeText(text: MarkdownFonts.styled(AttributedString(text), size: 14, weight: .regular), mention: "@mini").designLines().textSelection(.enabled).padding(.leading, 20)
+    }
+
+    /// The pixels of `view` rendered at `size`, to tell two drawings apart.
+    private func rendering(_ view: some View, _ size: CGSize) throws -> Data {
+        _ = NSApplication.shared
+        _ = PardnerFonts.register()
+        let hosting = NSHostingView(rootView: view.frame(width: size.width, height: size.height, alignment: .topLeading))
+        hosting.appearance = NSAppearance(named: .aqua)
+        hosting.frame = NSRect(origin: .zero, size: size)
+        hosting.layoutSubtreeIfNeeded()
+        let rep = try XCTUnwrap(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
+        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        return try XCTUnwrap(rep.tiffRepresentation)
+    }
+
+    private func fitting(_ view: some View, width: CGFloat) -> CGSize {
+        _ = NSApplication.shared
+        _ = PardnerFonts.register()
+        return NSHostingView(rootView: view.frame(width: width, alignment: .topLeading)).fittingSize
+    }
+
+    /// What Cmd-C puts on the pasteboard when the owner selects all of `view`, as plain text and as the rich text (RTFD) of the same copy: the selectable text
+    /// view SwiftUI puts under `.textSelection(.enabled)` (`AppKitTextInteractionView`, found as the hosting view's first subview), made the first responder
+    /// of a window, receives `selectAll:` and `copy:`.
+    private func copiedText(_ view: some View) throws -> (plain: String, rich: String) {
+        _ = NSApplication.shared
+        _ = PardnerFonts.register()
+        let size = CGSize(width: 300, height: 120)
+        let hosting = NSHostingView(rootView: view.frame(width: size.width, height: size.height, alignment: .topLeading))
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = hosting
+        window.makeKeyAndOrderFront(nil)
+        hosting.layoutSubtreeIfNeeded()
+        // The view is SwiftUI's own and private: a macOS that builds it otherwise (the macOS 15 runner) skips the test, it does not fail it.
+        guard let selectable = hosting.subviews.first, selectable.acceptsFirstResponder, window.makeFirstResponder(selectable),
+              selectable.tryToPerform(#selector(NSText.selectAll(_:)), with: nil)
+        else { throw XCTSkip("the selectable text view is not found, or does not answer selectAll:") }
+        // The general pasteboard is the machine's clipboard: what it held comes back when the test ends.
+        let saved = (NSPasteboard.general.pasteboardItems ?? []).map { item in
+            item.types.reduce(into: [NSPasteboard.PasteboardType: Data]()) { $0[$1] = item.data(forType: $1) }
+        }
+        defer {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.writeObjects(saved.map { held in
+                let item = NSPasteboardItem()
+                for (type, data) in held { item.setData(data, forType: type) }
+                return item
+            })
+        }
+        NSPasteboard.general.clearContents()
+        guard selectable.tryToPerform(#selector(NSText.copy(_:)), with: nil) else { throw XCTSkip("the selectable text view does not answer copy:") }
+        let rtfd = try XCTUnwrap(NSPasteboard.general.data(forType: .rtfd), "the rich flavour")
+        let rich = try XCTUnwrap(NSAttributedString(rtfd: rtfd, documentAttributes: nil))
+        return (try XCTUnwrap(NSPasteboard.general.string(forType: .string)), rich.string)
+    }
+
+    /// The clear image that stands the mention in by the ground's side padding is not part of a copied prompt: neither the plain string nor the string of the
+    /// rich flavour holds anything but the mention and the message (measured on macOS 27.2.1; the plain flavour drops U+FFFC from any source, so the rich one is
+    /// the stricter pin, and a character such as U+200B in the image's place fails both).
+    func testACopiedPromptHoldsTheMentionAndTheMessageAndNothingElse() throws {
+        let cases: [(AnyView, String)] = [
+            (AnyView(person("hello there")), "@mini hello there"),
+            (AnyView(person("run `ls -a` now")), "@mini run ls -a now"),
+        ]
+        for (view, expected) in cases {
+            let copied = try copiedText(view)
+            XCTAssertEqual(copied.plain, expected)
+            XCTAssertEqual(copied.rich, expected)
+        }
+    }
+
+    func testAPersonsHeadingListAndFenceAreReadAsBlocks() throws {
+        let text = "# Plan\n\n- one\n- two\n\n```swift\nlet x = 1\n```"
+        guard case .read(let pieces, _) = MarkdownBlocks.read(text) else { return XCTFail("read") }
+        XCTAssertEqual(pieces.count, 4, "a heading, two items and a block")
+        let read = fitting(person(text), width: 400).height
+        let raw = fitting(typed(text), width: 400).height
+        XCTAssertNotEqual(read, raw, "drawn as blocks, not as typed")
+        XCTAssertGreaterThan(read, fitting(person("Plan"), width: 400).height + 2 * PardnerFont.textLine, "a heading, items and a block stand on lines of their own")
+    }
+
+    /// A message with no markup is one paragraph that looks as it did when it was drawn as typed: its lines start where they did, and it is as high.
+    func testAPlainMessageLooksAsItDidBeforeTheMentionJoinedTheMarkdown() throws {
+        let text = "hello there this prompt wraps onto a second line and then a third one"
+        let size = CGSize(width: 160, height: 120)
+        // The text as it was drawn before it was read as Markdown: the mention, its space widened by the side padding, then the words as typed.
+        var space = AttributedString(" ")
+        space.kern = MentionedText.side
+        let old = Text(Image(nsImage: NSImage(size: NSSize(width: MentionedText.side, height: 1)))) + Text(mentionLabel("@mini")) + Text(space) + Text(verbatim: text)
+        let before = try inkStarts(old.font(PardnerFont.ui(size: 14, weight: .regular)).foregroundStyle(PardnerColor.text).designLines().textSelection(.enabled).padding(.leading, 20), size)
+        let after = try inkStarts(person(text), size)
+        XCTAssertEqual(after.count, before.count)
+        for (a, b) in zip(after, before) { XCTAssertEqual(a, b, accuracy: 2, "\(after) against \(before)") }
+        XCTAssertEqual(after[0], 20 + MentionedText.side, accuracy: 2)
+        XCTAssertEqual(fitting(person(text), width: 160).height, fitting(typed(text), width: 160).height, accuracy: 0.5)
+    }
+
+    /// A person's message that opens with a code span: the chip's ground and the span's ground stand a space apart, as a span stands from the text beside it
+    /// elsewhere (the space's own width: the room of both grounds is a kern, outside it).
+    func testTheCodeGroundAfterTheChipStandsASpaceAwayFromIt() throws {
+        _ = PardnerFonts.register()
+        let font = PardnerFont.uiCT(size: 14, weight: .regular)
+        var character: UniChar = 0x20, glyph = CGGlyph()
+        XCTAssertTrue(CTFontGetGlyphsForCharacters(font, &character, &glyph, 1))
+        var advance = CGSize.zero
+        CTFontGetAdvancesForGlyphs(font, .horizontal, &glyph, &advance, 1)
+        let room = try roomBetweenChipAndCode(person("`npm test` fails"), CGSize(width: 300, height: 60))
+        XCTAssertEqual(room, advance.width, accuracy: 1, "the grounds are a space (\(advance.width) points) apart; measured \(room)")
+    }
+
+    /// A text Markdown reads as no piece (a link reference definition: block HTML such as a comment is kept as a paragraph) is drawn as typed after the chip,
+    /// not as the chip alone.
+    func testATextMarkdownReadsAsNothingShowsAsTypedAfterTheChip() throws {
+        let size = CGSize(width: 300, height: 60)
+        let alone = try rendering(person(""), size)
+        for text in ["[ref]: https://example.com", "[a]: https://example.com/a\n[b]: https://example.com/b"] {
+            guard case .read(let pieces, _) = MarkdownBlocks.read(text) else { return XCTFail("read") }
+            XCTAssertTrue(pieces.isEmpty, "Markdown reads \(text) as no piece")
+            XCTAssertNotEqual(try rendering(person(text), size), alone, "the typed text is drawn beside the chip")
+        }
+    }
+
+    func testTheChipStandsBeforeTheFirstParagraphsTextAndOnItsOwnLineBeforeAnythingElse() throws {
+        let size = CGSize(width: 300, height: 200)
+        let paragraph = try gold(person("hello\n\n- one\n- two"), size)
+        XCTAssertLessThan(try XCTUnwrap(paragraph.rows.last), MessageRow.lineSpacing / 2 + PardnerFont.textLine, "the chip is on the first paragraph's line")
+        let heading = try gold(person("# Plan\n\nhello"), size)
+        let top = try XCTUnwrap(heading.rows.first), bottom = try XCTUnwrap(heading.rows.last)
+        XCTAssertLessThan(bottom - top, PardnerFont.textLine, "the chip is one line high")
+        XCTAssertLessThan(bottom, MessageRow.lineSpacing / 2 + PardnerFont.textLine, "the chip is above the heading")
+        XCTAssertFalse(MarkdownView.opens(MarkdownBlocks.Piece(depth: 1, bars: 0, marker: "-", body: .paragraph(AttributedString("one")))), "an item is not a first line")
+        guard case .read(let linked, _) = MarkdownBlocks.read("[a](https://example.com) b"), let first = linked.first else { return XCTFail("read") }
+        XCTAssertFalse(MarkdownView.opens(first), "a link is drawn by AppKit, which a chip cannot join")
     }
 
     func testAMentionIsDarkSemiboldTextWithNoCharacterForPadding() {

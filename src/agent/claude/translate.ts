@@ -176,16 +176,30 @@ function callStarted(block: WireRecord, parentCallId: string | null): SessionEve
   return [{ type: "call_started", callId, toolName, input, parentCallId }];
 }
 
+// The SDK wraps the words of a failed call in this tag (recorded: `edit-write.jsonl`,
+// `subagent-message-bypass.jsonl`); the terminal shows the words alone (Claude Code 2.1.321,
+// measured 2026-11-10, #163). Only a whole wrapper is stripped, and only when it holds words.
+const TOOL_USE_ERROR = /^<tool_use_error>([\s\S]*)<\/tool_use_error>\s*$/;
+
+function unwrapped(text: string): string {
+  const inner = TOOL_USE_ERROR.exec(text)?.[1];
+  return inner === undefined || inner.trim() === "" ? text : inner;
+}
+
 /**
  * The text of a tool result, whatever its form: a string, the text parts of a list a line each,
- * or the type of a single object (a server tool's result). Null for anything else.
+ * or the type of a single object (a server tool's result). Null for anything else. A failed
+ * call's words come without the SDK's `tool_use_error` tag.
  */
-function resultText(content: unknown): string | null {
-  if (typeof content === "string") return content;
+function resultText(content: unknown, isError: boolean): string | null {
+  const text = (value: string) => (isError ? unwrapped(value) : value);
+  if (typeof content === "string") return text(content);
   if (Array.isArray(content)) {
-    return records(content)
-      .map((part) => string(part.text) ?? "")
-      .join("\n");
+    return text(
+      records(content)
+        .map((part) => string(part.text) ?? "")
+        .join("\n"),
+    );
   }
   if (isRecord(content)) return string(content.type) ?? "";
   return null;
@@ -224,7 +238,7 @@ function callEnded(
       type: "call_ended",
       callId,
       isError,
-      output: resultText(block.content),
+      output: resultText(block.content, isError),
       images: resultImages(block.content),
       fileChange: change,
       model,

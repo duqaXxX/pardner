@@ -133,7 +133,7 @@ final class ThreadScrollTests: XCTestCase {
         let thread = s.model.channels[s.channel]!.threads[root.hex]!
         let open = try XCTUnwrap(thread.openLines.first)
         XCTAssertEqual(open.fields.title, "Agent(look)")
-        let rows = ThreadRows.build(thread, isSystem: { _ in false })
+        let rows = ThreadRows.build(thread, isSystem: { _ in false }, isOpen: { _ in true })
         let index = try XCTUnwrap(rows.firstIndex { $0.id == ThreadRows.id(of: open) })
         guard case .line(let drawn) = rows[index].content else { return XCTFail("the row is the line's") }
         XCTAssertEqual(drawn.ref, open.ref)

@@ -110,7 +110,7 @@
       "id": "toolu_01SmiBP25PJ2TRrhCQqi5wAz",
       "message": false,
       "name": "SendMessage",
-      "output": "<tool_use_error>InputValidationError: SendMessage failed due to the following issue:",
+      "output": "InputValidationError: SendMessage failed due to the following issue:",
       "preview": null,
       "startedAt": null,
       "status": "error",

@@ -339,7 +339,7 @@ struct DaySeparator: View {
     }
 }
 
-/// The bot's `@name` as a gold label: `mentionText`, semibold. Its `mentionBg` ground is drawn behind it by `mentioned`, rounded by 5 and padded
+/// The bot's `@name` as a gold label: `mentionText`, semibold. Its `mentionBg` ground is drawn behind it by `InlineCodeText`, rounded by 5 and padded
 /// 6 at the sides and 1 above and below, as the design draws it: a `Text` run's own background is square and unpadded, and a padding of
 /// characters would be copied with the prompt.
 func mentionLabel(_ mention: String) -> AttributedString {
@@ -349,27 +349,28 @@ func mentionLabel(_ mention: String) -> AttributedString {
     return label
 }
 
-/// A prompt's text as one selectable text: the bot's `@name` as its label, then the text as written. Without a mention, the text alone.
-func mentioned(_ mention: String?, _ text: String) -> some View { MentionedText(mention: mention, text: text) }
-
 /// The label's ground reads where the mention sits from the text's own layout (`Text.LayoutKey`): the run carries `MentionRun`, since a
 /// layout's character indices are opaque. The space after the mention is widened by the side padding (`kern`, no character), so that the
-/// ground ends a space before the text; at the start of the line the ground reaches 6 points left of the column, where the text stays.
+/// ground ends a space before the text. The mention itself starts the side padding in, after a clear image as wide as the padding (an
+/// attachment, which a copy leaves out, as a character would not be: a `Text` has no indent for its first line), so that the ground
+/// starts at the column where the author's name and the other lines do. The ground is drawn by `InlineCodeText`, which holds the text.
 struct MentionedText: View {
-    let mention: String?
-    let text: String
+    let mention: String
 
     /// The ground's padding beyond the run: at each side, and above and below.
     static let side: CGFloat = 6, edge: CGFloat = 1, radius: CGFloat = 5
 
     private struct MentionRun: TextAttribute {}
 
-    private var joined: Text {
-        let body = Text(verbatim: text).foregroundStyle(PardnerColor.text)
-        guard let mention else { return body }
+    /// A clear image `side` wide: the room before the mention's text.
+    private static let indent = NSImage(size: NSSize(width: side, height: 1))
+
+    /// The mention as it opens a text: the room, the label, and the widened space after it. A code span right after it has its own room to the left
+    /// (`InlineCodeText.inset`), which the space holds too, so that the two grounds keep a space between them as a span keeps from any text beside it.
+    static func lead(_ mention: String, beforeCode: Bool = false) -> Text {
         var space = AttributedString(" ")
-        space.kern = Self.side
-        return Text(mentionLabel(mention)).customAttribute(MentionRun()) + Text(space) + body
+        space.kern = side + (beforeCode ? InlineCodeText.inset : 0)
+        return Text(Image(nsImage: indent)) + Text(mentionLabel(mention)).customAttribute(MentionRun()) + Text(space)
     }
 
     /// The rectangles of the mention's runs, in the text's coordinates; a mention that wraps has one per line.
@@ -385,18 +386,11 @@ struct MentionedText: View {
     }
 
     var body: some View {
-        joined.backgroundPreferenceValue(Text.LayoutKey.self) { layouts in
-            GeometryReader { proxy in
-                ForEach(Array(Self.grounds(layouts, in: proxy).enumerated()), id: \.offset) { _, rect in
-                    RoundedRectangle(cornerRadius: Self.radius).fill(PardnerColor.mentionBg)
-                        .frame(width: rect.width, height: rect.height).position(x: rect.midX, y: rect.midY)
-                }
-            }
-        }
+        InlineCodeText(text: AttributedString(), mention: mention)
     }
 }
 
-/// One message: its sender's mark, name and time, then its text as written.
+/// One message: its sender's mark, name and time, then its text, read as Markdown whoever wrote it (a person's with the bot's mention as a chip).
 struct MessageRow: View {
     /// A mark's side and its gap to the text: the conversation's, and the thread panel's smaller one.
     struct Mark {
@@ -444,7 +438,7 @@ struct MessageRow: View {
 
     var body: some View {
         if compactNotices, model.isSystemEvent(message, bots: botDevices) {
-            SystemEvent(text: message.shown, indent: mark.indent).contextMenu { Button("Copy") { Clipboard.copy(message.shown) } }
+            SystemEvent(text: message.shown, indent: mark.indent, foldKey: message.ref.hex).contextMenu { Button("Copy") { Clipboard.copy(message.shown) } }
         } else {
             text
         }
@@ -480,12 +474,14 @@ struct MessageRow: View {
                     } else if case .file(let title) = message.body {
                         FileRow(title: title, message: message, place: place, opener: opener)
                     } else if isBot {
-                        // A bot's text is read as Markdown, any other body of a bot keeps its code spans only; a person's stays exactly as typed (#73, 5.2).
+                        // A bot's text is read as Markdown, any other body of a bot keeps its code spans only; a person's text is read as a bot's is, whole.
                         if MarkdownView.reads(message.body) {
-                            MarkdownView(text: message.shown, copy: { Clipboard.copy(message.shown) }, codeGround: tinted ? PardnerColor.surface : PardnerColor.codeInline).frame(maxWidth: PardnerMetrics.answerWidth, alignment: .leading)
+                            MarkdownView(text: message.shown, copy: { Clipboard.copy(message.shown) }, codeGround: tinted ? PardnerColor.surface : PardnerColor.codeInline, foldKey: message.ref.hex).frame(maxWidth: PardnerMetrics.answerWidth, alignment: .leading)
                         } else { InlineCodeText(text: CodeSpans.styled(message.shown, ground: tinted ? PardnerColor.surface : PardnerColor.codeInline)) }
                     } else {
-                        mentioned(Naming.mention(of: message, in: model), message.shown)
+                        // A person's text is read as a bot's is, its leading mention a chip before the first paragraph.
+                        MarkdownView(text: message.shown, copy: { Clipboard.copy(message.shown) }, mention: Naming.mention(of: message, in: model),
+                                     codeGround: tinted ? PardnerColor.surface : PardnerColor.codeInline, foldKey: message.ref.hex)
                     }
                 }
                 .designLines()
@@ -508,12 +504,14 @@ extension EnvironmentValues {
 struct SystemEvent: View {
     let text: String
     let indent: CGFloat
+    /// What names its long fences for the open state, as a message's text does (`MarkdownView.foldKey`); nil draws them whole.
+    var foldKey: String?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: text.hasPrefix("Stopped") ? "stop.fill" : "info.circle").font(.system(size: 11)).frame(width: 14).accessibilityHidden(true)
             // Read as a bot's text is: a word answer holds a link, a quote or a folder in backticks (`/bind`).
-            MarkdownView(text: text, copy: { Clipboard.copy(text) }, size: 13)
+            MarkdownView(text: text, copy: { Clipboard.copy(text) }, size: 13, foldKey: foldKey)
         }
         .foregroundStyle(PardnerColor.muted).textSelection(.enabled)
         .padding(.leading, indent).frame(maxWidth: .infinity, alignment: .leading)
@@ -533,7 +531,7 @@ struct Answered: View {
     @State private var opened: Set<String> = []
 
     var body: some View {
-        let rows = ThreadRows.build(thread, isSystem: { _ in false })
+        let rows = ThreadRows.build(thread, isSystem: { _ in false }, isOpen: OpenBlocks.shared.isOpen)
         VStack(alignment: .leading, spacing: PardnerMetrics.gap) {
             // The same rows as the thread panel, with their stable identities: a row's own state stays with it when an answer replaces its segments.
             ForEach(rows) { row in
@@ -549,10 +547,10 @@ struct Answered: View {
                     FoldRow(fold: fold, isOpen: fold.isOpen(in: opened), toggle: { opened = fold.toggled(opened) }, indent: 0) { line in
                         LineRow(line: line, state: thread.state(of: line), indent: 0, place: place, folder: folder, images: thread.images[line.ref] ?? [])
                     }
-                case .body(let line, let index): LineBodyRow(line: line, index: index, indent: 0, stack: PardnerMetrics.gap)
+                case .body(let line, let index): LineBodyRow(line: line, index: index, indent: 0, stack: PardnerMetrics.gap, place: place)
                 case .segment(let answer):
                     // Read at each part that reaches it: a structure half written is drawn half written until a later part (#73, 2.1).
-                    MarkdownView(text: answer.shown, copy: { Clipboard.copy(thread.text(of: answer)) }).designLines()
+                    MarkdownView(text: answer.shown, copy: { Clipboard.copy(thread.text(of: answer)) }, foldKey: LongBlock.key(of: answer)).designLines()
                         .frame(maxWidth: PardnerMetrics.answerWidth, alignment: .leading)
                         .contextMenu { Button("Copy") { Clipboard.copy(thread.text(of: answer)) } }
                 }

@@ -209,4 +209,7 @@ public enum PardnerMetrics {
     /// What a tool's open details are indented by, and the width of the guide line along them.
     public static let toolIndent = value(file.spacing, "tool-indent")
     public static let toolGuide = value(file.spacing, "tool-guide")
+    /// The room inside a call's preview body (a diff, a file's first lines): at each side of its rows, and above its first row and below its last.
+    public static let previewPadX = value(file.spacing, "preview-pad-x")
+    public static let previewPadY = value(file.spacing, "preview-pad-y")
 }

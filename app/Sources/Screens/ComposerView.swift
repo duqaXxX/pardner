@@ -391,7 +391,7 @@ struct PendingRows: View {
                         Text("You").font(PardnerFont.ui(size: 14, weight: .semibold))
                     }
                     .designLines()
-                    mentioned(row.to.map { "@" + model.name(of: $0) }, row.text).designLines().textSelection(.enabled)
+                    MarkdownView(text: row.text, mention: row.to.map { "@" + model.name(of: $0) }).designLines().textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                     switch row.status {
                     case .sending: line("Sending\u{2026}", PardnerColor.muted)

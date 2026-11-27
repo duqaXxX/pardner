@@ -1,4 +1,4 @@
-// A bot's text read as Markdown into a flat list of pieces the thread draws one row each (#73, step B2). Foundation's parser
+// A message's text, a bot's or a person's, read as Markdown into a flat list of pieces the thread draws one row each (#73, step B2). Foundation's parser
 // reads it, after bounds that keep a hostile text from costing more than a few milliseconds, and nothing it reads runs or loads:
 // a link becomes a numbered placeholder the view resolves behind a confirm, an image becomes its text. A text the bounds refuse is
 // drawn as `CodeSpans.styled` draws it today.
