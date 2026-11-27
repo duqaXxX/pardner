@@ -87,8 +87,40 @@ final class TableWindowTests: XCTestCase {
         func height(_ text: String) -> CGFloat { measure(MarkdownView(text: text, size: 30), width: 400).size.height }
         let preview = height(grid(columns: 20, cell: "abcdefghijklmnopqrst"))
         let fitted = height(grid(columns: 1, cell: "abcdefghijklmnopqrst"))
-        XCTAssertGreaterThan(preview - fitted, 12, "the same three rows and a footer")
-        XCTAssertLessThan(preview - fitted, 60)
+        // The same three rows and what stands under them: the footer's line, the room above it and the room under it.
+        let line = measure(Text(verbatim: "+19 columns \u{00B7} Open table").font(PardnerFont.ui(size: PardnerFont.toolSize, weight: .regular))).size.height
+        XCTAssertEqual(preview - fitted, TableFit.footerAbove + line + TableFit.footerBelow, accuracy: 0.5)
+    }
+
+    // MARK: a click on the preview
+
+    /// The view of `hosting` a click at `point` (in its own coordinates, from the top left) reaches.
+    private func hit(_ hosting: NSView, x: CGFloat, y: CGFloat) -> NSView? {
+        let point = NSPoint(x: x, y: hosting.isFlipped ? y : hosting.bounds.height - y)
+        return hosting.hitTest(hosting.convert(point, to: hosting.superview))
+    }
+
+    /// Every view a click reaches over the 400 point card, cell and gap alike, on a 4 point grid.
+    private func targets(_ text: String) -> [NSView] {
+        let hosting = ScrollHost.host(MarkdownView(text: text).frame(width: 400).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
+        defer { hosting.window?.orderOut(nil) }
+        hosting.layoutSubtreeIfNeeded()
+        let height = hosting.fittingSize.height
+        return stride(from: CGFloat(2), to: 398, by: 4).flatMap { x in stride(from: CGFloat(2), to: height - 4, by: 4).compactMap { y in hit(hosting, x: x, y: y) } }
+    }
+
+    func testAClickOnAPreviewIsNeverTakenByAnAppKitTextView() {
+        // A link in the first column, which a preview draws, and one in the last, which it hides.
+        func row(_ cells: [String]) -> String { "| " + cells.joined(separator: " | ") + " |" }
+        let cells = ["[docs](https://example.com/a)"] + Array(repeating: "abcdefghijklmnopqrst", count: 18) + ["[last](https://example.com/b)"]
+        let wide = (0..<20).map { "h\($0)" }
+        let text = [row(wide), row(Array(repeating: "---", count: 20)), row(cells)].joined(separator: "\n")
+        let preview = targets(text)
+        XCTAssertFalse(preview.isEmpty)
+        XCTAssertFalse(preview.contains { $0 is NSTextView }, "the click reaches no text view, so none selects or follows a link before the button")
+        // The same link in a table that fits is the text view's: the check above can fail.
+        let fits = targets("| a | b |\n|---|---|\n| [docs](https://example.com/a) | x |")
+        XCTAssertTrue(fits.contains { $0 is NSTextView })
     }
 
     // MARK: the window
@@ -108,6 +140,23 @@ final class TableWindowTests: XCTestCase {
         XCTAssertEqual(content.title, "File, Lines, Owner")
         XCTAssertEqual(content.markdown, "| File | Lines | Owner | Extra |\n|---|---|---|---|\n| a\\|b | 1 | x | y |")
         XCTAssertEqual(TableContent(text: "text", piece: 0).title, "Table")
+    }
+
+    func testTheCopyKeepsCodeSpansLinksAndEscapedPunctuation() throws {
+        let source = "| File | Notes |\n|---|---|\n| a\\|b | see [docs](https://example.com/a) and `x` |\n| 1\\*2 | \\_u\\_ ``a`b`` and `p\\|q` |"
+        let content = TableContent(text: source, piece: 0)
+        XCTAssertEqual(content.markdown, source)
+        // What the copy says reads back as the same table.
+        let again = TableContent(text: content.markdown, piece: 0)
+        XCTAssertEqual(again.table, content.table)
+        XCTAssertNotNil(content.table)
+    }
+
+    func testTheWindowDrawsTheTableAtThePanesSize() {
+        let text = grid(columns: 6, cell: "abcdefghijklmnopqrst")
+        func width(_ size: CGFloat) -> CGFloat { measure(TableWindow(content: TableContent(text: text, piece: 0, size: size))).size.width }
+        XCTAssertLessThan(width(13), width(14), "a system event's table (13) is narrower than a message's (14)")
+        XCTAssertEqual(TableContent(text: text, piece: 0).size, 14)
     }
 
     func testTheWindowIsAsWideAsTheTableWithinTheScreenAndScrollsPastIt() {

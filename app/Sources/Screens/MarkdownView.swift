@@ -156,11 +156,12 @@ struct MarkdownView: View {
         }
     }
 
-    /// A run of inline text: SwiftUI's `Text`, or `LinkText` when it holds a kept link, since only AppKit gives a link the pointing hand (2.4).
+    /// A run of inline text: SwiftUI's `Text`, or `LinkText` when it holds a kept link, since only AppKit gives a link the pointing hand (2.4). A run that is
+    /// `inert` (a preview's cell, which opens the table's window on a click) is always `Text`: an AppKit text view would take the click for itself.
     @ViewBuilder private func inline(_ text: AttributedString, size: CGFloat, weight: InterWeight, color: Color = PardnerColor.text, codeSize: CGFloat = 12.5,
-                                     tabular: Bool = false, lineSpacing: CGFloat = MessageRow.lineSpacing, mention: String? = nil) -> some View {
+                                     tabular: Bool = false, lineSpacing: CGFloat = MessageRow.lineSpacing, mention: String? = nil, inert: Bool = false) -> some View {
         let text = Self.grounded(text, on: codeGround)
-        if text.runs.contains(where: { $0.link != nil }) {
+        if !inert, text.runs.contains(where: { $0.link != nil }) {
             LinkText(text: text, size: size, weight: weight, color: color, codeSize: codeSize, lineSpacing: lineSpacing, tabular: tabular, open: { open($0) }, copy: copy)
         } else {
             InlineCodeText(text: MarkdownFonts.styled(text, size: size, weight: weight, tabular: tabular), mention: mention)
@@ -181,13 +182,13 @@ struct MarkdownView: View {
 
     /// A cell: the header row small, semibold and grey, a body row at one point under the text; a code span keeps its monospace face but not its ground (#174).
     /// A cell of a column of numbers sets its digits at one width, so that the figures line up under each other.
-    private func cell(_ table: MarkdownBlocks.Table, _ row: Int, _ column: Int, tabular: Bool) -> some View {
+    private func cell(_ table: MarkdownBlocks.Table, _ row: Int, _ column: Int, tabular: Bool, inert: Bool) -> some View {
         var text = table.rows[row][column]
         for run in text.runs where run.backgroundColor != nil { text[run.range].backgroundColor = nil }
         // A code span of the header is as small as the header's words.
         if row == 0 { for run in text.runs where run.font != nil { text[run.range].font = PardnerFont.mono(size: 12, weight: .regular) } }
         return inline(text, size: row == 0 ? 12 : size - 1, weight: row == 0 ? .semibold : .regular, color: row == 0 ? PardnerColor.muted : PardnerColor.text,
-                      codeSize: row == 0 ? 12 : 12.5, tabular: tabular)
+                      codeSize: row == 0 ? 12 : 12.5, tabular: tabular, inert: inert)
             .foregroundStyle(row == 0 ? PardnerColor.muted : PardnerColor.text)
     }
 
@@ -224,15 +225,17 @@ struct MarkdownView: View {
             } else {
                 ViewThatFits(in: .horizontal) {
                     grid(table, numeric, mode: .fitted)
-                    Button { openWindow(id: WindowID.table, value: TableContent(text: text, piece: index)) } label: {
-                        grid(table, numeric, mode: .preview).mask {
+                    // The whole card is the button: the cells take no hit and no selection and draw no AppKit view, so a click anywhere on it opens the window.
+                    Button { openWindow(id: WindowID.table, value: TableContent(text: text, piece: index, size: size)) } label: {
+                        grid(table, numeric, mode: .preview).allowsHitTesting(false).textSelection(.disabled).mask {
                             HStack(spacing: 0) {
                                 Rectangle()
                                 LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: TableFit.fade)
                             }
                         }
+                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.clickable).accessibilityLabel("Open table")
+                    .buttonStyle(.clickable).accessibilityHint("Opens the whole table in a window")
                 }
             }
         }
@@ -246,7 +249,7 @@ struct MarkdownView: View {
             // The header's ground, the first child: drawn under the cells and across the card's padding.
             PardnerColor.tableHead
             ForEach(table.rows.indices, id: \.self) { r in
-                ForEach(0..<table.columns, id: \.self) { c in cell(table, r, c, tabular: numeric[c]) }
+                ForEach(0..<table.columns, id: \.self) { c in cell(table, r, c, tabular: numeric[c], inert: mode == .preview) }
                 if r < table.rows.count - 1 { Rectangle().fill(PardnerColor.line).frame(height: 1) }
             }
             // A preview's footer for each count of columns it may leave out: the layout places the one that is true.
@@ -334,8 +337,8 @@ struct TableFit: Layout {
     /// The width of a preview's fade at its right edge, which the last column drawn stays clear of.
     static let fade: CGFloat = 24
     /// The room above a preview's footer and under it.
-    private static let footerAbove: CGFloat = 2
-    private static let footerBelow: CGFloat = 10
+    static let footerAbove: CGFloat = 2
+    static let footerBelow: CGFloat = 10
     static let spacing: CGFloat = 16
     static let rowSpacing: CGFloat = 0
     /// A row is at least this high, its cells centred; one that wraps takes its tallest cell and 12 points more (`rowPadding` each side).
