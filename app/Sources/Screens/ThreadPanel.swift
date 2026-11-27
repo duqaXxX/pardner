@@ -31,7 +31,7 @@ struct ThreadPanel: View {
         let _ = redraw // read, so that a change draws the day words again
         let queued = thread.queued
         // The day word before the root and each later entry that opens a day, a bot's answer by the time of its first part.
-        let rows = ThreadRows.build(thread, isSystem: { model.isSystemEvent($0, bots: botDevices) })
+        let rows = ThreadRows.build(thread, isSystem: { model.isSystemEvent($0, bots: botDevices) }, isOpen: OpenBlocks.shared.isOpen)
         let days = Naming.dayLabels([thread.root?.time] + rows.map(\.time), now: Date(), calendar: .current)
         VStack(spacing: 0) {
             HStack(spacing: PardnerMetrics.gap) {
@@ -88,7 +88,7 @@ struct ThreadPanel: View {
                                     foldRow(f, indent: 0)
                                 }
                             case .fold(let f): foldRow(f)
-                            case .body(let l, let i): LineBodyRow(line: l, index: i, stack: ThreadRow.stack)
+                            case .body(let l, let i): LineBodyRow(line: l, index: i, stack: ThreadRow.stack, place: place)
                             }
                         }
                         .padding(.top, row.offset)
@@ -192,7 +192,7 @@ struct AnswerRow: View {
                     .designLines()
                 }
                 // Read at each part that reaches it: a structure half written is drawn half written until a later part (#73, 2.1).
-                MarkdownView(text: answer.shown, copy: { Clipboard.copy(whole) }).designLines()
+                MarkdownView(text: answer.shown, copy: { Clipboard.copy(whole) }, foldKey: LongBlock.key(of: answer)).designLines()
                     .frame(maxWidth: PardnerMetrics.answerWidth, alignment: .leading)
                 if writing && headless {
                     Text("Writing…").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)

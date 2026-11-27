@@ -442,7 +442,13 @@ export class ClaudeSession implements AgentSession {
           // After the records the SDK delivered before it asked (as a hook's input is), so the
           // call's start is on the events when the request names it.
           await this.#inChain();
-          const request = toRequest(toolName, input, context, (id) => this.#translator.started(id));
+          const request = toRequest(
+            toolName,
+            input,
+            context,
+            (id) => this.#translator.started(id),
+            (name) => this.#translator.verbOf(name),
+          );
           if (request.type === "question") {
             return questionResult(await requests.question(request, context.signal), input);
           }

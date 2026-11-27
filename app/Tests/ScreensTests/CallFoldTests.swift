@@ -62,7 +62,7 @@ private struct Session {
     mutating func footer() { put(1, bot, ["thread": prompt.hex, "say": "footer", "markdown": "4s"]) }
 
     var thread: MessageThread { model.channels[channel]!.threads[prompt.hex]! }
-    var rows: [ThreadRow] { ThreadRows.build(thread, isSystem: { _ in false }) }
+    var rows: [ThreadRow] { ThreadRows.build(thread, isSystem: { _ in false }, isOpen: { _ in true }) }
 }
 
 /// What a row is, in one word, so that a run's shape reads at a glance.
@@ -300,15 +300,15 @@ final class CallFoldTests: XCTestCase {
         s.text("The daemon's own line.")
         s.call("Bash: running", status: "in_progress")
         s.text("Another.")
-        let rows = ThreadRows.build(s.thread, isSystem: { _ in true })
+        let rows = ThreadRows.build(s.thread, isSystem: { _ in true }, isOpen: { _ in true })
         XCTAssertEqual(shape(rows), ["fold(1) Read 1 file", "message", "line Bash: running", "message"])
         XCTAssertEqual(rows.map(\.showsHead), [true, false, false, false])
         XCTAssertEqual(rows.map(\.gapAbove), [PardnerMetrics.messageGap, 8, 8, 8], "a system event under a call, as a text is")
-        let plain = ThreadRows.build(s.thread, isSystem: { _ in false })
+        let plain = ThreadRows.build(s.thread, isSystem: { _ in false }, isOpen: { _ in true })
         XCTAssertEqual(plain.map(\.gapAbove)[1], 8)
         var t = Session()
         t.text("One.")
-        let card = ThreadRows.build(t.thread, isSystem: { _ in true })
+        let card = ThreadRows.build(t.thread, isSystem: { _ in true }, isOpen: { _ in true })
         XCTAssertEqual(card.map(\.gapAbove), [PardnerMetrics.cardGap], "under no call a head-less row keeps the card gap")
     }
 

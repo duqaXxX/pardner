@@ -702,6 +702,12 @@ export type SessionEvent =
       /** The input as the agent sent it. */
       readonly input: Readonly<Record<string, unknown>>;
       readonly parentCallId: string | null;
+      /**
+       * The agent's own words for the tool when they are not its name (a tool of a server the
+       * terminal names by server and tool); the call's title opens with them. Absent when the
+       * name is what the terminal shows.
+       */
+      readonly verb?: string;
     }
   | {
       readonly type: "call_ended";
@@ -965,6 +971,8 @@ export interface PermissionRequest {
   /** The agent's own sentence for the request, when it writes one. */
   readonly title: string | null;
   readonly description: string | null;
+  /** The agent's own words for the tool when they are not its name, as `call_started.verb`. */
+  readonly verb?: string;
 }
 
 export type PermissionAnswer =

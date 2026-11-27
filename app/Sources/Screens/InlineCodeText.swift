@@ -9,6 +9,8 @@ import SwiftUI
 struct InlineCodeText: View {
     /// The text with its code spans' fonts set; a run that carries a `backgroundColor` is a code span, and that colour its ground.
     let text: AttributedString
+    /// The bot's `@name` a person's message opens with, drawn as its label before the text (`MentionedText`).
+    var mention: String?
 
     /// How far a span's ground reaches beyond the room it holds: above and below its text, and at each side on top of the padding.
     static let edge: CGFloat = 1
@@ -94,21 +96,26 @@ struct InlineCodeText: View {
     var body: some View {
         let pieces = Self.pieces(text)
         Group {
-            if pieces.allSatisfy({ $0.ground == nil }) {
+            if mention == nil, pieces.allSatisfy({ $0.ground == nil }) {
                 Text(text)
             } else {
-                pieces.map { piece in
+                let body = pieces.map { piece in
                     piece.ground.map { Text(piece.text).customAttribute(CodeRun(ground: $0)) } ?? Text(piece.text)
                 }
                 .reduce(Text(verbatim: ""), +)
-                .backgroundPreferenceValue(Text.LayoutKey.self) { layouts in
-                    GeometryReader { proxy in
-                        ForEach(Array(Self.grounds(layouts, in: proxy).enumerated()), id: \.offset) { _, box in
-                            RoundedRectangle(cornerRadius: PardnerMetrics.codeRadius).fill(box.ground)
-                                .frame(width: box.rect.width, height: box.rect.height).position(x: box.rect.midX, y: box.rect.midY)
+                (mention.map { MentionedText.lead($0, beforeCode: pieces.first?.ground != nil) + body } ?? body)
+                    .backgroundPreferenceValue(Text.LayoutKey.self) { layouts in
+                        GeometryReader { proxy in
+                            ForEach(Array(Self.grounds(layouts, in: proxy).enumerated()), id: \.offset) { _, box in
+                                RoundedRectangle(cornerRadius: PardnerMetrics.codeRadius).fill(box.ground)
+                                    .frame(width: box.rect.width, height: box.rect.height).position(x: box.rect.midX, y: box.rect.midY)
+                            }
+                            ForEach(Array(MentionedText.grounds(layouts, in: proxy).enumerated()), id: \.offset) { _, rect in
+                                RoundedRectangle(cornerRadius: MentionedText.radius).fill(PardnerColor.mentionBg)
+                                    .frame(width: rect.width, height: rect.height).position(x: rect.midX, y: rect.midY)
+                            }
                         }
                     }
-                }
             }
         }
         .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)

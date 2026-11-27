@@ -47,13 +47,12 @@ final class DesignSystemTests: XCTestCase {
         XCTAssertNotEqual(Tokens.pairs["select"]?.light, Tokens.pairs["hover"]?.light, "the band of the open thread differs from the one under the pointer")
     }
 
-    /// The dark values the pass adds or keeps: containers and code on the grounds of the sketch, the mention as the dark theme draws it today.
+    /// The dark values the pass adds or keeps: containers and code on the grounds of the sketch, and the mention as a gold wash with light gold text (the first hand test's softer one).
     func testTheDarkValuesOfTheReadingPass() {
         let want = ["bg": "#1B1B1B", "panel": "#1B1B1B", "side": "#161616", "code-bg": "#232323", "container": "#232323", "code-inline": "#2A2A2A",
-                    "table-head": "#202020", "mention-bg": "#E9B04F", "mention-text": "#2A1B05", "select": "rgba(127,169,240,.1)", "hover": "rgba(255,255,255,.04)"]
+                    "table-head": "#202020", "mention-bg": "rgba(233,176,79,.2)", "mention-text": "#F0C987", "select": "rgba(127,169,240,.1)", "hover": "rgba(255,255,255,.04)"]
         for (name, hex) in want { XCTAssertEqual(Tokens.pairs[name]?.dark, RGBA(hex), name) }
-        XCTAssertEqual(Tokens.pairs["mention-bg"]?.dark, Tokens.pairs["agent"]?.dark, "the dark mention is the agent's gold as before")
-        XCTAssertEqual(Tokens.pairs["mention-text"]?.dark, Tokens.pairs["agent-ink"]?.dark)
+        XCTAssertEqual(Tokens.pairs["mention-text"]?.dark, Tokens.pairs["agent-text"]?.dark, "the dark mention reads in the agent's soft gold text")
     }
 
     /// The dark theme is not touched by the sidebar's tokens: each takes the dark value of the window's token of its role.
@@ -154,6 +153,10 @@ final class LayoutMetricsTests: XCTestCase {
         XCTAssertEqual([PardnerMetrics.paragraphGap, PardnerMetrics.blockGap, PardnerMetrics.itemGap, PardnerMetrics.messageGap], [10, 12, 4, 20])
         XCTAssertEqual([PardnerMetrics.headingBefore, PardnerMetrics.headingAfter], [16, 6])
         XCTAssertEqual([PardnerMetrics.listIndent, PardnerMetrics.quoteBar, PardnerMetrics.quotePad, PardnerMetrics.toolIndent, PardnerMetrics.toolGuide], [20, 2, 12, 16, 1])
+    }
+
+    func testAPreviewsBodyHasItsRoom() {
+        XCTAssertEqual([PardnerMetrics.previewPadX, PardnerMetrics.previewPadY], [12, 6])
     }
 
     func testTheHeadingsAndTheToolRowsHaveTheirOwnScale() {

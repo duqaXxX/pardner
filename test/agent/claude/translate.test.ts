@@ -732,9 +732,60 @@ test("a failed edit changed no file", () => {
   const [ended] = of(perRecord("edit-write")[137] ?? [], "call_ended");
   assert.equal(ended?.isError, true);
   assert.equal(ended?.fileChange, null);
+  // The words of the terminal's failed Edit, with no wrapper (CLI 2.1.321, measured 2026-11-10).
+  assert.equal(ended?.output, "String to replace not found in file.\nString: 2\tbeta");
+});
+
+// `subagent-message-bypass`, recorded on 2.1.316 with the TypeScript SDK 0.3.316 (#135): a failed
+// SendMessage whose result the SDK wraps in the same tag.
+test("a failed call's output crosses without the SDK's tag, in every recording", () => {
+  const [ended] = of(perRecord("subagent-message-bypass")[65] ?? [], "call_ended");
+  assert.equal(ended?.isError, true);
+  assert.match(ended?.output ?? "", /^InputValidationError: SendMessage failed/);
+  assert.doesNotMatch(ended?.output ?? "", /tool_use_error/);
+  for (const name of sdkRecordings()) {
+    for (const event of of(events(name), "call_ended")) {
+      assert.doesNotMatch(event.output ?? "", /tool_use_error/, name);
+    }
+  }
+});
+
+test("the tag is stripped from a failed call's whole wrapper, in a string or a list of text parts", () => {
+  const ended = (content: unknown, isError = true) => {
+    const record = {
+      type: "user",
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "t1", content, is_error: isError }],
+      },
+    };
+    return of(new Translator().translate(record), "call_ended")[0]?.output;
+  };
+  assert.equal(ended("<tool_use_error>Words</tool_use_error>"), "Words");
+  assert.equal(ended("<tool_use_error>Words</tool_use_error>\n"), "Words");
   assert.equal(
-    ended?.output,
-    "<tool_use_error>String to replace not found in file.\nString: 2\tbeta</tool_use_error>",
+    ended([{ type: "text", text: "<tool_use_error>Listed</tool_use_error>" }]),
+    "Listed",
+  );
+  assert.equal(
+    ended([
+      { type: "text", text: "<tool_use_error>First" },
+      { type: "text", text: "Second</tool_use_error>" },
+    ]),
+    "First\nSecond",
+  );
+  // Left as it is: no closing tag, text after the closing tag, a tag inside the words, a blank
+  // wrapper, and a successful output that starts with the tag.
+  assert.equal(ended("<tool_use_error>Cut off here"), "<tool_use_error>Cut off here");
+  assert.equal(
+    ended("<tool_use_error>Words</tool_use_error> more"),
+    "<tool_use_error>Words</tool_use_error> more",
+  );
+  assert.equal(ended("plain <tool_use_error> text"), "plain <tool_use_error> text");
+  assert.equal(ended("<tool_use_error></tool_use_error>"), "<tool_use_error></tool_use_error>");
+  assert.equal(
+    ended("<tool_use_error>Words</tool_use_error>", false),
+    "<tool_use_error>Words</tool_use_error>",
   );
 });
 
@@ -1926,4 +1977,73 @@ test("only a base64 source of an image type is an image", () => {
     { mediaType: "image/webp", data: Uint8Array.from([0x89, 0x50, 0x4e, 0x47]) },
   ]);
   assert.deepEqual((resultOf("plain")[0] as EventOf<"call_ended">).images, []);
+});
+
+// An MCP tool's call is worded as the terminal words it (Claude Code 2.1.332, measured 2026-11-27:
+// `<server's name> - <tool> (MCP)`). The server names are those of the init of `read-image`
+// (Claude Code 2.1.330, TypeScript SDK 0.3.330, `SDKSystemMessage.mcp_servers[].name`), since
+// the call's own name carries them normalized.
+
+/** The events of a call to `toolName` made after the init of `read-image`, which lists the servers. */
+function mcpCall(toolName: string): EventOf<"call_started"> {
+  const records = sdkRecords("read-image");
+  const init = record("read-image", 5);
+  const read = structuredClone(record("read-image", 41));
+  const block = (read.message as { content: JsonObject[] }).content[0] as JsonObject;
+  block.name = toolName;
+  const [event] = of(translated([init, read]), "call_started");
+  assert.ok(event, `no call in ${records.length} records`);
+  return event;
+}
+
+test("a call to a claude.ai connector's tool is worded by the connector's name", () => {
+  assert.equal(
+    mcpCall("mcp__claude_ai_Example_Docs__batch").verb,
+    "claude.ai Example Docs - batch (MCP)",
+  );
+});
+
+test("a call to a plugin's tool is worded by the plugin server's name", () => {
+  assert.equal(
+    mcpCall("mcp__plugin_example-plugin_example__resolve-library-id").verb,
+    "plugin:example-plugin:example - resolve-library-id (MCP)",
+  );
+});
+
+test("a tool name that holds the separator keeps all of it", () => {
+  assert.equal(
+    mcpCall("mcp__claude_ai_Example_Docs__list__all").verb,
+    "claude.ai Example Docs - list__all (MCP)",
+  );
+});
+
+test("a call to a server the init did not list is worded by the name as written", () => {
+  assert.equal(mcpCall("mcp__other_server__go").verb, "other_server - go (MCP)");
+});
+
+test("a call that names no server and no tool keeps its name", () => {
+  for (const name of ["mcp__", "mcp__server", "mcp__server__", "Read"]) {
+    assert.equal(mcpCall(name).verb, undefined, name);
+  }
+});
+
+test("the daemon's own server keeps the tool's name", () => {
+  assert.equal(mcpCall("mcp__pardner__share_file").verb, undefined);
+});
+
+test("a call before any init is worded by the name as written", () => {
+  const [event] = of(
+    translated([
+      {
+        ...structuredClone(record("read-image", 41)),
+        message: {
+          content: [
+            { type: "tool_use", id: "t-1", name: "mcp__claude_ai_Example_Docs__batch", input: {} },
+          ],
+        },
+      },
+    ]),
+    "call_started",
+  );
+  assert.equal(event?.verb, "claude_ai_Example_Docs - batch (MCP)");
 });

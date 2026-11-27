@@ -271,7 +271,9 @@ a release with no notice, so it is the first place to look when a release misbeh
 | `SDKStatusMessage` | `permissionMode` | field | translate.ts: status | reference | none |
 | `SDKStatusMessage` | `status` | field | translate.ts: status | reference | P22 |
 | `SDKSystemMessage` | `claude_code_version` | field | translate.ts: init | reference | P1 |
+| `SDKSystemMessage` | `mcp_servers` | field | translate.ts: init | reference | none |
 | `SDKSystemMessage` | `session_id` | field | translate.ts: init | reference | none |
+| `SDKSystemMessage.mcp_servers[]` | `name` | field | translate.ts: init | reference | none |
 | `SDKTaskNotificationMessage` | `status` | field | translate.ts: taskNotification | reference | none |
 | `SDKTaskNotificationMessage` | `summary` | field | translate.ts: taskNotification | reference | none |
 | `SDKTaskNotificationMessage` | `task_id` | field | translate.ts: taskNotification | reference | none |

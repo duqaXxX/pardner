@@ -304,3 +304,10 @@ test("the core sets `agent` from the task's kind, for an agent that is not Claud
   assert.deepEqual([last("c1")?.agent, last("c1")?.task], ["subagent work", true]);
   assert.equal(last("c2")?.agent, null);
 });
+
+test("a call is titled by the agent's own words for its tool, then by its first text input", async () => {
+  const [first] = await cardsOf(call("lookup", { query: "zod" }, { verb: "Docs - lookup (tool)" }));
+  assert.equal(first?.title, "Docs - lookup (tool): zod");
+  const [bare] = await cardsOf(call("lookup", {}, { verb: "Docs - lookup (tool)" }));
+  assert.equal(bare?.title, "Docs - lookup (tool)");
+});

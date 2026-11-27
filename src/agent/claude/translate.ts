@@ -25,6 +25,7 @@ import type {
   TaskOutcome,
   TurnEnding,
 } from "../seam.ts";
+import { mcpVerb } from "./mcp.ts";
 import { integer, number, string, strings, type WireRecord, words } from "./wire.ts";
 
 // Each task_type (measured on Claude Code 2.1.280: `local_bash` for a background command,
@@ -87,6 +88,8 @@ interface Memory {
    * names no prompt the daemon sent (#270).
    */
   woken: string | null;
+  /** The names of the MCP servers the last `init` listed: a call's tool name carries them normalized. */
+  servers: string[];
 }
 
 // Runs remembered for a notification that may never be folded (one a turn of its own reports).
@@ -168,24 +171,45 @@ function unannounced(memory: Memory, messageId: string) {
   return !memory.streamed.has(messageId) && !memory.open && !memory.unnamed;
 }
 
-function callStarted(block: WireRecord, parentCallId: string | null): SessionEvent[] {
+function callStarted(
+  memory: Memory,
+  block: WireRecord,
+  parentCallId: string | null,
+): SessionEvent[] {
   const callId = string(block.id);
   const toolName = string(block.name);
   if (callId === null || toolName === null) return [];
   const input = isRecord(block.input) ? block.input : {};
-  return [{ type: "call_started", callId, toolName, input, parentCallId }];
+  const verb = mcpVerb(toolName, memory.servers);
+  return [
+    { type: "call_started", callId, toolName, input, parentCallId, ...(verb !== null && { verb }) },
+  ];
+}
+
+// The SDK wraps the words of a failed call in this tag (recorded: `edit-write.jsonl`,
+// `subagent-message-bypass.jsonl`); the terminal shows the words alone (Claude Code 2.1.321,
+// measured 2026-11-10, #163). Only a whole wrapper is stripped, and only when it holds words.
+const TOOL_USE_ERROR = /^<tool_use_error>([\s\S]*)<\/tool_use_error>\s*$/;
+
+function unwrapped(text: string): string {
+  const inner = TOOL_USE_ERROR.exec(text)?.[1];
+  return inner === undefined || inner.trim() === "" ? text : inner;
 }
 
 /**
  * The text of a tool result, whatever its form: a string, the text parts of a list a line each,
- * or the type of a single object (a server tool's result). Null for anything else.
+ * or the type of a single object (a server tool's result). Null for anything else. A failed
+ * call's words come without the SDK's `tool_use_error` tag.
  */
-function resultText(content: unknown): string | null {
-  if (typeof content === "string") return content;
+function resultText(content: unknown, isError: boolean): string | null {
+  const text = (value: string) => (isError ? unwrapped(value) : value);
+  if (typeof content === "string") return text(content);
   if (Array.isArray(content)) {
-    return records(content)
-      .map((part) => string(part.text) ?? "")
-      .join("\n");
+    return text(
+      records(content)
+        .map((part) => string(part.text) ?? "")
+        .join("\n"),
+    );
   }
   if (isRecord(content)) return string(content.type) ?? "";
   return null;
@@ -224,7 +248,7 @@ function callEnded(
       type: "call_ended",
       callId,
       isError,
-      output: resultText(block.content),
+      output: resultText(block.content, isError),
       images: resultImages(block.content),
       fileChange: change,
       model,
@@ -267,7 +291,7 @@ function assistant(memory: Memory, record: WireRecord): SessionEvent[] {
   }
   for (const block of blocks) {
     if (block.type === "tool_use" || block.type === "server_tool_use") {
-      events.push(...callStarted(block, parentCallId));
+      events.push(...callStarted(memory, block, parentCallId));
     } else if (block.type === "tool_result") {
       events.push(...callEnded(block, parentCallId, block.is_error === true, null));
     } else if (block.type === "advisor_tool_result") {
@@ -429,7 +453,7 @@ function user(memory: Memory, record: WireRecord): SessionEvent[] {
   const model = results.length === 1 ? agentModel(memory, record.tool_use_result) : null;
   const events: SessionEvent[] = [];
   for (const block of blocks) {
-    if (block.type === "tool_use") events.push(...callStarted(block, parentCallId));
+    if (block.type === "tool_use") events.push(...callStarted(memory, block, parentCallId));
     else if (block.type === "tool_result") {
       events.push(...callEnded(block, parentCallId, block.is_error === true, change, model));
     }
@@ -439,7 +463,8 @@ function user(memory: Memory, record: WireRecord): SessionEvent[] {
 
 // System records.
 
-function init(_memory: Memory, record: WireRecord): SessionEvent[] {
+function init(memory: Memory, record: WireRecord): SessionEvent[] {
+  memory.servers = records(record.mcp_servers).flatMap((server) => string(server.name) ?? []);
   return [
     {
       type: "session_started",
@@ -814,6 +839,7 @@ export class Translator {
     agents: new Set(),
     called: new Set(),
     woken: null,
+    servers: [],
   };
 
   /** The daemon is sending a prompt under `promptId`: its replay will be `prompt_taken`. */
@@ -833,6 +859,11 @@ export class Translator {
       else if (event.type === "call_ended") this.#memory.called.delete(event.callId);
     }
     return events;
+  }
+
+  /** The terminal's words for a call to `toolName`, or null (`mcpVerb`), by the servers of the last `init`. */
+  verbOf(toolName: string): string | null {
+    return mcpVerb(toolName, this.#memory.servers);
   }
 
   /** Whether a `call_started` of `callId` has been emitted and its `call_ended` has not. */

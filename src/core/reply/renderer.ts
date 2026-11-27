@@ -53,14 +53,18 @@ function line(
   };
 }
 
-/** `Name: first non-empty string argument`, whatever the tool. */
-export function taskTitle(name: string, input: Readonly<Record<string, unknown>>): string {
+/** `Name: first non-empty string argument`, whatever the tool; `verb`, the agent's words for it, stands for the name. */
+export function taskTitle(
+  name: string,
+  input: Readonly<Record<string, unknown>>,
+  verb = name,
+): string {
   for (const value of Object.values(input)) {
     if (typeof value === "string" && !blank(value)) {
-      return oneLine(`${name}: ${value}`, TITLE_LIMIT);
+      return oneLine(`${verb}: ${value}`, TITLE_LIMIT);
     }
   }
-  return name;
+  return verb;
 }
 
 /** A result's text as a line of its call: its first line that says something, or null. */
@@ -731,7 +735,7 @@ export class TurnRenderer {
   async #callStarted(event: EventOf<"call_started">): Promise<void> {
     const title =
       this.#previews.described(event.toolName, event.input) ??
-      taskTitle(event.toolName, event.input);
+      taskTitle(event.toolName, event.input, event.verb);
     const parent = event.parentCallId;
     const root = parent === null ? null : (this.#rootOf.get(parent) ?? parent);
     const file = this.#previews.file(event.toolName, event.input);

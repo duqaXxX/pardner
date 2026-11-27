@@ -66,7 +66,7 @@ private struct Session {
         put(4, bot, ["thread": prompt.hex, "markdown": markdown], re: MessageRef(device: bot, name: Data(repeating: name, count: 16)))
     }
 
-    var rows: [ThreadRow] { ThreadRows.build(model.channels[channel]!.threads[prompt.hex]!, isSystem: { model.isSystemEvent($0, bots: bots) }) }
+    var rows: [ThreadRow] { ThreadRows.build(model.channels[channel]!.threads[prompt.hex]!, isSystem: { model.isSystemEvent($0, bots: bots) }, isOpen: { _ in true }) }
 }
 
 final class ThreadColumnTests: XCTestCase {
@@ -110,6 +110,12 @@ final class ThreadColumnTests: XCTestCase {
         XCTAssertEqual(ToolTitle.parts(cut, path: path, folder: folder).subject, relative, "the cut title names the path by its beginning")
         XCTAssertEqual(ToolTitle.parts("Read: " + path, path: path, folder: folder).subject, relative)
         XCTAssertEqual(ToolTitle.parts("Read: /srv/example/other/file.swift…", path: path, folder: folder).subject, "/srv/example/other/file.swift…", "a title that is no beginning of the path")
+    }
+
+    func testAnImagesReadIsWrittenFromTheFolderLikeAnyOther() {
+        // The daemon names the file of a Read of an image as of any Read (`path`), so the title's subject is cut the same way (#163, 4).
+        let path = "/srv/example/demo/chart.png"
+        XCTAssertEqual(ToolTitle.parts("Read: \(path)", path: path, folder: "/srv/example/demo").subject, "chart.png")
     }
 
     func testATitleSplitsIntoItsVerbAndItsSubject() {
@@ -213,6 +219,7 @@ final class ThreadColumnTests: XCTestCase {
         XCTAssertEqual(Markup.plain("run `ls -la` here"), "run ls -la here")
         XCTAssertEqual(Markup.plain("see [the guide](https://example.com/guide) now"), "see the guide now")
         XCTAssertEqual(Markup.plain("**Counts** and `x` and [t](u)"), "Counts and x and t")
+        XCTAssertEqual(Markup.plain("**Counts** (In `/srv/example/demo`):"), "Counts (In /srv/example/demo):", "an agent's reply line as #163 saw it")
     }
 
     func testPlainWordsAndUnclosedMarkupComeBackAsWritten() {
@@ -354,6 +361,19 @@ final class ThreadColumnTests: XCTestCase {
         XCTAssertLessThan(height(row([bot])), height(row([])), "the row is the compact one, not a full message with its head")
     }
 
+    /// A long fence in a bot's notice folds in the compact row as it does in the conversation (the long block rule).
+    @MainActor
+    func testALongFenceInACompactNoticeIsClosed() {
+        var s = Session()
+        s.typed("one")
+        let fence = "```\n" + (1...40).map { "line \($0)" }.joined(separator: "\n") + "\n```"
+        s.say("notice", fence)
+        s.publishProfile()
+        let notice = s.model.channels[s.channel]!.threads[s.prompt.hex]!.items.compactMap { item -> Message? in if case .message(let m) = item, m.isNotice { m } else { nil } }[0]
+        let folded = height(MessageRow(model: s.model, icons: [:], message: notice, mark: .thread, compactNotices: true).environment(\.botDevices, [bot]))
+        XCTAssertLessThan(folded, height(SystemEvent(text: notice.shown, indent: 0)), "the fence is closed to its head: shorter than the 40 lines whole")
+    }
+
     func testASingleUnreadableMessageIsAHeadWithTheMessageGap() {
         var s = Session()
         s.typed("one")
@@ -477,7 +497,7 @@ final class ThreadColumnTests: XCTestCase {
             s.answer()
             s.say("footer", footer)
             let thread = s.model.channels[s.channel]!.threads[s.prompt.hex]!
-            XCTAssertEqual(ThreadRows.build(thread, isSystem: { _ in false }).first?.duration, footer.isEmpty ? nil : footer, "the call's row carries it")
+            XCTAssertEqual(ThreadRows.build(thread, isSystem: { _ in false }, isOpen: { _ in true }).first?.duration, footer.isEmpty ? nil : footer, "the call's row carries it")
             return height(Answered(model: s.model, icons: [:], thread: thread, prompt: thread.root!))
         }
         XCTAssertGreaterThan(drawn("3s"), drawn(""), "the length stands under the answer")

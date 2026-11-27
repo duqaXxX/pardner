@@ -1,4 +1,4 @@
-// Draws a bot's text: as `CodeSpans.styled` draws a text the bounds refuse, else one row per piece of `MarkdownBlocks` in a
+// Draws a message's text, a bot's or a person's: as `CodeSpans.styled` draws a text the bounds refuse, else one row per piece of `MarkdownBlocks` in a
 // flat stack, never a view nested per level (#73, step B2, design 2.3). A kept link carries `pardner-link:<n>`, so the only way to
 // an address is this view's own `OpenURLAction`, which asks before anything opens (2.4).
 import AppKit
@@ -53,10 +53,16 @@ struct MarkdownView: View {
     let text: String
     /// What the row's `Copy` does; a piece with a link offers it as its own menu (design 2.7).
     var copy: (() -> Void)?
+    /// The bot's `@name` a person's message opens with: a chip before the first paragraph's text, or on a line of its own when the text opens with
+    /// anything else (a heading, a list, a block) or with a link, which AppKit draws and a chip cannot join.
+    var mention: String?
     /// The size of a paragraph and of a table's cells; a system event's is smaller than a text's.
     var size: CGFloat = 14
     /// The ground of an inline code span: `surface` on the selected band, where `codeInline` would blend with it (#174, section 8).
     var codeGround = PardnerColor.codeInline
+    /// The message or answer the text is of, which names its code blocks for their open state (`LongBlock.key`); nil draws every block whole.
+    var foldKey: String?
+    var blocks: OpenBlocks = .shared
 
     @State private var confirming: LinkConfirmation?
     /// One list step (the bullet hangs at its left, the text starts one step in), and one quote bar with the room between it and its text.
@@ -82,13 +88,24 @@ struct MarkdownView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if case .read(let pieces, _) = MarkdownBlocks.read(text) {
+        // A person's text Markdown reads as no piece (a link reference definition, an HTML comment) is drawn as typed, so that the chip does not stand alone.
+        if case .read(let pieces, _) = MarkdownBlocks.read(text), !(pieces.isEmpty && mention != nil) {
+            let joined = pieces.first.map(Self.opens) ?? false
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(pieces.indices, id: \.self) { row(pieces[$0], gaps: Self.gaps(from: $0 > 0 ? pieces[$0 - 1] : nil, to: pieces[$0])) }
+                if let mention, !joined { MentionedText(mention: mention).padding(.bottom, PardnerMetrics.paragraphGap) }
+                ForEach(pieces.indices, id: \.self) {
+                    row(pieces[$0], gaps: Self.gaps(from: $0 > 0 ? pieces[$0 - 1] : nil, to: pieces[$0]), mention: $0 == 0 && joined ? mention : nil, index: $0)
+                }
             }
         } else {
-            InlineCodeText(text: CodeSpans.styled(text, ground: codeGround))
+            InlineCodeText(text: CodeSpans.styled(text, ground: codeGround), mention: mention)
         }
+    }
+
+    /// Whether a mention can stand in `piece`'s first line: a paragraph at the column holding no link.
+    static func opens(_ piece: MarkdownBlocks.Piece) -> Bool {
+        guard piece.depth == 0, piece.marker == nil, case .paragraph(let text) = piece.body else { return false }
+        return !text.runs.contains { $0.link != nil }
     }
 
     /// The space above piece `b` after piece `a`, the first rule that holds (FA 3.4, the reading pass): before a heading 16, after one 6, around a code block, a
@@ -117,7 +134,7 @@ struct MarkdownView: View {
         return (gap, (0..<b.bars).map { $0 < a.bars ? 0 : gap })
     }
 
-    private func row(_ piece: MarkdownBlocks.Piece, gaps: (content: CGFloat, bars: [CGFloat])) -> some View {
+    private func row(_ piece: MarkdownBlocks.Piece, gaps: (content: CGFloat, bars: [CGFloat]), mention: String?, index: Int) -> some View {
         let lists = max(piece.depth - piece.bars, 0)
         return HStack(alignment: .top, spacing: 0) {
             ForEach(0..<piece.bars, id: \.self) { bar in
@@ -128,18 +145,18 @@ struct MarkdownView: View {
                 // A marker such as `100.` keeps its width and pushes the text, where a fixed frame would cut it.
                 Text(verbatim: piece.marker ?? "").fixedSize().padding(.trailing, 6).frame(minWidth: Self.listStep, alignment: .leading).padding(.top, gaps.content)
             }
-            body(of: piece.body).padding(.top, gaps.content)
+            body(of: piece.body, mention: mention, index: index).padding(.top, gaps.content)
         }
     }
 
     /// A run of inline text: SwiftUI's `Text`, or `LinkText` when it holds a kept link, since only AppKit gives a link the pointing hand (2.4).
     @ViewBuilder private func inline(_ text: AttributedString, size: CGFloat, weight: InterWeight, color: Color = PardnerColor.text, codeSize: CGFloat = 12.5,
-                                     tabular: Bool = false, lineSpacing: CGFloat = MessageRow.lineSpacing) -> some View {
+                                     tabular: Bool = false, lineSpacing: CGFloat = MessageRow.lineSpacing, mention: String? = nil) -> some View {
         let text = Self.grounded(text, on: codeGround)
         if text.runs.contains(where: { $0.link != nil }) {
             LinkText(text: text, size: size, weight: weight, color: color, codeSize: codeSize, lineSpacing: lineSpacing, tabular: tabular, open: { open($0) }, copy: copy)
         } else {
-            InlineCodeText(text: MarkdownFonts.styled(text, size: size, weight: weight, tabular: tabular))
+            InlineCodeText(text: MarkdownFonts.styled(text, size: size, weight: weight, tabular: tabular), mention: mention)
         }
     }
 
@@ -172,16 +189,16 @@ struct MarkdownView: View {
         level == 1 ? (PardnerFont.headingSize1, PardnerFont.headingLine1) : (PardnerFont.headingSize, PardnerFont.headingLine)
     }
 
-    @ViewBuilder private func body(of body: MarkdownBlocks.Body) -> some View {
+    @ViewBuilder private func body(of body: MarkdownBlocks.Body, mention: String?, index: Int) -> some View {
         switch body {
         case .paragraph(let text):
-            inline(text, size: size, weight: .regular)
+            inline(text, size: size, weight: .regular, mention: mention)
         case .heading(let level, let text):
             let (size, line) = Self.heading(level)
             let spacing = MessageRow.spacing(size: size, line: line)
             inline(text, size: size, weight: .semibold, lineSpacing: spacing).lineSpacing(spacing)
         case .code(let language, let code):
-            CodeBlock(language: language, code: code)
+            CodeBlock(language: language, code: code, key: foldKey.map { LongBlock.key(message: $0, block: index) }, blocks: blocks)
         case .table(let table):
             // The table takes the column's width, its cells wrapping; a column that would fall under its floor sends it to the sideways scroll. A card
             // on `container` with a hairline border and a faint ground behind the header row, a column of numbers aligned right.
@@ -234,10 +251,13 @@ struct CodeBlock: View {
     let language: String?
     let code: String
     var copy: (String) -> Void = { Clipboard.copy($0) }
+    /// What the block's open state is kept by (`LongBlock.key`); nil draws it whole, as a file window's text is.
+    var key: String?
+    var blocks: OpenBlocks = .shared
 
     private static let shape = RoundedRectangle(cornerRadius: 8)
 
-    /// What the copy button does: copies the block's text as drawn, never its wrapped lines.
+    /// What the copy button does: copies the block's text as drawn, never its wrapped lines, and all of it when the block is closed.
     func copyCode() { copy(code) }
 
     private var named: Bool { language?.isEmpty == false }
@@ -250,6 +270,9 @@ struct CodeBlock: View {
     }
 
     var body: some View {
+        let total = LongBlock.count(of: code)
+        let open = key.map(blocks.isOpen) ?? true
+        let footer = key.flatMap { key in LongBlock.footer(total: total, open: open).map { (key, $0) } }
         VStack(alignment: .leading, spacing: 0) {
             if let language, named {
                 HStack(spacing: 0) {
@@ -260,9 +283,12 @@ struct CodeBlock: View {
                 .padding(.horizontal, 12).frame(height: 28)
             }
             // Without a header the corner button takes the room the text leaves at the right of its first line.
-            Text(verbatim: code).font(PardnerFont.code).textSelection(.enabled)
+            Text(verbatim: footer != nil && !open ? LongBlock.head(of: code) : code).font(PardnerFont.code).textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 12).padding(.trailing, named ? 12 : 34).padding(.top, named ? 2 : 12).padding(.bottom, 12)
+                .padding(.leading, 12).padding(.trailing, named ? 12 : 34).padding(.top, named ? 2 : 12).padding(.bottom, footer == nil ? 12 : 6)
+            if let (key, label) = footer {
+                LongBlockFooter(label: label, toggle: { blocks.toggle(key) }).padding(.leading, 12).padding(.bottom, 10)
+            }
         }
         .background(PardnerColor.codeBg, in: Self.shape)
         .overlay(Self.shape.strokeBorder(PardnerColor.line))
