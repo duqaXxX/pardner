@@ -49,7 +49,7 @@ struct FocusedScrollbar: ViewModifier {
         let shown = focus?.focused(pane) ?? true
         content
             .onScrollGeometryChange(for: Bool.self, of: { $0.contentSize.height > $0.containerSize.height }) { _, new in overflows = new }
-            // The vertical axis alone: a table's or a code block's own sideways scroll keeps its bar.
+            // The vertical axis alone: a code block's own sideways scroll keeps its bar, and a table's follows the pointer (`HoverScrollbar`).
             .scrollIndicators(shown ? .automatic : .never, axes: .vertical)
             .padding(.trailing, Self.margin(shown: shown, legacy: legacyStyle ?? legacy, overflows: overflows))
             // Plugging a mouse in or out changes the style, and with it whether the margin is owed.
@@ -61,4 +61,38 @@ struct FocusedScrollbar: ViewModifier {
 
 extension View {
     func focusedScrollbar(_ pane: PaneFocus.Pane, legacy: Bool? = nil) -> some View { modifier(FocusedScrollbar(pane: pane, legacyStyle: legacy)) }
+}
+
+/// A table's sideways scroll view that shows its bar while the pointer is over the table, or while the table is scrolling (a knob dragged out of the
+/// table keeps its bar). `.never` and not `.hidden`, as `FocusedScrollbar`; while a legacy bar is hidden over a table that overflows, its height stays
+/// as an empty margin under it, so that the table does not change height, nor move the rows below, when the bar appears. The hover covers the margin
+/// too, so its frame is the same in both states: the margin is the room the bar takes when it appears (17 points each, measured under the legacy style).
+struct HoverScrollbar: ViewModifier {
+    /// Whether the pointer is over the table; nil follows it (a test sets it, since a test process has no pointer).
+    var hovering: Bool?
+    /// The scroller style to assume; nil follows the system's (a test sets it, since a process cannot be put in the legacy style).
+    var legacyStyle: Bool?
+    @State private var hovered = false
+    @State private var scrolling = false
+    @State private var legacy = NSScroller.preferredScrollerStyle == .legacy
+    // `ViewThatFits` picks the scroll view only when the table does not fit, so the room is owed from the first frame.
+    @State private var overflows = true
+
+    func body(content: Content) -> some View {
+        let shown = hovering ?? (hovered || scrolling)
+        content
+            .onScrollGeometryChange(for: Bool.self, of: { $0.contentSize.width > $0.containerSize.width }) { _, new in overflows = new }
+            .onScrollPhaseChange { _, new in scrolling = new != .idle }
+            .scrollIndicators(shown ? .automatic : .never, axes: .horizontal)
+            .padding(.bottom, FocusedScrollbar.margin(shown: shown, legacy: legacyStyle ?? legacy, overflows: overflows))
+            .onHover { hovered = $0 }
+            // Plugging a mouse in or out changes the style, and with it whether the margin is owed.
+            .onReceive(NotificationCenter.default.publisher(for: NSScroller.preferredScrollerStyleDidChangeNotification)) { _ in
+                legacy = NSScroller.preferredScrollerStyle == .legacy
+            }
+    }
+}
+
+extension View {
+    func hoverScrollbar(hovering: Bool? = nil, legacy: Bool? = nil) -> some View { modifier(HoverScrollbar(hovering: hovering, legacyStyle: legacy)) }
 }
