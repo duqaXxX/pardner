@@ -215,6 +215,7 @@ final class ComposerModelTests: XCTestCase {
         type(c, "@mini dev fix the test")
         XCTAssertEqual(c.label, mini, "the longest name wins")
         XCTAssertEqual(c.text, "fix the test", "the rest stays as the text")
+        XCTAssertTrue(c.textRestored, "the rest is the Markdown the person typed: the field reads it back when it reads back as it was")
         XCTAssertFalse(c.picking)
         type(c, "@alpha again")
         XCTAssertEqual(c.label, mini, "one label per message: a second @name is text")
@@ -521,6 +522,17 @@ final class ComposerModelTests: XCTestCase {
         type(c, "second")
         await task?.value
         XCTAssertEqual(c.text, "second")
+    }
+
+    func testOnlyATextAFailureGivesBackIsMarkedRestored() async {
+        outcome = .notSaved
+        let c = composer()
+        type(c, "a **b**")
+        XCTAssertFalse(c.textRestored, "a typed text, or one the model takes from a suggestion, is as typed")
+        await send(c, "a **b**")
+        XCTAssertTrue(c.textRestored)
+        type(c, "a **b**!")
+        XCTAssertFalse(c.textRestored, "an edit makes it the person's again")
     }
 
     /// #107: a failed send gives the text back; selecting it all and typing `@` (one edit) opens the bot list as in an empty field.
