@@ -162,4 +162,87 @@ final class PaneFocusTests: XCTestCase {
         until { bar(hosting) == true }
         XCTAssertEqual(bar(hosting), true, "a view outside the main window (a preview, a test) has no pane to follow")
     }
+
+    // MARK: a table's sideways bar
+
+    private struct Wide: View {
+        let hovering: Bool
+        var body: some View {
+            ScrollView(.horizontal) { Color.clear.frame(width: 2000, height: 40) }.hoverScrollbar(hovering: hovering, legacy: true)
+        }
+    }
+
+    private func wideBar(hovering: Bool) -> Bool? {
+        _ = NSApplication.shared
+        let hosting = NSHostingView(rootView: Wide(hovering: hovering))
+        let window = NSWindow(contentRect: NSRect(x: -3000, y: -3000, width: 300, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        window.orderFront(nil)
+        defer { window.close() }
+        until { hosting.layoutSubtreeIfNeeded(); return ScrollHost.scrollView(in: hosting) != nil }
+        let expected = hovering
+        until { hosting.layoutSubtreeIfNeeded(); return ScrollHost.scrollView(in: hosting)?.hasHorizontalScroller == expected }
+        return ScrollHost.scrollView(in: hosting)?.hasHorizontalScroller
+    }
+
+    func testATablesSidewaysBarShowsWhileThePointerIsOverIt() {
+        XCTAssertEqual(wideBar(hovering: true), true)
+        XCTAssertEqual(wideBar(hovering: false), false, "the pointer is elsewhere: no bar")
+    }
+
+    /// The height a wide scroll view takes with `width` of content, the modifier assuming the legacy style whatever the process's. The overflow is
+    /// read once the scroll view has laid out, so the height is polled until it is `expecting`, or the deadline passes; nil takes the first layout.
+    private func wideHeight(hovering: Bool, content width: CGFloat, expecting: CGFloat? = nil) -> CGFloat {
+        _ = NSApplication.shared
+        let view = ScrollView(.horizontal) { Color.clear.frame(width: width, height: 40) }.hoverScrollbar(hovering: hovering, legacy: true).frame(width: 300)
+        let hosting = NSHostingView(rootView: view)
+        let window = NSWindow(contentRect: NSRect(x: -3000, y: -3000, width: 300, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        window.orderFront(nil)
+        defer { window.close() }
+        hosting.layoutSubtreeIfNeeded()
+        if let expecting { until { hosting.layoutSubtreeIfNeeded(); return abs(hosting.fittingSize.height - expecting) < 0.5 } }
+        return hosting.fittingSize.height
+    }
+
+    /// Whether this process draws legacy scrollers: it does on a Mac with a mouse, and the tests run there too.
+    private var processIsLegacy: Bool { NSScroller.preferredScrollerStyle == .legacy }
+
+    func testATablesBarKeepsItsHeightAsAMarginOnlyWhileItIsHiddenOverATableThatOverflows() {
+        // The child of the test below runs this one and sets the variable: a child that did not come up legacy fails here, not green.
+        if ProcessInfo.processInfo.environment["PARDNER_EXPECT_LEGACY"] != nil { XCTAssertTrue(processIsLegacy, "`-AppleShowScrollBars Always` did not make the process legacy") }
+        let side = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+        let shown = wideHeight(hovering: true, content: 2000)
+        // An overlay bar takes no room of its own, so the margin is the whole difference; a legacy bar takes `side` when shown, and the margin the same.
+        let hidden = shown + (processIsLegacy ? 0 : side)
+        XCTAssertEqual(wideHeight(hovering: false, content: 2000, expecting: hidden), hidden, accuracy: 0.5, "the bar's room stays under the table, so that the rows below do not move")
+        let fits = wideHeight(hovering: true, content: 100)
+        XCTAssertEqual(wideHeight(hovering: false, content: 100, expecting: fits), fits, accuracy: 0.5, "a table that fits has no bar to leave room for")
+    }
+
+    /// A process cannot be put in the legacy style, so the test above runs again in a child process started with `-AppleShowScrollBars Always`,
+    /// where a shown bar takes its own room and the margin has to be the same (measured 2026-11-27: 17 points each, 82 with the table's rows).
+    func testTheMarginMatchesALegacyBarsRoom() throws {
+        try XCTSkipIf(processIsLegacy, "this process is legacy already: the test above ran in it")
+        let name = "ScreensTests.PaneFocusTests/testATablesBarKeepsItsHeightAsAMarginOnlyWhileItIsHiddenOverATableThatOverflows"
+        let runner = try XCTUnwrap(Bundle.main.executableURL, "the test runner's own path")
+        try XCTSkipUnless(runner.lastPathComponent == "xctest", "the child is started with `xctest`; this runner is \(runner.lastPathComponent)")
+        let child = Process()
+        child.executableURL = runner
+        child.arguments = ["-AppleShowScrollBars", "Always", "-XCTest", name, Bundle(for: Self.self).bundlePath]
+        child.environment = ProcessInfo.processInfo.environment.merging(["PARDNER_EXPECT_LEGACY": "1"]) { $1 }
+        let output = Pipe()
+        child.standardOutput = output
+        child.standardError = output
+        try child.run()
+        let watchdog = DispatchWorkItem { if child.isRunning { child.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 120, execute: watchdog)
+        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        child.waitUntilExit()
+        watchdog.cancel()
+        XCTAssertEqual(child.terminationStatus, 0, "the legacy child failed:\n\(text.split(separator: "\n").filter { $0.contains("error") }.joined(separator: "\n"))")
+        XCTAssertTrue(text.contains("Executed 1 test"), "the legacy child ran the test:\n\(text)")
+    }
 }

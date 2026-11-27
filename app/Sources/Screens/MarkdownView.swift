@@ -234,6 +234,7 @@ struct MarkdownView: View {
                     }
                     .padding(.horizontal, Self.tablePad)
                 }
+                .hoverScrollbar()
             }
             .background(PardnerColor.container, in: RoundedRectangle(cornerRadius: 8))
             .clipShape(RoundedRectangle(cornerRadius: 8))

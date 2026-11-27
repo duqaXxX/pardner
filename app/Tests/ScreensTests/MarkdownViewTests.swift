@@ -273,6 +273,27 @@ final class MarkdownViewTests: XCTestCase {
         XCTAssertGreaterThan(height("| x |\n| --- |\n| \(word) |"), height("| \(word) |\n| --- |\n| x |") + 10)
     }
 
+    func testAWideTablesSidewaysBarIsHiddenWhileThePointerIsElsewhere() {
+        _ = NSApplication.shared
+        PardnerFonts.register()
+        let wide = (0..<12).map { "column-with-a-long-name-\($0)" }
+        let table = "| " + wide.joined(separator: " | ") + " |\n|" + String(repeating: " --- |", count: wide.count) + "\n| " + wide.joined(separator: " | ") + " |"
+        let hosting = NSHostingView(rootView: MarkdownView(text: table).frame(width: 400, height: 300, alignment: .topLeading))
+        let window = NSWindow(contentRect: NSRect(x: -3000, y: -3000, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        window.orderFront(nil)
+        defer { window.close() }
+        // Polled to a deadline, not a fixed wait: a slower runner lays the table out later (#179).
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline {
+            hosting.layoutSubtreeIfNeeded()
+            if ScrollHost.scrollView(in: hosting)?.hasHorizontalScroller == false { break }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        XCTAssertEqual(ScrollHost.scrollView(in: hosting)?.hasHorizontalScroller, false, "the table scrolls sideways, and its bar shows over it alone")
+    }
+
     // MARK: the gaps between an answer's blocks (#73, step F, design FA 3.4; the reading pass)
 
     private func piece(_ body: MarkdownBlocks.Body = .paragraph(AttributedString("p")), depth: Int = 0, bars: Int = 0, marker: String? = nil) -> MarkdownBlocks.Piece {
