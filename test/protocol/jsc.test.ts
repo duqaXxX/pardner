@@ -98,7 +98,8 @@ test("every vector file passes in JavaScriptCore on CryptoKit", {
     // Each test bundle runs on its own and ends with its own "All tests" line ("Selected tests" under `--skip`): the total is their sum.
     const executed = [
       ...(tests.stdout + tests.stderr).matchAll(
-        /Test Suite '(?:All|Selected) tests' passed[^\n]*\n\s*Executed (\d+) tests, with 0 failures/g,
+        // XCTest adds "with N test(s) skipped and" when a test throws XCTSkip (the copy test does on a runner whose SwiftUI lacks the view it reads).
+        /Test Suite '(?:All|Selected) tests' passed[^\n]*\n\s*Executed (\d+) tests?, with (?:\d+ tests? skipped and )?0 failures/g,
       ),
     ].reduce((sum, m) => sum + Number(m[1]), 0);
     assert.ok(defined > 0 && executed >= defined, `executed ${executed} of ${defined} tests`);
