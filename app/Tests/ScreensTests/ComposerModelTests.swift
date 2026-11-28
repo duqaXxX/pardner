@@ -336,6 +336,24 @@ final class ComposerModelTests: XCTestCase {
         XCTAssertNil(c.notice, "typing takes it back")
     }
 
+    func testTheNoticesCloseButtonTakesItBackAndKeepsTheText() {
+        let c = composer()
+        type(c, "draft")
+        c.pasteRefused()
+        c.closeNotice()
+        XCTAssertNil(c.notice)
+        XCTAssertEqual(c.text, "draft")
+    }
+
+    func testTheSameNoticeSetAgainCountsAgain() {
+        let c = composer()
+        c.pasteRefused()
+        let first = c.noticeCount
+        c.pasteRefused()
+        XCTAssertEqual(c.notice, "Files cannot be sent yet.")
+        XCTAssertEqual(c.noticeCount, first + 1, "a second refusal with the same text is announced again")
+    }
+
     func testABodyPastTheFrameIsNotSentAndAnEscapedOneCountsItsEncodedBytes() async {
         let c = composer()
         await send(c, String(repeating: "a", count: 999_980))

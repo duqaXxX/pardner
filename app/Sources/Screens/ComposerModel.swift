@@ -87,8 +87,10 @@ public final class ComposerModel {
     /// Escape closed the bot list: it stays closed until the `@` that opened it goes, or the field is a lone `@` again.
     private var pickerClosed = false
     public private(set) var pickIndex = 0
-    /// What the last key or send refused to do, until the next edit.
-    public private(set) var notice: String?
+    /// What the last key or send refused to do, until the next edit, pick, send or `closeNotice`.
+    public private(set) var notice: String? { didSet { if notice != nil { noticeCount += 1 } } }
+    /// Counts the notices set, the same text again included, so that the view announces each one.
+    public private(set) var noticeCount = 0
 
     private var entries: [Entry] = []
     private var cards: [MessageRef: RequestCardModel] = [:]
@@ -309,6 +311,9 @@ public final class ComposerModel {
 
     /// A paste of a file or an image: nothing is sent until a design seals file keys at rest.
     public func pasteRefused() { notice = "Files cannot be sent yet." }
+
+    /// The notice's close button.
+    public func closeNotice() { notice = nil }
 
     // MARK: sending
 

@@ -577,6 +577,14 @@ MainActor.assumeIsolated {
             refusedState.outboxes[live.channel] = [item(0xC2, .refused, "I will look at it after lunch.")]
             refusedHub.take(refusedState)
             try render(appearance, window(refusedHub), size: big, to: "composer-not-delivered-\(theme).png")
+            // The notice in the composer's box (#199): a command with no bot in the channel (two lines), a paste refused in the thread.
+            let noticed = hub()
+            noticed.composer(channel: live.channel).edited("/review")
+            noticed.composer(channel: live.channel).submit()
+            try render(appearance, window(noticed), size: big, to: "composer-notice-\(theme).png")
+            let threadNoticed = hub()
+            threadNoticed.composer(channel: live.channel, thread: live.queuedThread).pasteRefused()
+            try render(appearance, window(threadNoticed, thread: live.queuedThread), size: big, to: "composer-notice-thread-\(theme).png")
             let threaded = hub()
             threaded.composer(channel: live.channel, thread: live.queuedThread).edited("And add the new folder to the guide.")
             try render(appearance, window(threaded, thread: live.queuedThread), size: big, to: "composer-thread-queued-\(theme).png")
