@@ -1,6 +1,6 @@
 /**
  * What Claude Code says of itself, into the seam's types: the answer to the initialize request
- * (`server-info.json`, Claude Code 2.1.318), the context usage (`context-usage.json`) and a
+ * (`server-info.json`, Claude Code 2.1.332), the context usage (`context-usage.json`) and a
  * listed session (`SDKSessionInfo`, TypeScript SDK 0.3.296).
  */
 import assert from "node:assert/strict";
@@ -20,7 +20,7 @@ const LEVELS = ["low", "medium", "high", "xhigh", "max"];
 
 test("the server info gives each model with what the setup shows of it", () => {
   const { models } = agentInfo(SERVER_INFO);
-  assert.equal(models.length, 13);
+  assert.equal(models.length, 14);
   assert.deepEqual(models.slice(0, 2), [
     {
       value: "default",
@@ -44,7 +44,7 @@ test("the server info gives each model with what the setup shows of it", () => {
 });
 
 test("a model without effort has no level", () => {
-  // Claude Code 2.1.318 lists Haiku 4.5 with no `supportsEffort` at all.
+  // Claude Code 2.1.332 lists Haiku 4.5 with no `supportsEffort` at all.
   const haiku = agentInfo(SERVER_INFO).models.find(
     (model) => model.value === "claude-haiku-4-5-20251001",
   );
@@ -89,7 +89,7 @@ test("a model with no name of its own is shown by its value", () => {
 
 test("the server info gives every command with its hint and its aliases", () => {
   const { commands } = agentInfo(SERVER_INFO);
-  assert.equal(commands.length, 56);
+  assert.equal(commands.length, 57);
   assert.deepEqual(
     commands.find((command) => command.name === "compact"),
     {

@@ -5,7 +5,7 @@ import type { ModelInfo } from "../../../src/agent/seam.ts";
 import { modelName, settingName } from "../../../src/core/models.ts";
 import { sdkJson } from "../../support/fixtures.ts";
 
-// The recorded list (`server-info.json`, Claude Code 2.1.318): the Claude data the core tests (`test/core/models.test.ts`) leave out.
+// The recorded list (`server-info.json`, Claude Code 2.1.332): the Claude data the core tests (`test/core/models.test.ts`) leave out.
 const MODELS = agentInfo(sdkJson("server-info")).models;
 
 test("a model is named by its display name in the agent's list, found by its full id", () => {

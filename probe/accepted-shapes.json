@@ -113,7 +113,8 @@
       "ultrathink_available:boolean": "2.1.316",
       "ultrathink_typed_raises:boolean": "2.1.318",
       "plugins[].version:string": "2.1.319",
-      "served_by_anthropic:boolean": "2.1.330"
+      "served_by_anthropic:boolean": "2.1.330",
+      "sandbox_enabled:boolean": "2.1.332"
     },
     "user": {
       "message.content[].content[].source.data:string": "2.1.304",
@@ -158,7 +159,9 @@
     },
     "system/task_notification": {
       "handback_report.toolUseId:string": "2.1.327",
-      "summary_is_report:boolean": "2.1.327"
+      "summary_is_report:boolean": "2.1.327",
+      "description:string": "2.1.332",
+      "owned_by_subagent:boolean": "2.1.332"
     }
   },
   "tools": {
@@ -167,6 +170,7 @@
     "LSP": "2.1.319",
     "ListMcpResourcesTool": "2.1.330",
     "ReadMcpResourceDirTool": "2.1.330",
-    "ReadMcpResourceTool": "2.1.330"
+    "ReadMcpResourceTool": "2.1.330",
+    "McpTaskCheck": "2.1.332"
   }
 }
