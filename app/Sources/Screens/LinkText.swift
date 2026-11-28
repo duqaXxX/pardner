@@ -19,6 +19,8 @@ struct LinkText: NSViewRepresentable {
     let open: (URL) -> Void
     /// What the row's own `Copy` does (design 2.7): the one item of this view's menu.
     var copy: (() -> Void)?
+    /// The menu item's title: `Copy as Markdown` in a table's cell hosted in a message's text view, where the text view's own `Copy` is the selection's.
+    var copyTitle = "Copy"
 
     /// The text as AppKit draws it, with what `MarkdownFonts.styled` and the row give a `Text`: Inter at `size` and `weight` (strong one
     /// step heavier, emphasized in the italic file), a code span in JetBrains Mono on `raised`, strikethrough, the theme's text colour,
@@ -49,7 +51,7 @@ struct LinkText: NSViewRepresentable {
         return out
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(open: open, copy: copy) }
+    func makeCoordinator() -> Coordinator { Coordinator(open: open, copy: copy, copyTitle: copyTitle) }
 
     func makeNSView(context: Context) -> NSTextView {
         let view = Self.makeTextView()
@@ -62,6 +64,12 @@ struct LinkText: NSViewRepresentable {
     /// follows the frame SwiftUI gives it; no measuring touches it.
     static func makeTextView() -> NSTextView {
         let view = NSTextView(usingTextLayoutManager: false)
+        configure(view)
+        return view
+    }
+
+    /// The settings of `makeTextView`, for the message's text view as well.
+    static func configure(_ view: NSTextView) {
         view.isEditable = false
         view.isSelectable = true
         view.drawsBackground = false
@@ -74,12 +82,12 @@ struct LinkText: NSViewRepresentable {
         view.isAutomaticDataDetectionEnabled = false
         view.displaysLinkToolTips = false
         view.linkTextAttributes = [.foregroundColor: NSColor(PardnerColor.brandText), .cursor: NSCursor.pointingHand]
-        return view
     }
 
     func updateNSView(_ view: NSTextView, context: Context) {
         context.coordinator.open = open
         context.coordinator.copy = copy
+        context.coordinator.copyTitle = copyTitle
         apply(to: view, coordinator: context.coordinator)
     }
 
@@ -111,15 +119,17 @@ struct LinkText: NSViewRepresentable {
 
         var open: (URL) -> Void
         var copy: (() -> Void)?
+        var copyTitle: String
         /// The source the view's text was last set from.
         var source: Source?
         private let storage = NSTextStorage()
         private let layout = NSLayoutManager()
         private let container = NSTextContainer()
 
-        init(open: @escaping (URL) -> Void, copy: (() -> Void)?) {
+        init(open: @escaping (URL) -> Void, copy: (() -> Void)?, copyTitle: String = "Copy") {
             self.open = open
             self.copy = copy
+            self.copyTitle = copyTitle
             container.lineFragmentPadding = 0
             storage.addLayoutManager(layout)
             layout.addTextContainer(container)
@@ -141,7 +151,7 @@ struct LinkText: NSViewRepresentable {
         func textView(_ view: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
             let own = NSMenu()
             if copy != nil {
-                let item = NSMenuItem(title: "Copy", action: #selector(copyAnswer(_:)), keyEquivalent: "")
+                let item = NSMenuItem(title: copyTitle, action: #selector(copyAnswer(_:)), keyEquivalent: "")
                 item.target = self
                 own.addItem(item)
             }

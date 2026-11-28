@@ -66,7 +66,7 @@ test("4.5 an answer that comes while a stream runs is built before the stream's 
   assert.deepEqual(f.sent, ["head 0", "result 1", "head 1"]);
 });
 
-test("4.5 a socket that queued a write stops the outbox: no answer is built and no step taken until 'drain'", () => {
+test("4.5 a socket that queued a write stops the outbox: no answer is built and no step taken until 'drain'", async () => {
   const f = fake(2);
   const built = { n: 0 };
   const out = new Outbox(f.peer, () => false, assert.ifError);
@@ -77,16 +77,20 @@ test("4.5 a socket that queued a write stops the outbox: no answer is built and 
   assert.equal(made, 0, "no answer is built for a peer that does not read");
   assert.equal(f.drains.length, 1, "one wait for 'drain', however many answers queue");
   f.empty();
+  await tick();
   assert.equal(made, 100, "the answers go first once it drained");
   assert.equal(built.n, 3, "then the stream goes on");
 });
 
-test("4.5 one stream runs at a time: the next starts when the one before it is done", () => {
+test("4.5 one stream runs at a time: the next starts when the one before it is done", async () => {
   const f = fake(1);
   const out = new Outbox(f.peer, () => false, assert.ifError);
   out.stream(frames(out, 2, undefined, 10));
   out.stream(frames(out, 2, undefined, 20));
-  for (let i = 0; i < 4; i++) f.empty();
+  for (let i = 0; i < 4; i++) {
+    f.empty();
+    await tick();
+  }
   assert.deepEqual(f.sent, ["head 10", "head 11", "head 20", "head 21"]);
 });
 
@@ -143,4 +147,113 @@ test("4.5 end sends the frame and closes: no answer or step is built after it", 
   const before = f.sent.length;
   out.answer(() => out.send(result(2)));
   assert.equal(f.sent.length, before);
+});
+
+/** One head per step, as a pass sends: numbered from `from`. */
+const head = (n: number): Frame => ({
+  type: "head",
+  n,
+  chain: new Uint8Array(32),
+  sig: new Uint8Array(64),
+});
+
+test("3.1 a pass queued during a stream runs before the stream's next step, and the stream resumes where it stopped", () => {
+  const f = fake();
+  const out = new Outbox(f.peer, () => false, assert.ifError);
+  out.stream(
+    (function* () {
+      out.send(head(0));
+      yield;
+      out.follow(frames(out, 2, undefined, 100));
+      out.send(head(1));
+      yield;
+      out.send(head(2));
+      yield;
+    })(),
+  );
+  assert.deepEqual(f.sent, ["head 0", "head 1", "head 100", "head 101", "head 2"]);
+});
+
+test("3.1 two passes run in order, the first to its end", () => {
+  const f = fake();
+  const out = new Outbox(f.peer, () => false, assert.ifError);
+  out.stream(
+    (function* () {
+      out.send(head(0));
+      yield;
+      out.follow(frames(out, 2, undefined, 100));
+      out.follow(frames(out, 2, undefined, 200));
+      yield;
+      out.send(head(1));
+    })(),
+  );
+  assert.deepEqual(f.sent, ["head 0", "head 100", "head 101", "head 200", "head 201", "head 1"]);
+});
+
+test("3.1 an answer queued during a pass goes before that pass's next step", () => {
+  const f = fake();
+  const out = new Outbox(f.peer, () => false, assert.ifError);
+  out.follow(
+    (function* () {
+      out.send(head(100));
+      yield;
+      out.answer(() => out.send(result(1)));
+      yield;
+      out.send(head(101));
+    })(),
+  );
+  assert.deepEqual(f.sent, ["head 100", "result 1", "head 101"]);
+});
+
+test("3.3 'drain' stops both lanes: a pass and a stream take one step each time the socket empties, the pass first", async () => {
+  const f = fake(1);
+  const out = new Outbox(f.peer, () => false, assert.ifError);
+  out.follow(frames(out, 2, undefined, 100));
+  out.stream(frames(out, 2, undefined, 0));
+  assert.deepEqual(f.sent, ["head 100"], "the first frame filled the socket");
+  assert.equal(f.drains.length, 1);
+  for (let i = 0; i < 4; i++) {
+    f.empty();
+    await tick();
+  }
+  assert.deepEqual(f.sent, ["head 100", "head 101", "head 0", "head 1"]);
+});
+
+test("3.1 a pass queued while the socket is full takes the first step after 'drain', ahead of the stream", async () => {
+  const f = fake(1);
+  const out = new Outbox(f.peer, () => false, assert.ifError);
+  out.stream(frames(out, 3, undefined, 0));
+  assert.deepEqual(f.sent, ["head 0"]);
+  out.follow(frames(out, 1, undefined, 100));
+  assert.deepEqual(f.sent, ["head 0"], "nothing is sent while the socket is full");
+  f.empty();
+  await tick();
+  assert.deepEqual(f.sent, ["head 0", "head 100"]);
+  f.empty();
+  await tick();
+  assert.deepEqual(f.sent, ["head 0", "head 100", "head 1"]);
+});
+
+test("3.3 after 'drain' no step runs before the next turn of the event loop", async () => {
+  const f = fake(1);
+  const built = { n: 0 };
+  const out = new Outbox(f.peer, () => false, assert.ifError);
+  out.stream(frames(out, 3, built));
+  assert.equal(built.n, 1);
+  f.empty();
+  assert.equal(built.n, 1, "not inside the 'drain' emit");
+  await tick();
+  assert.equal(built.n, 2);
+});
+
+test("3.6 close drops both lanes: nothing is built when the socket drains", async () => {
+  const f = fake(1);
+  const out = new Outbox(f.peer, () => false, assert.ifError);
+  out.stream(frames(out, 3, undefined, 0));
+  out.follow(frames(out, 3, undefined, 100));
+  out.close();
+  f.empty();
+  await tick();
+  await tick();
+  assert.deepEqual(f.sent, ["head 0"]);
 });

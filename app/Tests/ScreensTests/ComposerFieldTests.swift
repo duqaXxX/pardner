@@ -617,4 +617,88 @@ final class ComposerFieldTests: XCTestCase {
         XCTAssertTrue(try gutter("1. a"))
         XCTAssertTrue(try gutter("> a"))
     }
+
+    /// Runs `body` with the general pasteboard holding `fill`'s content, and puts back whatever it held before: the paste reads `.general`.
+    private func withGeneral(_ fill: (NSPasteboard) -> Void, _ body: () throws -> Void) rethrows {
+        let general = NSPasteboard.general
+        let saved = (general.pasteboardItems ?? []).map { item in item.types.compactMap { type in item.data(forType: type).map { (type, $0) } } }
+        defer {
+            general.clearContents()
+            for item in saved {
+                let restored = NSPasteboardItem()
+                for (type, data) in item { restored.setData(data, forType: type) }
+                general.writeObjects([restored])
+            }
+        }
+        general.clearContents()
+        fill(general)
+        try body()
+    }
+
+    func testPasteAndMatchStyleRefusesAFileAsPasteDoes() throws {
+        try withGeneral({
+            $0.writeObjects([URL(fileURLWithPath: "/tmp/pardner-paste-test.txt") as NSURL])
+            $0.setString("pardner-paste-test.txt", forType: .string)
+        }) {
+            let model = model(label: false)
+            let (window, field) = try field("kept", in: model)
+            field.pasteAsPlainText(nil)
+            settle(window)
+            XCTAssertEqual(model.text, "kept")
+            XCTAssertEqual(model.notice, "Files cannot be sent yet.")
+        }
+    }
+
+    func testAPictureCopiedAloneIsRefusedAndTheBotNeverGetsItsCharacter() throws {
+        // A text view's copy of a picture holds U+FFFC as its plain text.
+        try withGeneral({ $0.setString(" \u{FFFC}\n", forType: .string) }) {
+            let model = model(label: false)
+            let (window, field) = try field("kept", in: model)
+            field.setSelectedRange(NSRange(location: 4, length: 0))
+            field.paste(nil)
+            settle(window)
+            XCTAssertEqual(model.text, "kept")
+            XCTAssertEqual(model.notice, "Files cannot be sent yet.")
+        }
+        try withGeneral({ $0.setString("a\u{FFFC}b", forType: .string) }) {
+            let model = model(label: false)
+            let (window, field) = try field("", in: model)
+            field.paste(nil)
+            settle(window)
+            XCTAssertEqual(model.text, "ab")
+        }
+    }
+
+    func testAPlainPasteStaysAsTyped() throws {
+        try withGeneral({ $0.setString("**not bold** and  \n", forType: .string) }) {
+            let model = model(label: false)
+            let (window, field) = try field("", in: model)
+            field.paste(nil)
+            settle(window)
+            XCTAssertEqual(model.text, "**not bold** and  \n")
+        }
+    }
+
+    func testATextWithAPictureGoesInAsTypedAndUndoesAlone() throws {
+        try withGeneral({ $0.setString("it's \"x\" a--b \u{FFFC}", forType: .string) }) {
+            let model = model(label: false)
+            let (window, field) = try field("", in: model)
+            field.isAutomaticQuoteSubstitutionEnabled = true
+            field.isAutomaticDashSubstitutionEnabled = true
+            field.insertText("typed ", replacementRange: field.selectedRange())
+            settle(window)
+            field.paste(nil)
+            settle(window)
+            XCTAssertEqual(model.text, "typed it's \"x\" a--b ", "no smart quote or dash")
+            try XCTUnwrap(field.undoManager).undo()
+            settle(window)
+            XCTAssertEqual(field.string, "typed ", "the paste undoes alone")
+        }
+    }
+
+    func testADroppedPictureAloneIsRefusedAndADroppedTextLosesItsPicture() throws {
+        XCTAssertNil(ComposerTextView.withoutPictures(" \u{FFFC}\n"))
+        XCTAssertEqual(ComposerTextView.withoutPictures("a\u{FFFC}b"), "ab")
+        XCTAssertEqual(ComposerTextView.withoutPictures("  "), "  ", "spaces are text")
+    }
 }
