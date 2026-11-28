@@ -308,7 +308,13 @@ final class MessageTableTests: XCTestCase {
 
     // MARK: the preview
 
-    private let wide = "Intro\n\n" + { (cells: [String]) in "| " + cells.joined(separator: " | ") + " |" }((0..<20).map { "h\($0)" }) + "\n|" + String(repeating: "---|", count: 20) + "\n| " + (0..<20).map { _ in "abcdefghijklmnopqrst" }.joined(separator: " | ") + " |"
+    // In parts: the macOS 15 runner's compiler gives up type-checking the one expression this was.
+    private let wide: String = {
+        let head: String = "| " + (0..<20).map { "h\($0)" }.joined(separator: " | ") + " |"
+        let rule: String = "|" + String(repeating: "---|", count: 20)
+        let row: String = "| " + Array(repeating: "abcdefghijklmnopqrst", count: 20).joined(separator: " | ") + " |"
+        return "Intro\n\n" + head + "\n" + rule + "\n" + row
+    }()
 
     /// A click on the middle of the hosted card.
     private func click(_ hosted: NSView, in window: NSWindow) throws {

@@ -30,7 +30,7 @@ function skipReason(): string | false {
 
 test("every vector file passes in JavaScriptCore on CryptoKit", {
   skip: skipReason(),
-  timeout: 960_000, // the sum of the steps below: 120 + 450 + 240 + 60 + 30 s, and the Node checks,
+  timeout: 1_260_000, // the sum of the steps below: 120 + 750 + 240 + 60 + 30 s, and the Node checks,
 }, () => {
   const folder = tempDirSync("pardner-jsc-");
   try {
@@ -72,7 +72,9 @@ test("every vector file passes in JavaScriptCore on CryptoKit", {
         "--skip",
         "DevicesRelayTests",
       ],
-      450_000,
+      // The app's tests took 284 s here (Mac mini M4, 2026-11-28) and passed 450 s on the macos-latest runner with the
+      // message selection's offscreen bitmap tests (#194).
+      750_000,
       {
         PARDNER_JOINED_SCRIPT: script,
         PARDNER_APP_SCRIPT: appScript,
