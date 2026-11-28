@@ -97,7 +97,8 @@ const REQUEST_UNSHOWN = "pardner could not show this request to the owner, so no
 export interface QueryHandle extends AsyncIterable<unknown> {
   interrupt(): Promise<unknown>;
   stopTask(taskId: string): Promise<void>;
-  setPermissionMode(mode: SdkPermissionMode): Promise<void>;
+  // 0.3.332 answers with the mode now in effect (`SDKControlSetPermissionModeResponse`), which nothing reads.
+  setPermissionMode(mode: SdkPermissionMode): Promise<unknown>;
   applyFlagSettings(settings: { effortLevel: EffortLevel | null }): Promise<void>;
   initializationResult(): Promise<unknown>;
   getContextUsage(): Promise<unknown>;

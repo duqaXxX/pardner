@@ -43,7 +43,7 @@ function command(
   return { name, description, argumentHint: "", aliases: [], ...extra };
 }
 
-/** The recorded server info's commands (SDK 0.2.163), as the session's list holds them. */
+/** The recorded server info's commands (SDK 0.3.332, Claude Code 2.1.332), as the session's list holds them. */
 function recordedCommands(): CommandInfo[] {
   const info = sdkJson("server-info") as { commands: Record<string, unknown>[] };
   return info.commands.map((raw) =>

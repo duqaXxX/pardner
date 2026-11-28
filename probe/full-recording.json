@@ -1,7 +1,7 @@
 {
-  "date": "2026-11-22",
-  "sdk": "0.3.330",
-  "cli": "2.1.330",
+  "date": "2026-11-28",
+  "sdk": "0.3.332",
+  "cli": "2.1.332",
   "types": [
     "SDKAssistantMessage",
     "SDKUserMessage",
