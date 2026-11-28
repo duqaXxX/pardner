@@ -232,11 +232,44 @@ final class ComposerTextView: NSTextView {
     }
 
     override func paste(_ sender: Any?) {
-        if Self.holdsFile(.general) {
+        pasteAsPlainText(sender)
+    }
+
+    override func pasteAsRichText(_ sender: Any?) {
+        pasteAsPlainText(sender)
+    }
+
+    /// The text of a paste or a drop without the U+FFFC a picture stands for, so that the bot never gets that character; nil for a picture alone.
+    static func withoutPictures(_ text: String) -> String? {
+        guard text.contains("\u{FFFC}") else { return text }
+        let rest = text.replacingOccurrences(of: "\u{FFFC}", with: "")
+        return rest.contains(where: { !$0.isWhitespace }) ? rest : nil
+    }
+
+    /// Every paste is plain text as typed: a file or a picture alone is refused. A text with a picture in it goes in without the picture, through the
+    /// field's own change cycle as one undo step, and with no automatic substitution, as a paste does.
+    override func pasteAsPlainText(_ sender: Any?) {
+        let board = NSPasteboard.general
+        guard !Self.holdsFile(board) else {
             coordinator?.parent.model.pasteRefused()
             return
         }
-        pasteAsPlainText(sender)
+        guard let string = board.string(forType: .string), string.contains("\u{FFFC}"), let storage = textStorage else {
+            super.pasteAsPlainText(sender)
+            return
+        }
+        guard let text = Self.withoutPictures(string) else {
+            coordinator?.parent.model.pasteRefused()
+            return
+        }
+        let range = selectedRange()
+        guard shouldChangeText(in: range, replacementString: text) else { return }
+        breakUndoCoalescing()
+        storage.replaceCharacters(in: range, with: NSAttributedString(string: text, attributes: typingAttributes))
+        didChangeText()
+        undoManager?.setActionName("Paste")
+        setSelectedRange(NSRange(location: range.location + (text as NSString).length, length: 0))
+        scrollRangeToVisible(selectedRange())
     }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
@@ -250,7 +283,11 @@ final class ComposerTextView: NSTextView {
         }
         // Text from another view goes in as plain text at the drop point, with none of the formatting it carries but the block it lands in; a drag inside
         // the field is its own.
-        if let storage = textStorage, sender.draggingSource as AnyObject? !== self, let text = sender.draggingPasteboard.string(forType: .string) {
+        if let storage = textStorage, sender.draggingSource as AnyObject? !== self, let string = sender.draggingPasteboard.string(forType: .string) {
+            guard let text = Self.withoutPictures(string) else {
+                coordinator?.parent.model.pasteRefused()
+                return true
+            }
             let range = NSRange(location: characterIndexForInsertion(at: convert(sender.draggingLocation, from: nil)), length: 0)
             guard shouldChangeText(in: range, replacementString: text) else { return false }
             let dropped = NSMutableAttributedString(attributedString: ComposerMarkdown.plain(text))
@@ -573,7 +610,7 @@ struct PendingRows: View {
                         Text("You").font(PardnerFont.ui(size: 14, weight: .semibold))
                     }
                     .designLines()
-                    MarkdownView(text: row.text, mention: row.to.map { "@" + model.name(of: $0) }).designLines().textSelection(.enabled)
+                    MarkdownView(text: row.text, mention: row.to.map { "@" + model.name(of: $0) }, wholeSelection: true).designLines().textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                     switch row.status {
                     case .sending: line("Sending\u{2026}", PardnerColor.muted)

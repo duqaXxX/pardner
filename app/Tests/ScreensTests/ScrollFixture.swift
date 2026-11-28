@@ -12,19 +12,23 @@ struct ScrollFixture {
     let bot = Data(repeating: 3, count: 32)
     private(set) var position = 1
     private(set) var model = ReadingModel()
+    /// The last message put, as the reading was handed it: what a conversation model takes as delivered.
+    private(set) var lastView: HostValue?
 
     @discardableResult
     mutating func put(_ kind: Int, _ sender: Data, _ body: [String: Any]?, to: Data? = nil, re: MessageRef? = nil, name: Data? = nil) -> MessageRef {
         let at = position
         position += 1
         let messageName = name ?? Data(repeating: UInt8(at & 0xFF), count: 16)
-        model.take(view: .object([
+        let view = HostValue.object([
             "do": .string("message"), "position": .number(Double(at)), "channel": .bytes(channel), "sender": .bytes(sender),
             "name": .bytes(messageName), "epoch": .bytes(Data(repeating: 9, count: 32)), "time": .number(1_700_000_000_000 + Double(at) * 1000),
             "kind": .number(Double(kind)), "to": to.map { .bytes($0) } ?? .null, "blobs": .array([]), "files": .array([]),
             "re": re.map { .object(["device": .bytes($0.device), "name": .bytes($0.name)]) } ?? .null,
             "text": body.map { .string(String(decoding: try! JSONSerialization.data(withJSONObject: $0), as: UTF8.self)) } ?? .null, "again": .bool(false),
-        ]))
+        ])
+        model.take(view: view)
+        lastView = view
         return MessageRef(device: sender, name: messageName)
     }
 

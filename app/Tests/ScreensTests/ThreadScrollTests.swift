@@ -3,6 +3,7 @@
 import Conversation
 import Foundation
 import ProtocolHost
+@testable import Relay
 @testable import Screens
 import SwiftUI
 import XCTest
@@ -83,6 +84,59 @@ final class ThreadScrollTests: XCTestCase {
             ScrollHost.spin(0.5)
             try assertAtEnd(hosting, "after part \(part)")
         }
+    }
+
+    /// The person's devices as the composer needs them: this Mac, and the thread's bot active.
+    private func devices(_ s: ScrollFixture) -> DevicesModel {
+        func row(_ id: Data, _ kind: DeviceKind, _ position: Int) -> DeviceRow {
+            DeviceRow(id: id, kind: kind, label: nil, shortForm: "", adder: .none, position: position, active: true, isThisMac: kind == .app, seenAt: nil, onlyHolderEpochs: 0, addedWhileRemoving: false)
+        }
+        var state = DevicesState()
+        state.rows = [row(s.alice, .app, 1), row(s.bot, .bot, 2)]
+        return DevicesModel(state: state)
+    }
+
+    /// The owner sends from the composer, a message of Markdown that holds a list and a table: the pending row stands at the end, and when the relay
+    /// delivers the message the row is swapped for the sent message's. The end of the thread holds at each step (the swap is where #179's fix failed on CI),
+    /// and again when the bot's answer begins.
+    func testTheEndHoldsWhenAComposerSendBecomesTheSentMessage() async throws {
+        var s = ScrollFixture()
+        let root = longThread(&s)
+        let conversation = ConversationModel(reading: s.model)
+        let sentName = Data(repeating: 0xD1, count: 16)
+        let composer = ComposerModel(channel: s.channel, thread: root.hex, conversation: conversation, devices: devices(s)) { _, _ in .queued(name: sentName) }
+        func panel(_ s: ScrollFixture) -> ThreadPanel {
+            ThreadPanel(model: s.model, icons: [:], thread: s.model.channels[s.channel]!.threads[root.hex]!, close: {}, composer: composer, channel: s.channel)
+        }
+        let hosting = ScrollHost.host(panel(s))
+        defer { hosting.window?.orderOut(nil) }
+        ScrollHost.spin(1.0)
+        try assertAtEnd(hosting, "before the send")
+
+        let text = "A question with a list\n\n- first\n- second\n\n| Name | Size |\n|---|---|\n| a.txt | 12 |\n\nand a last paragraph that goes on for a while, long enough to wrap in the narrow panel of the thread."
+        composer.edited(text)
+        await composer.submit()?.value
+        XCTAssertEqual(composer.rows().count, 1, "the message stands on its way")
+        hosting.rootView = panel(s)
+        for (label, wait) in [("0.2 s", 0.2), ("1 s", 0.8)] {
+            ScrollHost.spin(wait)
+            try assertAtEnd(hosting, "the pending row, \(label)")
+        }
+
+        let prompt = s.put(2, s.alice, ["text": text, "thread": root.hex], to: s.bot, name: sentName)
+        conversation.apply(.delivered(try XCTUnwrap(s.lastView)))
+        XCTAssertTrue(composer.rows().isEmpty, "the reading holds the message: the pending row is gone")
+        hosting.rootView = panel(s)
+        for (label, wait) in [("0.2 s", 0.2), ("1 s", 0.8)] {
+            ScrollHost.spin(wait)
+            try assertAtEnd(hosting, "the sent message, \(label)")
+        }
+
+        s.put(3, s.bot, [:], re: prompt)
+        s.put(4, s.bot, ["thread": root.hex, "markdown": "Starting on it. "], re: MessageRef(device: s.bot, name: Data(repeating: 0xD2, count: 16)))
+        hosting.rootView = panel(s)
+        ScrollHost.spin(0.5)
+        try assertAtEnd(hosting, "the bot's answer begins")
     }
 
     /// An owner who scrolled up to read is not taken to the bottom by a send.

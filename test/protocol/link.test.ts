@@ -1650,6 +1650,62 @@ test("G 3.6: a streamed get is closed on the frame that reaches the size, with n
   assert.deepEqual(closes(a.link.tick(1_000_000)), [], "nothing of the get is left waiting");
 });
 
+test("G 3.6: an item and its head between two blob frames of a get in flight are delivered, and the blob still arrives whole (#153)", () => {
+  const a = rig({}, 1);
+  a.toRest(0);
+  const get = a.link.getBlob(blobId, 10, 100);
+  assert.ok(typeof get !== "string");
+  const wire = gets(get.effects)[0]?.request as number;
+  const [f1, f2, f3] = frames(wire, 10, 4);
+  assert.ok(f1 && f2 && f3);
+  a.give(1, [f1], 200);
+  const from = a.s.wire.items.length;
+  a.s.wire.put(4, prompt(a.s, a.epoch, fill(31, 16), 2));
+  const between = a.give(1, a.s.wire.push(from), 300);
+  assert.deepEqual(
+    between.flatMap((e) => (e.do === "deliver" ? [e.out.do] : [])),
+    ["message", "rest"],
+    "the item is delivered and the reading is at rest again",
+  );
+  assert.deepEqual(answers(between), [], "the get goes on");
+  const rest = a.give(1, [f2, f3], 400);
+  assert.deepEqual(
+    rest.filter((e) => e.do === "blob").map((e) => e.do === "blob" && e.offset),
+    [4, 8],
+  );
+  assert.deepEqual(answers(rest), [{ do: "answer", request: get.request, code: 0 }]);
+});
+
+test("G 3.6: a blob frame that arrives while the head's rest persist is held is taken after 'persisted', and after the rest is delivered (#153)", () => {
+  const a = rig({}, 1);
+  a.toRest(0);
+  const get = a.link.getBlob(blobId, 10, 100);
+  assert.ok(typeof get !== "string");
+  const wire = gets(get.effects)[0]?.request as number;
+  const [f1, f2, f3] = frames(wire, 10, 4);
+  assert.ok(f1 && f2 && f3);
+  a.give(1, [f1], 200);
+  const from = a.s.wire.items.length;
+  a.s.wire.put(4, prompt(a.s, a.epoch, fill(31, 16), 2));
+  const held = a.chunk(1, [...a.s.wire.push(from), f2], 300);
+  assert.equal(held.at(-1)?.do, "persist", "the head's rest stores what was read");
+  assert.deepEqual(
+    held.filter((e) => e.do === "blob"),
+    [],
+    "the frame after it waits for the store",
+  );
+  const after = a.link.persisted(true, 310);
+  assert.deepEqual(
+    after.flatMap((e) =>
+      e.do === "deliver" ? [`deliver ${e.out.do}`] : e.do === "blob" ? [`blob ${e.offset}`] : [],
+    ),
+    ["deliver rest", "blob 4"],
+    "in order",
+  );
+  const done = a.give(1, [f3], 400);
+  assert.deepEqual(answers(done), [{ do: "answer", request: get.request, code: 0 }]);
+});
+
 test("G 3.6: the get's request id is not given to another request while it streams", () => {
   const a = rig();
   a.toRest(0);

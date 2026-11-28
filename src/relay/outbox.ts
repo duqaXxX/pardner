@@ -2,8 +2,13 @@
  * Design 4.5: everything a served connection is sent goes through its outbox. A write the socket
  * queued in memory stops the outbox until `drain`, so a peer that does not read holds the frame that
  * filled the socket and nothing it asked for since: an answer is built, and a stream takes its next
- * step, only while the socket has room. Answers go before a stream's next step; one stream runs at a
- * time and the others wait their turn.
+ * step, only while the socket has room. Answers go before a pass, a pass goes before a stream's next
+ * step, and one stream runs at a time while the others wait their turn. A pass is a follow's: a device's
+ * new messages go ahead of a file it is streaming, the file goes on once they are sent (#153).
+ *
+ * After `drain` the next step waits one turn of the event loop: the server hands on what the device
+ * sent while the socket was full in that turn, and a chunk written first would fill the socket again
+ * before any of it was read.
  */
 import type { Frame } from "../protocol/frames.ts";
 import type { Peer } from "./server.ts";
@@ -16,6 +21,7 @@ export class Outbox {
   #silent: () => boolean;
   #fail: (error: unknown) => void;
   #answers: (() => void)[] = [];
+  #passes: Generator<void>[] = [];
   #streams: Generator<void>[] = [];
   #stream: Generator<void> | undefined;
   #blocked = false;
@@ -46,6 +52,12 @@ export class Outbox {
     this.#run();
   }
 
+  /** `steps` is a follow's pass: it runs, one step per `yield`, ahead of the streams, once the answers are built. */
+  follow(steps: Generator<void>): void {
+    this.#passes.push(steps);
+    this.#run();
+  }
+
   /** Sends `frame` and closes the connection: nothing is built after it. */
   end(frame: Frame): void {
     this.close();
@@ -56,6 +68,7 @@ export class Outbox {
   close(): void {
     this.#closed = true;
     this.#answers = [];
+    this.#passes = [];
     this.#streams = [];
     this.#stream = undefined;
   }
@@ -70,7 +83,8 @@ export class Outbox {
           break;
         }
         if (this.#blocked) {
-          this.#peer.drain(() => this.#again(() => (this.#blocked = false)));
+          // One turn later, so that the server hands on what the device sent meanwhile (header comment).
+          this.#peer.drain(() => setImmediate(() => this.#again(() => (this.#blocked = false))));
           return;
         }
         if (n === SLICE) {
@@ -80,6 +94,11 @@ export class Outbox {
         const job = this.#answers.shift();
         if (job) {
           job();
+          continue;
+        }
+        const [pass] = this.#passes;
+        if (pass) {
+          if (pass.next().done) this.#passes.shift();
           continue;
         }
         this.#stream ??= this.#streams.shift();

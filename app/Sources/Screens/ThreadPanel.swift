@@ -191,14 +191,14 @@ struct AnswerRow: View {
                     .designLines()
                 }
                 // Read at each part that reaches it: a structure half written is drawn half written until a later part (#73, 2.1).
-                MarkdownView(text: answer.shown, copy: { Clipboard.copy(whole) }, foldKey: LongBlock.key(of: answer)).designLines()
+                MarkdownView(text: answer.shown, copy: { Clipboard.copy(whole) }, foldKey: LongBlock.key(of: answer), wholeSelection: true).designLines()
                     .frame(maxWidth: PardnerMetrics.answerWidth, alignment: .leading)
                 if writing && headless {
                     Text("Writing…").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
                 }
             }
         }
-        .contextMenu { Button("Copy") { Clipboard.copy(whole) } }
+        .contextMenu { Button("Copy as Markdown") { Clipboard.copy(whole) } }
     }
 }
 

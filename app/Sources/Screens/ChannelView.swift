@@ -318,9 +318,15 @@ extension View {
         lineSpacing(MessageRow.lineSpacing).padding(.vertical, MessageRow.lineSpacing / 2)
     }
 
-    /// The empty part of a header under the hidden title bar moves the window as a title bar would, from an inactive window too.
+    /// The empty part of a header under the hidden title bar moves the window as a title bar would, from an inactive window too,
+    /// and a double click on it zooms the window. No documented API reads the System Settings choice for a title bar's double
+    /// click, so it always zooms, whatever that choice (issue #182).
     func movesWindow() -> some View {
-        background { Color.clear.contentShape(Rectangle()).gesture(WindowDragGesture()).allowsWindowActivationEvents(true) }
+        background {
+            Color.clear.contentShape(Rectangle()).gesture(WindowDragGesture())
+                .simultaneousGesture(TapGesture(count: 2).onEnded { NSApp.currentEvent?.window?.performZoom(nil) })
+                .allowsWindowActivationEvents(true)
+        }
     }
 }
 
@@ -475,12 +481,12 @@ struct MessageRow: View {
                     } else if isBot {
                         // A bot's text is read as Markdown, any other body of a bot keeps its code spans only; a person's text is read as a bot's is, whole.
                         if MarkdownView.reads(message.body) {
-                            MarkdownView(text: message.shown, copy: { Clipboard.copy(message.shown) }, codeGround: tinted ? PardnerColor.surface : PardnerColor.codeInline, foldKey: message.ref.hex).frame(maxWidth: PardnerMetrics.answerWidth, alignment: .leading)
+                            MarkdownView(text: message.shown, copy: { Clipboard.copy(message.shown) }, codeGround: tinted ? PardnerColor.surface : PardnerColor.codeInline, foldKey: message.ref.hex, wholeSelection: true).frame(maxWidth: PardnerMetrics.answerWidth, alignment: .leading)
                         } else { InlineCodeText(text: CodeSpans.styled(message.shown, ground: tinted ? PardnerColor.surface : PardnerColor.codeInline)) }
                     } else {
                         // A person's text is read as a bot's is, its leading mention a chip before the first paragraph.
                         MarkdownView(text: message.shown, copy: { Clipboard.copy(message.shown) }, mention: Naming.mention(of: message, in: model),
-                                     codeGround: tinted ? PardnerColor.surface : PardnerColor.codeInline, foldKey: message.ref.hex)
+                                     codeGround: tinted ? PardnerColor.surface : PardnerColor.codeInline, foldKey: message.ref.hex, wholeSelection: true)
                     }
                 }
                 .designLines()
@@ -490,7 +496,16 @@ struct MessageRow: View {
                 if queued { Text("Queued").font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted) }
             }
         }
-        .contextMenu { Button("Copy") { Clipboard.copy(message.shown) } }
+        .contextMenu { Button(Self.copyTitle(of: message.body, isBot: isBot)) { Clipboard.copy(message.shown) } }
+    }
+
+    /// The row's menu item: the text view's own menu offers `Copy` of the selection, so the row's, which copies the whole source, is `Copy as Markdown` wherever the
+    /// body is drawn by it; a file or an unreadable row draws none, and a bot's body that is no text keeps its code spans only.
+    static func copyTitle(of body: Conversation.Body, isBot: Bool) -> String {
+        switch body {
+        case .unreadable, .file: "Copy"
+        default: isBot && !MarkdownView.reads(body) ? "Copy" : "Copy as Markdown"
+        }
     }
 }
 
@@ -549,9 +564,9 @@ struct Answered: View {
                 case .body(let line, let index): LineBodyRow(line: line, index: index, indent: 0, stack: PardnerMetrics.gap, place: place)
                 case .segment(let answer):
                     // Read at each part that reaches it: a structure half written is drawn half written until a later part (#73, 2.1).
-                    MarkdownView(text: answer.shown, copy: { Clipboard.copy(thread.text(of: answer)) }, foldKey: LongBlock.key(of: answer)).designLines()
+                    MarkdownView(text: answer.shown, copy: { Clipboard.copy(thread.text(of: answer)) }, foldKey: LongBlock.key(of: answer), wholeSelection: true).designLines()
                         .frame(maxWidth: PardnerMetrics.answerWidth, alignment: .leading)
-                        .contextMenu { Button("Copy") { Clipboard.copy(thread.text(of: answer)) } }
+                        .contextMenu { Button("Copy as Markdown") { Clipboard.copy(thread.text(of: answer)) } }
                 }
             }
             // The length stands beside the time of a head this list draws (a text, a lone unreadable message); the head of a reply that starts

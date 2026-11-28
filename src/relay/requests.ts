@@ -282,7 +282,7 @@ export class Requests {
     if (f.passing) f.again = true;
     else {
       f.passing = true;
-      f.out.stream(this.#pass(f));
+      f.out.follow(this.#pass(f));
     }
   }
 

@@ -12,6 +12,7 @@ import { makeCertificate } from "../../src/relay/certificate.ts";
 import { PartialBytes } from "../../src/relay/frames-in.ts";
 import { FIGURES, Limits } from "../../src/relay/limits.ts";
 import { createLog } from "../../src/relay/log.ts";
+import { Outbox } from "../../src/relay/outbox.ts";
 import { createServer, type Peer, type ServerDeps } from "../../src/relay/server.ts";
 import { platform } from "./support.ts";
 
@@ -501,4 +502,109 @@ test("section 7: a length past the limit is a dropped connection, a frame that d
   garbage.socket.write(Buffer.from([0, 0, 0, 2, 0x7f, 0]));
   await garbage.closed;
   assert.deepEqual(limits.take(), { refused: 0, dropped: 0 });
+});
+
+test("4.5 a read and a submit sent while a blob streams are read and answered before its last chunk, over real TLS (#153, F1)", async (t) => {
+  const CHUNK = 512 * 1024;
+  const CHUNKS = 60;
+  const reached: Record<string, number> = {};
+  const errors: unknown[] = [];
+  let sentChunks = 0;
+  const { port, server } = await relay({
+    // The session's outbox is the relay's own; no round is waited for, so no `fsync` decides the order.
+    session: (peer) => {
+      const out = new Outbox(
+        peer,
+        () => false,
+        (e) => errors.push(e),
+      );
+      peer.allow();
+      function* blob(): Generator<void> {
+        for (let i = 0; i < CHUNKS; i++) {
+          sentChunks++;
+          out.send({
+            type: "blob",
+            request: 1,
+            size: CHUNKS * CHUNK,
+            offset: i * CHUNK,
+            chunk: new Uint8Array(CHUNK),
+          });
+          yield;
+        }
+      }
+      function* pass(): Generator<void> {
+        out.send({ type: "position", from: 0, incarnation: new Uint8Array(16) });
+        yield;
+      }
+      return {
+        frame: (f) => {
+          reached[f.type] = sentChunks;
+          if (f.type === "get-blob") out.stream(blob());
+          else if (f.type === "read") out.answer(() => out.follow(pass()));
+          else if (f.type === "submit")
+            out.answer(() => out.send({ type: "result", request: f.request, code: 0 }));
+          return true;
+        },
+        closed: () => out.close(),
+      };
+    },
+  });
+  t.after(() => server.close());
+  const c = client(port);
+  await new Promise((resolve) => c.socket.once("secureConnect", resolve));
+  const frame = (f: Frame) => Buffer.from(encodeFrame(f, true));
+  c.socket.write(frame({ type: "get-blob", request: 1, blob: new Uint8Array(32), offset: 0 }));
+  // The first chunk is on its way to the device: it asks for a pass and sends a message.
+  while (c.received().length < CHUNK) await wait(1);
+  c.socket.write(
+    Buffer.concat([
+      frame({ type: "read", from: 0 }),
+      frame({
+        type: "submit",
+        request: 2,
+        kind: 1,
+        signed: new Uint8Array(8),
+        sig: new Uint8Array(64),
+      }),
+    ]),
+  );
+  const seen = (): string[] => {
+    const bytes = c.received();
+    const types: string[] = [];
+    for (let at = 0; at + 4 <= bytes.length; ) {
+      const end = at + 4 + bytes.readUInt32BE(at);
+      if (end > bytes.length) break;
+      if (bytes[at + 4] === 0x46) types.push("blob");
+      else {
+        const body = bytes.subarray(at, end);
+        const frame = decodeFrame(body, true, "device");
+        const hello = frame.ok ? frame : decodeFrame(body, false, "device");
+        assert.ok(hello.ok);
+        types.push(hello.value.type);
+      }
+      at = end;
+    }
+    return types;
+  };
+  const started = Date.now();
+  while (seen().filter((x) => x === "blob").length < CHUNKS && Date.now() - started < 20_000)
+    await wait(20);
+  c.socket.destroy();
+  assert.deepEqual(errors, []);
+  assert.equal(sentChunks, CHUNKS);
+  assert.ok((reached.read ?? CHUNKS) < CHUNKS, `the read was read after chunk ${reached.read}`);
+  assert.ok(
+    (reached.submit ?? CHUNKS) < CHUNKS,
+    `the submit was read after chunk ${reached.submit}`,
+  );
+  const order = seen();
+  const last = order.lastIndexOf("blob");
+  assert.ok(
+    order.indexOf("position") !== -1 && order.indexOf("position") < last,
+    "the position came before the last chunk",
+  );
+  assert.ok(
+    order.indexOf("result") !== -1 && order.indexOf("result") < last,
+    "the result came before the last chunk",
+  );
 });

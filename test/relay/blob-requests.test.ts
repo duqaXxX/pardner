@@ -180,6 +180,40 @@ test("4.5 get blob: a socket that does not drain holds one chunk and the rest fo
   assert.deepEqual(Buffer.concat(chunks(reader).map((c) => c.chunk)), data);
 });
 
+test("4.5 a message placed while a blob of eight chunks streams reaches a following device, with its head, before the blob's last chunk (#153)", async () => {
+  const w = await world();
+  const data = bytes(8 * 512 * 1024, 2);
+  const id = platform.sha256(data);
+  w.put(w.me, data);
+  await settle();
+  w.submit(w.me, w.text(1, [id]));
+  await settle();
+  const reader = await w.connect().prove(w.alice.first, w.alice);
+  reader.frame({ type: "read", from: 0 });
+  await settle();
+  assert.equal(reader.types().at(-1), "head", "the follow's first pass ended");
+  const before = reader.sent.length;
+  reader.blockAfter(1);
+  w.get(reader, id);
+  await settle();
+  assert.equal(chunks(reader).length, 1, "the file is on its way");
+  w.submit(w.me, w.text(2, []));
+  await settle();
+  for (let i = 0; i < 20 && chunks(reader).length < 8; i++) {
+    reader.blockAfter(1);
+    await reader.flush();
+  }
+  assert.equal(chunks(reader).length, 8);
+  const types = reader.types(before);
+  const last = types.lastIndexOf("blob");
+  assert.ok(types.indexOf("item") !== -1 && types.indexOf("item") < last, types.join(" "));
+  assert.ok(
+    types.indexOf("head") !== -1 && types.indexOf("head") < last,
+    "the head that ends the new items too",
+  );
+  assert.deepEqual(Buffer.concat(chunks(reader).map((c) => c.chunk)), data);
+});
+
 test("6.3 step 3: the round that removes a device drops the unnamed blobs only it put (3.11)", async () => {
   const w = await world();
   const bob = keyed();
