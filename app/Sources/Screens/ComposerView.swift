@@ -329,6 +329,27 @@ struct ComposerHint: View {
     }
 }
 
+/// Why the composer refused the last action, inside its box above the field, in the channel and in the thread (#199): the HIG's feedback near
+/// what it is about, where an alert would stop the person for information alone. It goes on the next edit, a send, or its close button.
+struct ComposerNotice: View {
+    let text: String
+    /// The model's `noticeCount`: a refusal said again with the same text is announced again.
+    let count: Int
+    let close: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 12)).foregroundStyle(PardnerColor.delText).accessibilityHidden(true)
+            Text(text).font(PardnerFont.ui(size: 13, weight: .regular)).foregroundStyle(PardnerColor.text).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button(action: close) { Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).frame(width: 20, height: 20).contentShape(Rectangle()) }
+                .buttonStyle(.clickable).foregroundStyle(PardnerColor.muted).help("Close").accessibilityLabel("Close notice")
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .onChange(of: count, initial: true) { AccessibilityNotification.Announcement(text).post() }
+    }
+}
+
 struct ComposerView: View {
     let model: ComposerModel
     @State private var height: CGFloat = 34
@@ -344,6 +365,12 @@ struct ComposerView: View {
                 Text(line).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.muted)
             }
             VStack(spacing: 0) {
+                if let notice = model.notice {
+                    ComposerNotice(text: notice, count: model.noticeCount, close: model.closeNotice)
+                    Rectangle().fill(PardnerColor.line).frame(height: 1)
+                }
+                // A composer that is not ready is drawn dimmed; the notice above stays at full strength, its close button working.
+                VStack(spacing: 0) {
                 if model.formatting {
                     FormattingRow(model: model)
                     Rectangle().fill(PardnerColor.line).frame(height: 1)
@@ -375,13 +402,11 @@ struct ComposerView: View {
                     buttons(hint: false, commandsWord: false)
                 }
                 .padding(.horizontal, PardnerMetrics.gap).padding(.vertical, 6)
+                }
+                .opacity(model.availability == .ready ? 1 : 0.5)
             }
-            .opacity(model.availability == .ready ? 1 : 0.5)
             .background(PardnerColor.surface, in: RoundedRectangle(cornerRadius: PardnerMetrics.containerRadius))
             .overlay(RoundedRectangle(cornerRadius: PardnerMetrics.containerRadius).stroke(PardnerColor.line))
-            if let notice = model.notice {
-                Text(notice).font(PardnerFont.ui(size: 12, weight: .regular)).foregroundStyle(PardnerColor.delText).fixedSize(horizontal: false, vertical: true)
-            }
         }
         // A card standing on its own under the messages, with no rule above it, the same in the conversation and in the thread panel so that the
         // two cards' lower borders sit at one height. The top keeps a scrolled message off the card's border.
